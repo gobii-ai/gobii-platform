@@ -8,7 +8,7 @@ Tests the core logic around:
 """
 import uuid
 from unittest.mock import Mock, patch, MagicMock
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
 from api.models import (
@@ -25,6 +25,7 @@ from api.agent.tools.secure_credentials_request import (
 User = get_user_model()
 
 
+@tag("batch_agent_secrets_ctx")
 class GetSecretsBlockTests(TestCase):
     """Test the _get_secrets_block function that includes secrets in agent context."""
     

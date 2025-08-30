@@ -2,12 +2,13 @@
 
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 import asyncio
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, MCPServer
 from api.models import PersistentAgent
 
 
+@tag("batch_mcp_tools")
 class TestMCPToolBlacklist(TestCase):
     """Test the MCP tool blacklist functionality."""
     

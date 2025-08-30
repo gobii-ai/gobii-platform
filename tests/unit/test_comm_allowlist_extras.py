@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-from django.test import TestCase, RequestFactory
+from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 
 from api.models import (
@@ -20,6 +20,7 @@ from config import settings
 User = get_user_model()
 
 
+@tag("batch_allowlist_rules")
 class ManualEmailDisplayNameAndCaseTests(TestCase):
     def setUp(self):
         # Enable feature-gated whitelist logic for tests
@@ -73,4 +74,3 @@ class ManualEmailDisplayNameAndCaseTests(TestCase):
         resp = email_webhook(req)
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_called_once()
-

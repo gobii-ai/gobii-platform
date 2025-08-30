@@ -5,7 +5,7 @@ from unittest.mock import patch, Mock
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.models import (
@@ -21,6 +21,7 @@ from util.subscription_helper import get_user_max_contacts_per_agent
 User = get_user_model()
 
 
+@tag("batch_allowlist_rules")
 class ContactLimitEnforcementTests(TestCase):
     """Test that contact limits are enforced based on user's plan."""
     

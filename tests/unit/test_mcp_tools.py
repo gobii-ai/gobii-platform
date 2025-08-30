@@ -3,7 +3,7 @@
 import json
 import time
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
 from api.models import PersistentAgent, BrowserUseAgent
@@ -31,6 +31,7 @@ def create_test_browser_agent(user):
         return BrowserUseAgent.objects.create(user=user, name="test-browser-agent")
 
 
+@tag("batch_mcp_tools")
 class MCPToolInfoTests(TestCase):
     """Test MCPToolInfo data class."""
     
@@ -53,6 +54,7 @@ class MCPToolInfoTests(TestCase):
         self.assertIn("url", search_dict["parameters"])
 
 
+@tag("batch_mcp_tools")
 class MCPToolManagerTests(TestCase):
     """Test MCPToolManager functionality."""
     
@@ -315,6 +317,7 @@ class MCPToolManagerTests(TestCase):
         self.assertFalse(self.manager._initialized)
 
 
+@tag("batch_mcp_tools")
 class MCPToolFunctionsTests(TestCase):
     """Test module-level MCP tool functions."""
     
@@ -471,6 +474,7 @@ class MCPToolFunctionsTests(TestCase):
         mock_enable.assert_not_called()
 
 
+@tag("batch_mcp_tools")
 class MCPToolExecutorsTests(TestCase):
     """Test tool executor functions."""
     
@@ -572,6 +576,7 @@ class MCPToolExecutorsTests(TestCase):
         )
 
 
+@tag("batch_mcp_tools")
 class MCPToolIntegrationTests(TestCase):
     """Integration tests for MCP tool system."""
     

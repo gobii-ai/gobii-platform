@@ -7,6 +7,7 @@ import tempfile
 import threading
 import multiprocessing
 from unittest import TestCase
+from django.test import tag
 from unittest.mock import patch, MagicMock
 from util.ephemeral_xvfb import EphemeralXvfb, xvfb_lock, _find_available_display
 import platform
@@ -111,6 +112,7 @@ class XvfbLockTests(TestCase):
 # environment handling differ and the mocks in these tests are not valid.
 
 @unittest.skipUnless(platform.system() == "Linux", "EphemeralXvfb tests require Linux/Xvfb")
+@tag("batch_xvfb")
 class EphemeralXvfbTests(TestCase):
     """Test EphemeralXvfb functionality including retry logic."""
 

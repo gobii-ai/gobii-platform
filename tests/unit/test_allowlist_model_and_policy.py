@@ -21,6 +21,7 @@ from api.models import (
 User = get_user_model()
 
 
+@tag("batch_allowlist_rules")
 class AllowlistModelValidationTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -69,6 +70,7 @@ class AllowlistModelValidationTests(TestCase):
         self.assertFalse(self.agent.is_sender_whitelisted(CommsChannel.EMAIL, "friend@example.com"))
 
 
+@tag("batch_allowlist_rules")
 class WhitelistPolicyAndFlagsTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()

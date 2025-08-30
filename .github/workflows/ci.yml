@@ -85,6 +85,34 @@ jobs:
             tag: batch_browser_task_db
           - batch: redis_budget_cleanup
             tag: batch_redis_budget_cleanup
+          - batch: agent_invite
+            tag: batch_agent_invite
+          - batch: agent_filesystem
+            tag: batch_agent_filesystem
+          - batch: agent_secrets_ctx
+            tag: batch_agent_secrets_ctx
+          - batch: allowlist_rules
+            tag: batch_allowlist_rules
+          - batch: api_decodo
+            tag: batch_api_decodo
+          - batch: api_persistent_agents
+            tag: batch_api_persistent_agents
+          - batch: billing
+            tag: batch_billing
+          - batch: event_llm
+            tag: batch_event_llm
+          - batch: event_processing
+            tag: batch_event_processing
+          - batch: mcp_tools
+            tag: batch_mcp_tools
+          - batch: promptree
+            tag: batch_promptree
+          - batch: redis_leaks
+            tag: batch_redis_leaks
+          - batch: spawn_depth
+            tag: batch_spawn_depth
+          - batch: xvfb
+            tag: batch_xvfb
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

@@ -7,7 +7,7 @@ from unittest.mock import patch, Mock
 
 from django.contrib.auth import get_user_model
 from django.core import mail
-from django.test import TestCase, Client
+from django.test import TestCase, Client, tag
 from django.urls import reverse
 from django.utils import timezone
 
@@ -24,6 +24,7 @@ from api.models import (
 User = get_user_model()
 
 
+@tag("batch_agent_invite")
 class AgentAllowlistInviteModelTests(TestCase):
     """Test the AgentAllowlistInvite model."""
     
@@ -205,6 +206,7 @@ class AgentAllowlistInviteModelTests(TestCase):
         self.assertEqual(invite.address, "friend@example.com")
 
 
+@tag("batch_agent_invite")
 class OwnerAlwaysAllowedTests(TestCase):
     """Test that owner is always allowed, even with manual allowlist policy."""
     
@@ -292,6 +294,7 @@ class OwnerAlwaysAllowedTests(TestCase):
         )
 
 
+@tag("batch_agent_invite")
 class AgentAllowlistInviteViewTests(TestCase):
     """Test the invitation accept/reject views."""
     
@@ -512,6 +515,7 @@ class AgentAllowlistInviteEmailTests(TestCase):
             self.assertIn("already", data.get('error', '').lower())
 
 
+@tag("batch_agent_invite")
 class ManualPolicySMSRestrictionTests(TestCase):
     """Test that manual policy agents can't use SMS."""
     

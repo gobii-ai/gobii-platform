@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
@@ -18,6 +18,7 @@ from api.models import (
 )
 
 
+@tag("batch_agent_filesystem")
 class AgentFileSpaceModelTests(TestCase):
     """Test suite for the AgentFileSpace model."""
 
@@ -101,6 +102,7 @@ class AgentFileSpaceModelTests(TestCase):
         self.assertEqual(str(filespace), expected)
 
 
+@tag("batch_agent_filesystem")
 class AgentFileSpaceAccessModelTests(TestCase):
     """Test suite for the AgentFileSpaceAccess model."""
 

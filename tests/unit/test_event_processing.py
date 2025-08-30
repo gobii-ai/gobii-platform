@@ -1,5 +1,5 @@
 from datetime import timedelta
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from unittest.mock import patch
@@ -24,6 +24,7 @@ from constants.plans import PlanNamesChoices
 User = get_user_model()
 
 
+@tag("batch_event_processing")
 class EventProcessingWindowTests(TestCase):
     """Unit-tests for `_prepare_event_window` helper."""
 
@@ -140,6 +141,7 @@ class EventProcessingWindowTests(TestCase):
         self.assertTrue(all(cut_off < ts <= window2.upper for ts in cron_timestamps))
 
 
+@tag("batch_event_processing")
 class PromptContextBuilderTests(TestCase):
     """Unit tests for `_build_prompt_context`."""
 
@@ -233,6 +235,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn(f"You are a persistent AI agent named '{self.agent.name}'.", system_message['content'])
 
 
+@tag("batch_event_processing")
 class CronTriggerTaskTests(TestCase):
     """Unit tests for the cron trigger task."""
 

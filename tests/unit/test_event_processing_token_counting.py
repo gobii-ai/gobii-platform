@@ -8,7 +8,7 @@ just the fitted user content.
 import os
 from unittest import mock
 from unittest.mock import patch, MagicMock
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
 from api.agent.core.event_processing import _run_agent_loop, _build_prompt_context, EventWindow
@@ -16,6 +16,7 @@ from api.agent.core.llm_config import get_llm_config_with_failover
 from api.models import PersistentAgent, BrowserUseAgent, UserQuota
 
 
+@tag("batch_event_processing")
 class TestEventProcessingTokenCounting(TestCase):
     """Test token counting logic in event processing."""
 

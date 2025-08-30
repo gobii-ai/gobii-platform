@@ -4,7 +4,7 @@ Tests for Decodo IP block sync functionality.
 import uuid
 from unittest.mock import patch, MagicMock
 
-from django.test import TestCase, RequestFactory
+from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 from django.contrib.admin.sites import AdminSite
 from django.contrib.messages import get_messages
@@ -19,6 +19,7 @@ from api.tasks import sync_ip_block, _fetch_decodo_ip_data, _update_or_create_ip
 User = get_user_model()
 
 
+@tag("batch_api_decodo")
 class DecodoSyncTaskTests(TestCase):
     """Test Decodo IP block sync tasks."""
     

@@ -1,12 +1,13 @@
 # tests/test_billing_service.py
 from datetime import date
 
-from django.test import TestCase
+from django.test import TestCase, tag
 from dateutil.relativedelta import relativedelta
 
 from billing.services import BillingService
 
 
+@tag("batch_billing")
 class BillingServiceComputeNextBillingDateTests(TestCase):
     """Unit tests for BillingService.compute_next_billing_date."""
 
@@ -50,6 +51,7 @@ class BillingServiceComputeNextBillingDateTests(TestCase):
         self.assertEqual(result, expected)
 
 
+@tag("batch_billing")
 class BillingServiceCurrentPeriodTests(TestCase):
     """Unit tests for BillingService.get_current_billing_period_from_day."""
 
@@ -104,6 +106,7 @@ class BillingServiceCurrentPeriodTests(TestCase):
                 self.assertEqual(end, exp_end)
 
 
+@tag("batch_billing")
 class BillingServiceValidationTests(TestCase):
     """Invalid-input and behaviour-parity checks."""
 

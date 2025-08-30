@@ -4,7 +4,7 @@ Unit tests for LLM failover configuration.
 import os
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TestCase, tag
 from api.agent.core.llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
@@ -15,6 +15,7 @@ from api.agent.core.llm_config import (
 )
 
 
+@tag("batch_event_llm")
 class TestLLMFailover(TestCase):
     """Test LLM failover configuration and provider selection."""
 

@@ -1,6 +1,6 @@
 import random
 import string
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from api.agent.core.promptree import Prompt, hmt
 
@@ -14,6 +14,7 @@ def _long_random_text(words: int = 3000) -> str:
     )
 
 
+@tag("batch_promptree")
 class PrompTreeShrinkerTests(TestCase):
     """Test suite for PromTree shrinker functionality."""
 
@@ -45,6 +46,7 @@ class PrompTreeShrinkerTests(TestCase):
         self.assertTrue(result.startswith("one"))
 
 
+@tag("batch_promptree")
 class PromptShrinkingTests(TestCase):
     """Test suite for Prompt class shrinking functionality."""
 
@@ -118,6 +120,7 @@ class PromptShrinkingTests(TestCase):
         self.assertIn("test_section", report)
 
 
+@tag("batch_promptree")
 class PromptBuilderTests(TestCase):
     """Test suite for Prompt builder functionality."""
 
@@ -179,6 +182,7 @@ class PromptBuilderTests(TestCase):
         self.assertIn("CUSTOM TRUNCATED", result)
 
 
+@tag("batch_promptree")
 class PromptTokenCountingTests(TestCase):
     """Test suite for Prompt class token counting functionality."""
 

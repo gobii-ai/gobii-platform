@@ -1,4 +1,4 @@
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from unittest.mock import patch, MagicMock
@@ -17,6 +17,7 @@ def create_browser_agent_without_proxy(user, name):
         return BrowserUseAgent.objects.create(user=user, name=name)
 
 
+@tag("batch_api_persistent_agents")
 class PersistentAgentModelTests(TestCase):
     """Test suite for the PersistentAgent model."""
 

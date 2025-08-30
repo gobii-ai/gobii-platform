@@ -5,7 +5,7 @@ import os
 from unittest import mock
 from unittest.mock import Mock, patch
 
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.utils import timezone
 from api.agent.core.event_processing import (
     _estimate_message_tokens,
@@ -15,6 +15,7 @@ from api.agent.core.event_processing import (
 from api.models import PersistentAgent
 
 
+@tag("batch_event_llm")
 class TestEventProcessingLLMSelection(TestCase):
     """Test LLM selection functionality in event processing."""
 

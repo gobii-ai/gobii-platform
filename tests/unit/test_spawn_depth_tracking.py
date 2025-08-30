@@ -7,7 +7,7 @@ incorrectly share and mutate the same branch depth counter.
 import threading
 import time
 from unittest.mock import patch, MagicMock, call
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 
 from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask
@@ -15,6 +15,7 @@ from api.agent.core.budget import AgentBudgetManager, BudgetContext, set_current
 from api.agent.tools.spawn_web_task import execute_spawn_web_task
 
 
+@tag("batch_spawn_depth")
 class SpawnDepthTrackingTests(TransactionTestCase):
     """Test that parallel spawn_web_task calls correctly track depth."""
     

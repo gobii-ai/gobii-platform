@@ -6,9 +6,11 @@ scenarios where Redis budget data is not properly cleaned up.
 
 import uuid
 from unittest import TestCase
+from django.test import tag
 from unittest.mock import MagicMock, patch, ANY
 
 
+@tag("batch_redis_leaks")
 class RedisBudgetLeakTests(TestCase):
     """Pure unit tests demonstrating Redis budget leak scenarios."""
 
