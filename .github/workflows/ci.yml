@@ -33,6 +33,10 @@ jobs:
             tag: batch_email_body
           - batch: email_allowlist
             tag: batch_email_allowlist
+          - batch: pages
+            tag: batch_pages
+          - batch: contact_requests
+            tag: batch_contact_requests
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

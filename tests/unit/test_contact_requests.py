@@ -1,5 +1,5 @@
 """Test contact request system with invitation flow."""
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
@@ -63,6 +63,7 @@ class ContactRequestTests(TestCase):
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.whitelist_policy, PersistentAgent.WhitelistPolicy.MANUAL)
     
+    @tag("batch_contact_requests")
     def test_approve_request_creates_invitation(self):
         """Test that approving a contact request can create an invitation or direct entry."""
         # Create a contact request
@@ -117,6 +118,7 @@ class ContactRequestTests(TestCase):
         self.assertIsNotNone(request2.responded_at)
         self.assertEqual(request2.allowlist_invitation, result2)
         
+    @tag("batch_contact_requests")
     def test_approve_existing_contact_skips_invitation(self):
         """Test that approving a request for an existing contact doesn't create a new invitation."""
         # Create existing allowlist entry
@@ -150,6 +152,7 @@ class ContactRequestTests(TestCase):
         # No invitation should be created
         self.assertIsNone(request.allowlist_invitation)
         
+    @tag("batch_contact_requests")
     def test_cannot_approve_expired_request(self):
         """Test that expired requests cannot be approved."""
         # Create an expired request
@@ -171,6 +174,7 @@ class ContactRequestTests(TestCase):
         
         self.assertIn("cannot be approved", str(context.exception))
         
+    @tag("batch_contact_requests")
     def test_reject_request(self):
         """Test rejecting a contact request."""
         # Create a contact request
