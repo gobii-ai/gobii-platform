@@ -98,6 +98,30 @@ jobs:
           TOTAL_SHARDS: ${{ matrix.total_shards }}
           SHARD_INDEX: ${{ matrix.shard_index }}
 
+      - name: Validate import of selected labels
+        run: |
+          set -euo pipefail
+          if [[ ! -s selected-tests.txt ]]; then
+            echo "No selected tests to validate (this shard may be empty)"
+            exit 0
+          fi
+          echo "Validating $(wc -l < selected-tests.txt | tr -d ' ') labels can be imported..."
+          uv run python - << 'PY'
+          import importlib, sys
+          labels = [l.strip() for l in open('selected-tests.txt') if l.strip()]
+          failures = []
+          for m in labels:
+              try:
+                  importlib.import_module(m)
+                  print(f"[ok] {m}")
+              except Exception as e:
+                  print(f"[fail] {m}: {e}", file=sys.stderr)
+                  failures.append(m)
+          if failures:
+              print(f"ERROR: {len(failures)} labels failed to import", file=sys.stderr)
+              sys.exit(1)
+          PY
+
       - name: Run Django tests (JUnit XML)
         run: |
           set -euo pipefail
@@ -108,6 +132,7 @@ jobs:
           fi
           # Read labels into an array safely
           mapfile -t LABELS < selected-tests.txt
+          echo "Running $((${#LABELS[@]})) labels in this shard:"; printf ' - %s\n' "${LABELS[@]}" | sed -n '1,120p'
           uv run python manage.py test "${LABELS[@]}" \
             --settings=config.test_settings \
             --parallel auto \
