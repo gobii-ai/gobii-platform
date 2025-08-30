@@ -18,9 +18,21 @@ permissions:
 
 jobs:
   tests:
-    name: tests
+    name: tests (${{ matrix.batch }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - batch: email
+            labels: >
+              tests.unit.test_api_webhooks.EmailWebhookTest.test_email_from_owner_is_accepted
+              tests.unit.test_api_webhooks.EmailWebhookTest.test_email_from_non_owner_is_discarded
+          - batch: sms
+            labels: >
+              tests.unit.test_api_webhooks.SmsStatusWebhookTest.test_delivered_status_updates_message
+              tests.unit.test_api_webhooks.SmsStatusWebhookTest.test_failed_status_records_error
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
@@ -69,16 +81,15 @@ jobs:
         run: |
           uv pip install -q unittest-xml-reporting
 
-      - name: Run a single test file (smoke)
+      - name: Run batch tests (${{ matrix.batch }})
         run: |
           set -euo pipefail
           mkdir -p "$TEST_OUTPUT_DIR"
-          # Choose a small, reliable test to validate CI plumbing
-          LABEL="tests.unit.test_api_webhooks.EmailWebhookTest.test_email_from_owner_is_accepted"
-          echo "Running single test: $LABEL"
-          uv run python manage.py test "$LABEL" \
+          LABELS="${{ matrix.labels }}"
+          echo "Running tests:"; printf ' - %s\n' $LABELS
+          uv run python manage.py test $LABELS \
             --settings=config.test_settings \
-            --parallel 1 \
+            --parallel auto \
             --testrunner=xmlrunner.extra.djangotestrunner.XMLTestRunner
           # Collect any stray TEST-*.xml files into the output dir
           shopt -s nullglob || true
