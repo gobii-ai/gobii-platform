@@ -186,8 +186,11 @@ class EphemeralXvfb(AbstractContextManager):
                 # Clean up on failure
                 if self._proc is not None:
                     try:
-                        os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
-                        self._proc.wait(timeout=2)
+                        pid = getattr(self._proc, "pid", None)
+                        # Only attempt to terminate a real child process. Guard against mocks/invalid PIDs
+                        if isinstance(pid, int) and pid > 1:
+                            os.killpg(os.getpgid(pid), signal.SIGTERM)
+                            self._proc.wait(timeout=2)
                     except Exception:
                         pass
                     self._proc = None
@@ -209,12 +212,15 @@ class EphemeralXvfb(AbstractContextManager):
         display_to_cleanup = self.display_num
 
         try:
-            # Terminate gracefully
-            os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
-            try:
-                self._proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                os.killpg(os.getpgid(self._proc.pid), signal.SIGKILL)
+        # Terminate gracefully (only if we have a valid child PID)
+        pid = getattr(self._proc, "pid", None)
+        if isinstance(pid, int) and pid > 1:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        try:
+            self._proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            if isinstance(pid, int) and pid > 1:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
                 self._proc.wait(timeout=2)
         except Exception:
             # Ignore all cleanup errors
