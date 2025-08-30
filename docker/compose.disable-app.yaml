@@ -1,0 +1,8 @@
+services:
+  web:
+    profiles: ["off"]
+  worker:
+    profiles: ["off"]
+  beat:
+    profiles: ["off"]
+

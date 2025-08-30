@@ -44,21 +44,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 ENV USE_EPHEMERAL_XVFB=true
 
 RUN DJANGO_SECRET_KEY=dummy-build-key \
-    GOBII_ENCRYPTION_KEY=dummy-encryption-key \
-    POSTGRES_DB=dummy-db \
-    POSTGRES_USER=dummy-user \
-    POSTGRES_PASSWORD=dummy-pw \
-    POSTGRES_HOST=dummy-host \
-    POSTGRES_PORT=5432 \
-    REDIS_URL=redis://dummy-redis:6379/0 \
-    SEGMENT_WRITE_KEY=dummy-segment-key \
-    POSTMARK_SERVER_TOKEN=dummy-postmark-token \
-    POSTMARK_INCOMING_WEBHOOK_TOKEN=dummy-postmark-incoming-token \
-    GOOGLE_API_KEY=dummy-google-key \
-    EXA_SEARCH_API_KEY=dummy-exa-key \
-    python manage.py test --settings=config.test_settings --verbosity 3
-
-RUN DJANGO_SECRET_KEY=dummy-build-key \
     POSTGRES_DB=dummy-db \
     POSTGRES_USER=dummy-user \
     POSTGRES_PASSWORD=dummy-pw \
