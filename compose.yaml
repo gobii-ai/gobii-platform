@@ -1,0 +1,126 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9090"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000"
+      - "9090:9090"
+    volumes:
+      - minio-data:/data
+
+#  django:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile.dev
+#    command: ./manage.py runserver 0.0.0.0:8000
+#    env_file: .env
+#    volumes:
+#      - ./console:/app
+#    ports:
+#      - "8000:8000"
+#    depends_on:
+#      - db
+#      - redis
+#      - minio
+
+  flower:
+    image: mher/flower:2.0
+    command: celery flower --broker=redis://redis:6379/0 --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - FLOWER_BASIC_AUTH=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+# --------------------------------------------------------------------- #
+#  Optional Celery worker (disabled unless profile "worker" is enabled)
+# --------------------------------------------------------------------- #
+  worker:
+    platform: linux/amd64
+    build:
+      context: ../../../gobii_platform  # platform directory where pyproject.toml lives
+      dockerfile: ../infra/platform/image/Dockerfile  # relative to platform directory
+    command: celery -A config worker -l info
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      XDG_DATA_HOME: /tmp/.chrome
+      XDG_CONFIG_HOME: /tmp/.chrome
+      XDG_CACHE_HOME: /tmp/.chrome
+    depends_on:
+      - db
+      - redis
+    profiles: ["worker"]
+    restart: unless-stopped
+    shm_size: 2gb
+
+  # --------------------------------------------------------------------- #
+  #  Optional Celery beat scheduler (disabled unless profile "beat" is enabled)
+  # --------------------------------------------------------------------- #
+  beat:
+    platform: linux/amd64
+    build:
+      context: ../../../gobii_platform  # platform directory where pyproject.toml lives
+      dockerfile: ../infra/platform/image/Dockerfile  # relative to platform directory
+    command: >
+      celery -A config beat --loglevel=info --scheduler=redbeat.RedBeatScheduler
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      XDG_DATA_HOME: /tmp/.chrome
+      XDG_CONFIG_HOME: /tmp/.chrome
+      XDG_CACHE_HOME: /tmp/.chrome
+    depends_on:
+      - db
+      - redis
+    profiles: ["beat"]
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.128.0
+    command: [ "--config=/etc/otel/config.yaml" ]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel/config.yaml
+    ports:
+      - "4317:4317"    # gRPC OTLP
+      - "4318:4318"    # HTTP OTLP
+      - "55679:55679"  # tracer
+    environment:
+      GRAFANA_CLOUD_OTLP_ENDPOINT: ${GRAFANA_CLOUD_OTLP_ENDPOINT}
+      GRAFANA_CLOUD_INSTANCE_ID: ${GRAFANA_CLOUD_INSTANCE_ID}
+      GRAFANA_CLOUD_API_KEY: ${GRAFANA_CLOUD_API_KEY}
+
+volumes:
+  db-data:
+  minio-data:
