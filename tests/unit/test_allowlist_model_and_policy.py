@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-from django.test import TestCase, RequestFactory, override_settings
+from django.test import TestCase, RequestFactory, override_settings, tag
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 
