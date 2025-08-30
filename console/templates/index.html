@@ -1,0 +1,292 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="space-y-6 pb-8">
+  <!-- Discord Community Card -->
+  <div class="bg-indigo-600 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-xl shadow-xl p-6 mb-6 relative overflow-hidden">
+    <!-- Decorative elements -->
+    <div class="absolute -top-12 -right-12 w-40 h-40 bg-indigo-500/30 rounded-full blur-xl"></div>
+    <div class="absolute -bottom-8 -left-8 w-32 h-32 bg-purple-500/20 rounded-full blur-xl"></div>
+
+    <div class="flex flex-col md:flex-row items-center gap-6 relative z-10">
+      <!-- Discord icon and info -->
+      <div class="flex-shrink-0 flex items-center justify-center bg-white/15 backdrop-blur-sm rounded-xl p-4 w-16 h-16">
+        <svg class="w-10 h-10 text-white" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+        </svg>
+      </div>
+
+      <div class="flex-1 text-center md:text-left">
+        <h2 class="text-xl font-bold text-white">Join Our Discord Community</h2>
+        <p class="text-indigo-100 mt-1">Connect with our team and other users for support, tips, and discussions.</p>
+      </div>
+
+      <!-- CTA button -->
+      <div class="flex-shrink-0">
+        <a href="https://discord.gg/yyDB8GwxtE" class="inline-flex items-center gap-2 px-6 py-3 bg-white text-indigo-700 font-medium rounded-lg hover:bg-indigo-50 shadow-md hover:shadow-lg transition-all duration-200">
+          Join Discord
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M16.707 7.293a1 1 0 0 0-1.414 1.414L18.586 12l-3.293 3.293a1 1 0 1 0 1.414 1.414l4-4a1 1 0 0 0 0-1.414l-4-4z"/>
+            <path d="M8.707 7.293a1 1 0 0 1 1.414 1.414L6.828 12l3.293 3.293a1 1 0 1 1-1.414 1.414l-4-4a1 1 0 0 1 0-1.414l4-4z" opacity="0"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <!-- Tasks Quota Card -->
+    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6 flex flex-col text-center">
+      <div class="flex flex-col items-center gap-3">
+        <div class="p-3 rounded-xl bg-blue-100">
+          <svg aria-hidden="true" class="w-6 h-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+        </div>
+        <p class="text-sm font-medium text-slate-500">Available Tasks</p>
+      </div>
+      <div class="flex-grow flex items-center justify-center mt-auto">
+        <h3 class="text-3xl font-semibold text-slate-900">{% if account.usage.tasks_available >= 0 %}{{ account.usage.tasks_available }}{% else %}∞{% endif %}</h3>
+      </div>
+      <!-- additional task quota information -->
+      <div>
+        {% if not addl_tasks_enabled %}
+        <!-- Tasks disabled state -->
+        <div class="mt-3 flex items-center p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <div class="flex-shrink-0 mr-3">
+            <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-200">
+              <svg aria-hidden="true" class="h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </span>
+          </div>
+          <div class="flex-1">
+            <p class="text-sm font-medium text-gray-700">Additional Tasks</p>
+            <p class="text-xs text-gray-500">No additional tasks are currently enabled for your account.</p>
+            <div class="mt-3 flex items-center justify-center">
+              <p class="mt-1.5">
+                <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
+                  Update settings
+                  <svg aria-hidden="true" class="ml-0.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                </a>
+              </p>
+            </div>
+          </div>
+        </div>
+        {# -1 means unlimited #}
+        {% elif account.usage.tasks_addl_limit == -1 %}
+        <!-- Unlimited tasks state -->
+        <div class="mt-3 flex items-center p-3 bg-blue-50 rounded-lg border border-blue-100">
+          <div class="flex-shrink-0 mr-3">
+            <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100">
+              <svg aria-hidden="true" class="h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+              </svg>
+            </span>
+          </div>
+          <div class="flex-1">
+            <p class="text-sm font-medium text-blue-700">Unlimited Additional Tasks</p>
+            <div class="mt-1 flex items-center">
+              <span class="text-xs text-blue-600 font-medium">{{ addl_tasks_used }} tasks used in current billing period</span>
+              <span class="ml-1 px-1.5 py-0.5 bg-blue-100 text-xs font-medium text-blue-700 rounded-full">Unlimited</span>
+            </div>
+            <div class="mt-3 flex items-center justify-center">
+              <p class="mt-1.5">
+                <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
+                  Update settings
+                  <svg aria-hidden="true" class="ml-0.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                </a>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {% else %}
+        <!-- Limited tasks state with usage information -->
+        <div class="mt-3 flex flex-col p-3 bg-indigo-50 rounded-lg border border-indigo-100">
+          <div class="flex items-center mb-2">
+            <div class="flex-shrink-0 mr-3">
+              <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100">
+                <svg aria-hidden="true" class="h-4 w-4 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </span>
+            </div>
+            <div class="flex-1">
+              <p class="text-sm font-medium text-indigo-700">Additional Tasks Enabled</p>
+              <p class="text-xs text-indigo-600">You can use up to {{ account.usage.tasks_addl_limit }} additional tasks.</p>
+            </div>
+          </div>
+
+          <!-- Progress bar for task usage -->
+          <div class="mt-1">
+            <div class="flex justify-between text-xs mb-1">
+              <span class="font-medium text-indigo-700">{{ addl_tasks_used }} used</span>
+              <span class="font-medium text-indigo-700">{{ addl_tasks_remaining }} remaining</span>
+            </div>
+            <div class="w-full bg-indigo-200 rounded-full h-2.5">
+              <div class="bg-indigo-600 h-2.5 rounded-full" style="width: {{ addl_tasks_percent }}%"></div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center justify-center">
+            <p class="mt-1.5">
+              <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
+                Update settings
+                <svg aria-hidden="true" class="ml-0.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+              </a>
+            </p>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+    </div>
+    
+    <!-- Active Agents Card -->
+    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6 flex flex-col text-center">
+      <div class="flex flex-col items-center gap-3">
+        <div class="p-3 rounded-xl bg-purple-100">
+          <svg aria-hidden="true" class="w-6 h-6 text-purple-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+        </div>
+        <p class="text-sm font-medium text-slate-500">Active Agents</p>
+      </div>
+      <div class="flex-grow flex items-center justify-center mt-auto">
+        <h3 class="text-3xl font-semibold text-slate-900 flex items-center">{{ agent_count }} {% if not account.usage.agents_unlimited %}<span class="text-xl font-normal text-slate-500 inline-flex items-center ml-1">/ {{ subscription_plan.agent_limit }}</span>{% endif %}</h3>
+      </div>
+    </div>
+    
+    <!-- Task Status Card -->
+    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6 flex flex-col text-center">
+      <div class="flex flex-col items-center gap-3">
+        <div class="p-3 rounded-xl bg-green-100">
+          <svg aria-hidden="true" class="w-6 h-6 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <p class="text-sm font-medium text-slate-500">Task Status</p>
+      </div>
+      <div class="flex-grow flex flex-col items-center justify-center mt-auto">
+        <h3 class="text-3xl font-semibold text-slate-900 mb-2 flex items-center">{{ total_active_tasks }} <span class="text-xl font-normal text-slate-500 inline-flex items-center ml-1">active</span></h3>
+        <!-- Breakdown -->
+        <div class="grid grid-cols-3 gap-6 w-full">
+          <div class="flex flex-col items-center">
+            <span class="text-xs text-slate-500">Completed</span>
+            <span class="mt-0.5 text-sm font-semibold text-green-600">{{ completed_tasks }}</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-xs text-slate-500">In&nbsp;Progress</span>
+            <span class="mt-0.5 text-sm font-semibold text-blue-600">{{ in_progress_tasks }}</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-xs text-slate-500">Pending</span>
+            <span class="mt-0.5 text-sm font-semibold text-amber-600">{{ pending_tasks }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- API Section -->
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6">
+    <h2 class="text-lg font-semibold text-gray-800 mb-4">API</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- API Reference Card -->
+      <div class="border border-gray-200 rounded-lg p-4 flex flex-col">
+        <div class="flex items-center mb-3">
+          <div class="p-2 bg-purple-100 rounded-lg">
+            <svg aria-hidden="true" class="w-5 h-5 text-purple-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+          </div>
+          <h3 class="ml-2 text-md font-medium">API Documentation</h3>
+        </div>
+        <p class="text-sm text-gray-600 mb-auto">Explore our API documentation to learn how to integrate with our services.</p>
+        <a href="/api/schema/swagger-ui/" class="mt-4 inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800">
+          View API Docs <span class="ml-1">→</span>
+        </a>
+      </div>
+
+      <!-- Quick Start Card -->
+      <div class="border border-gray-200 rounded-lg p-4 flex flex-col">
+        <div class="flex items-center mb-3">
+          <div class="p-2 bg-green-100 rounded-lg">
+            <svg aria-hidden="true" class="w-5 h-5 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
+          <h3 class="ml-2 text-md font-medium">Quick Start</h3>
+        </div>
+        <p class="text-sm text-gray-600 mb-auto">Get started quickly with example code and tutorials.</p>
+        <a href="/docs/guides/quickstart/" class="mt-4 inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800">
+          View Quick Start Guide <span class="ml-1">→</span>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- API Key Card -->
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6">
+    <h2 class="text-lg font-semibold text-gray-800 mb-3">API Key</h2>
+    
+    {% if has_api_key %}
+    <div x-data="{ copied: false }" class="mb-4">
+      <div class="flex items-center">
+        <div class="flex-1 relative">
+          <div class="flex items-center border border-gray-300 rounded-lg overflow-hidden bg-gray-50">
+            <span id="apiKeyDisplay" class="block py-2 px-4 flex-1 font-mono text-sm truncate">
+              {{ default_api_key|slice:":12" }}•••••••••••••••••{{ default_api_key|slice:"-4:" }}
+            </span>
+            <button 
+              @click="navigator.clipboard.writeText('{{ default_api_key }}'); copied = true; setTimeout(() => copied = false, 2000)"
+              class="flex items-center justify-center px-3 py-2 bg-gray-100 hover:bg-gray-200 border-l border-gray-300 transition-colors"
+              title="Copy to clipboard">
+              <svg aria-hidden="true"  x-show="!copied" class="h-5 w-5 text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <svg aria-hidden="true" x-show="copied" class="h-5 w-5 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+          </div>
+          <div x-show="copied" x-transition class="absolute -bottom-6 left-0 right-0 text-center text-xs text-green-600 font-medium">
+            Copied to clipboard!
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="text-sm text-gray-500">Do not share your API key with anybody.</p>
+    {% else %}
+    <div class="mb-4 border border-gray-200 rounded-lg p-4 bg-gray-50">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-blue-100 rounded-full">
+          <svg aria-hidden="true" class="h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+          </svg>
+        </div>
+        <p class="text-sm text-gray-700">No API key is available. Create a new API key to access our services.</p>
+      </div>
+      <div class="mt-3">
+        <a href="{% url 'api_keys' %}" class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium text-sm shadow-sm hover:shadow-md transition-all">
+          Create API Key
+        </a>
+      </div>
+    </div>
+    {% endif %}
+    
+    <div class="mt-3">
+      <a href="{% url 'api_keys' %}" class="text-sm text-blue-600 hover:text-blue-800 font-medium">
+        Manage API Keys →
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

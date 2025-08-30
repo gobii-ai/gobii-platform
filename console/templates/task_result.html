@@ -1,0 +1,218 @@
+{% extends "console_page.html" %}
+
+{% block head_extras %}
+<!-- Add the JSON Viewer library -->
+<script src="https://unpkg.com/@alenaksu/json-viewer@2.1.0/dist/json-viewer.bundle.js"></script>
+<style>
+  /* Custom styles for json-viewer */
+  json-viewer {
+    --background-color: #f9fafb;
+    --color: #1f2937;
+    --hover-background-color: #f3f4f6;
+    --hover-color: #111827;
+    --selected-background-color: #dbeafe;
+    --selected-color: #1e40af;
+    --key-color: #2563eb;
+    --separator-color: #4b5563;
+    --border: 1px solid #e5e7eb;
+    --font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --font-size: 14px;
+    --indent: 24px;
+    --string-color: #059669;
+    --number-color: #d97706;
+    --boolean-color: #7c3aed;
+    --null-color: #dc2626;
+    --property-color: #2563eb;
+    height: auto;
+    width: 100%;
+    border-radius: 0.5rem;
+  }
+</style>
+{% endblock %}
+
+{% block console_content %}
+<div class="space-y-6">
+    <!-- Result header -->
+    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
+        <div class="p-6 border-b border-gray-200/70">
+            <h1 class="text-2xl font-semibold text-gray-800 mb-1">Task Result</h1>
+            <p class="text-sm text-gray-500">Completed on {{ task.updated_at|date:"F j, Y" }} at {{ task.updated_at|time:"H:i" }}</p>
+            <a href="{% url 'task_detail' task.id %}" class="group flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
+                <svg class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+                Back to task details
+            </a>
+        </div>
+    </div>
+
+    <!-- Result content -->
+    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
+        <div class="border-b border-gray-200/70 bg-gray-50/80 px-6 py-3 flex items-center justify-between">
+            <h2 class="text-lg font-medium text-gray-800">Result Data</h2>
+
+            {% if result_step and result_step.result_value %}
+            <!-- View toggle buttons -->
+            <div class="flex space-x-2">
+                <button id="raw-view-btn" class="px-3 py-1.5 text-xs font-medium rounded-md bg-blue-100 text-blue-800 focus:outline-none" aria-pressed="true">
+                    Raw Text
+                </button>
+                <button id="tree-view-btn" class="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 focus:outline-none" aria-pressed="false">
+                    Tree View
+                </button>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="p-6">
+            {% if result_step and result_step.result_value %}
+                <!-- Raw text view -->
+                <div id="raw-view" class="bg-gray-50/80 rounded-lg p-4 overflow-auto">
+                    <pre class="text-sm font-mono text-gray-800 whitespace-pre-wrap">{{ result_step.result_value|pprint }}</pre>
+                </div>
+
+                <!-- Tree view (hidden by default) -->
+                <div id="tree-view" class="hidden">
+                    <json-viewer id="json-viewer" data='{{ result_step.result_value|json_script:"json-data" }}'></json-viewer>
+                </div>
+
+                <!-- Download result button -->
+                <div class="mt-4 flex justify-end space-x-2">
+                    <button id="copy-json-btn" class="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        Copy JSON
+                    </button>
+                    <a href="?format=json" class="px-4 py-2 bg-blue-600 rounded-lg text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        Download JSON
+                    </a>
+                </div>
+
+                <!-- Hidden textarea for copy functionality -->
+                <textarea id="json-copy-content" class="hidden">{{ result_step.result_value|json_script:"json-copy-data" }}</textarea>
+
+                <script>
+                    // JSON data to be used by the viewer
+                    // JSON data to be used by the viewer
+                    const jsonData = JSON.parse(document.getElementById('json-data').textContent);
+
+                    // Elements
+                    const rawViewBtn = document.getElementById('raw-view-btn');
+                    const treeViewBtn = document.getElementById('tree-view-btn');
+                    const rawView = document.getElementById('raw-view');
+                    const treeView = document.getElementById('tree-view');
+                    const jsonViewer = document.getElementById('json-viewer');
+                    const copyBtn = document.getElementById('copy-json-btn');
+                    const copyContent = document.getElementById('json-copy-content');
+
+                    // Initialize JSON viewer
+                    jsonViewer.data = jsonData;
+
+                    // Toggle between views
+                    rawViewBtn.addEventListener('click', () => {
+                        rawView.classList.remove('hidden');
+                        treeView.classList.add('hidden');
+
+                        rawViewBtn.classList.remove('bg-gray-100', 'text-gray-600');
+                        rawViewBtn.classList.add('bg-blue-100', 'text-blue-800');
+
+                        treeViewBtn.classList.remove('bg-blue-100', 'text-blue-800');
+                        treeViewBtn.classList.add('bg-gray-100', 'text-gray-600');
+
+                        rawViewBtn.setAttribute('aria-pressed', 'true');
+                        treeViewBtn.setAttribute('aria-pressed', 'false');
+                    });
+
+                    treeViewBtn.addEventListener('click', () => {
+                        treeView.classList.remove('hidden');
+                        rawView.classList.add('hidden');
+
+                        treeViewBtn.classList.remove('bg-gray-100', 'text-gray-600');
+                        treeViewBtn.classList.add('bg-blue-100', 'text-blue-800');
+
+                        rawViewBtn.classList.remove('bg-blue-100', 'text-blue-800');
+                        rawViewBtn.classList.add('bg-gray-100', 'text-gray-600');
+
+                        treeViewBtn.setAttribute('aria-pressed', 'true');
+                        rawViewBtn.setAttribute('aria-pressed', 'false');
+                    });
+
+                    // Copy to clipboard functionality
+                    copyBtn.addEventListener('click', () => {
+                      // Get the JSON data to copy
+                      // Get the JSON data to copy
+                      const textToCopy = JSON.parse(document.getElementById('json-copy-data').textContent);
+
+                      // Use the Clipboard API if available, with fallback to execCommand
+                      if (navigator.clipboard && navigator.clipboard.writeText) {
+                          navigator.clipboard.writeText(textToCopy)
+                              .then(() => showCopiedConfirmation())
+                              .catch(err => {
+                                  console.error('Failed to copy: ', err);
+                                  // Fallback to execCommand method
+                                  fallbackCopyToClipboard();
+                              });
+                      } else {
+                          // Fallback for browsers without Clipboard API
+                          fallbackCopyToClipboard();
+                      }
+
+                      // Fallback copy method using execCommand
+                      function fallbackCopyToClipboard() {
+                          // Make textarea visible temporarily (but not displayed)
+                          copyContent.style.position = 'fixed';
+                          copyContent.style.top = '0';
+                          copyContent.style.left = '0';
+                          copyContent.style.width = '2em';
+                          copyContent.style.height = '2em';
+                          copyContent.style.opacity = '0';
+                          copyContent.style.pointerEvents = 'none';
+
+                          // Ensure content is in the textarea
+                          copyContent.value = textToCopy;
+
+                          // Show the textarea so it can be selected
+                          document.body.appendChild(copyContent);
+                          copyContent.focus();
+                          copyContent.select();
+
+                          try {
+                              const successful = document.execCommand('copy');
+                              if (successful) {
+                                  showCopiedConfirmation();
+                              } else {
+                                  console.error('Failed to copy with execCommand');
+                              }
+                          } catch (err) {
+                              console.error('Failed to copy: ', err);
+                          }
+
+                          // Remove the textarea if it was added to the DOM
+                          if (document.body.contains(copyContent)) {
+                              document.body.removeChild(copyContent);
+                          }
+                      }
+
+                      // Function to show the copied confirmation UI
+                      function showCopiedConfirmation() {
+                          const originalText = copyBtn.textContent;
+                          copyBtn.textContent = 'Copied!';
+                          copyBtn.classList.add('bg-green-50', 'text-green-700', 'border-green-300');
+
+                          setTimeout(() => {
+                              copyBtn.textContent = originalText;
+                              copyBtn.classList.remove('bg-green-50', 'text-green-700', 'border-green-300');
+                          }, 2000);
+                      }
+                  });
+                </script>
+            {% else %}
+                <div class="text-center py-8">
+                    <svg class="mx-auto h-12 w-12 text-gray-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p class="mt-2 text-sm text-gray-500">No result data found</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,75 @@
+{% extends "allauth/layouts/entrance.html" %}
+{% load i18n form_extras socialaccount %}
+{% block title %}{% trans "Create your account" %}{% endblock %}
+
+{% block body_inner %}
+<div class="bg-white max-w-md w-full sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-2xs mb-20">
+  <div class="p-8">
+    <div class="text-center">
+      <h1 class="text-center text-2xl font-bold text-gray-900">{% trans "Sign up" %}</h1>
+      <p class="mt-2 text-sm text-slate-600">
+        {% trans "Already have an account?" %}
+        <a href="{% url 'account_login' %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
+      </p>
+    </div>
+
+    <div class="flex justify-center mt-6">
+      <a href="{% provider_login_url 'google' %}"
+         class="w-full inline-flex justify-center items-center gap-x-2 rounded-lg
+                border border-gray-200 bg-white text-gray-800 text-sm font-medium py-3
+                shadow-2xs hover:bg-gray-50">
+        <svg class="w-4 h-4" viewBox="0 0 46 47" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M45.5 24.0146C45.5 22.2076 45.3525 20.8125 45.0241 19.3906H23.4648V28.4649H35.7291C35.4886 30.4614 34.1641 33.5183 31.2241 35.5358L31.1821 35.8129L38.0279 41.1813L38.5072 41.2285C42.5569 37.4992 45.5 31.4204 45.5 24.0146Z" fill="#4285F4"/>
+          <path d="M23.4648 46.999C29.7679 46.999 34.8626 45.0039 38.5072 41.2285L31.2241 35.5358C29.3525 36.8544 26.8318 37.7123 23.4648 37.7123C17.3026 37.7123 12.0849 33.9831 10.2357 28.645L9.97733 28.6661L2.91761 34.1784L2.82373 34.4375C6.44344 41.999 14.3474 46.999 23.4648 46.999Z" fill="#34A853"/>
+          <path d="M10.2357 28.645C9.74903 27.2087 9.46551 25.6693 9.46551 24.0948C9.46551 22.5203 9.74903 20.9809 10.2129 19.5446L10.2002 19.2542L3.02785 13.625L2.82373 13.7528C1.21902 16.9232 0.25 20.4085 0.25 24.0948C0.25 27.7811 1.21902 31.2664 2.82373 34.4368L10.2357 28.645Z" fill="#FBBC05"/>
+          <path d="M23.4648 9.50305C27.7704 9.50305 30.5803 11.3591 32.2598 12.8985L38.6524 6.73554C34.8424 3.32286 29.7679 1.19092 23.4648 1.19092C14.3474 1.19092 6.44344 6.19094 2.82373 13.7524L10.2129 19.5442C12.0849 14.2058 17.3026 9.50305 23.4648 9.50305Z" fill="#EB4335"/>
+        </svg>
+        <span class="sr-only">{% trans "Continue with Google" %}</span>
+        {% trans "Sign up with Google" %}
+      </a>
+    </div>
+
+    <div class="my-6 flex items-center text-xs text-gray-400 uppercase before:flex-1
+                before:border-t before:border-gray-200 before:me-6 after:flex-1 after:border-t
+                after:border-gray-200 after:ms-6">{% trans "or" %}</div>
+
+    <form method="post" action="{% url 'account_signup' %}" class="space-y-4">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+
+      {% for field in form.visible_fields %}
+      {% if field.name != 'turnstile' %}
+      <div>
+        <label for="{{ field.id_for_label }}" class="block text-sm mb-1">{{ field.label }}</label>
+        <input id="{{ field.id_for_label }}" name="{{ field.name }}" type="{{ field.field.widget.input_type }}" required
+               value="{{ field.value|default_if_none:'' }}"
+               class="block w-full rounded-lg border border-gray-200 px-4 py-2.5
+                      focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+               {% if field.field.widget.attrs.placeholder %}placeholder="{{ field.field.widget.attrs.placeholder }}"{% endif %}>
+        {% if field.errors %}
+          <p class="mt-1 text-sm text-red-600" id="{{ field.id_for_label }}-error">{{ field.errors|striptags }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% endfor %}
+
+      {# Cloudflare Turnstile widget #}
+      <div class="mt-4 flex justify-center">
+        {{ form.turnstile }}
+      </div>
+
+      <button type="submit"
+              class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white
+                     hover:bg-blue-700">
+        {% trans "Create account" %}
+      </button>
+      <p class="mt-4 text-xs text-gray-500 text-center">
+        By creating an account, you agree to our
+        <a href="{% url 'pages:tos' %}" class="text-blue-600 hover:underline">Terms of Service</a>
+        and
+        <a href="{% url 'pages:privacy' %}" class="text-blue-600 hover:underline">Privacy Policy</a>.
+      </p>
+    </form>
+  </div>
+</div>
+{% endblock %} 

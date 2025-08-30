@@ -1,0 +1,52 @@
+{% extends "partials/_generic_modal.html" %}
+
+{% block modal_id %}org-leave-modal{% endblock %}
+{% block modal_event_id %}org-leave-modal{% endblock %}
+{% block modal_event_id_close %}org-leave-modal{% endblock %}
+
+{% block modal_header %}{% endblock %}
+
+{% block modal_size_class %}sm:max-w-lg{% endblock %}
+
+{% block modal_icon_bg %}bg-yellow-100{% endblock %}
+{% block modal_icon_color %}text-yellow-600{% endblock %}
+{% block modal_icon %}
+<svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+ </svg>
+{% endblock %}
+
+{% block modal_body_title %}
+<h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+  Leave Organization
+  </h3>
+{% endblock %}
+
+{% block modal_content_margin %}sm:ml-4{% endblock %}
+
+{% block modal_body %}
+<div class="mt-2">
+  <p class="text-sm text-gray-600">
+    Are you sure you want to leave this organization? You will immediately lose access to its resources.
+  </p>
+  <p class="mt-2 text-xs text-gray-500">If you are the last Owner, you must transfer ownership or add another Owner first.</p>
+  </div>
+{% endblock %}
+
+{% block modal_footer_bg %}bg-gray-50{% endblock %}
+
+{% block modal_footer %}
+<form :action="actionUrl" method="post" class="inline-flex">
+  {% csrf_token %}
+  <button type="submit"
+    class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-yellow-600 text-base font-medium text-white hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 sm:ml-3 sm:w-auto sm:text-sm">
+    Confirm Leave
+  </button>
+  </form>
+<button type="button"
+  class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+  @click="$dispatch('close-modal', { id: 'org-leave-modal' })">
+  Cancel
+  </button>
+{% endblock %}
+

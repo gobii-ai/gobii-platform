@@ -1,0 +1,32 @@
+{% load nav %}
+{% load waffle_tags %}
+<!-- Console Navigation Items for Mobile Menu -->
+<div class="py-1">
+  <div class="space-y-1">
+    <a href="{% url 'console-home' %}" 
+       class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-home' %}bg-blue-50 text-blue-600{% else %}text-slate-700 hover:bg-gray-100 hover:text-blue-600{% endif %}">
+      <svg class="flex-shrink-0 w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+      </svg>
+      Dashboard
+    </a>
+    
+    <a href="{% url 'api_keys' %}"
+       class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}bg-blue-50 text-blue-600{% else %}text-slate-700 hover:bg-gray-100 hover:text-blue-600{% endif %}">
+      <svg class="flex-shrink-0 w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+      </svg>
+      API Keys
+    </a>
+
+    {% flag "organizations" %}
+    <a href="{% url 'organizations' %}"
+       class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'organizations' or request.resolver_match.url_name == 'organization_detail' %}bg-blue-50 text-blue-600{% else %}text-slate-700 hover:bg-gray-100 hover:text-blue-600{% endif %}">
+      <svg class="flex-shrink-0 w-5 h-5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Organizations
+    </a>
+    {% endflag %}
+    
+    <!-- Add other console-specific links here -->
+  </div>
+</div> 

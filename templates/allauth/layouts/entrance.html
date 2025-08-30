@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}{% if head_title %}{{ head_title }} · {% endif %}Gobii{% endblock %}
+
+{% block content %}
+<div class="flex justify-center pt-20">
+  {% block body_inner %}{% endblock %}
+</div>
+{% endblock %}

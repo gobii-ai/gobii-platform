@@ -1,0 +1,474 @@
+{% load static %}
+{% load django_htmx %}
+{% load analytics_tags %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  {% if default_charter and not agent_charter_saved %}
+    {# a default charter has been specified, so change title #}
+    <title>{% if landing_title %}{{ landing_title }}{% else %}{{ default_charter|truncatechars:60 }}{% endif %} - Gobii</title>
+
+    <meta property="og:type"        content="website">
+
+    {% if landing_code %}
+    <meta property="og:url"         content="{{ request.scheme }}://{{ request.get_host }}{% url 'pages:landing_redirect' code=landing_code %}">
+    {% endif %}
+
+    <meta property="og:title" content="{% if landing_title %}{{ landing_title }}{% else %}{{ default_charter|truncatechars:60 }}{% endif %} - Gobii">
+    <meta property="og:description" content="{{ default_charter|truncatechars:160 }}">
+    <meta property="og:site_name" content="Gobii">
+
+    {%  if landing_preview_image %}
+    <meta property="og:image" content="{{ landing_preview_image }}">
+    {% endif %}
+
+    <meta name="twitter:card" content="summary">
+  {% else %}
+  <title>{% block title %}Gobii{% endblock %}</title>
+  {% endif %}
+  <!-- Favicon -->
+  <link rel="icon" href="{% static 'images/favicon.ico' %}?v=4" sizes="any">
+  <link rel="icon" type="image/png" sizes="16x16" href="{% static 'images/favicon-16x16.png' %}?v=4">
+  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'images/favicon-32x32.png' %}?v=4">
+  <link rel="apple-touch-icon" sizes="180x180" href="{% static 'images/apple-touch-icon.png' %}?v=4">
+
+  <meta name="twitter:site"        content="@gobii_ai">
+
+  <!-- Optional: for better Android support -->
+  <link rel="manifest" href="{% static 'manifest.json' %}?v=4">
+  <meta name="theme-color" content="#0ea5e9">
+
+  {% if settings.GA_MEASUREMENT_ID and not debug %}
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id={{ settings.GA_MEASUREMENT_ID }}"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    {% get_page_meta request.path as ga_page_meta %}
+
+    {% if page_meta %}
+    const gaPageTitle = "{{ ga_page_meta.0|escapejs }} - {{ ga_page_meta.1|escapejs }}";
+    {% else %}
+    const gaPageTitle = document.title;
+    {% endif %}
+
+    const gtagConfig = {
+      anonymize_ip: true,
+      page_title: gaPageTitle
+    };
+    {% if user.is_authenticated %}
+    gtagConfig.user_id = '{{ user.id }}';
+    {% endif %}
+    gtag('config', '{{ settings.GA_MEASUREMENT_ID }}', gtagConfig);
+  </script>
+  {% endif %}
+
+
+  {% if environment.is_production %}
+  <!-- Reddit Pixel -->
+  <script>
+  !function(w,d){if(!w.rdt){var p=w.rdt=function(){p.sendEvent?p.sendEvent.apply(p,arguments):p.callQueue.push(arguments)};p.callQueue=[];var t=d.createElement("script");t.src="https://www.redditstatic.com/ads/pixel.js",t.async=!0;var s=d.getElementsByTagName("script")[0];s.parentNode.insertBefore(t,s)}}(window,document);
+
+  {% if user.is_authenticated %}
+    rdt('init', 'a2_hb27sv7t5pa6', {
+        email: '{{ user.email }}',
+        externalId: '{{ user.id }}',
+    });
+  {% else %}
+    rdt('init','a2_hb27sv7t5pa6');
+  {%  endif %}
+
+  rdt('track', 'PageVisit');
+  </script>
+  <!-- DO NOT MODIFY UNLESS TO REPLACE A USER IDENTIFIER -->
+  <!-- End Reddit Pixel -->
+  {% endif %}
+
+
+{% if not debug %}
+  <!-- Segment -->
+  <script>
+    {% if environment.is_production %}
+    !function(){var i="analytics",analytics=window[i]=window[i]||[];if(!analytics.initialize)if(analytics.invoked)window.console&&console.error&&console.error("Segment snippet included twice.");else{analytics.invoked=!0;analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","screen","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware","register"];analytics.factory=function(e){return function(){if(window[i].initialized)return window[i][e].apply(window[i],arguments);var n=Array.prototype.slice.call(arguments);if(["track","screen","alias","group","page","identify"].indexOf(e)>-1){var c=document.querySelector("link[rel='canonical']");n.push({__t:"bpc",c:c&&c.getAttribute("href")||void 0,p:location.pathname,u:location.href,s:location.search,t:document.title,r:document.referrer})}n.unshift(e);analytics.push(n);return analytics}};for(var n=0;n<analytics.methods.length;n++){var key=analytics.methods[n];analytics[key]=analytics.factory(key)}analytics.load=function(key,n){var t=document.createElement("script");t.type="text/javascript";t.async=!0;t.setAttribute("data-global-segment-analytics-key",i);t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";var r=document.getElementsByTagName("script")[0];r.parentNode.insertBefore(t,r);analytics._loadOptions=n};analytics._writeKey="P31GhsuL2CrLOgk10l54NyAlgHA5hg0n";;analytics.SNIPPET_VERSION="5.2.0";
+    analytics.load("P31GhsuL2CrLOgk10l54NyAlgHA5hg0n");
+    }}();
+    {%  else %}
+    !function(){var i="analytics",analytics=window[i]=window[i]||[];if(!analytics.initialize)if(analytics.invoked)window.console&&console.error&&console.error("Segment snippet included twice.");else{analytics.invoked=!0;analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","screen","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware","register"];analytics.factory=function(e){return function(){if(window[i].initialized)return window[i][e].apply(window[i],arguments);var n=Array.prototype.slice.call(arguments);if(["track","screen","alias","group","page","identify"].indexOf(e)>-1){var c=document.querySelector("link[rel='canonical']");n.push({__t:"bpc",c:c&&c.getAttribute("href")||void 0,p:location.pathname,u:location.href,s:location.search,t:document.title,r:document.referrer})}n.unshift(e);analytics.push(n);return analytics}};for(var n=0;n<analytics.methods.length;n++){var key=analytics.methods[n];analytics[key]=analytics.factory(key)}analytics.load=function(key,n){var t=document.createElement("script");t.type="text/javascript";t.async=!0;t.setAttribute("data-global-segment-analytics-key",i);t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";var r=document.getElementsByTagName("script")[0];r.parentNode.insertBefore(t,r);analytics._loadOptions=n};analytics._writeKey="dngSev7Aren7cficlECon9egZEKyRMsm";;analytics.SNIPPET_VERSION="5.2.0";
+    analytics.load("dngSev7Aren7cficlECon9egZEKyRMsm");
+    }}();
+    {%  endif %}
+
+    // Add a source middleware to set the medium for web events
+    analytics.addSourceMiddleware(({ payload, next }) => {
+      const { properties } = payload.obj;
+
+      if (!properties) {
+        payload.obj.properties = {};
+      }
+
+      properties.medium = 'Web';
+      properties.frontend = true;
+
+      next(payload)
+    });
+
+    (function () {
+      if (!{{ user.is_authenticated|yesno:"true,false" }}) return;
+      if (typeof window.analytics === 'undefined') return; //Snippet blocked
+      // Check if user method exists before calling it (may not be loaded on localhost)
+      if (analytics?.user && typeof analytics.user === 'function') {
+        if (analytics.user()?.id() === "{{ user.id }}") return;
+      }
+
+      analytics.identify("{{ user.id }}", {
+        email : "{{ user.email }}",
+      });
+    })();
+
+    {% if landing_code %}
+      analytics.page('Landing Page', {
+        landing_code: '{{ landing_code|escapejs }}',
+        landing_hero_text: '{{ landing_hero_text|escapejs|default:"" }}',
+        landing_preview_image: '{{ landing_preview_image|escapejs|default:"" }}',
+        landing_title: '{{ landing_title|escapejs|default:"" }}',
+        default_charter: '{{ default_charter|escapejs|default:"" }}',
+      });
+    {% else %}
+      {% get_page_meta request.path as page_meta %}   {# ← call the tag, store result #}
+      analytics.page(
+        {% if page_meta %}
+          "{{ page_meta.0|escapejs }}",   // category
+          "{{ page_meta.1|escapejs }}"    // name
+        {% endif %}
+      );
+    {% endif %}
+  </script>
+  <!-- End Segment -->
+
+  <!-- Mixpanel Replay -->
+  <script type="text/javascript">
+    (function (f, b) { if (!b.__SV) { var e, g, i, h; window.mixpanel = b; b._i = []; b.init = function (e, f, c) { function g(a, d) { var b = d.split("."); 2 == b.length && ((a = a[b[0]]), (d = b[1])); a[d] = function () { a.push([d].concat(Array.prototype.slice.call(arguments, 0))); }; } var a = b; "undefined" !== typeof c ? (a = b[c] = []) : (c = "mixpanel"); a.people = a.people || []; a.toString = function (a) { var d = "mixpanel"; "mixpanel" !== c && (d += "." + c); a || (d += " (stub)"); return d; }; a.people.toString = function () { return a.toString(1) + ".people (stub)"; }; i = "disable time_event track track_pageview track_links track_forms track_with_groups add_group set_group remove_group register register_once alias unregister identify name_tag set_config reset opt_in_tracking opt_out_tracking has_opted_in_tracking has_opted_out_tracking clear_opt_in_out_tracking start_batch_senders people.set people.set_once people.unset people.increment people.append people.union people.track_charge people.clear_charges people.delete_user people.remove".split( " "); for (h = 0; h < i.length; h++) g(a, i[h]); var j = "set set_once union unset remove delete".split(" "); a.get_group = function () { function b(c) { d[c] = function () { call2_args = arguments; call2 = [c].concat(Array.prototype.slice.call(call2_args, 0)); a.push([e, call2]); }; } for ( var d = {}, e = ["get_group"].concat( Array.prototype.slice.call(arguments, 0)), c = 0; c < j.length; c++) b(j[c]); return d; }; b._i.push([e, f, c]); }; b.__SV = 1.2; e = f.createElement("script"); e.type = "text/javascript"; e.async = !0; e.src = "undefined" !== typeof MIXPANEL_CUSTOM_LIB_URL ? MIXPANEL_CUSTOM_LIB_URL : "file:" === f.location.protocol && "//cdn.mxpnl.com/libs/mixpanel-2-latest.min.js".match(/^\/\//) ? "https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js" : "//cdn.mxpnl.com/libs/mixpanel-2-latest.min.js"; g = f.getElementsByTagName("script")[0]; g.parentNode.insertBefore(e, g); } })(document, window.mixpanel || []);
+
+    mixpanel.init("{{ analytics.tokens.mixpanel_project_token }}", {
+      record_sessions_percent: 1,  //records 1% of all sessions
+      record_heatmap_data: true,
+      loaded: function (mixpanel) {
+        const pollInterval = 500; // How frequently to check
+        const maxAttempts = 10; // Max times to check
+        let anonymousCheckAttempts = 0;
+        let authCheckAttempts = 0;
+
+       {% if user.is_authenticated %}
+        // If user is authenticated, identify them immediately
+        mixpanel.identify("{{ user.id }}"); //use django's user id
+       {% else %}
+          try {
+            const authCheck = setInterval(() => {
+                const segment_user_id = analytics?.user()?.id();
+
+                if (segment_user_id) {
+                    mixpanel.identify(segment_user_id); //use segment's user id
+                    clearInterval(authCheck);
+                } else {
+                    authCheckAttempts++;
+                    if (authCheckAttempts >= maxAttempts) {
+                        clearInterval(authCheck);
+                        console.log('mixpanel: Max attempts reached for segment user_id');
+                    }
+                }
+            }, pollInterval);
+          } catch (e) {
+              console.error(`mixpanel: error checking for segment user_id: ${e}`);
+          }
+       {% endif %}
+
+
+        // Checking for segment device_id
+       try {
+         const anonymousCheck = setInterval(() => {
+           const segment_device_id = analytics?.user()?.anonymousId();
+
+           if (segment_device_id) {
+             mixpanel.register({$device_id: segment_device_id}); //use segment's device_id
+             clearInterval(anonymousCheck);
+           } else {
+             anonymousCheckAttempts++;
+             if (anonymousCheckAttempts >= maxAttempts) {
+               clearInterval(anonymousCheck);
+               console.log('mixpanel: Max attempts reached for segment device_id');
+             }
+           }
+         }, pollInterval);
+       } catch (e) {
+         console.error(`mixpanel: error checking for segment device_id: ${e}`);
+       }
+
+        // Checking for segment user_id
+
+      }
+    });
+  </script>
+  <!-- End Mixpanel Replay -->
+  {% endif %}
+
+  {% if environment.is_production %}
+  <!-- Meta Pixel Code -->
+  <script>
+  !function(f,b,e,v,n,t,s)
+  {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+  n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+  if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+  n.queue=[];t=b.createElement(e);t.async=!0;
+  t.src=v;s=b.getElementsByTagName(e)[0];
+  s.parentNode.insertBefore(t,s)}(window, document,'script',
+  'https://connect.facebook.net/en_US/fbevents.js');
+
+  {% if user.is_authenticated %}
+    {# link external id #}
+    fbq('init', '1955131478577477', { em: '{{ user.email }}', external_id: '{{ user.id }}' });
+  {%  else %}
+    fbq('init', '1955131478577477');
+  {% endif %}
+
+  fbq('track', 'PageView');
+  </script>
+  <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1955131478577477&ev=PageView&noscript=1" /></noscript>
+  <!-- End Meta Pixel Code -->
+
+  {% endif %}
+
+  <!-- Tailwind Play CDN -->
+  <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
+  
+  <!-- Custom Fonts -->
+  <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+
+  <!-- Syntax highlighting for code blocks -->
+  <link rel="stylesheet" href="{% static 'css/pygments.css' %}">
+  
+  <!-- Preload logo to prevent flicker -->
+  <link rel="preload" as="image" href="{% static 'images/noBgBlue.png' %}" />
+  
+  <style>
+    [x-cloak] { display: none !important; }
+    
+    /* Reserve space for logo to prevent layout shift */
+    a[href="{% url 'pages:home' %}"] img {
+      min-height: 2.5rem; /* matches h-10 */
+    }
+
+    /* Optimized global font size for comfortable reading across all devices.
+       This scales all rem-based Tailwind utilities proportionally and keeps
+       sizing reasonable across breakpoints. */
+    :root {
+      font-size: 16px; /* Standard base size on mobile */
+    }
+
+    @media (min-width: 768px) {
+      :root {
+        font-size: 18px; /* Slightly larger on tablets & larger screens */
+      }
+    }
+    
+    /* Theme colors for documentation */
+    :root {
+      --primary-50: #f0f9ff;
+      --primary-100: #e0f2fe;
+      --primary-200: #bae6fd;
+      --primary-300: #7dd3fc;
+      --primary-400: #38bdf8;
+      --primary-500: #0ea5e9;
+      --primary-600: #0284c7;
+      --primary-700: #0369a1;
+      --primary-800: #075985;
+      --primary-900: #0c4a6e;
+    }
+
+  </style>
+
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.7/dist/cdn.min.js"></script>
+  
+  <!-- Preline -->
+  <script src="https://cdn.jsdelivr.net/npm/preline@latest/dist/preline.min.js"></script>
+
+  <script defer>
+    // This script block handles the re-initialization of Preline components
+    // after HTMX swaps content into the DOM.
+
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof htmx !== 'undefined') {
+        // Use a direct event listener for 'htmx:load' on document.body,
+        // as this was demonstrably working in earlier tests.
+        document.body.addEventListener('htmx:load', function(event) {
+          // event.detail.elt is the element that HTMX has loaded content into.
+          if (window.HSStaticMethods && typeof window.HSStaticMethods.autoInit === 'function') {
+            window.HSStaticMethods.autoInit();
+            // console.log('Preline components re-initialized via htmx:load. HTMX loaded element:', event.detail.elt);
+          } else {
+            console.error('Preline (HSStaticMethods.autoInit) not available for HTMX content re-initialization during htmx:load.');
+          }
+        });
+      } else {
+        console.warn('HTMX not found on DOMContentLoaded. Preline re-initialization for HTMX swaps will not be configured.');
+      }
+    });
+  </script>
+
+  <!-- Global event to close all mobile navs before navigation or caching -->
+  <script>
+    function dispatchCloseMobileNav() {
+      document.dispatchEvent(new CustomEvent('close-mobile-nav'));
+    }
+
+    window.addEventListener('pagehide', dispatchCloseMobileNav);
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') dispatchCloseMobileNav();
+    });
+    window.addEventListener('freeze', dispatchCloseMobileNav);
+    document.addEventListener('htmx:beforeRequest', dispatchCloseMobileNav);
+    document.addEventListener('htmx:beforeHistorySave', dispatchCloseMobileNav);
+  </script>
+
+  <!-- Re-initialize Alpine after a bfcache restore -->
+  <script>
+    window.addEventListener('pageshow', function (event) {
+      if (event.persisted) {
+        if (window.Alpine) {
+          Alpine.destroyTree(document.body);
+          Alpine.initTree(document.body);
+        }
+      }
+    });
+  </script>
+
+  <script src="{% static 'js/gobii_analytics.js' %}"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js"></script>
+  <script type="text/javascript" src="{% static 'js/phone_format.js' %}" defer></script>
+
+  <style type="text/css">
+
+    .htmx-indicator {
+      width: 0;           /* matches spinner dimensions */
+      height: 0;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+  </style>
+
+  {% if show_signup_tracking %}
+    <script>
+      (function () {
+        /* Avoid ReferenceError if the pixel hasn’t loaded yet */
+        if (typeof window.rdt === 'function') {
+          rdt('track', 'SignUp', {
+            email: "{{ analytics.data.email_hash }}",
+            externalId : "{{ user.id }}",
+            conversionId: "reg-{{ user.id }}",
+          });
+        }
+
+        if (typeof window.gtag === 'function') {
+          const utmParams = window.getUTMParams ? window.getUTMParams() : {};
+          gtag('event', 'sign_up', { method: 'email', ...utmParams });
+        }
+      })();
+    </script>
+    <!-- Clear the session flag -->
+    <script>
+      fetch('{% url "pages:clear_signup_tracking" %}', {method: 'GET', headers: {'X-CSRFToken': '{{ csrf_token }}'}});
+    </script>
+  {% endif %}
+
+  {% if user.is_authenticated %}
+  <script type="text/javascript">
+    // For each of the UTM parameters, check if it exists in the URL or cookies, and add to properties object
+    // to send to Segment
+    const cookies = ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'];
+    const props = {};
+
+    cookies.forEach(cookie => {
+      const cookieValue = document.cookie.split('; ').find(row => row.startsWith(cookie + '='));
+      if (cookieValue) {
+        props[cookie] = decodeURIComponent(cookieValue.substring(cookie.length + 1));
+      } else {
+        // If the cookie doesn't exist, check the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has(cookie)) {
+          props[cookie] = urlParams.get(cookie);
+        }
+      }
+    });
+
+    if (analytics && analytics.identify && Object.keys(props).length > 0) {
+      analytics.identify("{{ user.id }}", props);
+    }
+  </script>
+  {% endif %}
+
+  {% if show_signup_tracking %}
+   <script>
+    (function () {
+      if (typeof window.fbq !== 'function') return;
+
+      // --- pull any UTM cookies you created earlier (optional) ---
+      const utmParams = window.getUTMParams ? window.getUTMParams() : {};
+
+      fbq('track', 'CompleteRegistration',
+          {...utmParams},
+          {
+            external_id : "{{ user.id }}",
+            em          : "{{ analytics.data.email_hash }}",
+          });
+    })();
+  </script>
+  {% endif %}
+
+  <!-- block for head_extras -->
+  {% block head_extras %}{% endblock %}
+
+  {% htmx_script %}
+</head>
+<body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+  {% include "includes/_unified_header_nav.html" %}
+  <div>
+    {% if messages %}
+    <div class="fixed top-18 left-1/2 transform -translate-x-1/2 w-full max-w-md p-4 z-50" id="global-messages">
+      {% for message in messages %}
+      <div
+        class="p-4 mb-4 {% if message.tags == 'success' %}bg-green-100 text-green-800 border border-green-200{% elif message.tags == 'error' %}bg-red-100 text-red-800 border border-red-200{% elif message.tags == 'info' %}bg-blue-100 text-blue-800 border border-blue-200{% elif message.tags == 'warning' %}bg-yellow-100 text-yellow-800 border border-yellow-200{% else %}bg-gray-100 text-gray-800 border border-gray-200{% endif %} rounded-lg shadow-lg flex justify-between items-center"
+        role="alert"
+        x-data="{ show: true }"
+        x-show="show"
+        x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 transform -translate-y-2"
+        x-transition:enter-end="opacity-100 transform translate-y-0"
+        x-transition:leave="transition ease-in duration-300"
+        x-transition:leave-start="opacity-100 transform translate-y-0"
+        x-transition:leave-end="opacity-0 transform -translate-y-2"
+      >
+        <span>{{ message }}</span>
+        <button type="button" @click="show = false; setTimeout(() => $el.closest('[role=alert]').remove(), 300)"
+          class="text-gray-500 hover:text-gray-700 focus:outline-none" aria-label="Close">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+    <!-- HTMX injects modals here -->
+    <div id="modal-container"></div>
+
+    {# Global footer #}
+    {% include "includes/_footer.html" %}
+  </div>
+</body>
+</html>

@@ -1,0 +1,50 @@
+{% comment %} Expects 'icon_key' and optional 'icon_class' in context {% endcomment %}
+{% if icon_key == "guide" %}
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2 text-gray-500' %}">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+</svg>
+{% elif icon_key == "api" %}
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2 text-gray-500' %}">
+    <!-- Heroicons: code-bracket -->
+    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 4.75l4.72 6.95a.75.75 0 010 .6l-4.72 6.95M7.5 4.75l-4.72 6.95a.75.75 0 000 .6l4.72 6.95" />
+</svg>
+{% elif icon_key == "reference" %}
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2 text-gray-500' %}">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.5 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
+</svg>
+{% elif icon_key == "stopwatch" %}
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2 text-gray-500' %}">
+    <!-- Heroicons: clock -->
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+</svg>
+{% elif icon_key == "json" %}
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2 text-gray-500' %}">
+    <!-- Heroicons: brackets-curly -->
+    <path stroke-linecap="round" stroke-linejoin="round" d="M8 4H6a2 2 0 00-2 2v4m0 4v4a2 2 0 002 2h2m8-2h2a2 2 0 002-2v-4m0-4V6a2 2 0 00-2-2h-2" />
+</svg>
+{% elif icon_key == "code" %}
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2 text-gray-500' %}">
+    <!-- Heroicons: code-bracket-square -->
+    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 4.75l4.72 6.95a.75.75 0 010 .6l-4.72 6.95M7.5 4.75l-4.72 6.95a.75.75 0 000 .6l4.72 6.95" />
+</svg>
+{% elif icon_key == "code-file" %}
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2 text-gray-500' %}">
+    <!-- Heroicons: document-code -->
+    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+</svg>
+{% elif icon_key == "typescript" %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2' %}">
+  <rect width="256" height="256" rx="12" fill="#3178C6" />
+  <text x="50%" y="60%" dominant-baseline="middle" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="140" fill="white">TS</text>
+</svg>
+{% elif icon_key == "lock" %}
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2 text-gray-500' %}">
+    <!-- Heroicons: lock-closed -->
+    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+</svg>
+{% else %}
+{# Default icon (document-text) #}
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="{% firstof icon_class 'flex-shrink-0 size-5 me-2 text-gray-500' %}">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+</svg>
+{% endif %} 

@@ -1,0 +1,87 @@
+{% load nav %}
+{% load waffle_tags %}
+
+<!-- Console Sub-Navigation Panel - Visible on medium and large screens -->
+<aside class="hidden md:block sticky top-20 self-start min-w-64 w-64 flex-shrink-0 bg-white/80 backdrop-blur-sm border border-white/60 p-4 mx-4 my-4 rounded-xl shadow-xl overflow-y-auto">
+  <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Console Menu</h3>
+  <nav class="space-y-1">
+    <a href="{% url 'console-home' %}" 
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-home' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"
+           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+      </svg>
+      Dashboard
+    </a>
+    {% flag "persistent_agents" %}
+    <a href="{% url 'agents' %}"
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'agents' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'agents' %}text-blue-600{% else %}text-gray-500{% endif %}"
+           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+      Agents
+    </a>
+    {% endflag %}
+    <a href="{% url 'tasks' %}"
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'tasks' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'tasks' %}text-blue-600{% else %}text-gray-500{% endif %}"
+           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+      </svg>
+      Tasks
+    </a>
+    <a href="{% url 'api_keys' %}"
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"
+           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+      </svg>
+      API Keys
+    </a>
+    {% flag "organizations" %}
+    <a href="{% url 'organizations' %}"
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'organizations' or request.resolver_match.url_name == 'organization_detail' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'organizations' or request.resolver_match.url_name == 'organization_detail' %}text-blue-600{% else %}text-gray-500{% endif %}" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Organizations
+    </a>
+    {% endflag %}
+    <a href="{% url 'profile' %}"
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'profile' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'profile' %}text-blue-600{% else %}text-gray-500{% endif %}"
+           xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" height="24" width="24" fill="currentColor" stroke="currentColor">
+        <!--!Font Awesome Free v7.0.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2025 Fonticons, Inc.-->
+       <path d="M240 192C240 147.8 275.8 112 320 112C364.2 112 400 147.8 400 192C400 236.2 364.2 272 320 272C275.8 272 240 236.2 240 192zM448 192C448 121.3 390.7 64 320 64C249.3 64 192 121.3 192 192C192 262.7 249.3 320 320 320C390.7 320 448 262.7 448 192zM144 544C144 473.3 201.3 416 272 416L368 416C438.7 416 496 473.3 496 544L496 552C496 565.3 506.7 576 520 576C533.3 576 544 565.3 544 552L544 544C544 446.8 465.2 368 368 368L272 368C174.8 368 96 446.8 96 544L96 552C96 565.3 106.7 576 120 576C133.3 576 144 565.3 144 552L144 544z"/>
+      </svg>
+      Profile
+    </a>
+    <a href="{% url 'billing' %}"
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'billing' %}text-blue-600{% else %}text-gray-500{% endif %}"
+           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M2 7a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V7z"
+        />
+        <!-- dividing stripe -->
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M2 10h20"
+        />
+        <!-- detail lines -->
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M6 16h2m4 0h6"
+        />
+      </svg>
+      Billing
+    </a>
+    <!-- Add other console-specific links here -->
+  </nav>
+</aside>

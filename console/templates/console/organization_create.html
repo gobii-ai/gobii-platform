@@ -1,0 +1,16 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="max-w-md space-y-6">
+  <h1 class="text-2xl font-semibold text-gray-800">Add Organization</h1>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    <div>
+      {{ form.name.label_tag }}
+      {{ form.name }}
+      {{ form.name.errors }}
+    </div>
+    <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Create</button>
+  </form>
+</div>
+{% endblock %}

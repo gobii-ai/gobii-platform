@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% load static %}
+{% load waffle_tags %}
+{% block title %}Gobii – API-first AI Browser Agents{% endblock %}
+{% block content %}
+<div class="relative">
+  <!-- Decorative blobs removed for cleaner background -->
+  
+  <!-- Grid pattern overlay -->
+  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[-1]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
+  
+  <!-- ========================================================= -->
+  <!-- Agent Spawn Hero -->
+  <section class="relative pb-16">
+    
+    <!-- Content container with enhanced styling -->
+    <div class="relative max-w-5xl mx-auto px-6 pt-16 pb-12">
+
+      <!-- Main Headline -->
+      <div class="text-center mb-8">
+        <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 leading-tight max-w-3xl mx-auto">
+          {%  if landing_hero_text %}
+          <span class="font-semibold">{{ landing_hero_text|safe }}</span>
+          {% else %}
+          <span class="font-semibold">Spawn an AI agent that works</span>
+          <span class="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"> while you sleep.</span>
+          {% endif %}
+        </h1>
+        <p class="mt-4 text-lg text-gray-600 max-w-3xl mx-auto leading-relaxed">
+          Describe what you need automated, and we'll spawn an always-on agent to handle it 24/7.
+        </p>
+      </div>
+
+      <!-- Task Usage Warning for logged in users -->
+      {% if user.is_authenticated %}
+        <div class="max-w-4xl mx-auto mb-8">
+          {% include "partials/_task_usage.html" %}
+        </div>
+      {% endif %}
+
+      <!-- Agent Spawn Form -->
+      {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
+      <div class="bg-white/90 backdrop-blur-sm shadow-2xl rounded-2xl overflow-hidden max-w-4xl mx-auto">
+        <div class="p-2 sm:p-4 lg:p-6">
+          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}">
+            {% csrf_token %}
+            
+            <!-- Charter Input with inline CTA button -->
+            <div class="space-y-4">
+              <!-- Unified input + button container -->
+              <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white/80 transition-colors duration-200">
+                <!-- Textarea -->
+                {{ agent_charter_form.charter }}
+
+                <!-- Button row -->
+                <div class="flex flex-col sm:flex-row sm:justify-end items-stretch sm:items-center gap-3 p-3">
+                  {% if user.is_authenticated %}
+                    {% load waffle_tags %}
+                    {% flag "persistent_agents" %}
+                      {% if account.usage.agents_in_use > 0 %}
+                        <a href="{% url 'agents' %}" class="py-3 px-4 inline-flex items-center justify-center gap-x-2 text-sm font-medium rounded-lg border border-blue-600 bg-white text-blue-600 hover:bg-blue-50 focus:outline-none focus:bg-blue-50 transition-colors duration-200">
+                          <span class="hidden sm:inline">Manage your {{ account.usage.agents_in_use }} always-on agent{{ account.usage.agents_in_use|pluralize }}</span>
+                          <span class="sm:hidden">Manage {{ account.usage.agents_in_use }} agent{{ account.usage.agents_in_use|pluralize }}</span>
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                          </svg>
+                        </a>
+                      {% endif %}
+                    {% endflag %}
+                  {% endif %}
+                  
+                  <button
+                    type="submit"
+                    class="group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 border border-transparent text-white text-sm font-semibold rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
+
+                  >
+                    Create Agent
+                    <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              
+              {% if agent_charter_form.charter.errors %}
+                <div class="mt-2 text-red-600 text-sm flex items-center gap-2">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"></path>
+                  </svg>
+                  {{ agent_charter_form.charter.errors.0 }}
+                </div>
+              {% endif %}
+            </div>
+
+              <!-- Helper text -->
+              {% if not user.is_authenticated %}
+              <div class="text-center mt-4 mb-4 sm:mb-0">
+                <p class="text-sm text-gray-500 flex items-center justify-center gap-2">
+                  <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                  </svg>
+                  You'll sign in after clicking "Create Agent"
+                </p>
+              </div>
+              {% endif %}
+            </div>
+          </form>
+        </div>
+      </div>
+      <!-- Simple Examples Section -->
+      <div class="max-w-4xl mx-auto mt-2 text-center px-4">
+        <p class="text-sm text-gray-500 mb-4">Or, try an example:</p>
+        <div class="flex flex-wrap justify-center gap-2">
+          {% for example in simple_examples %}
+            <button type="button" class="bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:text-gray-800 text-sm font-medium py-1.5 px-3 rounded-full transition-colors" onclick="setPrompt('{{ example.prompt|escapejs }}')">
+                "{{ example.label }}"
+            </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% else %}
+      <div class="max-w-4xl mx-auto mt-8 px-4">
+        <div class="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-8 shadow-lg text-center">
+          <!-- Icon -->
+          <div class="flex justify-center mb-6">
+            <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+              <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Header -->
+          <h3 class="text-2xl font-bold text-gray-900 mb-3">No Agents Available</h3>
+
+          <!-- Description -->
+          <p class="text-gray-600 mb-6 max-w-2xl mx-auto">
+            You've reached your agent limit for your current plan. Upgrade to unlock more agents and take advantage of advanced features to boost your productivity.
+          </p>
+
+          <!-- Stats Card -->
+          <div class="bg-white rounded-lg p-4 mb-6 border border-blue-100 max-w-md mx-auto">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-medium text-gray-600">Available Agents</span>
+              <span class="text-sm font-bold text-blue-600">0/{{ account.usage.agent_limit }}</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2">
+              <div class="bg-gradient-to-r from-blue-400 to-indigo-500 h-2 rounded-full" style="width: 100%"></div>
+            </div>
+          </div>
+
+          <!-- CTA Button -->
+          <a href="{% url "pages:startup_checkout" %}" class="inline-flex items-center justify-center px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+            </svg>
+            Upgrade Your Plan
+          </a>
+
+          <!-- Benefits Preview -->
+          <div class="mt-8 pt-6 border-t border-blue-200">
+            <h4 class="text-lg font-semibold text-gray-900 mb-4">What you'll get with an upgrade:</h4>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl mx-auto">
+              <div class="flex flex-col items-center text-center">
+                <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mb-2">
+                  <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
+                  </svg>
+                </div>
+                <h5 class="font-medium text-gray-900 mb-1">Unlimited Agents</h5>
+                <p class="text-sm text-gray-600">Create more agents for all your tasks</p>
+              </div>
+
+              <div class="flex flex-col items-center text-center">
+                <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center mb-2">
+                  <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                  </svg>
+                </div>
+                <h5 class="font-medium text-gray-900 mb-1">More Tasks</h5>
+                <p class="text-sm text-gray-600">Run more tasks each month</p>
+              </div>
+
+              <div class="flex flex-col items-center text-center">
+                <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mb-2">
+                  <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192L5.636 18.364M12 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                </div>
+                <h5 class="font-medium text-gray-900 mb-1">Priority Support</h5>
+                <p class="text-sm text-gray-600">Get help when you need it most</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    
+    <!-- Rich Examples Grid Section -->
+    <div class="max-w-7xl mx-auto mt-12 px-4">
+      <!-- Examples Grid -->
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        {% for example in rich_examples %}
+        <div class="group relative bg-white border border-gray-200 rounded-2xl p-6 hover:shadow-xl hover:border-blue-200 transition-all duration-300 cursor-pointer" onclick="setPrompt('{{ example.prompt|escapejs }}')">
+          <div class="flex items-center mb-4">
+            <div class="p-3 bg-gradient-to-r {{ example.gradient }} rounded-xl shadow-lg">
+              <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ example.icon }}"></path>
+              </svg>
+            </div>
+            <div class="ml-4">
+              <h3 class="text-lg font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">{{ example.title }}</h3>
+              <p class="text-sm text-gray-500">{{ example.subtitle }}</p>
+            </div>
+          </div>
+          <p class="text-gray-600 text-sm leading-relaxed mb-4">
+            {{ example.description }}
+          </p>
+          <div class="flex items-center text-blue-600 text-sm font-medium">
+            <span>Try this agent</span>
+            <svg class="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      
+      <!-- Call to Action -->
+      <div class="text-center px-4">
+        <p class="text-gray-600 mb-6">Don't see what you're looking for?</p>
+        <button type="button" class="inline-flex items-center justify-center w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105" onclick="setPrompt('');">
+          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+          </svg>
+          Create Custom Agent
+        </button>
+      </div>
+    </div>
+  </section>
+
+
+
+
+
+  <script>
+    function setPrompt(promptText) {
+        const textarea = document.querySelector('textarea[name="charter"]');
+        if (textarea) {
+            textarea.value = promptText;
+            textarea.focus();
+            textareaAutoResize(textarea);
+        }
+
+        // Analytics CTA
+        if (window.analytics && analytics.track) {
+          var properties = {
+            {% if user.is_authenticated %}user_id: "{{ user }}", {% endif %}
+            charter: promptText,
+            medium: 'Web',
+          }
+          analytics.track('{{ analytics.cta.CTA_EXAMPLE_AGENT_CLICKED.value }}', properties);
+        }
+    }
+
+    // Auto-focus the textarea when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        const textarea = document.querySelector('textarea[name="charter"]');
+        if (textarea) {
+            textarea.focus();
+            // Move cursor to the end of the text
+            const length = textarea.value.length;
+            textarea.setSelectionRange(length, length);
+            textareaAutoResize(textarea);
+        }
+    });
+
+    function textareaAutoResize(el) {
+        const maxHeight = parseInt(el.dataset.maxHeight || 400);
+        el.style.height = 'auto';
+        if (el.scrollHeight <= maxHeight) {
+            el.style.height = el.scrollHeight + 'px';
+            el.style.overflowY = 'hidden';
+        } else {
+            el.style.height = maxHeight + 'px';
+            el.style.overflowY = 'auto';
+        }
+    }
+  </script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const form = document.getElementById('create-agent-form');
+      if (form) {
+        form.addEventListener('submit', function (e) {
+          // Optional: fire analytics before submit
+          if (window.analytics && analytics.track) {
+            var properties = {
+              {% if user.is_authenticated %}user_id: "{{ user.id }}", {% endif %}
+              charter: document.querySelector('textarea[name="charter"]').value,
+              medium: 'Web'
+            };
+
+            analytics.track('{{ analytics.cta.CTA_CREATE_AGENT_CLICKED.value }}', properties);
+          }
+        });
+      }
+    });
+  </script>
+</div> <!-- New closing div for the main wrapper -->
+{% endblock %}

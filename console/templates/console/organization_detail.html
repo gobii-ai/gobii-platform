@@ -1,0 +1,110 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="max-w-3xl space-y-8" x-data="{}">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold text-gray-800">{{ org.name }}</h1>
+  </div>
+
+  <div>
+    <h2 class="text-lg font-medium text-gray-800 mb-2">Members</h2>
+    <ul class="bg-white shadow rounded-lg divide-y divide-gray-200">
+      {% for member in members %}
+      <li class="px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span>{{ member.user.email }}</span>
+          <span class="text-xs text-gray-500 capitalize">{{ member.get_role_display }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          {% if can_manage_members %}
+          <form method="post" action="{% url 'org_member_role_update_org' org.id member.user.id %}" class="flex items-center gap-2">
+            {% csrf_token %}
+            <select name="role" class="text-sm border-gray-300 rounded-md"
+              {% if is_org_admin and member.role == 'owner' %}disabled{% endif %}>
+              {% for value,label in allowed_role_choices %}
+                <option value="{{ value }}" {% if member.role == value %}selected{% endif %}
+                  {% if is_org_admin and value == 'owner' %}disabled{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Update</button>
+          </form>
+          {% endif %}
+          {% if can_manage_members and member.user.id != request.user.id %}
+          <button
+            type="button"
+            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 w-24"
+            @click="$dispatch('open-modal', { id: 'org-member-remove-modal', url: '{% url 'org_member_remove_org' org.id member.user.id %}' })"
+          >
+            Remove
+          </button>
+          {% endif %}
+          {% if member.user.id == request.user.id %}
+          <button
+            type="button"
+            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 w-24"
+            @click="$dispatch('open-modal', { id: 'org-leave-modal', url: '{% url 'org_leave_org' org.id %}' })"
+          >
+            Leave
+          </button>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div>
+    <h2 class="text-lg font-medium text-gray-800 mb-2">Invite Member</h2>
+    <form method="post" class="space-y-4">
+      {% csrf_token %}
+      <div>
+        {{ invite_form.email.label_tag }}
+        {{ invite_form.email }}
+        {{ invite_form.email.errors }}
+      </div>
+      <div>
+        {{ invite_form.role.label_tag }}
+        {{ invite_form.role }}
+        {{ invite_form.role.errors }}
+      </div>
+      <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Send Invite</button>
+    </form>
+  </div>
+
+  {% if pending_invites %}
+  <div>
+    <h2 class="text-lg font-medium text-gray-800 mb-2">Pending Invitations</h2>
+    <ul class="bg-white shadow rounded-lg divide-y divide-gray-200">
+      {% for invite in pending_invites %}
+      <li class="px-4 py-3 flex items-center justify-between">
+        <div>
+          <div class="text-gray-900 font-medium">{{ invite.email }}</div>
+          <div class="text-sm text-gray-500">Role: {{ invite.get_role_display }} · Invited by {{ invite.invited_by.email }} · Expires {{ invite.expires_at|date:"M j, Y" }}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <form method="post" action="{% url 'org_invite_resend_org' org.id invite.token %}">
+            {% csrf_token %}
+            <button type="submit" class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100">Resend</button>
+          </form>
+          <button
+            type="button"
+            class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100"
+            @click="$dispatch('open-modal', { id: 'org-invite-revoke-modal', url: '{% url 'org_invite_revoke_org' org.id invite.token %}' })"
+          >
+            Revoke
+          </button>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {# Include revoke confirm modal for invites #}
+  {% include "partials/_org_invite_revoke_modal.html" %}
+  {# Include remove confirm modal for members #}
+  {% include "partials/_org_member_remove_modal.html" %}
+  {# Include leave confirm modal for self #}
+  {% include "partials/_org_leave_modal.html" %}
+</div>
+{% endblock %}

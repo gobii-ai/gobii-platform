@@ -1,0 +1,14 @@
+You're invited to join {{ org.name }} on Gobii
+
+{{ invited_by.get_full_name|default:invited_by.email }} has invited you to join the organization {{ org.name }} with the role {{ invite.get_role_display }}.
+
+This invitation expires on {{ invite.expires_at|date:"M j, Y" }}.
+
+Accept this invitation:
+{{ accept_url }}
+
+Decline this invitation:
+{{ reject_url }}
+
+If you did not expect this invitation, you can safely ignore this email.
+

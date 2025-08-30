@@ -1,0 +1,50 @@
+<!-- Agent Empty State Component -->
+<script>
+  createFirstAgent = function() {
+    // Function to handle agent creation logic
+    // This can be customized based on your application's requirements
+    if (window.analytics) {
+      analytics.track('{{ analytics.cta.CTA_CREATE_FIRST_AGENT_CLICKED.value }}');
+    }
+  };
+
+</script>
+<div class="space-y-6 pb-6">
+  <!-- Empty State Card -->
+  <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
+    <!-- Empty State Body -->
+    <div class="max-w-md w-full min-h-96 flex flex-col items-center justify-center mx-auto px-6 py-16">
+      <!-- Ensure content is centered horizontally -->
+      <!-- Added items-center to horizontally center children -->
+      <!-- Icon -->
+      <div class="flex justify-center items-center size-20 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-full mb-8 shadow-xl">
+        <svg class="shrink-0 size-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+      </div>
+
+      <!-- Heading -->
+      <h2 class="text-xl font-semibold text-gray-800 text-center mb-3">
+        No always-on agents yet
+      </h2>
+      
+      <!-- Description -->
+      <p class="text-sm text-gray-600 text-center mb-6 leading-relaxed">
+        Create your first AI agent that works 24/7. Agents can automate tasks, monitor changes, send notifications, and much more while you focus on what matters.
+      </p>
+
+      <!-- CTA Button -->
+      <div class="flex flex-col gap-3">
+        <a href="{% url 'pages:home' %}?spawn=1"
+           onclick="createFirstAgent()"
+           class="group inline-flex items-center justify-center gap-x-2 py-3 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+          <svg class="shrink-0 size-5 group-hover:rotate-12 transition-transform duration-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+          </svg>
+          Create Your First Agent
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- End Agent Empty State Component --> 
