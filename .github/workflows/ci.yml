@@ -37,6 +37,14 @@ jobs:
             tag: batch_pages
           - batch: contact_requests
             tag: batch_contact_requests
+          - batch: console_agents
+            tag: batch_console_agents
+          - batch: console_allowlist
+            tag: batch_console_allowlist
+          - batch: outbound_email
+            tag: batch_outbound_email
+          - batch: secrets
+            tag: batch_secrets
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

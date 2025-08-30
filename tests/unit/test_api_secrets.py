@@ -3,7 +3,7 @@ Tests for secrets encryption/decryption functionality.
 """
 import os
 import json
-from django.test import TestCase, override_settings
+from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 from rest_framework import status
@@ -34,6 +34,7 @@ class SecretsEncryptionTest(TestCase):
         elif 'GOBII_ENCRYPTION_KEY' in os.environ:
             del os.environ['GOBII_ENCRYPTION_KEY']
     
+    @tag("batch_secrets")
     def test_encrypt_decrypt_roundtrip(self):
         """Test that we can encrypt and decrypt secrets successfully."""
         secrets = {
@@ -68,6 +69,7 @@ class SecretsEncryptionTest(TestCase):
         result = SecretsEncryption.encrypt_secrets({})
         self.assertIsNone(result)
     
+    @tag("batch_secrets")
     def test_missing_encryption_key_raises_error(self):
         """Test that missing encryption key raises ValueError."""
         del os.environ['GOBII_ENCRYPTION_KEY']
@@ -154,6 +156,7 @@ class SecretsAPITest(APITestCase):
         elif 'GOBII_ENCRYPTION_KEY' in os.environ:
             del os.environ['GOBII_ENCRYPTION_KEY']
     
+    @tag("batch_secrets")
     def test_create_task_with_secrets(self):
         """Test creating a task with secrets via API."""
         data = {
@@ -197,6 +200,7 @@ class SecretsAPITest(APITestCase):
         self.assertIsNone(task.encrypted_secrets)
         self.assertIsNone(task.secret_keys)
     
+    @tag("batch_secrets")
     def test_invalid_secret_keys_rejected(self):
         """Test that invalid secret keys are rejected."""
         test_cases = [

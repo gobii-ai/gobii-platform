@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from django.db import connection
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 
 from api.models import (
@@ -48,6 +48,7 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")  # Mock where it's imported in email_sender
     @patch("api.models.switch_is_active", return_value=True)
+    @tag("batch_outbound_email")
     def test_email_execute_respects_manual_allowlist(self, _switch, mock_deliver_email, mock_close_old_connections):
         # Switch agent to manual and allow only a specific recipient
         self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
@@ -74,6 +75,7 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")  # Mock where it's imported in email_sender  
     @patch("api.models.switch_is_active", return_value=False)
+    @tag("batch_outbound_email")
     def test_email_execute_legacy_owner_only_when_switch_off(self, _switch, mock_deliver_email, mock_close_old_connections):
         # Only owner email permitted when switch is off
         ok = execute_send_email(self.agent, {
@@ -122,4 +124,3 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
         blocked = execute_send_sms(self.agent, {"to_number": "+15557779999", "body": "yo"})
         self.assertEqual(blocked.get("status"), "error")
         mock_deliver_sms.assert_not_called()  # Should not deliver to blocked number
-
