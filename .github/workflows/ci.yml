@@ -57,32 +57,48 @@ jobs:
           enable-cache: true
           ignore-nothing-to-cache: true
 
+      # Install dependencies into a project venv using uv, leveraging cache.
+      # Prefer lockfile if present; otherwise resolve from pyproject.
+      - name: Sync deps (locked)
+        if: ${{ hashFiles('uv.lock') != '' }}
+        run: |
+          uv sync --python 3.12 --frozen --all-extras --dev
+
+      - name: Sync deps (no lock)
+        if: ${{ hashFiles('uv.lock') == '' }}
+        run: |
+          echo "No uv.lock found; resolving from pyproject.toml"
+          uv sync --python 3.12 --all-extras --dev
+
+      - name: Add JUnit test runner to venv
+        run: |
+          uv run python -m pip install -q unittest-xml-reporting
+
       - name: Select tests for shard
         id: select
         run: |
-          set -euo pipefail
-          total=${{ matrix.total_shards }}
-          index=${{ matrix.shard_index }}
-          mapfile -t files < <(ls -1 tests/unit/test_*.py | sort)
-          echo "Found ${#files[@]} test files total; selecting shard $index of $total" >&2
-          i=0
-          labels=()
-          for f in "${files[@]}"; do
-            if (( i % total == index )); then
-              mod=${f%.py}
-              mod=${mod//\//.}
-              labels+=("$mod")
-            fi
-            ((i++))
-          done
-          if (( ${#labels[@]} == 0 )); then
-            echo "No tests selected for this shard (index=$index)." >&2
-          fi
-          printf '%s\n' "${labels[@]}" > selected-tests.txt
-          echo "Selected ${#labels[@]} labels:" >&2
-          sed -n '1,200p' selected-tests.txt >&2
+          python - << 'PY'
+          import glob, os, sys
+          total = int(os.environ.get('TOTAL_SHARDS', '1'))
+          index = int(os.environ.get('SHARD_INDEX', '0'))
+          files = sorted(glob.glob('tests/unit/test_*.py'))
+          print(f"Found {len(files)} test files total; selecting shard {index} of {total}", file=sys.stderr)
+          labels = []
+          for i, f in enumerate(files):
+              if i % total == index:
+                  mod = f[:-3].replace('/', '.')
+                  labels.append(mod)
+          with open('selected-tests.txt', 'w') as fh:
+              fh.write('\n'.join(labels))
+          print(f"Selected {len(labels)} labels:", file=sys.stderr)
+          for line in labels[:200]:
+              print(line, file=sys.stderr)
+          PY
+        env:
+          TOTAL_SHARDS: ${{ matrix.total_shards }}
+          SHARD_INDEX: ${{ matrix.shard_index }}
 
-      - name: Run Django tests (JUnit XML via uvx)
+      - name: Run Django tests (JUnit XML)
         run: |
           set -euo pipefail
           mkdir -p "$TEST_OUTPUT_DIR"
@@ -92,14 +108,10 @@ jobs:
           fi
           # Read labels into an array safely
           mapfile -t LABELS < selected-tests.txt
-          uvx --python 3.12 --managed-python \
-            --project . \
-            --with-editable . \
-            --with unittest-xml-reporting \
-            python manage.py test "${LABELS[@]}" \
-              --settings=config.test_settings \
-              --parallel auto \
-              --testrunner=xmlrunner.extra.djangotestrunner.XMLTestRunner
+          uv run python manage.py test "${LABELS[@]}" \
+            --settings=config.test_settings \
+            --parallel auto \
+            --testrunner=xmlrunner.extra.djangotestrunner.XMLTestRunner
           # Some versions of xmlrunner write TEST-*.xml to CWD even when TEST_OUTPUT_DIR is set.
           # Collect those into the output directory so the publisher finds them.
           shopt -s nullglob || true
