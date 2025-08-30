@@ -25,6 +25,7 @@ def create_browser_agent_without_proxy(user, name):
 
 
 @patch('django.db.close_old_connections')  # Mock at class level to prevent connection closing
+@tag("batch_outbound_email")
 class OutboundWhitelistGatingTests(TransactionTestCase):
     def setUp(self):
         self.user = User.objects.create_user(

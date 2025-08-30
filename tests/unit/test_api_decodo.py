@@ -164,6 +164,7 @@ class DecodoSyncTaskTests(TestCase):
             self.assertEqual(actual_calls[i][1], expected_call[1])
 
 
+@tag("batch_api_decodo")
 class DecodoAdminTests(TestCase):
     """Test Decodo admin interface."""
     

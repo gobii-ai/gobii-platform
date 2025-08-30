@@ -217,6 +217,7 @@ class GetSecretsBlockTests(TestCase):
         self.assertIn("https://other.com", result)
 
 
+@tag("batch_agent_secrets_ctx")
 class SecureCredentialsRequestToolTests(TestCase):
     """Test the secure_credentials_request tool execution."""
     
@@ -499,6 +500,7 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertTrue(created.first().requested)
 
 
+@tag("batch_agent_secrets_ctx")
 class SecretContextIntegrationTests(TestCase):
     """Integration tests for the full secret request → fulfill → context flow."""
     

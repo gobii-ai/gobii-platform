@@ -240,6 +240,7 @@ class AgentFileSpaceAccessModelTests(TestCase):
         )
 
 
+@tag("batch_agent_filesystem")
 class AgentFsNodeModelTests(TestCase):
     """Test suite for the AgentFsNode model."""
 
@@ -983,6 +984,7 @@ class AgentFsNodeModelTests(TestCase):
             )
 
 
+@tag("batch_agent_filesystem")
 class AgentFileSpaceSignalTests(TestCase):
     """Test suite for AgentFileSpace signal handlers."""
 
@@ -1059,6 +1061,7 @@ class AgentFileSpaceSignalTests(TestCase):
             self.assertEqual(filespaces.count(), 0)
 
 
+@tag("batch_agent_filesystem")
 class AgentFsNodeIntegrationTests(TestCase):
     """Integration tests for AgentFsNode with real file operations."""
 
@@ -1169,6 +1172,7 @@ class AgentFsNodeIntegrationTests(TestCase):
             self.assertEqual(file_node.path, expected_path)
 
 
+@tag("batch_agent_filesystem")
 class AgentFsNodeIndexPerformanceTests(TestCase):
     """Test suite for AgentFsNode index performance, specifically testing parent-only index."""
 
@@ -1389,6 +1393,7 @@ class AgentFsNodeIndexPerformanceTests(TestCase):
             self.assertEqual(node.parent_id, parent.id)
 
 
+@tag("batch_agent_filesystem")
 class AgentFsNodeSoftDeleteTests(TestCase):
     """Test suite for the AgentFsNode soft-delete semantics."""
 

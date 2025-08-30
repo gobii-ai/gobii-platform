@@ -137,6 +137,7 @@ class TestLLMFailover(TestCase):
             self.assertEqual(provider, "openrouter_glm")
 
 
+@tag("batch_event_llm")
 class TestTokenBasedTierSelection(TestCase):
     """Test token-based tier selection functionality."""
 

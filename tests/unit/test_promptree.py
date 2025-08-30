@@ -240,6 +240,7 @@ class PromptTokenCountingTests(TestCase):
         self.assertLess(tokens_after, budget)
 
 
+@tag("batch_promptree")
 class PromptRenderingTests(TestCase):
     """Test suite for Prompt rendering functionality."""
 
@@ -296,6 +297,7 @@ class PromptRenderingTests(TestCase):
         self.assertIsNotNone(result)
 
 
+@tag("batch_promptree")
 class PromptUnshrinkableTests(TestCase):
     """Test suite for unshrinkable sections in Prompt."""
 

@@ -11,6 +11,7 @@ from datetime import timedelta
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+@tag("batch_organizations")
 class OrganizationInvitesTest(TestCase):
     def setUp(self):
         # Enable organizations feature flag
@@ -135,6 +136,7 @@ class OrganizationInvitesTest(TestCase):
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+@tag("batch_organizations")
 class OrganizationPermissionsAndGuardsTest(TestCase):
     def setUp(self):
         # Enable organizations feature flag
@@ -280,6 +282,7 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+@tag("batch_organizations")
 class OrganizationInviteAcceptEdgeCasesTest(TestCase):
     def setUp(self):
         Flag.objects.update_or_create(name="organizations", defaults={"everyone": True})

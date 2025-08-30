@@ -367,6 +367,7 @@ class ContactLimitEnforcementTests(TestCase):
         self.assertIn("including 0 pending invitations", str(ctx.exception))
 
 
+@tag("batch_allowlist_rules")
 class ContactLimitContextProcessorTests(TestCase):
     """Test that contact limits are properly exposed in template context."""
     

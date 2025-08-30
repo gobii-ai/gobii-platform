@@ -312,6 +312,7 @@ class EmailDeliveryTests(TestCase):
             mock_msg.send.assert_called_once_with(fail_silently=False)
 
 
+@tag("batch_outbound_delivery")
 class SMSContentConversionTests(TestCase):
     """Test SMS content conversion functionality."""
 

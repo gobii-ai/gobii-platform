@@ -11,6 +11,7 @@ from util.constants.task_constants import TASKS_UNLIMITED
 User = get_user_model()
 
 
+@tag("batch_task_credits")
 class TaskCreditServiceCalculateAvailableTasksTests(TestCase):
     @patch("tasks.services.TaskCreditService.get_user_task_credits_used")
     @patch("tasks.services.TaskCreditService.get_tasks_entitled")
@@ -38,6 +39,7 @@ class TaskCreditServiceCalculateAvailableTasksTests(TestCase):
         mock_used.assert_not_called()
 
 
+@tag("batch_task_credits")
 class TaskCreditServiceGrantSubscriptionCreditsTests(TestCase):
     @patch("tasks.services.apps.get_model")
     def test_grant_subscription_credits_avoids_duplicate_invoice(self, mock_get_model):
@@ -79,6 +81,7 @@ class TaskCreditServiceGrantSubscriptionCreditsTests(TestCase):
         self.assertEqual(kwargs["credits"], plan["monthly_task_credits"])
 
 
+@tag("batch_task_credits")
 class TaskCreditServiceConsumeCreditTests(TestCase):
     @patch("tasks.services.TaskCreditService.handle_task_threshold")
     @patch("tasks.services.report_task_usage_to_stripe")
@@ -132,6 +135,7 @@ class TaskCreditServiceConsumeCreditTests(TestCase):
         mock_handle.assert_called_once_with(user)
 
 
+@tag("batch_task_credits")
 class TaskCreditServiceGetTasksEntitledTests(TestCase):
     @patch("tasks.services.get_user_extra_task_limit")
     @patch("tasks.services.apps.get_model")
@@ -161,6 +165,7 @@ class TaskCreditServiceGetTasksEntitledTests(TestCase):
         self.assertEqual(result, TASKS_UNLIMITED)
 
 
+@tag("batch_task_credits")
 class TaskCreditServiceCalculateUsedPctTests(TestCase):
     @patch("tasks.services.TaskCreditService.get_tasks_entitled")
     @patch("tasks.services.TaskCreditService.get_user_total_tasks_used")
@@ -187,6 +192,7 @@ class TaskCreditServiceCalculateUsedPctTests(TestCase):
         self.assertEqual(TaskCreditService.calculate_used_pct(user), 0.0)
 
 
+@tag("batch_task_credits")
 class TaskCreditServiceHandleThresholdTests(TestCase):
     @patch("tasks.services.apps.get_model")
     @patch("tasks.services.Analytics.publish_threshold_event")

@@ -14,6 +14,7 @@ from constants.plans import PlanNamesChoices
 
 User = get_user_model()
 
+@tag("batch_output_schema")
 class OutputSchemaValidationTests(TestCase):
     """Tests for validating the JSON Schema in the BrowserUseAgentTaskSerializer."""
     
@@ -96,6 +97,7 @@ class OutputSchemaValidationTests(TestCase):
         self.assertIn("Schema too complex", str(context.exception))
 
 
+@tag("batch_output_schema")
 class OutputSchemaAPITests(APITestCase):
     """Tests for the API endpoints with output_schema functionality."""
     

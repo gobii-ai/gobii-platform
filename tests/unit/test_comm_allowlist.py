@@ -20,6 +20,7 @@ from config import settings
 User = get_user_model()
 
 
+@tag("batch_email_allowlist")
 class ManualAllowlistEmailTests(TestCase):
     def setUp(self):
         # Enable feature-gated whitelist logic for tests
@@ -87,6 +88,7 @@ class ManualAllowlistEmailTests(TestCase):
         mock_ingest.assert_not_called()
 
 
+@tag("batch_email_allowlist")
 class OrgDefaultAllowlistEmailTests(TestCase):
     def setUp(self):
         # Enable feature-gated whitelist logic for tests
@@ -164,6 +166,7 @@ class OrgDefaultAllowlistEmailTests(TestCase):
         mock_ingest.assert_not_called()
 
 
+@tag("batch_email_allowlist")
 class ManualAllowlistSMSTests(TestCase):
     def setUp(self):
         # Enable feature-gated whitelist logic for tests

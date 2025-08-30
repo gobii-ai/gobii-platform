@@ -18,6 +18,7 @@ from constants.plans import PlanNamesChoices
 User = get_user_model()
 
 
+@tag("batch_secrets")
 class SecretsEncryptionTest(TestCase):
     """Test the SecretsEncryption class."""
     
@@ -117,6 +118,7 @@ class SecretsEncryptionTest(TestCase):
 
 
 @override_settings(GOBII_ENCRYPTION_KEY='test-key-for-api-testing-456')
+@tag("batch_secrets")
 class SecretsAPITest(APITestCase):
     """Test the API endpoints with secrets."""
     

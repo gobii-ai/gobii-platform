@@ -14,6 +14,7 @@ import platform
 import unittest
 
 
+@tag("batch_xvfb")
 class XvfbLockTests(TestCase):
     """Test the cross-process file locking mechanism."""
 
@@ -273,6 +274,7 @@ class EphemeralXvfbTests(TestCase):
 # Apply same platform limitation to allocation tests for consistency
 
 @unittest.skipUnless(platform.system() == "Linux", "EphemeralXvfb tests require Linux/Xvfb")
+@tag("batch_xvfb")
 class DisplayAllocationTests(TestCase):
     """Test display number allocation logic."""
     

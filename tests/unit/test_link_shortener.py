@@ -24,6 +24,7 @@ from util.analytics import Analytics, AnalyticsEvent
 User = get_user_model()
 
 
+@tag("batch_link_shortener")
 class EnsureSchemeTests(TestCase):
     """Unit tests for the ensure_scheme() helper."""
 
@@ -53,6 +54,7 @@ class EnsureSchemeTests(TestCase):
         )
 
 
+@tag("batch_link_shortener")
 class LinkShortenerTests(TestCase):
     """Integration tests around create_shortened_link()."""
 
@@ -104,6 +106,7 @@ class LinkShortenerTests(TestCase):
         self.assertEqual(kwargs["event"], AnalyticsEvent.SMS_SHORTENED_LINK_CREATED)
 
 
+@tag("batch_link_shortener")
 class ShortenLinksInBodyTests(TestCase):
     """Unit tests around shorten_links_in_body."""
 

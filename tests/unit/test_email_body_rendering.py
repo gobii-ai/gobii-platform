@@ -5,6 +5,7 @@ from django.test import TestCase, tag
 from api.agent.comms.outbound_delivery import _convert_body_to_html_and_plaintext
 
 
+@tag("batch_email_body")
 class EmailBodyRenderingTestCase(TestCase):
     """Test email body content detection and conversion."""
 

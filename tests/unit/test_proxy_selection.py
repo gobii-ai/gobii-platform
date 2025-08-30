@@ -21,6 +21,7 @@ from api.proxy_selection import (
 User = get_user_model()
 
 
+@tag("batch_proxy_selection")
 class ProxySelectionTests(TestCase):
     """Test proxy selection functionality."""
     
@@ -210,6 +211,7 @@ class ProxySelectionTests(TestCase):
         self.assertEqual(result, self.healthy_proxy)
 
 
+@tag("batch_proxy_selection")
 class PersistentAgentProxySelectionTests(TestCase):
     """Test proxy selection for persistent agents."""
     
@@ -284,6 +286,7 @@ class PersistentAgentProxySelectionTests(TestCase):
         self.assertEqual(result, override_proxy)
 
 
+@tag("batch_proxy_selection")
 class BrowserTaskProxySelectionTests(TestCase):
     """Test proxy selection for browser tasks."""
     
@@ -390,6 +393,7 @@ class BrowserTaskProxySelectionTests(TestCase):
         self.assertEqual(result, override_proxy)
 
 
+@tag("batch_proxy_selection")
 class ProxySelectionIntegrationTests(TestCase):
     """Integration tests for proxy selection without mocking."""
     

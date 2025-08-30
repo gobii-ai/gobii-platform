@@ -19,6 +19,7 @@ User = get_user_model()
 
 
 @override_settings(PA_RAW_STEP_LIMIT=5)
+@tag("batch_step_compaction")
 class StepCompactionTests(TestCase):
     """Unit-tests for on-demand step history compaction."""
 

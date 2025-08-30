@@ -378,6 +378,7 @@ class CronTriggerTaskTests(TestCase):
         ) 
 
 
+@tag("batch_event_processing")
 class UpdateScheduleMinimumIntervalTests(TestCase):
     """Unit tests for _execute_update_schedule minimum interval validation."""
 
@@ -594,6 +595,7 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
                 self.agent.save()
 
 
+@tag("batch_event_processing")
 class SearchWebCreditConsumptionTests(TestCase):
     """Unit-tests for search_web tool credit consumption."""
 
@@ -771,6 +773,7 @@ class SearchWebCreditConsumptionTests(TestCase):
         self.assertIn("Missing required parameter: query", result["message"]) 
 
 
+@tag("batch_event_processing")
 class HttpRequestSecretPlaceholderTests(TestCase):
     """Unit tests for http_request tool secret placeholder substitution."""
 

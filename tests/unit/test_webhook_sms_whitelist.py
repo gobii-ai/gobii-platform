@@ -22,6 +22,7 @@ from config import settings
 User = get_user_model()
 
 
+@tag("batch_sms")
 class SmsWebhookWhitelistTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()

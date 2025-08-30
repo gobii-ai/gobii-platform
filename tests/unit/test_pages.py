@@ -3,6 +3,7 @@ from django.test import TestCase, tag
 from pages.models import LandingPage
 
 
+@tag("batch_pages")
 class HomePageTests(TestCase):
     @tag("batch_pages")
     def test_home_page_renders(self):
@@ -11,6 +12,7 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
 
+@tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
     @tag("batch_pages")
     def test_landing_redirect(self):

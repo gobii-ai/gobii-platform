@@ -14,6 +14,7 @@ from api.models import (
 User = get_user_model()
 
 
+@tag("batch_contact_requests")
 class ContactRequestTests(TestCase):
     """Test the contact request approval workflow."""
 

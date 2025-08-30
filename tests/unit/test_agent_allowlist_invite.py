@@ -410,6 +410,7 @@ class AgentAllowlistInviteViewTests(TestCase):
         self.assertContains(response, "Invalid")
 
 
+@tag("batch_agent_invite")
 class AgentAllowlistInviteEmailTests(TestCase):
     """Test invitation email sending."""
     

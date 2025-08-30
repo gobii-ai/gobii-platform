@@ -19,6 +19,7 @@ from api.models import (
 User = get_user_model()
 
 
+@tag("batch_console_allowlist")
 class AgentAllowlistViewTests(TestCase):
     def setUp(self):
         self.client = Client()

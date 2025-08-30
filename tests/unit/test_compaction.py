@@ -16,6 +16,7 @@ User = get_user_model()
 
 
 @override_settings(PA_RAW_MSG_LIMIT=10)
+@tag("batch_compaction")
 class CompactionTests(TestCase):
     """Unit-tests for on-demand message history compaction."""
 

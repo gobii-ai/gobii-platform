@@ -5,6 +5,7 @@ from waffle.testutils import override_flag
 from constants.feature_flags import PERSISTENT_AGENTS
 
 
+@tag("batch_console_agents")
 class ConsoleViewsTest(TestCase):
     def setUp(self):
         """Set up test user and client."""

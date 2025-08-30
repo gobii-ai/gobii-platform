@@ -817,6 +817,7 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         self.task1_agent1_user1.refresh_from_db()
         self.assertFalse(self.task1_agent1_user1.is_deleted) # Should not be soft-deleted
 
+@tag("batch_api_agents")
 class AutoCreateApiKeyTest(APITestCase):
     def test_auto_create_api_key_for_new_user(self):
         """Test that a new user automatically gets an API key created."""
@@ -839,6 +840,7 @@ class AutoCreateApiKeyTest(APITestCase):
         user_quota = UserQuota.objects.filter(user=new_user)
         self.assertEqual(user_quota.count(), 1)
 
+@tag("batch_api_tasks")
 class BrowserUseAgentTaskQuotaTests(TestCase):
     """Tests for quota checks when creating BrowserUseAgentTask."""
 
@@ -902,6 +904,7 @@ class BrowserUseAgentTaskQuotaTests(TestCase):
             mock_report.assert_not_called()
 
 
+@tag("batch_api_tasks")
 class StripeUsageReportingTests(TestCase):
     """Tests for usage reporting helpers."""
 

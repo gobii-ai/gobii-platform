@@ -10,6 +10,7 @@ from django.test import TestCase, tag
 from api.tasks.browser_agent_tasks import _prune_chrome_profile, CHROME_PROFILE_MAX_SIZE_BYTES
 
 
+@tag("batch_browser_profile")
 class ChromeProfilePruningTest(TestCase):
     """Test the Chrome profile pruning logic."""
 

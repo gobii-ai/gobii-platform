@@ -165,6 +165,7 @@ class PersistentAgentModelTests(TestCase):
 
 
 @patch('django.db.close_old_connections')  # Mock at class level to ensure it's always mocked  
+@tag("batch_api_persistent_agents")
 class PersistentAgentCreditConsumptionTests(TransactionTestCase):
     """Test suite for persistent agent credit consumption."""
 
@@ -323,6 +324,7 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
             mock_loop.assert_not_called()
 
 
+@tag("batch_api_persistent_agents")
 class ScheduleUpdaterTests(TestCase):
     """Test suite for the schedule updater tool."""
 

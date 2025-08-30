@@ -12,6 +12,7 @@ from util.subscription_helper import mark_user_billing_with_plan
 User = get_user_model()
 
 
+@tag("batch_subscription")
 class MarkUserBillingWithPlanTests(TestCase):
     """Tests for the mark_user_billing_with_plan helper."""
 

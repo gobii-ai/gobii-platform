@@ -20,6 +20,7 @@ from config import settings
 User = get_user_model()
 
 
+@tag("batch_email")
 class EmailWebhookTest(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
@@ -125,6 +126,7 @@ class EmailWebhookTest(TestCase):
         )
 
 
+@tag("batch_sms")
 class SmsStatusWebhookTest(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
