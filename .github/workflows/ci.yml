@@ -18,8 +18,14 @@ permissions:
 
 jobs:
   tests:
+    name: tests (shard ${{ matrix.shard_index + 1 }}/${{ matrix.total_shards }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        total_shards: [8]
+        shard_index: [0, 1, 2, 3, 4, 5, 6, 7]
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
@@ -51,15 +57,46 @@ jobs:
           enable-cache: true
           ignore-nothing-to-cache: true
 
+      - name: Select tests for shard
+        id: select
+        run: |
+          set -euo pipefail
+          total=${{ matrix.total_shards }}
+          index=${{ matrix.shard_index }}
+          mapfile -t files < <(ls -1 tests/unit/test_*.py | sort)
+          echo "Found ${#files[@]} test files total; selecting shard $index of $total" >&2
+          i=0
+          labels=()
+          for f in "${files[@]}"; do
+            if (( i % total == index )); then
+              mod=${f%.py}
+              mod=${mod//\//.}
+              labels+=("$mod")
+            fi
+            ((i++))
+          done
+          if (( ${#labels[@]} == 0 )); then
+            echo "No tests selected for this shard (index=$index)." >&2
+          fi
+          printf '%s\n' "${labels[@]}" > selected-tests.txt
+          echo "Selected ${#labels[@]} labels:" >&2
+          sed -n '1,200p' selected-tests.txt >&2
+
       - name: Run Django tests (JUnit XML via uvx)
         run: |
           set -euo pipefail
           mkdir -p "$TEST_OUTPUT_DIR"
+          if [[ ! -s selected-tests.txt ]]; then
+            echo "No tests in this shard; exiting successfully."
+            exit 0
+          fi
+          # Read labels into an array safely
+          mapfile -t LABELS < selected-tests.txt
           uvx --python 3.12 --managed-python \
             --project . \
             --with-editable . \
             --with unittest-xml-reporting \
-            python manage.py test \
+            python manage.py test "${LABELS[@]}" \
               --settings=config.test_settings \
               --parallel auto \
               --testrunner=xmlrunner.extra.djangotestrunner.XMLTestRunner
@@ -75,5 +112,5 @@ jobs:
           files: |
             test-results/**/*.xml
             TEST-*.xml
-          check_name: "Test Results"
+          check_name: "Test Results (shard ${{ matrix.shard_index + 1 }}/${{ matrix.total_shards }})"
           comment_mode: off
