@@ -73,10 +73,9 @@ jobs:
         run: |
           uv sync --frozen --all-extras --dev
 
-      - name: Sync deps (no lock)
+      - name: Sync deps
         if: ${{ hashFiles('uv.lock') == '' }}
         run: |
-          echo "No uv.lock found; resolving from pyproject.toml"
           uv sync --all-extras --dev
 
       - name: Add JUnit test runner to venv
