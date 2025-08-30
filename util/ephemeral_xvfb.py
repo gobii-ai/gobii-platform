@@ -212,16 +212,16 @@ class EphemeralXvfb(AbstractContextManager):
         display_to_cleanup = self.display_num
 
         try:
-        # Terminate gracefully (only if we have a valid child PID)
-        pid = getattr(self._proc, "pid", None)
-        if isinstance(pid, int) and pid > 1:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        try:
-            self._proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
+            # Terminate gracefully (only if we have a valid child PID)
+            pid = getattr(self._proc, "pid", None)
             if isinstance(pid, int) and pid > 1:
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            try:
                 self._proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                if isinstance(pid, int) and pid > 1:
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)
+                    self._proc.wait(timeout=2)
         except Exception:
             # Ignore all cleanup errors
             pass
