@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from unittest.mock import patch, MagicMock
@@ -12,6 +12,7 @@ from constants.plans import PlanNames
 User = get_user_model()
 
 
+@tag("batch_agent_limits")
 class AgentLimitTests(TestCase):
     """Test suite for agent limit enforcement including the MAX_AGENT_LIMIT safety cap."""
 
@@ -200,6 +201,7 @@ class AgentLimitTests(TestCase):
         self.assertEqual(free_limit, 5)  # Explicit check for current value
 
 
+@tag("batch_agent_limits")
 class AgentLimitIntegrationTests(TestCase):
     """Integration tests that test the full agent creation flow with limits."""
 

@@ -3,7 +3,7 @@ import uuid
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
 import sys
@@ -26,6 +26,7 @@ from django.core.exceptions import ValidationError
 
 User = get_user_model()
 
+@tag("batch_api_agents")
 class BrowserUseAgentViewSetTests(APITestCase):
     def setUp(self):
         # User 1
@@ -194,6 +195,7 @@ class BrowserUseAgentViewSetTests(APITestCase):
         self.assertTrue(BrowserUseAgent.objects.filter(id=self.agent1_user2.id).exists())
 
 
+@tag("batch_api_serializer")
 class BrowserUseAgentTaskSerializerTests(APITestCase):
     def test_serializer_wait_parameter_validation(self):
         """Test that the BrowserUseAgentTaskSerializer validates the wait parameter correctly."""

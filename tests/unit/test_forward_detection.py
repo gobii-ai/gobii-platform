@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from django.test import tag
 
 # Provide minimal stubs for django modules used by adapters
 django = types.ModuleType("django")
@@ -73,6 +74,7 @@ _extract_forward_sections = adapters._extract_forward_sections
 _html_to_text = adapters._html_to_text
 
 
+@tag("batch_forward_detection")
 class ForwardDetectionTests(unittest.TestCase):
     def test_is_forward_like_subject(self):
         subject = "Fwd: Meeting notes"

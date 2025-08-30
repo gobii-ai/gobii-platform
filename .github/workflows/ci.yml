@@ -63,6 +63,14 @@ jobs:
             tag: batch_organizations
           - batch: browser_profile
             tag: batch_browser_profile
+          - batch: forward_detection
+            tag: batch_forward_detection
+          - batch: agent_limits
+            tag: batch_agent_limits
+          - batch: api_agents
+            tag: batch_api_agents
+          - batch: api_serializer
+            tag: batch_api_serializer
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
