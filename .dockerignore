@@ -1,0 +1,62 @@
+# VCS
+.git
+.git/*
+.git-*
+
+# Python bytecode and compiled extensions
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.pyo
+
+# Packaging and build artifacts
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test, tooling and cache dirs
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+*.log
+
+# Local environment files
+.env
+*.env
+.env.*
+
+# Node / frontend noise
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Django runtime outputs
+mediafiles/
+staticfiles/
+
+# IDEs
+.vscode/
+.idea/
+
+# CI/CD metadata not needed in image
+.github/
+
