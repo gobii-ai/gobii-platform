@@ -33,43 +33,8 @@ jobs:
         run: |
           python3 scripts/check_test_tags.py
 
-  deps:
-    name: Prime Dependency Cache
-    runs-on: ubuntu-latest
-    needs: [tag-guard]
-    env:
-      UV_PYTHON_DOWNLOADS: "never"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv (with cache)
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-          ignore-nothing-to-cache: true
-
-      - name: Sync deps (locked or fallback)
-        run: |
-          set -euo pipefail
-          if [ -f uv.lock ]; then
-            uv sync --frozen --all-extras --dev
-          else
-            uv sync --all-extras --dev
-          fi
-
-      - name: Pre-install JUnit test runner
-        run: |
-          uv pip install -q unittest-xml-reporting
-
   tests:
     name: tests (${{ matrix.batch }})
-    needs: [deps]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -201,6 +166,15 @@ jobs:
           enable-cache: true
           ignore-nothing-to-cache: true
 
+      - name: Restore venv cache
+        id: restore-venv
+        uses: actions/cache/restore@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            venv-${{ runner.os }}-py3.12-
+
       # Install dependencies into a project venv using uv, leveraging cache.
       # Prefer lockfile if present; otherwise resolve from pyproject.
       - name: Sync deps (locked)
@@ -213,7 +187,16 @@ jobs:
         run: |
           uv sync --all-extras --dev
 
-      # xmlrunner is pre-installed in deps job; this sync uses cache
+      - name: Add JUnit test runner to venv
+        run: |
+          uv pip install -q unittest-xml-reporting
+
+      - name: Save venv cache
+        if: steps.restore-venv.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}
 
       - name: Run batch tests (${{ matrix.batch }})
         run: |
