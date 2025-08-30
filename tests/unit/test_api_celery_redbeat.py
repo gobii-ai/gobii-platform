@@ -2,11 +2,12 @@
 Tests for RedBeat Celery scheduler configuration.
 """
 import unittest
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.conf import settings
 from unittest.mock import patch, MagicMock
 
 
+@tag("batch_celery_redbeat")
 class RedBeatConfigurationTest(TestCase):
     """Test that RedBeat scheduler is properly configured."""
 
@@ -68,6 +69,7 @@ class RedBeatConfigurationTest(TestCase):
         self.assertTrue(instantiation_success, "RedBeatScheduler should be instantiable")
 
 
+@tag("batch_celery_redbeat")
 class CeleryRedisConfigurationTest(TestCase):
     """Test that Celery is configured to use Redis."""
 

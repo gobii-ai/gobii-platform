@@ -2,11 +2,12 @@
 Tests for the sync_schedules management command.
 """
 from unittest.mock import patch
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.core.management import call_command
 from io import StringIO
 
 
+@tag("batch_periodic")
 class SyncSchedulesCommandTest(TestCase):
     """Test the sync_schedules management command."""
 

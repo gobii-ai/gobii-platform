@@ -3,11 +3,12 @@ Tests for periodic task synchronization functionality.
 """
 import unittest
 from unittest.mock import patch, MagicMock
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.db.utils import ProgrammingError, OperationalError
 from api.periodic_tasks import beat_schedule, add_dynamic_schedules, sync_to_redis, clean_up_old_decodo_schedules
 
 
+@tag("batch_periodic")
 class PeriodicTasksTest(TestCase):
     """Test periodic task schedule management."""
 

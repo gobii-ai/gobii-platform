@@ -71,6 +71,20 @@ jobs:
             tag: batch_api_agents
           - batch: api_serializer
             tag: batch_api_serializer
+          - batch: api_tasks
+            tag: batch_api_tasks
+          - batch: periodic
+            tag: batch_periodic
+          - batch: celery_redbeat
+            tag: batch_celery_redbeat
+          - batch: email_sender_db
+            tag: batch_email_sender_db
+          - batch: outbound_delivery
+            tag: batch_outbound_delivery
+          - batch: browser_task_db
+            tag: batch_browser_task_db
+          - batch: redis_budget_cleanup
+            tag: batch_redis_budget_cleanup
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

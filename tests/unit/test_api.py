@@ -222,6 +222,7 @@ class BrowserUseAgentTaskSerializerTests(APITestCase):
         self.assertTrue(serializer.is_valid())
         self.assertIn('wait', serializer.validated_data)
         
+@tag("batch_api_tasks")
 class BrowserUseAgentTaskViewSetTests(APITestCase):
     def setUp(self):
         self.user1 = User.objects.create_user(username='user1tasks@example.com', email='user1tasks@example.com', password='password123')

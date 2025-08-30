@@ -5,7 +5,7 @@ and HTML-to-plaintext conversion using inscriptis.
 
 import os
 from unittest.mock import patch, MagicMock
-from django.test import TestCase, override_settings
+from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
@@ -24,6 +24,7 @@ from inscriptis import get_text
 User = get_user_model()
 
 
+@tag("batch_outbound_delivery")
 class HTMLToPlaintextConversionTests(TestCase):
     """Test HTML to plaintext conversion using inscriptis."""
 
@@ -107,6 +108,7 @@ class HTMLToPlaintextConversionTests(TestCase):
         self.assertIn("Nested content", result)
 
 
+@tag("batch_outbound_delivery")
 class EmailDeliveryTests(TestCase):
     """Test email delivery functionality."""
 
@@ -698,4 +700,3 @@ Contact me at [john@company.com](mailto:john@company.com) if you have questions.
                 
                 # Ensure no markdown syntax remains
                 self.assertNotIn("](", result)
-

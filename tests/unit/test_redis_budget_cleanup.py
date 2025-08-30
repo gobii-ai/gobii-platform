@@ -5,9 +5,11 @@ These tests actually verify the cleanup logic works, not just that functions exi
 
 import uuid
 from unittest import TestCase
+from django.test import tag
 from unittest.mock import MagicMock, patch, call, ANY
 
 
+@tag("batch_redis_budget_cleanup")
 class RedisBudgetCleanupTests(TestCase):
     """Tests that verify the actual cleanup logic, not just existence of functions."""
 

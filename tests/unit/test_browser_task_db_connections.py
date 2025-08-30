@@ -4,11 +4,12 @@ from unittest.mock import patch
 from django.db.utils import OperationalError
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from api.models import BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep
 
 
+@tag("batch_browser_task_db")
 class BrowserTaskDbConnectionTests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -75,5 +76,4 @@ class BrowserTaskDbConnectionTests(TestCase):
         steps = BrowserUseAgentTaskStep.objects.filter(task=task, step_number=1)
         self.assertEqual(steps.count(), 1)
         self.assertTrue(steps.first().is_result)
-
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
 from django.db.utils import OperationalError
@@ -18,6 +18,7 @@ def create_browser_agent_without_proxy(user, name):
         return BrowserUseAgent.objects.create(user=user, name=name)
 
 
+@tag("batch_email_sender_db")
 class EmailSenderDbConnectionTests(TransactionTestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -87,4 +88,3 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             result = execute_send_email(self.agent, params)
 
         self.assertEqual(result.get("status"), "ok")
-
