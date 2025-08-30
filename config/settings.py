@@ -124,6 +124,7 @@ TEMPLATES = [
             "libraries": {
                 "form_extras": "templatetags.form_extras",
                 "analytics_tags": "templatetags.analytics_tags",
+                "social_extras": "templatetags.social_extras",
             },
         },
     },

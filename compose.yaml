@@ -83,7 +83,7 @@ services:
         condition: service_started
     restart: unless-stopped
     command: >-
-      bash -lc "python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000"
+      bash -lc "python manage.py migrate --noinput && python manage.py create_initial_superuser && gunicorn config.wsgi:application --bind 0.0.0.0:8000"
 
   flower:
     image: mher/flower:2.0
