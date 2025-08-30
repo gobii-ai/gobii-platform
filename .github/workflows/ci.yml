@@ -67,7 +67,7 @@ jobs:
 
       - name: Add JUnit test runner to venv
         run: |
-          uv run python -m pip install -q unittest-xml-reporting
+          uv pip install -q unittest-xml-reporting
 
       - name: Run a single test file (smoke)
         run: |
