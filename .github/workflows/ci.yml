@@ -54,24 +54,6 @@ jobs:
           enable-cache: true
           ignore-nothing-to-cache: true
 
-      - name: Restore uv global cache
-        id: restore-uv-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-cache-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            uv-cache-${{ runner.os }}-py3.12-
-
-      - name: Restore venv cache
-        id: restore-venv-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            venv-${{ runner.os }}-py3.12-
-
       - name: Sync deps (locked or fallback)
         run: |
           set -euo pipefail
@@ -81,17 +63,9 @@ jobs:
             uv sync --all-extras --dev
           fi
 
-      - name: Save venv cache
-        uses: actions/cache/save@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}-${{ hashFiles('pyproject.toml') }}
-
-      - name: Save uv global cache
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-cache-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}-${{ hashFiles('pyproject.toml') }}
+      - name: Pre-install JUnit test runner
+        run: |
+          uv pip install -q unittest-xml-reporting
 
   tests:
     name: tests (${{ matrix.batch }})
@@ -227,24 +201,6 @@ jobs:
           enable-cache: true
           ignore-nothing-to-cache: true
 
-      - name: Restore uv global cache
-        id: restore-uv-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-cache-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            uv-cache-${{ runner.os }}-py3.12-
-
-      - name: Restore venv cache
-        id: restore-venv-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            venv-${{ runner.os }}-py3.12-
-
       # Install dependencies into a project venv using uv, leveraging cache.
       # Prefer lockfile if present; otherwise resolve from pyproject.
       - name: Sync deps (locked)
@@ -257,9 +213,7 @@ jobs:
         run: |
           uv sync --all-extras --dev
 
-      - name: Add JUnit test runner to venv
-        run: |
-          uv pip install -q unittest-xml-reporting
+      # xmlrunner is pre-installed in deps job; this sync uses cache
 
       - name: Run batch tests (${{ matrix.batch }})
         run: |
