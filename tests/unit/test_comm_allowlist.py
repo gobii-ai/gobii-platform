@@ -1,7 +1,7 @@
 import json
 from unittest.mock import patch
 
-from django.test import TestCase, RequestFactory
+from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 
 from api.models import (
@@ -64,6 +64,7 @@ class ManualAllowlistEmailTests(TestCase):
             query_params={"t": settings.POSTMARK_INCOMING_WEBHOOK_TOKEN},
         )
 
+    @tag("batch_email_allowlist")
     @patch("api.webhooks.ingest_inbound_message")
     def test_manual_email_allowed(self, mock_ingest):
         CommsAllowlistEntry.objects.create(
@@ -74,6 +75,7 @@ class ManualAllowlistEmailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_called_once()
 
+    @tag("batch_email_allowlist")
     @patch("api.webhooks.ingest_inbound_message")
     def test_manual_email_rejects_others(self, mock_ingest):
         CommsAllowlistEntry.objects.create(
@@ -145,6 +147,7 @@ class OrgDefaultAllowlistEmailTests(TestCase):
             query_params={"t": settings.POSTMARK_INCOMING_WEBHOOK_TOKEN},
         )
 
+    @tag("batch_email_allowlist")
     @patch("api.webhooks.ingest_inbound_message")
     def test_org_member_email_allowed(self, mock_ingest):
         req = self._postmark_req(self.member.email)
@@ -152,6 +155,7 @@ class OrgDefaultAllowlistEmailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_called_once()
 
+    @tag("batch_email_allowlist")
     @patch("api.webhooks.ingest_inbound_message")
     def test_non_member_email_rejected(self, mock_ingest):
         req = self._postmark_req(self.non_member.email)

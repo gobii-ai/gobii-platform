@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from django.test import TestCase, RequestFactory
+from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 
 from api.models import (
@@ -46,6 +46,7 @@ class SmsWebhookWhitelistTests(TestCase):
             },
         )
 
+    @tag("batch_sms")
     @patch("api.models.switch_is_active", return_value=True)
     @patch("api.webhooks.ingest_inbound_message")
     def test_manual_allowlist_sender_allowed(self, mock_ingest, _flag):
@@ -61,6 +62,7 @@ class SmsWebhookWhitelistTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_called_once()
 
+    @tag("batch_sms")
     @patch("api.models.flag_is_active", return_value=True)
     @patch("api.webhooks.ingest_inbound_message")
     def test_manual_allowlist_sender_rejected(self, mock_ingest, _flag):
@@ -109,4 +111,3 @@ class SmsWebhookWhitelistTests(TestCase):
         resp = sms_webhook(req)
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_not_called()
-

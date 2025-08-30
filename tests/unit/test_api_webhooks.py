@@ -94,6 +94,7 @@ class EmailWebhookTest(TestCase):
             f"Discarding email from non-whitelisted sender '{self.non_owner.email}' to agent 'Test Agent' (endpoint: {self.agent_endpoint.address})."
         )
 
+    @tag("batch_email")
     @patch("api.webhooks.ingest_inbound_message")
     @patch("api.webhooks.logger.info")
     def test_email_from_owner_with_display_name_is_accepted(self, mock_logger, mock_ingest):
@@ -107,6 +108,7 @@ class EmailWebhookTest(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_ingest.assert_called_once()
 
+    @tag("batch_email")
     @patch("api.webhooks.ingest_inbound_message")
     @patch("api.webhooks.logger.info")
     def test_email_to_unroutable_address_is_discarded(self, mock_logger, mock_ingest):

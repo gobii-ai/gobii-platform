@@ -29,6 +29,10 @@ jobs:
             tag: batch_email
           - batch: sms
             tag: batch_sms
+          - batch: email_body
+            tag: batch_email_body
+          - batch: email_allowlist
+            tag: batch_email_allowlist
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

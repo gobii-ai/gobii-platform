@@ -1,6 +1,6 @@
 import re
 
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from api.agent.comms.outbound_delivery import _convert_body_to_html_and_plaintext
 
@@ -8,6 +8,7 @@ from api.agent.comms.outbound_delivery import _convert_body_to_html_and_plaintex
 class EmailBodyRenderingTestCase(TestCase):
     """Test email body content detection and conversion."""
 
+    @tag("batch_email_body")
     def test_html_stays_as_is(self):
         """HTML content should be preserved as-is."""
         body = "<p>Hello</p><p>Thanks</p>"
@@ -18,6 +19,7 @@ class EmailBodyRenderingTestCase(TestCase):
         self.assertIn("Hello", plaintext)
         self.assertIn("Thanks", plaintext)
 
+    @tag("batch_email_body")
     def test_plaintext_converted_to_br(self):
         """Plaintext newlines should be converted to <br> tags."""
         body = "Hello\n\nThanks"
@@ -26,6 +28,7 @@ class EmailBodyRenderingTestCase(TestCase):
         self.assertEqual(html_snippet, "Hello<br><br>Thanks")
         self.assertEqual(plaintext.strip(), "Hello\n\nThanks")
 
+    @tag("batch_email_body")
     def test_markdown_rendered_to_html(self):
         """Markdown content should be rendered to HTML."""
         body = "# Title\n\n- one\n- two"
@@ -47,6 +50,7 @@ class EmailBodyRenderingTestCase(TestCase):
         self.assertIn("<strong>bold</strong>", html_snippet)
         self.assertIn("bold", plaintext)
 
+    @tag("batch_email_body")
     def test_link_markdown_converted(self):
         """Markdown links should be converted to HTML."""
         body = "Check out [Google](https://google.com)"
