@@ -1,3 +1,30 @@
 *.egg-info/
 .venv/
 .env
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test outputs
+test-results/
+TEST-*.xml
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+
+# Editors/OS
+.DS_Store
+.idea/
+.vscode/
+
+# Build artifacts
+build/
+dist/
+pip-wheel-metadata/
+
+# Django collectstatic outputs (if generated locally)
+staticfiles/
+mediafiles/

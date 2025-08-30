@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Auto-cancel previous runs on the same PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Needed for posting test summaries/annotations
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Ensure Django loads test settings; manage.py still imports config.settings first
+      DJANGO_SETTINGS_MODULE: config.test_settings
+      PYTHONUNBUFFERED: "1"
+      TEST_OUTPUT_DIR: test-results
+
+      # Satisfy config.settings import before test settings override DB to SQLite
+      DJANGO_SECRET_KEY: test-secret
+      GOBII_ENCRYPTION_KEY: dummy-encryption-key-for-testing
+      POSTGRES_DB: test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://localhost:6379/0
+
+      # Satisfy LLM fail-fast check; any one provider key is enough
+      OPENAI_API_KEY: dummy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv (with cache)
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          ignore-nothing-to-cache: true
+
+      - name: Run Django tests (JUnit XML via uvx)
+        run: |
+          mkdir -p "$TEST_OUTPUT_DIR"
+          uvx --python 3.12 --managed-python \
+            --project . \
+            --with-editable . \
+            --with unittest-xml-reporting \
+            python manage.py test \
+              --settings=config.test_settings \
+              --parallel auto \
+              --testrunner=xmlrunner.extra.djangotestrunner.XMLTestRunner
+
+      - name: Publish test results to PR
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: "test-results/**/*.xml"
+          check_name: "Test Results"
+          comment_mode: off
+
