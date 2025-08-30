@@ -38,6 +38,8 @@ jobs:
 
       # Satisfy LLM fail-fast check; any one provider key is enough
       OPENAI_API_KEY: dummy
+      # Disable Celery worker self-shutdown logic in tests to avoid interfering with CI runner
+      BROWSER_USE_TASK_MAX_COUNT: "0"
 
     steps:
       - name: Checkout
@@ -51,6 +53,7 @@ jobs:
 
       - name: Run Django tests (JUnit XML via uvx)
         run: |
+          set -euo pipefail
           mkdir -p "$TEST_OUTPUT_DIR"
           uvx --python 3.12 --managed-python \
             --project . \
@@ -60,12 +63,17 @@ jobs:
               --settings=config.test_settings \
               --parallel auto \
               --testrunner=xmlrunner.extra.djangotestrunner.XMLTestRunner
+          # Some versions of xmlrunner write TEST-*.xml to CWD even when TEST_OUTPUT_DIR is set.
+          # Collect those into the output directory so the publisher finds them.
+          shopt -s nullglob || true
+          for f in TEST-*.xml; do mv "$f" "$TEST_OUTPUT_DIR/"; done || true
 
       - name: Publish test results to PR
         if: always()
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:
-          files: "test-results/**/*.xml"
+          files: |
+            test-results/**/*.xml
+            TEST-*.xml
           check_name: "Test Results"
           comment_mode: off
-
