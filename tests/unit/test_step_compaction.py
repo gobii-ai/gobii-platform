@@ -1,5 +1,5 @@
 from datetime import timedelta
-from django.test import TestCase, override_settings
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.conf import settings
@@ -87,6 +87,7 @@ class StepCompactionTests(TestCase):
             created_at=ts,
         )
 
+    @tag("batch_step_compaction")
     def test_compaction_triggered_when_over_limit(self):
         """When raw steps > limit, a new snapshot is created."""
         # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
@@ -124,6 +125,7 @@ class StepCompactionTests(TestCase):
         last_step = PersistentAgentStep.objects.order_by("created_at").last()
         self.assertEqual(snapshot.snapshot_until, last_step.created_at)
 
+    @tag("batch_step_compaction")
     def test_no_compaction_when_at_or_below_limit(self):
         """No snapshot should be created when raw steps <= limit."""
         # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
@@ -140,6 +142,7 @@ class StepCompactionTests(TestCase):
         # Still no snapshots expected
         self.assertEqual(PersistentAgentStepSnapshot.objects.count(), 0)
 
+    @tag("batch_step_compaction")
     def test_incremental_compaction_with_existing_snapshot(self):
         """A second compaction should create a new snapshot linked to the previous one."""
         # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings

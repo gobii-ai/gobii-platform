@@ -1,5 +1,5 @@
 import uuid
-from django.test import TestCase
+from django.test import TestCase, tag
 from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
 from rest_framework import status, serializers
@@ -20,6 +20,7 @@ class OutputSchemaValidationTests(TestCase):
     def setUp(self):
         self.serializer = BrowserUseAgentTaskSerializer()
         
+    @tag("batch_output_schema")
     def test_valid_schema(self):
         """Test that a valid JSON Schema passes validation."""
         valid_schema = {
@@ -46,6 +47,7 @@ class OutputSchemaValidationTests(TestCase):
         result = self.serializer.validate_output_schema(valid_schema)
         self.assertEqual(result, valid_schema)
         
+    @tag("batch_output_schema")
     def test_invalid_schema_type(self):
         """Test that an invalid schema type is rejected."""
         invalid_schema = {
@@ -60,6 +62,7 @@ class OutputSchemaValidationTests(TestCase):
         with self.assertRaises((serializers.ValidationError, SchemaError)):
             self.serializer.validate_output_schema(invalid_schema)
     
+    @tag("batch_output_schema")
     def test_schema_too_deep(self):
         """Test that a schema with excessive nesting is rejected."""
         # Create a deeply nested schema
@@ -147,6 +150,7 @@ class OutputSchemaAPITests(APITestCase):
             }
         }
     
+    @tag("batch_output_schema")
     def test_create_task_with_valid_schema(self):
         """Test creating a task with a valid output schema."""
         url = reverse('api:agent-tasks-list', kwargs={'agentId': self.agent1_user1.id})

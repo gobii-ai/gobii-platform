@@ -1,5 +1,5 @@
 from datetime import timedelta
-from django.test import TestCase, override_settings
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
@@ -53,6 +53,7 @@ class CompactionTests(TestCase):
             body="test msg",
         )
 
+    @tag("batch_compaction")
     def test_compaction_triggered_when_over_limit(self):
         """When raw messages > limit, a new snapshot is created."""
         from api.agent.core.compaction import RAW_MSG_LIMIT
@@ -83,6 +84,7 @@ class CompactionTests(TestCase):
         last_message = PersistentAgentMessage.objects.order_by("timestamp").last()
         self.assertEqual(snapshot.snapshot_until, last_message.timestamp)
 
+    @tag("batch_compaction")
     def test_no_compaction_when_at_or_below_limit(self):
         """No snapshot should be created when raw messages <= limit."""
         from api.agent.core.compaction import RAW_MSG_LIMIT
@@ -97,6 +99,7 @@ class CompactionTests(TestCase):
         # Still no snapshots expected
         self.assertEqual(PersistentAgentCommsSnapshot.objects.count(), 0)
 
+    @tag("batch_compaction")
     def test_incremental_compaction_with_existing_snapshot(self):
         """A second compaction should create a new snapshot linked to the previous one."""
         from api.agent.core.compaction import RAW_MSG_LIMIT

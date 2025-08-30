@@ -5,7 +5,7 @@ import uuid
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -85,6 +85,7 @@ class ProxySelectionTests(TestCase):
             checked_at=timezone.now() - timedelta(hours=1)
         )
 
+    @tag("batch_proxy_selection")
     def test_proxy_has_recent_health_pass_default_days(self):
         """Test proxy health check with default 45-day window."""
         # Healthy proxy should pass
@@ -107,11 +108,13 @@ class ProxySelectionTests(TestCase):
         # With 90-day window, unhealthy proxy should now pass (includes old success)
         self.assertTrue(proxy_has_recent_health_pass(self.unhealthy_proxy, health_check_days=90))
 
+    @tag("batch_proxy_selection")
     def test_select_proxy_with_override(self):
         """Test proxy selection with override proxy."""
         result = select_proxy(override_proxy=self.unhealthy_proxy)
         self.assertEqual(result, self.unhealthy_proxy)
     
+    @tag("batch_proxy_selection")
     def test_select_proxy_with_healthy_preferred(self):
         """Test proxy selection with healthy preferred proxy."""
         result = select_proxy(preferred_proxy=self.healthy_proxy)
@@ -146,6 +149,7 @@ class ProxySelectionTests(TestCase):
     
     @patch('api.models.BrowserUseAgent.select_random_proxy')
     @patch.object(settings, 'DEBUG', True)
+    @tag("batch_proxy_selection")
     def test_select_proxy_no_proxy_debug_mode(self, mock_select_random):
         """Test proxy selection returns None in debug mode when no proxy available."""
         mock_select_random.return_value = None
@@ -155,6 +159,7 @@ class ProxySelectionTests(TestCase):
     
     @patch('api.models.BrowserUseAgent.select_random_proxy')
     @patch.object(settings, 'DEBUG', False)
+    @tag("batch_proxy_selection")
     def test_select_proxy_no_proxy_production_mode(self, mock_select_random):
         """Test proxy selection raises error in production mode when no proxy available."""
         mock_select_random.return_value = None

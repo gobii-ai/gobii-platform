@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import patch
 
@@ -22,6 +22,7 @@ class MarkUserBillingWithPlanTests(TestCase):
             password="testpass123",
         )
 
+    @tag("batch_subscription")
     def test_creates_billing_record_when_missing(self):
         """A billing record is created when one does not exist."""
         UserBilling.objects.filter(user=self.user).delete()
@@ -34,6 +35,7 @@ class MarkUserBillingWithPlanTests(TestCase):
         self.assertEqual(billing.subscription, PlanNames.STARTUP)
         self.assertEqual(billing.billing_cycle_anchor, 9)
 
+    @tag("batch_subscription")
     def test_updates_existing_record_without_duplication(self):
         """Existing billing records are updated in place without creating duplicates."""
         with patch("util.subscription_helper.timezone.now") as mock_now:
@@ -55,6 +57,7 @@ class MarkUserBillingWithPlanTests(TestCase):
         self.assertEqual(billing.subscription, PlanNames.FREE)
         self.assertEqual(billing.billing_cycle_anchor, 4)
 
+    @tag("batch_subscription")
     def test_update_anchor_false_keeps_existing_anchor(self):
         """The billing cycle anchor remains unchanged when update_anchor is False."""
         billing = UserBilling.objects.get(user=self.user)

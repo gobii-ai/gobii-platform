@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +14,7 @@ User = get_user_model()
 class TaskCreditServiceCalculateAvailableTasksTests(TestCase):
     @patch("tasks.services.TaskCreditService.get_user_task_credits_used")
     @patch("tasks.services.TaskCreditService.get_tasks_entitled")
+    @tag("batch_task_credits")
     def test_calculate_available_tasks_regular(self, mock_entitled, mock_used):
         user = User.objects.create(username="user1")
         mock_entitled.return_value = 10
@@ -54,6 +55,7 @@ class TaskCreditServiceGrantSubscriptionCreditsTests(TestCase):
     @patch("tasks.services.apps.get_model")
     @patch("tasks.services.get_active_subscription")
     @patch("tasks.services.get_user_plan")
+    @tag("batch_task_credits")
     def test_grant_subscription_credits_sets_expiration_to_subscription_end(self, mock_plan, mock_subscription, mock_get_model, mock_timezone):
         user = User.objects.create(username="user4")
         TaskCredit = MagicMock()
@@ -81,6 +83,7 @@ class TaskCreditServiceConsumeCreditTests(TestCase):
     @patch("tasks.services.TaskCreditService.handle_task_threshold")
     @patch("tasks.services.report_task_usage_to_stripe")
     @patch("tasks.services.apps.get_model")
+    @tag("batch_task_credits")
     def test_consume_credit_without_additional_task(self, mock_get_model, mock_report, mock_handle):
         user = User.objects.create(username="user5")
         TaskCredit = MagicMock()
@@ -133,6 +136,7 @@ class TaskCreditServiceGetTasksEntitledTests(TestCase):
     @patch("tasks.services.get_user_extra_task_limit")
     @patch("tasks.services.apps.get_model")
     @patch("tasks.services.get_user_plan")
+    @tag("batch_task_credits")
     def test_get_tasks_entitled_sums_granted_and_extra(self, mock_plan, mock_get_model, mock_extra):
         user = User.objects.create(username="user7")
         mock_plan.return_value = {"id": "PRO", "monthly_task_credits": 5}

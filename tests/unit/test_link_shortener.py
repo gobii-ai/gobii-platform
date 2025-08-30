@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, tag
 
 # Provide a minimal stub of ``urlextract`` so the sms sender module can be
 # imported in environments where the third‑party library is unavailable.
@@ -33,6 +33,7 @@ class EnsureSchemeTests(TestCase):
             "https://example.com/path",
         )
 
+    @tag("batch_link_shortener")
     def test_adds_scheme_to_bare_domain(self):
         self.assertEqual(
             ensure_scheme("example.com"),
@@ -64,6 +65,7 @@ class LinkShortenerTests(TestCase):
         )
         cls.user = User.objects.create_user("alice", "alice@example.com", "p@ssw0rd")
 
+    @tag("batch_link_shortener")
     @patch("util.analytics.Analytics.track_event")
     def test_link_is_canonicalised_before_save(self, mock_track):
         """`example.com` should be stored as `https://example.com`."""
@@ -81,6 +83,7 @@ class LinkShortenerTests(TestCase):
         # Analytics shouldn’t be called when user is None
         mock_track.assert_not_called()
 
+    @tag("batch_link_shortener")
     def test_short_code_generated_and_redirects(self):
         link = LinkShortener.objects.create(url="https://example.com")
         self.assertIsNotNone(link.code)
@@ -90,6 +93,7 @@ class LinkShortenerTests(TestCase):
         link.refresh_from_db()
         self.assertEqual(link.hits, 1)
 
+    @tag("batch_link_shortener")
     @patch("util.analytics.Analytics.track_event")
     def test_link_with_user_tracks_event(self, mock_track):
         shortened = create_shortened_link("https://example.com/page", user=self.user)

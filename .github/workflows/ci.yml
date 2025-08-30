@@ -45,6 +45,20 @@ jobs:
             tag: batch_outbound_email
           - batch: secrets
             tag: batch_secrets
+          - batch: proxy_selection
+            tag: batch_proxy_selection
+          - batch: compaction
+            tag: batch_compaction
+          - batch: step_compaction
+            tag: batch_step_compaction
+          - batch: subscription
+            tag: batch_subscription
+          - batch: task_credits
+            tag: batch_task_credits
+          - batch: output_schema
+            tag: batch_output_schema
+          - batch: link_shortener
+            tag: batch_link_shortener
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
