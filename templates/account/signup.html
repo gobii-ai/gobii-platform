@@ -56,10 +56,12 @@
       {% endif %}
       {% endfor %}
 
-      {# Cloudflare Turnstile widget #}
-      <div class="mt-4 flex justify-center">
-        {{ form.turnstile }}
-      </div>
+      {# Cloudflare Turnstile widget (enabled only when configured) #}
+      {% if settings.TURNSTILE_ENABLED and form.turnstile %}
+        <div class="mt-4 flex justify-center">
+          {{ form.turnstile }}
+        </div>
+      {% endif %}
 
       <button type="submit"
               class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white

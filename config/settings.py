@@ -26,6 +26,18 @@ if env_file.exists():
 # will not be overridden.
 os.environ.setdefault("GOBII_RELEASE_ENV", "local")
 
+# Community vs Proprietary build toggle
+# - Community Edition (default): minimal external deps, no Turnstile, no email verification
+# - Proprietary/Prod: enable Turnstile, real email delivery, and email verification
+#
+# Licensing notice (important): Proprietary Mode is available only to customers
+# who hold a current, valid proprietary software license from Gobii, Inc.
+# Enabling or using GOBII_PROPRIETARY_MODE without such a license is not
+# permitted and may violate Gobii, Inc.’s intellectual property rights and/or
+# applicable license terms. By setting this flag you represent and warrant that
+# you are authorized to do so under a written license agreement with Gobii, Inc.
+GOBII_PROPRIETARY_MODE = env.bool("GOBII_PROPRIETARY_MODE", default=False)
+
 # ────────── Core ──────────
 DEBUG = env.bool("DEBUG", default=False)
 SECRET_KEY = env("DJANGO_SECRET_KEY")
@@ -60,7 +72,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "django.contrib.sites",
-    "turnstile",  # Cloudflare Turnstile field/widget
+    # Cloudflare Turnstile (disabled by default in community edition; see TURNSTILE_ENABLED below)
     "djstripe",
     "allauth",
     "allauth.account",
@@ -277,7 +289,8 @@ AUTHENTICATION_BACKENDS = (
 )
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
-ACCOUNT_EMAIL_VERIFICATION = "none" if DEBUG else "mandatory"
+# Community Edition disables email verification by default to avoid external email providers
+ACCOUNT_EMAIL_VERIFICATION = "mandatory" if GOBII_PROPRIETARY_MODE else "none"
 ACCOUNT_LOGOUT_ON_GET = True
 
 # TODO: Test the removal of this; got deprecation warning
@@ -293,10 +306,15 @@ LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Integrate Cloudflare Turnstile with django-allauth ✨
-ACCOUNT_FORMS = {
-    "signup": "turnstile_signup.SignupFormWithTurnstile",
-    "login": "turnstile_signup.LoginFormWithTurnstile",
-}
+TURNSTILE_ENABLED = env.bool("TURNSTILE_ENABLED", default=GOBII_PROPRIETARY_MODE)
+
+# Conditionally enable Cloudflare Turnstile app and forms
+if TURNSTILE_ENABLED:
+    INSTALLED_APPS.append("turnstile")  # type: ignore[arg-type]
+    ACCOUNT_FORMS = {
+        "signup": "turnstile_signup.SignupFormWithTurnstile",
+        "login": "turnstile_signup.LoginFormWithTurnstile",
+    }
 
 # Optional: allow using dummy keys in dev; override in env for prod
 TURNSTILE_SITEKEY = env("TURNSTILE_SITEKEY", default="1x00000000000000000000AA")
@@ -383,6 +401,11 @@ TIME_ZONE = "UTC"
 USE_I18N = USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Feature flags (django-waffle)
+# Default to explicit management in admin; core features are not gated anymore.
+# You can still override with WAFFLE_FLAG_DEFAULT=1 in environments where you want missing flags active.
+WAFFLE_FLAG_DEFAULT = env.bool("WAFFLE_FLAG_DEFAULT", default=False)
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -438,7 +461,11 @@ BROWSER_HEADLESS = env.bool("BROWSER_HEADLESS", default=False)
 
 SOCIALACCOUNT_LOGIN_ON_GET = True
 
-EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
+EMAIL_BACKEND = (
+    "anymail.backends.mailgun.EmailBackend"
+    if GOBII_PROPRIETARY_MODE
+    else "django.core.mail.backends.console.EmailBackend"
+)
 
 ANYMAIL = {
     "MAILGUN_API_KEY": os.getenv("MAILGUN_API_KEY"),

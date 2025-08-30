@@ -89,17 +89,19 @@
         {% endif %}
       </div>
 
-      {# Cloudflare Turnstile widget #}
-      <div class="mt-4 flex flex-col items-center"> {# Changed to flex-col and items-center for centering content #}
-        {{ form.turnstile }}
-        {% if form.turnstile.errors %}
-          <div class="mt-2 text-center">
-            {% for error in form.turnstile.errors %}
-              <p class="text-sm text-red-600">{{ error }}</p>
-            {% endfor %}
-          </div>
-        {% endif %}
-      </div>
+      {# Cloudflare Turnstile widget (enabled only when configured) #}
+      {% if settings.TURNSTILE_ENABLED and form.turnstile %}
+        <div class="mt-4 flex flex-col items-center">
+          {{ form.turnstile }}
+          {% if form.turnstile.errors %}
+            <div class="mt-2 text-center">
+              {% for error in form.turnstile.errors %}
+                <p class="text-sm text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
 
       <button type="submit"
               class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white

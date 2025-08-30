@@ -66,7 +66,7 @@ from django.views.decorators.http import require_POST, require_http_methods
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
-from constants.feature_flags import PERSISTENT_AGENTS, ORGANIZATIONS
+from constants.feature_flags import ORGANIZATIONS
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from agent_namer import AgentNameGenerator
@@ -751,8 +751,7 @@ def task_result_view(request, task_id):
     return render(request, 'task_result.html', context)
 
 # ────────── Persistent Agents (Feature-Flagged) ──────────
-class PersistentAgentsView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
-    waffle_flag = PERSISTENT_AGENTS
+class PersistentAgentsView(LoginRequiredMixin, TemplateView):
     template_name = "console/persistent_agents.html"
 
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
@@ -784,9 +783,8 @@ class PersistentAgentsView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
         return context
 
 
-class AgentCreateContactView(WaffleFlagMixin, LoginRequiredMixin, PhoneNumberMixin, TemplateView):
+class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
     """Step 2: Contact preferences for agent creation."""
-    waffle_flag = PERSISTENT_AGENTS
     template_name = "console/agent_create_contact.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Create Contact View")
@@ -1073,10 +1071,9 @@ class AgentCreateContactView(WaffleFlagMixin, LoginRequiredMixin, PhoneNumberMix
         raise ValueError("Unable to generate a unique email address for the agent.")
 
 
-class AgentEnableSmsView(WaffleFlagMixin, LoginRequiredMixin, PhoneNumberMixin, TemplateView):
+class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
     """Enable SMS communication for an existing agent."""
 
-    waffle_flag = PERSISTENT_AGENTS
     template_name = "console/agent_enable_sms.html"
 
     def dispatch(self, request, *args, **kwargs):
@@ -1179,9 +1176,8 @@ class AgentEnableSmsView(WaffleFlagMixin, LoginRequiredMixin, PhoneNumberMixin, 
         messages.success(self.request, "SMS has been enabled for this agent.")
         return redirect("agent_detail", pk=self.agent.pk)
 
-class AgentDetailView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
+class AgentDetailView(LoginRequiredMixin, DetailView):
     """Configuration page for a single agent."""
-    waffle_flag = PERSISTENT_AGENTS
     model = PersistentAgent
     template_name = "console/agent_detail.html"
     context_object_name = "agent"
@@ -1686,9 +1682,8 @@ class AgentAllowlistView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
 
         return redirect('agent_allowlist', pk=agent.pk)
 
-class AgentDeleteView(WaffleFlagMixin, LoginRequiredMixin, View):
+class AgentDeleteView(LoginRequiredMixin, View):
     """Handle agent deletion."""
-    waffle_flag = PERSISTENT_AGENTS
 
     @transaction.atomic
     @tracer.start_as_current_span("CONSOLE Agent Delete View - delete")
@@ -1730,9 +1725,8 @@ class AgentDeleteView(WaffleFlagMixin, LoginRequiredMixin, View):
         except Exception as e:
             return HttpResponse(f"An error occurred: {e}", status=500)
 
-class AgentSecretsView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class AgentSecretsView(LoginRequiredMixin, TemplateView):
     """Secrets management page for a single agent."""
-    waffle_flag = PERSISTENT_AGENTS
     template_name = "console/agent_secrets.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets View - get_object")
@@ -1779,9 +1773,8 @@ class AgentSecretsView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
         return context
 
 
-class AgentSecretsAddView(WaffleFlagMixin, LoginRequiredMixin, View):
+class AgentSecretsAddView(LoginRequiredMixin, View):
     """Add a new secret to an agent."""
-    waffle_flag = PERSISTENT_AGENTS
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Add")
     def get_object(self):
@@ -1852,9 +1845,8 @@ class AgentSecretsAddView(WaffleFlagMixin, LoginRequiredMixin, View):
         return redirect('agent_secrets', pk=agent.pk)
 
 
-class AgentSecretsEditView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class AgentSecretsEditView(LoginRequiredMixin, TemplateView):
     """Edit view for existing secret value (GET render + POST update)."""
-    waffle_flag = PERSISTENT_AGENTS
     template_name = "console/agent_secret_edit.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Edit - get_object")
@@ -1962,9 +1954,8 @@ class AgentSecretsEditView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
         return self.render_to_response(context)
 
 
-class AgentSecretsDeleteView(WaffleFlagMixin, LoginRequiredMixin, View):
+class AgentSecretsDeleteView(LoginRequiredMixin, View):
     """Delete a secret from an agent."""
-    waffle_flag = PERSISTENT_AGENTS
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Delete")
     def get_object(self):
@@ -2028,9 +2019,8 @@ class AgentSecretsDeleteView(WaffleFlagMixin, LoginRequiredMixin, View):
         return redirect('agent_secrets', pk=agent.pk)
 
 
-class AgentSecretsAddFormView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class AgentSecretsAddFormView(LoginRequiredMixin, TemplateView):
     """Form view for adding a new secret to an agent."""
-    waffle_flag = PERSISTENT_AGENTS
     template_name = "console/agent_secret_add.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Add Form View - get_object")
@@ -2161,9 +2151,8 @@ def grant_credits(request):
         logger.error(f"Failed to grant credits to user {user_id}: {str(e)}")
         return JsonResponse({'success': False, 'error': f"Failed to grant credits: {str(e)}"}, status=500)
 
-class AgentSecretsRequestView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
     """View for displaying requested secrets that need values."""
-    waffle_flag = PERSISTENT_AGENTS
     template_name = "console/agent_secrets_request.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Request View - get_object")
@@ -2266,9 +2255,8 @@ class AgentSecretsRequestView(WaffleFlagMixin, LoginRequiredMixin, TemplateView)
         return self.render_to_response(context)
 
 
-class AgentSecretsRequestThanksView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class AgentSecretsRequestThanksView(LoginRequiredMixin, TemplateView):
     """Thank you page after providing secret values."""
-    waffle_flag = PERSISTENT_AGENTS
     template_name = "console/agent_secrets_request_thanks.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Request Thanks View - get_object")
@@ -2287,9 +2275,8 @@ class AgentSecretsRequestThanksView(WaffleFlagMixin, LoginRequiredMixin, Templat
         context['agent'] = self.get_object()
         return context
 
-class AgentWelcomeView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
+class AgentWelcomeView(LoginRequiredMixin, DetailView):
     """Welcome page shown immediately after creating an agent."""
-    waffle_flag = PERSISTENT_AGENTS
     model = PersistentAgent
     template_name = "console/agent_welcome.html"
     context_object_name = "agent"
@@ -2334,9 +2321,8 @@ class AgentWelcomeView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
 
         return context
 
-class AgentContactRequestsView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
     """View for displaying and approving contact requests from agents."""
-    waffle_flag = PERSISTENT_AGENTS
     template_name = "console/agent_contact_requests.html"
     
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get_object")
@@ -2556,9 +2542,8 @@ class AgentContactRequestsView(WaffleFlagMixin, LoginRequiredMixin, TemplateView
         return self.render_to_response(context)
 
 
-class AgentContactRequestsThanksView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class AgentContactRequestsThanksView(LoginRequiredMixin, TemplateView):
     """Thank you page after approving contact requests."""
-    waffle_flag = PERSISTENT_AGENTS
     template_name = "console/agent_contact_requests_thanks.html"
     
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_object")
