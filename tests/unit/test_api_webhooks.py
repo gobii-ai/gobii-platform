@@ -1,7 +1,7 @@
 import json
 from unittest.mock import patch, MagicMock
 
-from django.test import TestCase, RequestFactory
+from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 from django.http import HttpResponse
 
@@ -64,6 +64,7 @@ class EmailWebhookTest(TestCase):
         )
         return request
 
+    @tag("batch_email")
     @patch("api.webhooks.ingest_inbound_message")
     def test_email_from_owner_is_accepted(self, mock_ingest):
         """Verify that an email from the agent's owner is processed."""
@@ -76,6 +77,7 @@ class EmailWebhookTest(TestCase):
         mock_ingest.assert_called_once()
         self.assertEqual(mock_ingest.call_args[0][0], CommsChannel.EMAIL)
 
+    @tag("batch_email")
     @patch("api.webhooks.ingest_inbound_message")
     @patch("api.webhooks.logger.info")
     def test_email_from_non_owner_is_discarded(self, mock_logger, mock_ingest):
@@ -173,6 +175,7 @@ class SmsStatusWebhookTest(TestCase):
             data=data
         )
 
+    @tag("batch_sms")
     def test_delivered_status_updates_message(self):
         request = self._req("delivered")
         resp: HttpResponse = sms_status_webhook(request)
@@ -182,6 +185,7 @@ class SmsStatusWebhookTest(TestCase):
         self.assertEqual(self.message.latest_status, DeliveryStatus.DELIVERED)
         self.assertEqual(self.attempt.status, DeliveryStatus.DELIVERED)
 
+    @tag("batch_sms")
     def test_failed_status_records_error(self):
         request = self._req("failed", code="30007")
         resp: HttpResponse = sms_status_webhook(request)
