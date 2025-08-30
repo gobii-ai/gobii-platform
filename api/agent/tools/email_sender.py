@@ -32,6 +32,14 @@ def get_send_email_tool() -> Dict[str, Any]:
                 "type": "object",
                 "properties": {
                     "to_address": {"type": "string", "description": "Recipient email."},
+                    "cc_addresses": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email",
+                        },
+                        "description": "List of CC email addresses (optional)"
+                    },
                     "subject": {"type": "string", "description": "Email subject."},
                     "mobile_first_html": {"type": "string", "description": "Email content as lightweight HTML, excluding <html>, <head>, and <body> tags. Links should use html links, e.g. <a href=\"https://news.ycombinator.com\">News</a>"},
                 },
@@ -43,15 +51,20 @@ def get_send_email_tool() -> Dict[str, Any]:
 
 def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_email tool for a persistent agent."""
-    to_address, subject, mobile_first_html = params.get("to_address"), params.get("subject"), params.get("mobile_first_html")
+    to_address = params.get("to_address")
+    subject = params.get("subject")
+    mobile_first_html = params.get("mobile_first_html")
+    cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
+    
     if not all([to_address, subject, mobile_first_html]):
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
 
     # Log email attempt
     body_preview = mobile_first_html[:100] + "..." if len(mobile_first_html) > 100 else mobile_first_html
+    cc_info = f", CC: {cc_addresses}" if cc_addresses else ""
     logger.info(
-        "Agent %s sending email to %s, subject: '%s', body: %s",
-        agent.id, to_address, subject, body_preview
+        "Agent %s sending email to %s%s, subject: '%s', body: %s",
+        agent.id, to_address, cc_info, subject, body_preview
     )
 
     try:
@@ -73,6 +86,11 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
         if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, to_address):
             return {"status": "error", "message": "Recipient address not allowed for this agent."}
+        
+        # Check whitelist for CC addresses
+        for cc_addr in cc_addresses:
+            if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, cc_addr):
+                return {"status": "error", "message": f"CC address {cc_addr} not allowed for this agent."}
 
         close_old_connections()
         try:
@@ -84,6 +102,22 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
                 channel=CommsChannel.EMAIL, address=to_address, defaults={"owner_agent": None}
             )
+        
+        # Create CC endpoints
+        cc_endpoint_objects = []
+        for cc_addr in cc_addresses:
+            close_old_connections()
+            try:
+                cc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                    channel=CommsChannel.EMAIL, address=cc_addr, defaults={"owner_agent": None}
+                )
+                cc_endpoint_objects.append(cc_endpoint)
+            except OperationalError:
+                close_old_connections()
+                cc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                    channel=CommsChannel.EMAIL, address=cc_addr, defaults={"owner_agent": None}
+                )
+                cc_endpoint_objects.append(cc_endpoint)
 
         close_old_connections()
         try:
@@ -95,6 +129,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 body=mobile_first_html,
                 raw_payload={"subject": subject},
             )
+            # Add CC endpoints to the message
+            if cc_endpoint_objects:
+                message.cc_endpoints.set(cc_endpoint_objects)
         except OperationalError:
             close_old_connections()
             message = PersistentAgentMessage.objects.create(
@@ -105,6 +142,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 body=mobile_first_html,
                 raw_payload={"subject": subject},
             )
+            # Add CC endpoints to the message
+            if cc_endpoint_objects:
+                message.cc_endpoints.set(cc_endpoint_objects)
 
         # Immediately attempt delivery
         deliver_agent_email(message)

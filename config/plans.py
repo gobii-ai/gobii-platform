@@ -18,6 +18,7 @@ PLAN_CONFIG = {
         "description": "Free plan with basic features and limited support.",
         "price": 0,
         "currency": "USD",
+        "max_contacts_per_agent": 3,
     },
     "startup": {
         "id": "startup",
@@ -29,6 +30,7 @@ PLAN_CONFIG = {
         "description": "Pro plan with enhanced features and support.",
         "price": 30,
         "currency": "USD",
+        "max_contacts_per_agent": 20,
     },
 }
 

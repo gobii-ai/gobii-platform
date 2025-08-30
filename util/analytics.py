@@ -73,6 +73,11 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENT_SECRET_UPDATED = 'Persistent Agent Secret Updated'
     PERSISTENT_AGENT_SECRET_DELETED = 'Persistent Agent Secret Deleted'
     PERSISTENT_AGENT_SECRETS_PROVIDED = 'Persistent Agent Secrets Provided'
+    
+    # Contact Request Events
+    AGENT_CONTACTS_REQUESTED = 'Agent Contacts Requested'
+    AGENT_CONTACTS_APPROVED = 'Agent Contacts Approved'
+    AGENT_CONTACTS_REJECTED = 'Agent Contacts Rejected'
 
     # Billing Events
     BILLING_CANCELLATION = 'Billing Cancellation'

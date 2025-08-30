@@ -47,19 +47,37 @@
           {{ verify_form.phone_number }}
           {{ verify_form.verification_code.label_tag }}
           {{ verify_form.verification_code }}
-        {#  TODO Resend #}
-          <button
-              class="mt-2 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md"
-              type="button"                     {# ⭐ not “submit” #}
-              hx-post="{{ post_url }}"
-              hx-target="#sms-verification-form"            {# swap just the widget #}
-              hx-swap="outerHTML"
-              hx-indicator="#verify-phone-spinner"
-              hx-include="#sms-verification-form"
-              class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md"
-          >
-            Verify
-          </button>
+          <div class="mt-2 flex items-center gap-3">
+            <button
+                class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md"
+                type="button"
+                hx-post="{{ post_url }}"
+                hx-target="#sms-verification-form"
+                hx-swap="outerHTML"
+                hx-indicator="#verify-phone-spinner"
+                hx-include="#sms-verification-form"
+            >
+              Verify
+            </button>
+
+            <button
+                id="resend-code-btn"
+                type="button"
+                class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                hx-post="{{ post_url }}"
+                hx-target="#sms-verification-form"
+                hx-swap="outerHTML"
+                hx-include="#sms-verification-form"
+                hx-vals='{"resend_code": "1"}'
+                {% if cooldown_remaining and cooldown_remaining > 0 %}disabled{% endif %}
+            >
+              {% if cooldown_remaining and cooldown_remaining > 0 %}
+                  Resend in <span id="resend-timer" data-remaining="{{ cooldown_remaining }}">{{ cooldown_remaining }}</span>s
+              {% else %}
+                Resend code
+              {% endif %}
+            </button>
+          </div>
       {% endif %}
     </div>
   {% else %}

@@ -572,6 +572,29 @@ class PersistentAgentSecretsRequestForm(forms.Form):
         
         return cleaned_data
 
+
+class ContactRequestApprovalForm(forms.Form):
+    """Form for approving/rejecting contact requests."""
+    
+    def __init__(self, *args, contact_requests=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.contact_requests = contact_requests or []
+        
+        # Create checkbox fields for each request
+        for request in self.contact_requests:
+            field_name = f'approve_{request.id}'
+            display_name = request.name or request.address
+            self.fields[field_name] = forms.BooleanField(
+                required=False,
+                initial=True,  # Default to checked for convenience
+                label=f"{display_name} ({request.channel})",
+                help_text=f"Purpose: {request.purpose}",
+                widget=forms.CheckboxInput(attrs={
+                    'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
+                })
+            )
+
+
 class PhoneAddForm(forms.Form):
     phone_number = forms.CharField(
         label="Phone number",
@@ -636,7 +659,8 @@ class PhoneAddForm(forms.Form):
         try:
             sid = sms.start_verification(phone_number=phone_formatted)
             phone.last_verification_attempt = timezone.now()
-            phone.save()
+            phone.verification_sid = sid
+            phone.save(update_fields=["last_verification_attempt", "verification_sid", "updated_at"])
         except Exception as e:
             logger.error(f"Error sending verification: {str(e)}")
             raise ValidationError(f"Error sending verification: {str(e)}")
@@ -650,7 +674,9 @@ class PhoneVerifyForm(forms.Form):
         label="Verification Code",
         required=True,
         widget=forms.TextInput(
-            attrs={}
+            attrs={
+                "class": "px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+            }
         )
     )
 
@@ -663,6 +689,10 @@ class PhoneVerifyForm(forms.Form):
 
         code = cleaned.get("verification_code")
         phone_number = cleaned.get("phone_number")
+        # Avoid calling provider when code is missing
+        if not code:
+            raise ValidationError("Verification code is required.")
+
         verified = sms.check_verification(phone_number=phone_number, code=code)
 
         if not verified:

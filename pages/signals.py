@@ -57,7 +57,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     if k in UTM_MAPPING.values() and not first_touch.get(k) and v:
                         traits[f'{k}_first'] = v
             except json.JSONDecodeError:
-                logger.exception("Failed to parse __utm_first cookie")
+                logger.exception("Failed to parse __utm_first cookie; Content: %s", utm_first_cookie)
 
         Analytics.identify(
             user_id=str(user.id),

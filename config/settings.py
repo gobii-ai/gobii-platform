@@ -525,4 +525,4 @@ ALLOW_FILE_UPLOAD = env.bool("ALLOW_FILE_UPLOAD", default=False)
 
 # Manual whitelist limits
 # Maximum number of manual allowlist entries per agent. Configurable via env.
-MANUAL_WHITELIST_MAX_PER_AGENT = env.int("MANUAL_WHITELIST_MAX_PER_AGENT", default=20)
+MANUAL_WHITELIST_MAX_PER_AGENT = env.int("MANUAL_WHITELIST_MAX_PER_AGENT", default=100)

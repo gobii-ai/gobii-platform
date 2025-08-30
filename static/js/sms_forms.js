@@ -45,9 +45,15 @@ function initPhoneField() {
 document.addEventListener('DOMContentLoaded', initPhoneField);
 
 document.addEventListener('htmx:afterSwap', (e) => {
-  // only re-initialize when the swap affects the phone block
-  if (e.detail.target.closest('div.space-y-4')) {
+  // Re-init when the swap touches the SMS verification block
+  const tgt = e.detail && e.detail.target;
+  if (!tgt) return;
+  const affectsSmsForm = tgt.id === 'sms-verification-form' ||
+                         !!tgt.querySelector?.('#sms-verification-form') ||
+                         !!tgt.closest?.('#sms-verification-form');
+  if (affectsSmsForm) {
     initPhoneField();
+    initResendCountdown();
   }
 });
 
@@ -75,3 +81,31 @@ resetConfirmButton = function() {
   confirmButton.innerHTML = 'Confirm';
   confirmButton.classList.remove('opacity-50', 'cursor-not-allowed');
 };
+
+function initResendCountdown() {
+  const timer = document.getElementById('resend-timer');
+  const btn = document.getElementById('resend-code-btn');
+  if (!timer || !btn) return;
+
+  let remaining = parseInt(timer.getAttribute('data-remaining') || '0', 10);
+  if (isNaN(remaining) || remaining <= 0) {
+    btn.disabled = false;
+    btn.textContent = 'Resend code';
+    return;
+  }
+
+  btn.disabled = true;
+  const tick = () => {
+    remaining -= 1;
+    if (remaining <= 0) {
+      btn.disabled = false;
+      btn.textContent = 'Resend code';
+      return;
+    }
+    timer.textContent = String(remaining);
+    setTimeout(tick, 1000);
+  };
+  setTimeout(tick, 1000);
+}
+
+document.addEventListener('DOMContentLoaded', initResendCountdown);

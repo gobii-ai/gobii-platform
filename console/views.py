@@ -75,7 +75,7 @@ from api.agent.tasks import process_agent_events_task
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
-from api.models import CommsAllowlistEntry, OrganizationMembership
+from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMembership
 from console.forms import AllowlistEntryForm
 
 User = get_user_model()
@@ -778,11 +778,7 @@ class PersistentAgentsView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
         ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
         context['persistent_agents'] = persistent_agents
-        
-        # Check if we should auto-open modal for a newly created agent
-        show_modal_for_agent_id = self.request.session.pop('show_modal_for_agent', None)
-        context['show_modal_for_agent_id'] = show_modal_for_agent_id
-        
+
         context['has_agents'] = persistent_agents.exists()
 
         return context
@@ -987,27 +983,6 @@ class AgentCreateContactView(WaffleFlagMixin, LoginRequiredMixin, PhoneNumberMix
                     # Clear session data
                     if 'agent_charter' in request.session:
                         del request.session['agent_charter']
-                    
-                    # Store the agent ID to show modal on next page load
-                    request.session['show_modal_for_agent'] = str(persistent_agent.id)
-
-                    if sms_preferred:
-                        messages.success(
-                            request,
-                            format_html(
-                                "Your persistent agent ‘{0}’ has been created successfully! "
-                                "Its primary SMS number is "
-                                "<span class='phone-number-to-format'>{1}</span>.",
-                                agent_name,  # safely escaped
-                                agent_sms.phone_number,  # safely escaped
-                            )
-                        )
-                    else:
-                        messages.success(
-                            request,
-                            f"Your persistent agent '{agent_name}' has been created successfully! "
-                            f"Its primary email for receiving messages is {agent_email}."
-                        )
 
                     transaction.on_commit(lambda:  Analytics.track_event(
                         user_id=request.user.id,
@@ -1024,7 +999,7 @@ class AgentCreateContactView(WaffleFlagMixin, LoginRequiredMixin, PhoneNumberMix
                         }
                     ))
 
-                    return redirect('agents')
+                    return redirect('agent_welcome', pk=persistent_agent.id)
                     
             except Exception as e:
                 messages.error(
@@ -1234,18 +1209,318 @@ class AgentDetailView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
 
         context['primary_email'] = primary_email
         context['primary_sms'] = primary_sms
+        
+        # Add allowlist configuration if multiplayer_agents flag is active
+        from waffle import flag_is_active
+        from api.models import CommsAllowlistEntry
+        from constants.feature_flags import MULTIPLAYER_AGENTS
+        
+        if flag_is_active(self.request, MULTIPLAYER_AGENTS):
+            context['show_allowlist'] = True
+            context['whitelist_policy'] = agent.whitelist_policy
+            context['allowlist_entries'] = CommsAllowlistEntry.objects.filter(
+                agent=agent
+            ).order_by('channel', 'address')
+            context['pending_invites'] = AgentAllowlistInvite.objects.filter(
+                agent=agent,
+                status=AgentAllowlistInvite.InviteStatus.PENDING
+            ).order_by('channel', 'address')
+            
+            # Count active allowlist entries AND pending invitations for display
+            active_count = CommsAllowlistEntry.objects.filter(
+                agent=agent,
+                is_active=True
+            ).count()
+            pending_count = AgentAllowlistInvite.objects.filter(
+                agent=agent,
+                status=AgentAllowlistInvite.InviteStatus.PENDING
+            ).count()
+            context['active_allowlist_count'] = active_count + pending_count
+            
+            # Add pending contact requests count
+            from api.models import CommsAllowlistRequest
+            pending_contact_requests = CommsAllowlistRequest.objects.filter(
+                agent=agent,
+                status=CommsAllowlistRequest.RequestStatus.PENDING
+            ).count()
+            context['pending_contact_requests'] = pending_contact_requests
+            
+            # Add owner information for display
+            context['owner_email'] = agent.user.email
+            
+            # Check if owner has verified phone for SMS display
+            try:
+                from api.models import UserPhoneNumber
+                owner_phone = UserPhoneNumber.objects.filter(
+                    user=agent.user, 
+                    is_verified=True
+                ).first()
+                context['owner_phone'] = owner_phone.phone_number if owner_phone else None
+            except:
+                context['owner_phone'] = None
+        else:
+            context['show_allowlist'] = False
 
         return context
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - Post")
     def post(self, request, *args, **kwargs):
-        """Handle agent configuration updates."""
+        """Handle agent configuration updates and allowlist management."""
         agent = self.get_object()
+        
+        # Handle AJAX allowlist operations
+        # Check both modern header and legacy header for AJAX detection
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.META.get('HTTP_X_REQUESTED_WITH') == 'XMLHttpRequest'
+        
+        if is_ajax:
+            from django.http import JsonResponse
+            from django.template.loader import render_to_string
+            from api.models import CommsAllowlistEntry
+            from django.core.exceptions import ValidationError
+            from django.db import IntegrityError
+            
+            action = request.POST.get('action')
+            
+            if action == 'add_allowlist':
+                channel = request.POST.get('channel', 'email')
+                address = request.POST.get('address', '').strip()
+                
+                if not address:
+                    return JsonResponse({'success': False, 'error': 'Address is required'})
+                
+                try:
+                    # Check if they're already in the allowlist
+                    existing_entry = CommsAllowlistEntry.objects.filter(
+                        agent=agent,
+                        channel=channel,
+                        address=address
+                    ).first()
+                    
+                    if existing_entry:
+                        if existing_entry.is_active:
+                            return JsonResponse({'success': False, 'error': 'This address is already in the allowlist'})
+                        else:
+                            # Reactivate the existing entry
+                            existing_entry.is_active = True
+                            existing_entry.save(update_fields=['is_active'])
+                            entry = existing_entry
+                    else:
+                        # Directly create the allowlist entry (skip invitation process)
+                        entry = CommsAllowlistEntry.objects.create(
+                            agent=agent,
+                            channel=channel,
+                            address=address,
+                            is_active=True
+                        )
+
+                        Analytics.track_event(
+                            user_id=request.user.id,
+                            event=AnalyticsEvent.AGENT_CONTACTS_APPROVED,
+                            source=AnalyticsSource.WEB,
+                            properties={
+                                'agent_id': str(agent.id),
+                                'channel': channel,
+                                'address': address,
+                            }
+                        )
+
+                    from api.agent.tasks.process_events import process_agent_events_task
+                    process_agent_events_task.delay(str(agent.id))
+                    
+                    # Switch agent to manual allowlist mode if not already
+                    # (though it should already be manual with our new changes)
+                    if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+                        agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+                        agent.save(update_fields=['whitelist_policy'])
+                    
+                    # Render updated list
+                    entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
+                    
+                    # We no longer create pending invites from the agent config page
+                    # but there might be some from other flows, so we still check
+                    pending_invites = AgentAllowlistInvite.objects.filter(
+                        agent=agent, 
+                        status=AgentAllowlistInvite.InviteStatus.PENDING
+                    ).order_by('channel', 'address')
+                    
+                    # Add owner information for display
+                    owner_email = agent.user.email
+                    owner_phone = None
+                    try:
+                        from api.models import UserPhoneNumber
+                        phone_obj = UserPhoneNumber.objects.filter(
+                            user=agent.user, 
+                            is_verified=True
+                        ).first()
+                        owner_phone = phone_obj.phone_number if phone_obj else None
+                    except:
+                        pass
+                    
+                    html = render_to_string('console/partials/_allowlist_entries_inline.html', {
+                        'allowlist_entries': entries,
+                        'pending_invites': pending_invites,
+                        'owner_email': owner_email,
+                        'owner_phone': owner_phone,
+                    })
+                    
+                    # Count active entries for the counter
+                    active_count = CommsAllowlistEntry.objects.filter(
+                        agent=agent,
+                        is_active=True
+                    ).count()
+                    
+                    # Also count any remaining pending invitations from other flows
+                    pending_count = AgentAllowlistInvite.objects.filter(
+                        agent=agent,
+                        status=AgentAllowlistInvite.InviteStatus.PENDING
+                    ).count()
+                    total_count = active_count + pending_count
+                    
+                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count})
+                    
+                except ValidationError as e:
+                    # Handle ValidationError properly
+                    error_msg = 'Validation error'
+                    if hasattr(e, 'message_dict'):
+                        # Get first error message from the dict
+                        for field, msgs in e.message_dict.items():
+                            if msgs:
+                                error_msg = msgs[0] if isinstance(msgs[0], str) else str(msgs[0])
+                                break
+                    elif hasattr(e, 'messages') and e.messages:
+                        error_msg = e.messages[0] if isinstance(e.messages[0], str) else str(e.messages[0])
+                    else:
+                        error_msg = str(e)
+                    return JsonResponse({'success': False, 'error': error_msg})
+                except IntegrityError:
+                    return JsonResponse({'success': False, 'error': 'This address is already in the allowlist'})
+                except Exception as e:
+                    return JsonResponse({'success': False, 'error': str(e)})
+            
+            elif action == 'remove_allowlist':
+                entry_id = request.POST.get('entry_id')
+                
+                try:
+                    CommsAllowlistEntry.objects.filter(agent=agent, id=entry_id).delete()
+                    
+                    # Render updated list
+                    entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
+                    pending_invites = AgentAllowlistInvite.objects.filter(
+                        agent=agent, 
+                        status=AgentAllowlistInvite.InviteStatus.PENDING
+                    ).order_by('channel', 'address')
+                    
+                    # Add owner information for display
+                    owner_email = agent.user.email
+                    owner_phone = None
+                    try:
+                        from api.models import UserPhoneNumber
+                        phone_obj = UserPhoneNumber.objects.filter(
+                            user=agent.user, 
+                            is_verified=True
+                        ).first()
+                        owner_phone = phone_obj.phone_number if phone_obj else None
+                    except:
+                        pass
+                    
+                    html = render_to_string('console/partials/_allowlist_entries_inline.html', {
+                        'allowlist_entries': entries,
+                        'pending_invites': pending_invites,
+                        'owner_email': owner_email,
+                        'owner_phone': owner_phone,
+                    })
+                    
+                    # Count active entries AND pending invitations for the counter
+                    active_count = CommsAllowlistEntry.objects.filter(
+                        agent=agent,
+                        is_active=True
+                    ).count()
+                    pending_count = AgentAllowlistInvite.objects.filter(
+                        agent=agent,
+                        status=AgentAllowlistInvite.InviteStatus.PENDING
+                    ).count()
+                    total_count = active_count + pending_count
+                    
+                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count})
+                    
+                except Exception as e:
+                    return JsonResponse({'success': False, 'error': str(e)})
+            
+            elif action == 'cancel_invite':
+                invite_id = request.POST.get('invite_id')
+                
+                try:
+                    # Find and delete the invitation
+                    AgentAllowlistInvite.objects.filter(agent=agent, id=invite_id).delete()
+                    
+                    # Render updated list
+                    entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
+                    pending_invites = AgentAllowlistInvite.objects.filter(
+                        agent=agent, 
+                        status=AgentAllowlistInvite.InviteStatus.PENDING
+                    ).order_by('channel', 'address')
+                    
+                    # Add owner information for display
+                    owner_email = agent.user.email
+                    owner_phone = None
+                    try:
+                        from api.models import UserPhoneNumber
+                        phone_obj = UserPhoneNumber.objects.filter(
+                            user=agent.user, 
+                            is_verified=True
+                        ).first()
+                        owner_phone = phone_obj.phone_number if phone_obj else None
+                    except:
+                        pass
+                    
+                    html = render_to_string('console/partials/_allowlist_entries_inline.html', {
+                        'allowlist_entries': entries,
+                        'pending_invites': pending_invites,
+                        'owner_email': owner_email,
+                        'owner_phone': owner_phone,
+                    })
+                    
+                    # Count active entries AND pending invitations for the counter
+                    active_count = CommsAllowlistEntry.objects.filter(
+                        agent=agent,
+                        is_active=True
+                    ).count()
+                    pending_count = AgentAllowlistInvite.objects.filter(
+                        agent=agent,
+                        status=AgentAllowlistInvite.InviteStatus.PENDING
+                    ).count()
+                    total_count = active_count + pending_count
+                    
+                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count})
+                    
+                except Exception as e:
+                    return JsonResponse({'success': False, 'error': str(e)})
+            
+            return JsonResponse({'success': False, 'error': 'Invalid action'})
+        
+        # Handle regular form submission
+        # Check if this is an allowlist action that shouldn't have gotten here
+        action = request.POST.get('action', '')
+        if action in ['add_allowlist', 'remove_allowlist']:
+            # This shouldn't happen, but if JavaScript failed, redirect back
+            # Import messages here if needed
+            from django.contrib import messages as django_messages
+            django_messages.error(request, "Please enable JavaScript to manage the allowlist.")
+            return redirect('agent_detail', pk=agent.pk)
+        
         new_name = request.POST.get('name', '').strip()
         new_charter = request.POST.get('charter', '').strip()
         # Checkbox inputs are only present in POST data when checked. Determine the desired
         # active state based on whether the "is_active" field was submitted.
         new_is_active = 'is_active' in request.POST
+        
+        # Handle whitelist policy update if multiplayer_agents flag is active
+        from waffle import flag_is_active
+        from constants.feature_flags import MULTIPLAYER_AGENTS
+        
+        new_whitelist_policy = None
+        if flag_is_active(request, MULTIPLAYER_AGENTS):
+            new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
 
         if not new_name:
             messages.error(request, "Agent name cannot be empty.")
@@ -1285,6 +1560,12 @@ class AgentDetailView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
                 if agent.is_active != new_is_active:
                     agent.is_active = new_is_active
                     agent_fields_to_update.append('is_active')
+                
+                # Update whitelist policy if provided and changed
+                if new_whitelist_policy and agent.whitelist_policy != new_whitelist_policy:
+                    if new_whitelist_policy in [choice[0] for choice in PersistentAgent.WhitelistPolicy.choices]:
+                        agent.whitelist_policy = new_whitelist_policy
+                        agent_fields_to_update.append('whitelist_policy')
 
                 # Persist changes if needed
                 if agent_fields_to_update:
@@ -1292,19 +1573,19 @@ class AgentDetailView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
                 if browser_agent_fields_to_update:
                     agent.browser_use_agent.save(update_fields=browser_agent_fields_to_update)
 
-            messages.success(request, "Agent updated successfully.")
+                messages.success(request, "Agent updated successfully.")
 
-            Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
-                source=AnalyticsSource.WEB,
-                properties={
-                    'agent_id': str(agent.pk),
-                    'agent_name': new_name,
-                    'is_active': new_is_active,
-                    'charter': new_charter,
-                }
-            )
+                Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
+                    source=AnalyticsSource.WEB,
+                    properties={
+                        'agent_id': str(agent.pk),
+                        'agent_name': new_name,
+                        'is_active': new_is_active,
+                        'charter': new_charter,
+                    }
+                )
         except Exception as e:
             messages.error(request, f"Error updating agent: {e}")
 
@@ -1571,11 +1852,12 @@ class AgentSecretsAddView(WaffleFlagMixin, LoginRequiredMixin, View):
         return redirect('agent_secrets', pk=agent.pk)
 
 
-class AgentSecretsEditView(WaffleFlagMixin, LoginRequiredMixin, View):
-    """Edit an existing secret value."""
+class AgentSecretsEditView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+    """Edit view for existing secret value (GET render + POST update)."""
     waffle_flag = PERSISTENT_AGENTS
+    template_name = "console/agent_secret_edit.html"
 
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Edit")
+    @tracer.start_as_current_span("CONSOLE Agent Secrets Edit - get_object")
     def get_object(self):
         """Get the agent or raise 404."""
         return get_object_or_404(
@@ -1584,28 +1866,60 @@ class AgentSecretsEditView(WaffleFlagMixin, LoginRequiredMixin, View):
             user=self.request.user
         )
 
-    def post(self, request, *args, **kwargs):
-        """Handle editing a secret value."""
+    def get(self, request, *args, **kwargs):
+        """Load secret by ID for edit form."""
         agent = self.get_object()
-        secret_key = kwargs.get('secret_key')
-        
-        if not secret_key:
-            messages.error(request, "Secret key is required.")
+        secret_id = kwargs.get('secret_id') or self.kwargs.get('secret_id')
+
+        from api.models import PersistentAgentSecret
+
+        if not secret_id:
+            messages.error(request, "Secret ID is required.")
             return redirect('agent_secrets', pk=agent.pk)
 
-        # Get the specific secret
         try:
-            from api.models import PersistentAgentSecret
-            secret = PersistentAgentSecret.objects.get(
-                key=secret_key,
-                agent=agent
-            )
+            secret = PersistentAgentSecret.objects.get(agent=agent, pk=secret_id)
+        except PersistentAgentSecret.DoesNotExist:
+            messages.error(request, "Secret not found.")
+            return redirect('agent_secrets', pk=agent.pk)
+
+        # Store the secret in kwargs for other methods
+        kwargs['secret_obj'] = secret
+        return super().get(request, *args, **kwargs)
+
+    @tracer.start_as_current_span("CONSOLE Agent Secrets Edit - get_context_data")
+    def get_context_data(self, **kwargs):
+        """Add agent, secret info, and form to context."""
+        context = super().get_context_data(**kwargs)
+        agent = self.get_object()
+        secret_obj = kwargs.get('secret_obj')
+        
+        context['agent'] = agent
+        context['secret_key'] = secret_obj.key if secret_obj else None
+        context['secret_name'] = secret_obj.name if secret_obj else None
+        context['domain'] = secret_obj.domain_pattern if secret_obj else None
+        context['form'] = PersistentAgentEditSecretForm(agent=agent, secret=secret_obj)
+        return context
+
+    def post(self, request, *args, **kwargs):
+        """Handle form submission for editing a secret value."""
+        agent = self.get_object()
+        secret_id = kwargs.get('secret_id') or self.kwargs.get('secret_id')
+
+        if not secret_id:
+            messages.error(request, "Secret ID is required.")
+            return redirect('agent_secrets', pk=agent.pk)
+
+        # Find the secret by ID
+        from api.models import PersistentAgentSecret
+        try:
+            secret = PersistentAgentSecret.objects.get(agent=agent, pk=secret_id)
         except PersistentAgentSecret.DoesNotExist:
             messages.error(request, "Secret not found.")
             return redirect('agent_secrets', pk=agent.pk)
 
         form = PersistentAgentEditSecretForm(request.POST, agent=agent, secret=secret)
-        
+
         if form.is_valid():
             try:
                 with transaction.atomic():
@@ -1613,7 +1927,7 @@ class AgentSecretsEditView(WaffleFlagMixin, LoginRequiredMixin, View):
                     new_name = form.cleaned_data['name']
                     new_description = form.cleaned_data.get('description', '')
                     new_value = form.cleaned_data['value']
-
+                    
                     # Update name and description
                     secret.name = new_name
                     secret.description = new_description
@@ -1636,16 +1950,16 @@ class AgentSecretsEditView(WaffleFlagMixin, LoginRequiredMixin, View):
                         }
                     ))
 
+                    return redirect('agent_secrets', pk=agent.pk)
+
             except Exception as e:
-                logger.error(f"Failed to edit secret {secret_key} for agent {agent.id}: {str(e)}")
+                logger.error(f"Failed to edit secret for agent {agent.id}: {str(e)}")
                 messages.error(request, "Failed to update secret. Please try again.")
-        else:
-            # Show form errors
-            for field, errors in form.errors.items():
-                for error in errors:
-                    messages.error(request, f"{field}: {error}")
         
-        return redirect('agent_secrets', pk=agent.pk)
+        # If form is invalid or exception occurred, re-render with errors
+        context = self.get_context_data(**kwargs)
+        context['form'] = form
+        return self.render_to_response(context)
 
 
 class AgentSecretsDeleteView(WaffleFlagMixin, LoginRequiredMixin, View):
@@ -1662,19 +1976,19 @@ class AgentSecretsDeleteView(WaffleFlagMixin, LoginRequiredMixin, View):
         )
 
     def post(self, request, *args, **kwargs):
-        """Handle deleting a secret."""
+        """Handle deleting a secret by secret ID."""
         agent = self.get_object()
-        secret_key = kwargs.get('secret_key')
-        
-        if not secret_key:
-            messages.error(request, "Secret key is required.")
+        secret_id = kwargs.get('secret_id')
+
+        if not secret_id:
+            messages.error(request, "Secret ID is required.")
             return redirect('agent_secrets', pk=agent.pk)
 
-        # Get the specific secret
+        # Get the specific secret by ID
         try:
             from api.models import PersistentAgentSecret
             secret = PersistentAgentSecret.objects.get(
-                key=secret_key,
+                pk=secret_id,
                 agent=agent
             )
         except PersistentAgentSecret.DoesNotExist:
@@ -1708,7 +2022,7 @@ class AgentSecretsDeleteView(WaffleFlagMixin, LoginRequiredMixin, View):
                 ))
 
         except Exception as e:
-            logger.error(f"Failed to delete secret {secret_key} for agent {agent.id}: {str(e)}")
+            logger.error(f"Failed to delete secret {secret_id} for agent {agent.id}: {str(e)}")
             messages.error(request, "Failed to delete secret. Please try again.")
         
         return redirect('agent_secrets', pk=agent.pk)
@@ -1796,151 +2110,7 @@ class AgentSecretsAddFormView(WaffleFlagMixin, LoginRequiredMixin, TemplateView)
         return self.render_to_response(context)
 
 
-class AgentSecretsEditFormView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
-    """Form view for editing an existing secret value."""
-    waffle_flag = PERSISTENT_AGENTS
-    template_name = "console/agent_secret_edit.html"
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Edit Form View - get_object")
-    def get_object(self):
-        """Get the agent or raise 404."""
-        return get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
-
-    def get(self, request, *args, **kwargs):
-        """Handle GET requests with validation."""
-        agent = self.get_object()
-        secret_key = kwargs.get('secret_key') or self.kwargs.get('secret_key')
-        domain = kwargs.get('domain') or self.kwargs.get('domain')
-        
-        # Find the secret in the new model structure
-        from api.models import PersistentAgentSecret
-
-        # If domain is provided, look for that specific combination
-        if domain:
-            try:
-                secret = PersistentAgentSecret.objects.get(
-                    agent=agent,
-                    key=secret_key,
-                    domain_pattern=domain
-                )
-            except PersistentAgentSecret.DoesNotExist:
-                messages.error(request, f"Secret '{secret_key}' not found in domain '{domain}'.")
-                return redirect('agent_secrets', pk=agent.pk)
-        else:
-            # If domain not provided, find the secret by key (assuming it's unique for the agent)
-            secrets = PersistentAgentSecret.objects.filter(agent=agent, key=secret_key)
-            if not secrets.exists():
-                messages.error(request, f"Secret '{secret_key}' not found.")
-                return redirect('agent_secrets', pk=agent.pk)
-            elif secrets.count() > 1:
-                # Multiple secrets with same key in different domains
-                domains = [s.domain_pattern for s in secrets]
-                messages.error(request, f"Secret '{secret_key}' exists in multiple domains: {', '.join(domains)}. Please specify domain.")
-                return redirect('agent_secrets', pk=agent.pk)
-            else:
-                secret = secrets.first()
-
-        # Store the secret in kwargs for other methods
-        kwargs['secret_obj'] = secret
-        
-        return super().get(request, *args, **kwargs)
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Edit Form View - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add agent, secret info, and form to context."""
-        context = super().get_context_data(**kwargs)
-        agent = self.get_object()
-        secret_key = kwargs.get('secret_key') or self.kwargs.get('secret_key')
-        secret_obj = kwargs.get('secret_obj')
-        
-        context['agent'] = agent
-        context['secret_key'] = secret_key
-        context['secret_name'] = secret_obj.name if secret_obj else None
-        context['domain'] = secret_obj.domain_pattern if secret_obj else None
-        context['form'] = PersistentAgentEditSecretForm(agent=agent, secret=secret_obj)
-        return context
-
-    def post(self, request, *args, **kwargs):
-        """Handle form submission."""
-        agent = self.get_object()
-        secret_key = kwargs.get('secret_key') or self.kwargs.get('secret_key')
-        domain = kwargs.get('domain') or self.kwargs.get('domain')
-        
-        if not secret_key:
-            messages.error(request, "Secret key is required.")
-            return redirect('agent_secrets', pk=agent.pk)
-
-        # Find the secret in the new model structure
-        from api.models import PersistentAgentSecret
-        
-        if domain:
-            try:
-                secret = PersistentAgentSecret.objects.get(
-                    agent=agent,
-                    key=secret_key,
-                    domain_pattern=domain
-                )
-            except PersistentAgentSecret.DoesNotExist:
-                messages.error(request, f"Secret '{secret_key}' not found in domain '{domain}'.")
-                return redirect('agent_secrets', pk=agent.pk)
-        else:
-            secrets = PersistentAgentSecret.objects.filter(agent=agent, key=secret_key)
-            if not secrets.exists():
-                messages.error(request, f"Secret '{secret_key}' not found.")
-                return redirect('agent_secrets', pk=agent.pk)
-            elif secrets.count() > 1:
-                domains = [s.domain_pattern for s in secrets]
-                messages.error(request, f"Secret '{secret_key}' exists in multiple domains: {', '.join(domains)}. Please specify domain.")
-                return redirect('agent_secrets', pk=agent.pk)
-            else:
-                secret = secrets.first()
-
-        form = PersistentAgentEditSecretForm(request.POST, agent=agent, secret=secret)
-
-        if form.is_valid():
-            try:
-                with transaction.atomic():
-                    # Update the secret fields
-                    new_name = form.cleaned_data['name']
-                    new_description = form.cleaned_data.get('description', '')
-                    new_value = form.cleaned_data['value']
-                    
-                    # Update name and description
-                    secret.name = new_name
-                    secret.description = new_description
-                    secret.full_clean()  # This will regenerate the key if name changed
-                    secret.set_value(new_value)  # This validates and encrypts the value
-                    secret.save()
-                    
-                    messages.success(request, f"Secret '{secret.name}' updated successfully.")
-
-                    transaction.on_commit(lambda: Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_UPDATED,
-                        source=AnalyticsSource.WEB,
-                        properties={
-                            'agent_id': str(agent.pk),
-                            'agent_name': agent.name,
-                            'secret_name': secret.name,
-                            'secret_key': secret.key,
-                            'domain': secret.domain_pattern,
-                        }
-                    ))
-
-                    return redirect('agent_secrets', pk=agent.pk)
-
-            except Exception as e:
-                logger.error(f"Failed to edit secret for agent {agent.id}: {str(e)}")
-                messages.error(request, "Failed to update secret. Please try again.")
-        
-        # If form is invalid or exception occurred, re-render with errors
-        context = self.get_context_data(**kwargs)
-        context['form'] = form
-        return self.render_to_response(context)
+# (Consolidated) AgentSecretsEditFormView removed; logic merged into AgentSecretsEditView
 
 @login_required
 @require_POST
@@ -2111,6 +2281,296 @@ class AgentSecretsRequestThanksView(WaffleFlagMixin, LoginRequiredMixin, Templat
         )
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Request Thanks View - get_context_data")
+    def get_context_data(self, **kwargs):
+        """Add agent to context."""
+        context = super().get_context_data(**kwargs)
+        context['agent'] = self.get_object()
+        return context
+
+class AgentWelcomeView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
+    """Welcome page shown immediately after creating an agent."""
+    waffle_flag = PERSISTENT_AGENTS
+    model = PersistentAgent
+    template_name = "console/agent_welcome.html"
+    context_object_name = "agent"
+    pk_url_kwarg = "pk"
+
+    @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_queryset")
+    def get_queryset(self):
+        # Ensure users can only access their own agents
+        return super().get_queryset().filter(user=self.request.user)
+
+    @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_context_data")
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = self.get_object()
+
+        # Show agent endpoints for each channel if they exist, regardless of primary flag
+        primary_email = agent.comms_endpoints.filter(
+            channel=CommsChannel.EMAIL
+        ).first()
+        primary_sms = agent.comms_endpoints.filter(
+            channel=CommsChannel.SMS
+        ).first()
+
+        context['primary_email'] = primary_email
+        context['primary_sms'] = primary_sms
+
+        # Determine the user's preferred contact channel from the agent's preference
+        preferred_channel = None
+        try:
+            preferred_ep = agent.preferred_contact_endpoint
+            if preferred_ep and preferred_ep.channel in (CommsChannel.SMS, CommsChannel.EMAIL):
+                preferred_channel = 'sms' if preferred_ep.channel == CommsChannel.SMS else 'email'
+        except Exception:
+            preferred_channel = None
+        # Fallback to detect a likely preference if not set
+        if preferred_channel is None:
+            if primary_sms and getattr(primary_sms, 'is_primary', False):
+                preferred_channel = 'sms'
+            elif primary_email and getattr(primary_email, 'is_primary', False):
+                preferred_channel = 'email'
+        context['preferred_channel'] = preferred_channel
+
+        return context
+
+class AgentContactRequestsView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+    """View for displaying and approving contact requests from agents."""
+    waffle_flag = PERSISTENT_AGENTS
+    template_name = "console/agent_contact_requests.html"
+    
+    @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get_object")
+    def get_object(self):
+        """Get the agent or raise 404."""
+        return get_object_or_404(
+            PersistentAgent,
+            pk=self.kwargs['pk'],
+            user=self.request.user
+        )
+    
+    @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get_context_data")
+    def get_context_data(self, **kwargs):
+        """Add agent and pending contact requests to context."""
+        context = super().get_context_data(**kwargs)
+        agent = self.get_object()
+        context['agent'] = agent
+        
+        # Get pending contact requests
+        from api.models import CommsAllowlistRequest, CommsAllowlistEntry, AgentAllowlistInvite
+        pending_requests = CommsAllowlistRequest.objects.filter(
+            agent=agent,
+            status=CommsAllowlistRequest.RequestStatus.PENDING
+        ).order_by('-requested_at')
+        
+        context['pending_requests'] = pending_requests
+        context['has_pending_requests'] = pending_requests.exists()
+        
+        # Get current allowlist usage for limit display
+        from util.subscription_helper import get_user_max_contacts_per_agent
+        max_contacts = get_user_max_contacts_per_agent(agent.user)
+        active_count = CommsAllowlistEntry.objects.filter(
+            agent=agent, is_active=True
+        ).count()
+        pending_invites = AgentAllowlistInvite.objects.filter(
+            agent=agent, status=AgentAllowlistInvite.InviteStatus.PENDING
+        ).count()
+        
+        context['max_contacts'] = max_contacts
+        context['active_count'] = active_count
+        context['pending_invites'] = pending_invites
+        context['total_count'] = active_count + pending_invites
+        context['remaining_slots'] = max(0, max_contacts - (active_count + pending_invites))
+        
+        # Create form
+        from console.forms import ContactRequestApprovalForm
+        context['form'] = ContactRequestApprovalForm(contact_requests=pending_requests)
+        
+        return context
+    
+    def post(self, request, *args, **kwargs):
+        """Handle approval/rejection of contact requests."""
+        agent = self.get_object()
+        
+        # Get pending requests
+        from api.models import CommsAllowlistRequest, PersistentAgentStep, PersistentAgentSystemStep
+        pending_requests = CommsAllowlistRequest.objects.filter(
+            agent=agent,
+            status=CommsAllowlistRequest.RequestStatus.PENDING
+        ).order_by('-requested_at')
+        
+        from console.forms import ContactRequestApprovalForm
+        form = ContactRequestApprovalForm(request.POST, contact_requests=pending_requests)
+        
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    approved_count = 0
+                    rejected_count = 0
+                    approved_addresses = []
+                    invitations_sent = []
+                    
+                    for request_obj in pending_requests:
+                        field_name = f'approve_{request_obj.id}'
+                        should_approve = form.cleaned_data.get(field_name, False)
+                        
+                        try:
+                            if should_approve:
+                                # Try to approve (will directly add to allowlist, skipping invitation)
+                                result = request_obj.approve(invited_by=request.user, skip_invitation=True)
+                                approved_count += 1
+                                approved_addresses.append(f"{request_obj.name or request_obj.address}")
+                                
+                                # Check if we created a new invitation that needs email (won't happen with skip_invitation=True)
+                                from api.models import AgentAllowlistInvite
+                                if isinstance(result, AgentAllowlistInvite):
+                                    invitations_sent.append(request_obj.address)
+                            else:
+                                request_obj.reject()
+                                rejected_count += 1
+                        except ValidationError as e:
+                            # Hit the limit, show error
+                            messages.error(
+                                request, 
+                                f"Could not approve {request_obj.address}: {e.message if hasattr(e, 'message') else str(e)}"
+                            )
+                            continue
+                    
+                    if approved_count > 0:
+                        # Switch agent to manual allowlist mode if not already
+                        if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+                            agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+                            agent.save(update_fields=['whitelist_policy'])
+                        
+                        # Send invitation emails for new invitations
+                        if invitations_sent:
+                            from django.core.mail import send_mail
+                            from django.template.loader import render_to_string
+                            from django.urls import reverse
+                            from api.models import AgentAllowlistInvite, CommsChannel
+                            
+                            for address in invitations_sent:
+                                # Get the invitation we just created
+                                invitation = AgentAllowlistInvite.objects.filter(
+                                    agent=agent,
+                                    address=address,
+                                    status=AgentAllowlistInvite.InviteStatus.PENDING
+                                ).first()
+                                
+                                if invitation and invitation.channel == 'email':
+                                    try:
+                                        # Get the agent's primary email endpoint
+                                        primary_email = agent.comms_endpoints.filter(
+                                            channel=CommsChannel.EMAIL, is_primary=True
+                                        ).first()
+                                        
+                                        if not primary_email:
+                                            primary_email = agent.comms_endpoints.filter(
+                                                channel=CommsChannel.EMAIL
+                                            ).first()
+                                        
+                                        if primary_email:
+                                            # Build accept/reject URLs
+                                            accept_url = request.build_absolute_uri(
+                                                reverse('agent_allowlist_invite_accept', kwargs={'token': invitation.token})
+                                            )
+                                            reject_url = request.build_absolute_uri(
+                                                reverse('agent_allowlist_invite_reject', kwargs={'token': invitation.token})
+                                            )
+                                            
+                                            context = {
+                                                'agent': agent,
+                                                'agent_owner': agent.user,
+                                                'contact_email': address,
+                                                'agent_email': primary_email.address,
+                                                'accept_url': accept_url,
+                                                'reject_url': reject_url,
+                                                'invite': invitation,
+                                            }
+                                            
+                                            subject = f"You're invited to communicate with {agent.name} on Gobii"
+                                            text_body = render_to_string('emails/agent_allowlist_invite.txt', context)
+                                            html_body = render_to_string('emails/agent_allowlist_invite.html', context)
+                                            
+                                            send_mail(
+                                                subject,
+                                                text_body,
+                                                None,  # Use default from email
+                                                [address],
+                                                html_message=html_body,
+                                                fail_silently=True,  # Don't fail the whole process if email fails
+                                            )
+                                    except Exception as e:
+                                        import logging
+                                        logger = logging.getLogger(__name__)
+                                        logger.warning("Failed to send allowlist invitation email to %s: %s", address, e)
+                        
+                        # Create system step to record approvals
+                        step = PersistentAgentStep.objects.create(
+                            agent=agent,
+                            description=f"User approved {approved_count} contact request(s)"
+                        )
+                        PersistentAgentSystemStep.objects.create(
+                            step=step,
+                            code=PersistentAgentSystemStep.Code.CONTACTS_APPROVED,
+                            notes=f"Approved: {', '.join(approved_addresses)}"
+                        )
+                        
+                        # Trigger agent event processing
+                        from api.agent.tasks.process_events import process_agent_events_task
+                        process_agent_events_task.delay(str(agent.pk))
+                        
+                        Analytics.track_event(
+                            user_id=self.request.user.id,
+                            event=AnalyticsEvent.AGENT_CONTACTS_APPROVED,
+                            source=AnalyticsSource.WEB,
+                            properties={
+                                'agent_id': str(agent.pk),
+                                'agent_name': agent.name,
+                                'approved_count': approved_count,
+                                'rejected_count': rejected_count,
+                                'invitations_sent': len(invitations_sent),
+                            }
+                        )
+                        
+                        # Success message for approved contacts
+                        messages.success(
+                            request, 
+                            f"Successfully approved {approved_count} contact(s) - added to allowlist."
+                        )
+                    
+                    if rejected_count > 0:
+                        messages.info(request, f"Rejected {rejected_count} contact(s)")
+                    
+                    if approved_count > 0 or rejected_count > 0:
+                        return redirect('agent_contact_requests_thanks', pk=agent.pk)
+                    else:
+                        messages.warning(request, "No contacts were selected")
+                        
+            except Exception as e:
+                logger.error(f"Failed to process contact requests for agent {agent.id}: {str(e)}")
+                messages.error(request, "Failed to process requests. Please try again.")
+        
+        # If form invalid or failed, redisplay
+        context = self.get_context_data(**kwargs)
+        context['form'] = form
+        return self.render_to_response(context)
+
+
+class AgentContactRequestsThanksView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+    """Thank you page after approving contact requests."""
+    waffle_flag = PERSISTENT_AGENTS
+    template_name = "console/agent_contact_requests_thanks.html"
+    
+    @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_object")
+    def get_object(self):
+        """Get the agent or raise 404."""
+        return get_object_or_404(
+            PersistentAgent,
+            pk=self.kwargs['pk'],
+            user=self.request.user
+        )
+    
+    @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_context_data")
     def get_context_data(self, **kwargs):
         """Add agent to context."""
         context = super().get_context_data(**kwargs)
@@ -2858,3 +3318,105 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
         target_membership.save(update_fields=["role"])
         messages.success(request, "Member role updated.")
         return redirect("organization_detail", org_id=org.id)
+
+
+class AgentAllowlistInviteAcceptView(TemplateView):
+    """Handle accepting an agent allowlist invitation."""
+    template_name = "console/agent_allowlist_invite_response.html"
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        token = kwargs.get("token")
+        
+        try:
+            # Use select_related and prefetch_related for efficiency
+            invite = AgentAllowlistInvite.objects.select_related('agent__user').prefetch_related('agent__comms_endpoints').get(token=token)
+            context["invite"] = invite
+            context["agent"] = invite.agent
+            
+            if invite.status != AgentAllowlistInvite.InviteStatus.PENDING:
+                context["already_responded"] = True
+                context["status"] = invite.get_status_display()
+            elif invite.is_expired():
+                context["expired"] = True
+            else:
+                context["can_accept"] = True
+                
+        except AgentAllowlistInvite.DoesNotExist:
+            context["invalid_token"] = True
+            
+        return context
+    
+    def post(self, request, *args, **kwargs):
+        token = kwargs.get("token")
+        
+        try:
+            invite = AgentAllowlistInvite.objects.get(token=token)
+            
+            if not invite.can_be_accepted():
+                messages.error(request, "This invitation is no longer valid.")
+                return redirect("agent_allowlist_invite_accept", token=token)
+            
+            # Accept the invitation
+            invite.accept()
+            messages.success(
+                request, 
+                f"Great! You can now communicate with {invite.agent.name} by email."
+            )
+            
+        except AgentAllowlistInvite.DoesNotExist:
+            messages.error(request, "Invalid invitation token.")
+        except Exception as e:
+            messages.error(request, f"Error accepting invitation: {e}")
+            
+        return redirect("agent_allowlist_invite_accept", token=token)
+
+
+class AgentAllowlistInviteRejectView(TemplateView):
+    """Handle rejecting an agent allowlist invitation.""" 
+    template_name = "console/agent_allowlist_invite_response.html"
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        token = kwargs.get("token")
+        
+        try:
+            # Use select_related and prefetch_related for efficiency
+            invite = AgentAllowlistInvite.objects.select_related('agent__user').prefetch_related('agent__comms_endpoints').get(token=token)
+            context["invite"] = invite
+            context["agent"] = invite.agent
+            context["rejecting"] = True
+            
+            if invite.status != AgentAllowlistInvite.InviteStatus.PENDING:
+                context["already_responded"] = True  
+                context["status"] = invite.get_status_display()
+            elif invite.is_expired():
+                context["expired"] = True
+            else:
+                context["can_reject"] = True
+                
+        except AgentAllowlistInvite.DoesNotExist:
+            context["invalid_token"] = True
+            
+        return context
+    
+    def post(self, request, *args, **kwargs):
+        token = kwargs.get("token")
+        
+        try:
+            invite = AgentAllowlistInvite.objects.get(token=token)
+            
+            if invite.status != AgentAllowlistInvite.InviteStatus.PENDING:
+                messages.error(request, "This invitation has already been responded to.")
+                return redirect("agent_allowlist_invite_reject", token=token)
+            
+            # Reject the invitation
+            invite.reject()
+            messages.success(request, "You have declined the invitation.")
+            
+        except AgentAllowlistInvite.DoesNotExist:
+            messages.error(request, "Invalid invitation token.")
+        except Exception as e:
+            messages.error(request, f"Error rejecting invitation: {e}")
+            
+        return redirect("agent_allowlist_invite_reject", token=token)

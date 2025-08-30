@@ -49,7 +49,17 @@ class ManualEmailDisplayNameAndCaseTests(TestCase):
         )
 
     def _postmark_req(self, from_email: str):
-        payload = {"From": from_email, "To": self.agent_ep.address, "Subject": "t", "TextBody": "hi"}
+        # Use the new Postmark "Full" format
+        to_address = self.agent_ep.address
+        payload = {
+            "From": from_email,
+            "To": to_address,  # Keep for backward compatibility
+            "ToFull": [{"Email": to_address, "Name": "", "MailboxHash": ""}],
+            "CcFull": [],
+            "BccFull": [],
+            "Subject": "t",
+            "TextBody": "hi"
+        }
         return self.factory.post(
             "/api/webhooks/inbound/email/",
             data=json.dumps(payload),

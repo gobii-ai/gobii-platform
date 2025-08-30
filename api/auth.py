@@ -24,6 +24,10 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
                 if not api_key.matches(raw_key):
                     raise exceptions.AuthenticationFailed("Invalid API key")
 
+            # Check if the user account is active
+            if not api_key.user.is_active:
+                raise exceptions.AuthenticationFailed("User account is inactive")
+
             with traced("API Key Update"):
                 api_key.last_used_at = timezone.now()
                 api_key.save(update_fields=["last_used_at"])

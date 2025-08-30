@@ -1,0 +1,133 @@
+{% extends "page.html" %}
+{% load static %}
+
+{% block title %}
+  {% if rejecting %}Decline Invitation{% else %}Agent Invitation{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto py-12">
+  <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+    {% if invalid_token %}
+      <!-- Invalid Token -->
+      <div class="text-center p-8">
+        <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+          </svg>
+        </div>
+        <h2 class="text-2xl font-bold text-gray-900 mb-2">Invalid Invitation</h2>
+        <p class="text-gray-600">This invitation link is not valid or has expired.</p>
+      </div>
+      
+    {% elif expired %}
+      <!-- Expired -->
+      <div class="text-center p-8">
+        <div class="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg class="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+        </div>
+        <h2 class="text-2xl font-bold text-gray-900 mb-2">Invitation Expired</h2>
+        <p class="text-gray-600 mb-4">This invitation for {{ agent.name }} has expired.</p>
+        <p class="text-sm text-gray-500">Please contact {{ invite.invited_by.get_full_name|default:invite.invited_by.username }} for a new invitation.</p>
+      </div>
+      
+    {% elif already_responded %}
+      <!-- Already Responded -->
+      <div class="text-center p-8">
+        <div class="w-16 h-16 {% if status == 'Accepted' %}bg-green-100{% else %}bg-gray-100{% endif %} rounded-full flex items-center justify-center mx-auto mb-4">
+          {% if status == 'Accepted' %}
+            <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+          {% else %}
+            <svg class="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          {% endif %}
+        </div>
+        <h2 class="text-2xl font-bold text-gray-900 mb-2">{{ status }}</h2>
+        <p class="text-gray-600">You have {{ status|lower }} this invitation for {{ agent.name }}.</p>
+        {% if status == 'Accepted' %}
+          <div class="mt-6 p-4 bg-blue-50 rounded-lg">
+            <p class="text-sm text-blue-800">
+              You can communicate with {{ agent.name }} by sending emails to: 
+              <strong>{{ agent.comms_endpoints.all.0.address }}</strong>
+            </p>
+          </div>
+        {% endif %}
+      </div>
+      
+    {% elif rejecting and can_reject %}
+      <!-- Reject Confirmation -->
+      <div class="p-8">
+        <div class="text-center mb-6">
+          <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </div>
+          <h2 class="text-2xl font-bold text-gray-900 mb-2">Decline Invitation</h2>
+          <p class="text-gray-600">Are you sure you want to decline this invitation to communicate with {{ agent.name }}?</p>
+        </div>
+        
+        <div class="bg-gray-50 rounded-lg p-4 mb-6">
+          <h3 class="font-semibold text-gray-900 mb-2">About {{ agent.name }}:</h3>
+          <p class="text-sm text-gray-600">{{ agent.charter|truncatewords:30 }}</p>
+          <p class="text-xs text-gray-500 mt-2">Invited by {{ invite.invited_by.get_full_name|default:invite.invited_by.username }}</p>
+        </div>
+        
+        <div class="flex gap-4 justify-center">
+          <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors">
+              Yes, Decline Invitation
+            </button>
+          </form>
+          <a href="#" onclick="window.history.back()" class="bg-gray-200 text-gray-800 px-6 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors">
+            Cancel
+          </a>
+        </div>
+      </div>
+      
+    {% elif can_accept %}
+      <!-- Accept Form -->
+      <div class="p-8">
+        <div class="text-center mb-6">
+          <div class="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+            </svg>
+          </div>
+          <h2 class="text-2xl font-bold text-gray-900 mb-2">You're Invited!</h2>
+          <p class="text-gray-600">{{ invite.invited_by.get_full_name|default:invite.invited_by.username }} has invited you to communicate with their AI agent.</p>
+        </div>
+        
+        <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 mb-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-2">{{ agent.name }}</h3>
+          <p class="text-sm text-gray-700 mb-3">{{ agent.charter|truncatewords:30 }}</p>
+          <div class="text-xs text-gray-500">
+            <p>Once you accept, you can email {{ agent.name }} directly to start conversations.</p>
+          </div>
+        </div>
+        
+        <div class="flex gap-4 justify-center">
+          <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="bg-green-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+              </svg>
+              Accept Invitation
+            </button>
+          </form>
+          <a href="{% url 'agent_allowlist_invite_reject' token=invite.token %}" class="bg-gray-200 text-gray-800 px-8 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors">
+            Decline
+          </a>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

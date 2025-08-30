@@ -1,0 +1,130 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="space-y-6 pb-6">
+  <!-- Header -->
+  <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
+    <div class="px-6 py-5 border-b border-gray-200/70">
+      <h1 class="text-2xl font-semibold text-gray-800">Your Agent Is Live</h1>
+      <p class="text-sm text-gray-600 mt-1">Here’s what happens next and how to start talking to it.</p>
+      <a href="{% url 'agents' %}" class="group inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
+        <svg class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Back to Agents
+      </a>
+    </div>
+  </div>
+
+  <!-- Next steps + Contact methods -->
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+    <div class="p-6 sm:p-8">
+      <div class="grid gap-6 sm:grid-cols-12">
+        <div class="sm:col-span-7 space-y-4">
+          <h2 class="text-lg font-semibold text-gray-800">What happens next</h2>
+          <ul class="space-y-2 text-sm text-gray-700 list-disc list-inside">
+            <li>We finish initializing your agent and connecting channels.</li>
+            <li>Your agent will contact you on your preferred channel.</li>
+            <li>You can reply naturally - it understands plain language.</li>
+          </ul>
+
+          <div class="mt-4">
+            <h3 class="text-sm font-medium text-gray-800">Try it now</h3>
+            <p class="text-xs text-gray-500 mt-1">Send a quick hello to start your first conversation.</p>
+            <div class="mt-3 flex flex-wrap gap-3">
+              {% if primary_email %}
+              <a href="mailto:{{ primary_email.address }}" class="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-indigo-600 text-white hover:bg-indigo-700">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                Email your agent
+              </a>
+              {% endif %}
+              {% if primary_sms %}
+              <a href="sms:{{ primary_sms.address }}" class="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-green-600 text-white hover:bg-green-700">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3l2 5-2 1a11 11 0 005 5l1-2 5 2v3a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"/></svg>
+                Text your agent
+              </a>
+              {% endif %}
+            </div>
+            <div class="mt-3 text-xs text-gray-500">
+              Examples: "Summarize my latest updates" &bull; "What should I prioritize today?" &bull; "Draft a response to this"
+            </div>
+          </div>
+        </div>
+
+        <div class="sm:col-span-5">
+          <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h3 class="text-sm font-medium text-gray-800">Your agent</h3>
+            <p class="text-base font-semibold text-gray-900 mt-1">{{ agent.name }}</p>
+
+            {% if primary_email %}
+            <div class="mt-4">
+              <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Agent Email</p>
+              <div class="mt-1 flex items-center justify-between gap-2">
+                <code class="text-sm text-gray-800">{{ primary_email.address }}</code>
+                <button type="button" class="rounded-md p-2 text-gray-400 hover:bg-white hover:text-gray-600" title="Copy"
+                        @click="navigator.clipboard.writeText('{{ primary_email.address }}')">
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                </button>
+              </div>
+            </div>
+            {% endif %}
+
+            {% if primary_sms %}
+            <div class="mt-4">
+              <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Agent SMS</p>
+              <div class="mt-1 flex items-center justify-between gap-2">
+                <code class="phone-number-to-format text-sm text-gray-800">{{ primary_sms.address }}</code>
+                <button type="button" class="rounded-md p-2 text-gray-400 hover:bg-white hover:text-gray-600" title="Copy"
+                        @click="navigator.clipboard.writeText('{{ primary_sms.address }}')">
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                </button>
+              </div>
+            </div>
+            {% endif %}
+
+            <div class="mt-6">
+              <a href="{% url 'agent_detail' agent.id %}" class="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white text-gray-800 hover:bg-gray-50">
+                Manage agent settings
+              </a>
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-gray-500">You’re in control. Pause or delete anytime from Settings.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FAQ / Tips -->
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+    <div class="p-6 sm:p-8">
+      <h2 class="text-lg font-semibold text-gray-800">Quick answers</h2>
+      <dl class="mt-4 grid gap-4 sm:grid-cols-2">
+        <div>
+          <dt class="text-sm font-medium text-gray-800">How will it contact me?</dt>
+          {% if preferred_channel == 'sms' %}
+          <dd class="mt-1 text-sm text-gray-600">Your agent will contact you via SMS. You can change this in Settings.</dd>
+          {% elif preferred_channel == 'email' %}
+          <dd class="mt-1 text-sm text-gray-600">Your agent will contact you via Email. You can change this in Settings.</dd>
+          {% else %}
+          <dd class="mt-1 text-sm text-gray-600">Your agent uses the channels shown above. You can change this in Settings.</dd>
+          {% endif %}
+        </div>
+        <div>
+          <dt class="text-sm font-medium text-gray-800">What data does it use?</dt>
+          <dd class="mt-1 text-sm text-gray-600">Your agent will access the internet and other tools to get the most up-to-date information for you.</dd>
+        </div>
+        <div>
+          <dt class="text-sm font-medium text-gray-800">How fast will it reply?</dt>
+          <dd class="mt-1 text-sm text-gray-600">Most messages get a response within seconds. Complex tasks may take longer while the agent gathers the latest information.</dd>
+        </div>
+        <div>
+          <dt class="text-sm font-medium text-gray-800">Will I be charged for messages?</dt>
+          <dd class="mt-1 text-sm text-gray-600">Standard carrier rates may apply for SMS/MMS.</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+</div>
+
+{% include "partials/_talk_to_agent_modal.html" %}
+{% endblock %}

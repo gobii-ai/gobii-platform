@@ -233,74 +233,132 @@ def email_webhook(request):
     try:
         # Parse the JSON payload
         data = json.loads(raw_json)
-
         from_email_raw = data.get('From')
-        to_email = data.get('To')
         subject = data.get('Subject')
 
-        logger.info(f"Received email from {from_email_raw} to {to_email}: {subject}")
+        # Parse email addresses - they can be comma-separated strings
+        def extract_emails_from_full_format(email_array):
+            """Extract email addresses from array of dicts with Email, Name, MailboxHash format"""
+            if not email_array or not isinstance(email_array, list):
+                return []
+            return [item.get('Email', '').strip() for item in email_array if item.get('Email', '').strip()]
 
-        # --- Whitelist check: allow only approved senders ---
-        with tracer.start_as_current_span("COMM email whitelist check") as span:
-            try:
-                endpoint = PersistentAgentCommsEndpoint.objects.select_related('owner_agent__user').get(
-                    channel=CommsChannel.EMAIL,
-                    address__iexact=to_email,
-                )
-                agent = endpoint.owner_agent
-            except PersistentAgentCommsEndpoint.DoesNotExist:
-                logger.info(f"Discarding email to unroutable address: {to_email}")
-                span.add_event('Email - Unroutable Address', {'to_email': to_email})
-                return HttpResponse(status=200)  # OK to prevent retries
+            # Collect all recipient addresses (ToFull, CcFull, and BccFull)
 
-            if not agent or not agent.user:
-                logger.warning(f"Endpoint {to_email} is not associated with a usable agent/user. Discarding.")
-                span.add_event('Email - No Agent/User', {'to_email': to_email})
-                return HttpResponse(status=200)
+        to_emails = extract_emails_from_full_format(data.get('ToFull', []))
+        cc_emails = extract_emails_from_full_format(data.get('CcFull', []))
+        bcc_emails = extract_emails_from_full_format(data.get('BccFull', []))
+
+        all_recipient_addresses = []
+        all_recipient_addresses.extend(to_emails)
+        all_recipient_addresses.extend(cc_emails)
+        all_recipient_addresses.extend(bcc_emails)
+
+        logger.info(f"Received email from {from_email_raw} to {to_emails}, CC: {cc_emails}, BCC: {bcc_emails}: {subject}")
+
+        # Find all agent endpoints that match any of the recipient addresses
+        matching_endpoints = []
+        with tracer.start_as_current_span("COMM email endpoint lookup") as span:
+            # We need to check each address individually for case-insensitive matching
+            # since Django doesn't support iexact__in
+            for address in all_recipient_addresses:
+                try:
+                    endpoint = PersistentAgentCommsEndpoint.objects.select_related('owner_agent__user').get(
+                        channel=CommsChannel.EMAIL,
+                        address__iexact=address,
+                        owner_agent__is_active=True
+                    )
+                    if endpoint.owner_agent and endpoint.owner_agent.user:
+                        matching_endpoints.append(endpoint)
+                        logger.info(f"Found agent endpoint for address: {address}")
+                    else:
+                        logger.warning(f"Endpoint {address} is not associated with a usable agent/user.")
+                except PersistentAgentCommsEndpoint.DoesNotExist:
+                    logger.debug(f"No agent endpoint found for address: {address}")
+                    continue
+
+            span.set_attribute("total_recipients", len(all_recipient_addresses))
+            span.set_attribute("matching_endpoints", len(matching_endpoints))
+
+        # If no matching endpoints found, discard the email
+        if not matching_endpoints:
+            logger.info(f"Discarding email - no routable agent addresses found in To/CC/BCC")
+            with tracer.start_as_current_span("COMM email no endpoints") as span:
+                span.add_event('Email - No Routable Addresses', {
+                    'to_emails': to_emails,
+                    'cc_emails': cc_emails,
+                    'bcc_emails': bcc_emails
+                })
+            return HttpResponse(status=200)  # OK to prevent retries
 
         # Postmark 'From' format can be "Name <email@example.com>"
         match = re.search(r'<([^>]+)>', from_email_raw)
         from_email = (match.group(1) if match else from_email_raw).strip()
 
-        if not agent.is_sender_whitelisted(CommsChannel.EMAIL, from_email):
-            logger.info(
-                f"Discarding email from non-whitelisted sender '{from_email}' to agent '{agent.name}'."
-            )
+        # Process the email for each matching agent endpoint
+        processed_agents = []
+        for endpoint in matching_endpoints:
+            agent = endpoint.owner_agent
+            
+            # --- Whitelist check for this specific agent ---
+            with tracer.start_as_current_span("COMM email whitelist check") as span:
+                span.set_attribute("agent_id", str(agent.id))
+                span.set_attribute("agent_name", agent.name)
+                span.set_attribute("endpoint_address", endpoint.address)
+                
+                if not agent.is_sender_whitelisted(CommsChannel.EMAIL, from_email):
+                    logger.info(
+                        f"Discarding email from non-whitelisted sender '{from_email}' to agent '{agent.name}' (endpoint: {endpoint.address})."
+                    )
+                    span.add_event('Email - Sender Not Whitelisted', {
+                        'from_email': from_email,
+                        'agent_id': str(agent.id),
+                        'agent_name': agent.name,
+                        'endpoint_address': endpoint.address
+                    })
+                    continue  # Skip this agent but continue processing for other agents
+            
+            # Process the message for this agent
+            try:
+                # Parse the message with the correct recipient address for this agent
+                # We need to create a new parsed message with the endpoint's address as the recipient
+                adapter = PostmarkEmailAdapter()
+                parsed_message = adapter.parse_request(request)
+                
+                # Override the recipient to be this specific endpoint's address
+                # This ensures the message is correctly associated with this agent
+                parsed_message.recipient = endpoint.address
+                
+                # Add message via message service for this specific agent
+                msg_info = ingest_inbound_message(CommsChannel.EMAIL, parsed_message)
+                
+                processed_agents.append(agent)
+                
+                Analytics.track_event(
+                    user_id=agent.user.id,
+                    event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_RECEIVED,
+                    source=AnalyticsSource.AGENT,
+                    properties={
+                        'agent_id': str(agent.id),
+                        'agent_name': agent.name,
+                        'from_email': from_email_raw,
+                        'message_id': str(msg_info.message.id),
+                        'endpoint_address': endpoint.address,
+                        'recipient_type': 'to' if endpoint.address in to_emails else
+                                         'cc' if endpoint.address in cc_emails else 'bcc'
+                    }
+                )
+                
+                logger.info(f"Successfully processed email for agent '{agent.name}' (endpoint: {endpoint.address})")
+            except Exception as e:
+                logger.error(f"Error processing email for agent '{agent.name}': {e}", exc_info=True)
+                continue  # Continue processing for other agents
 
-            span.add_event('Email - Sender Not Whitelisted', {
-                'from_email': from_email,
-                'agent_id': str(agent.id),
-                'agent_name': agent.name
-            })
-
-            return HttpResponse(status=200)
-        # --- End whitelist check ---
-
-        # Process the email message - you might want to connect this to your PersistentAgent models
-        # from api.models import PersistentAgentEmailEndpoint, PersistentAgentMessage
-        # endpoint = PersistentAgentEmailEndpoint.objects.get(email_address=to_email)
-        # message = PersistentAgentMessage.objects.create(
-        #     conversation=endpoint.conversation,
-        #     content=body,
-        #     is_from_agent=False,
-        #     subject=subject
-        # )
-
-        # Add message via message service
-        parsed_message = PostmarkEmailAdapter().parse_request(request)
-        msg_info = ingest_inbound_message(CommsChannel.EMAIL, parsed_message)
-
-        Analytics.track_event(
-            user_id=agent.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_RECEIVED,
-            source=AnalyticsSource.AGENT,
-            properties={
-                'agent_id': str(agent.id),
-                'agent_name': agent.name,
-                'from_email': from_email_raw,
-                'message_id': str(msg_info.message.id),
-            }
-        )
+        # Log summary
+        if processed_agents:
+            logger.info(f"Email processed for {len(processed_agents)} agent(s): {[a.name for a in processed_agents]}")
+        else:
+            logger.info("Email not processed for any agents due to whitelist restrictions")
 
         return HttpResponse(status=200)
     except json.JSONDecodeError as e:

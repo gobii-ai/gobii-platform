@@ -584,11 +584,22 @@ def deliver_agent_email(message: PersistentAgentMessage):
             attempt.id
         )
         
+        # Get CC addresses if any
+        cc_addresses = []
+        if message.cc_endpoints.exists():
+            cc_addresses = list(message.cc_endpoints.values_list('address', flat=True))
+            logger.info(
+                "Email message %s includes CC recipients: %s",
+                message.id,
+                cc_addresses
+            )
+        
         msg = AnymailMessage(
             subject=subject,
             body=plaintext_body,
             from_email=from_address,
             to=[to_address],
+            cc=cc_addresses if cc_addresses else None,
             connection=POSTMARK_CONN,
             tags=["persistent-agent"],
             metadata={
@@ -721,18 +732,49 @@ def deliver_agent_sms(message: PersistentAgentMessage):
         len(plaintext_body),
     )
 
-    send_result = sms.send_sms(
-        to_number=message.to_endpoint.address,
-        from_number=message.from_endpoint.address,
-        body=plaintext_body,
-    )
+    # Collect all recipient numbers (primary + CC for group messaging)
+    recipient_numbers = [message.to_endpoint.address]
+    if message.cc_endpoints.exists():
+        cc_numbers = list(message.cc_endpoints.values_list('address', flat=True))
+        recipient_numbers.extend(cc_numbers)
+        logger.info(
+            "SMS message %s is a group message with %d total recipients: %s",
+            message.id,
+            len(recipient_numbers),
+            recipient_numbers
+        )
+
+    # Send to all recipients
+    # Note: This sends individual messages to each recipient
+    # For true group messaging, you'd need a different approach with your SMS provider
+    send_results = []
+    all_successful = True
+    
+    for recipient in recipient_numbers:
+        result = sms.send_sms(
+            to_number=recipient,
+            from_number=message.from_endpoint.address,
+            body=plaintext_body,
+        )
+        send_results.append((recipient, result))
+        if not result:
+            all_successful = False
+            logger.error(
+                "Failed to send SMS to %s for message %s",
+                recipient,
+                message.id
+            )
+    
+    send_result = all_successful
 
     now = timezone.now()
 
     if send_result:
-        logger.info("Successfully sent agent SMS message %s via Twilio.", message.id)
+        logger.info("Successfully sent agent SMS message %s via Twilio to all recipients.", message.id)
+        # Store first successful message ID as the primary one
+        provider_message_id = next((r[1] for r in send_results if r[1]), "")
         attempt.status = DeliveryStatus.SENT
-        attempt.provider_message_id = send_result
+        attempt.provider_message_id = provider_message_id
         attempt.sent_at = now
         attempt.save(update_fields=["status", "provider_message_id", "sent_at"])
 
@@ -747,9 +789,11 @@ def deliver_agent_sms(message: PersistentAgentMessage):
             properties={
                 "agent_id": str(message.owner_agent_id),
                 "message_id": str(message.id),
-                "sms_id": send_result,
+                "sms_id": provider_message_id,
                 "from_address": message.from_endpoint.address,
                 "to_address": message.to_endpoint.address,
+                "is_group": len(recipient_numbers) > 1,
+                "recipient_count": len(recipient_numbers),
             },
         )
     else:

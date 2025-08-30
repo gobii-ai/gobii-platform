@@ -36,11 +36,18 @@ def get_send_sms_tool() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "send_sms",
-            "description": "Sends an SMS message to a recipient.",
+            "description": "Sends an SMS message to a recipient or group.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "to_number": {"type": "string", "description": "E.164 phone number."},
+                    "to_number": {"type": "string", "description": "Primary E.164 phone number."},
+                    "cc_numbers": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Additional E.164 phone numbers for group SMS (optional)"
+                    },
                     "body": {"type": "string", "description": "SMS content."},
                 },
                 "required": ["to_number", "body"],
@@ -52,7 +59,17 @@ def get_send_sms_tool() -> Dict[str, Any]:
 @tracer.start_as_current_span("SMS Sender - execute_send_sms")
 def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute SMS sending for a persistent agent."""
-    to_number, body = params.get("to_number"), params.get("body")
+    to_number = params.get("to_number")
+    body = params.get("body")
+    cc_numbers = params.get("cc_numbers", [])  # Optional list for group SMS
+    
+    # Temporary restriction on group SMS until Twilio Conversations API is implemented
+    if cc_numbers:
+        return {
+            "status": "error",
+            "message": "Group SMS is not currently supported. Please use email for multi-recipient messages."
+        }
+    
     if not all([to_number, body]):
         return {"status": "error", "message": "Missing required parameters: to_number or body"}
 
@@ -64,9 +81,10 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
 
     # Log SMS attempt
     body_preview = body[:100] + "..." if len(body) > 100 else body
+    group_info = f" (group with {len(cc_numbers)} others)" if cc_numbers else ""
     logger.info(
-        "Agent %s sending SMS to %s, body: %s",
-        agent.id, to_number, body_preview
+        "Agent %s sending SMS to %s%s, body: %s",
+        agent.id, to_number, group_info, body_preview
     )
 
     try:
@@ -82,11 +100,27 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
             return {"status": "error", "message": "Agent has no configured SMS endpoint to send from."}
 
         if not agent.is_recipient_whitelisted(CommsChannel.SMS, to_number):
+            # Check if this is a multi-player agent to provide a more specific error
+            if agent.organization_id is not None or agent.whitelist_policy == PersistentAgent.WhitelistPolicy.MANUAL:
+                return {"status": "error", "message": "Multi-player agents only support email communication. SMS is not available for organization or allowlist-based agents."}
             return {"status": "error", "message": "Recipient number not allowed for this agent."}
+        
+        # Check whitelist for CC numbers
+        for cc_num in cc_numbers:
+            if not agent.is_recipient_whitelisted(CommsChannel.SMS, cc_num):
+                return {"status": "error", "message": f"Group member {cc_num} not allowed for this agent."}
 
         to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
             channel=CommsChannel.SMS, address=to_number, defaults={"owner_agent": None}
         )
+        
+        # Create CC endpoints for group SMS
+        cc_endpoint_objects = []
+        for cc_num in cc_numbers:
+            cc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                channel=CommsChannel.SMS, address=cc_num, defaults={"owner_agent": None}
+            )
+            cc_endpoint_objects.append(cc_endpoint)
 
         # Perform link shortening in body if needed
         body = shorten_links_in_body(body, user=agent.user)
@@ -99,6 +133,10 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
             body=body,
             raw_payload={},
         )
+        
+        # Add CC endpoints for group messaging
+        if cc_endpoint_objects:
+            message.cc_endpoints.set(cc_endpoint_objects)
 
         deliver_agent_sms(message)
 

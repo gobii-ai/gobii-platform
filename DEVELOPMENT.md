@@ -33,6 +33,7 @@ uv pip install -e '.[dev]'
 # bootstrap Django
 python manage.py migrate
 python manage.py createsuperuser   # email + pw
+python manage.py setup_initial_site   # setup Google OAuth placeholder
 
 # run Celery worker (new shell)
 celery -A config worker -l info --pool solo

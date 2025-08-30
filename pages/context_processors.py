@@ -8,7 +8,8 @@ from constants.plans import PlanNames
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs
 from util.subscription_helper import get_user_plan, get_user_api_rate_limit, get_user_agent_limit, \
-    get_user_task_credit_limit, has_unlimited_agents, allow_user_extra_tasks, get_user_extra_task_limit
+    get_user_task_credit_limit, has_unlimited_agents, allow_user_extra_tasks, get_user_extra_task_limit, \
+    get_user_max_contacts_per_agent
 
 def _enum_to_dict(enum_cls):
     """{'ENUM_MEMBER': 'string value', ...}"""
@@ -59,6 +60,7 @@ def account_info(request):
                 'tasks_addl_limit': get_user_extra_task_limit(request.user),
                 'task_credits_monthly': get_user_task_credit_limit(request.user),
                 'task_credits_available': TaskCreditService.calculate_available_tasks(request.user, task_credits=task_credits),
+                'max_contacts_per_agent': get_user_max_contacts_per_agent(request.user),
             }
         }
     }

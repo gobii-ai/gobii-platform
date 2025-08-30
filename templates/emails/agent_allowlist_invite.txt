@@ -1,0 +1,20 @@
+You're invited to communicate with {{ agent.name }}!
+
+Hi there!
+
+{{ agent_owner.get_full_name|default:agent_owner.username }} has added you to the communication list for their AI agent "{{ agent.name }}" on Gobii.
+
+About {{ agent.name }}:
+{{ agent.charter|truncatewords:30 }}
+
+To confirm you'd like to communicate with {{ agent.name }}, please respond to this invitation:
+
+ACCEPT INVITATION: {{ accept_url }}
+DECLINE INVITATION: {{ reject_url }}
+
+Once you accept, you'll be able to email {{ agent.name }} directly at {{ agent_email }}
+
+Simply reply to emails from {{ agent.name }} or send new emails to start conversations about anything you need help with!
+
+---
+This invitation was sent by {{ agent_owner.get_full_name|default:agent_owner.username }} via Gobii (https://gobii.ai)

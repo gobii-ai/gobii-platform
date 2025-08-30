@@ -7,28 +7,3 @@
   {% include "partials/_agent_list.html" %}
 {% endif %}
 {% endblock %}
-
-{% block extra_js %}
-{% if show_modal_for_agent_id %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Find the newly created agent's data to show modal
-    const agentId = '{{ show_modal_for_agent_id|escapejs }}';
-    {% for agent in persistent_agents %}
-    if ('{{ agent.id|escapejs }}' === agentId) {
-        // Dispatch event to open modal with agent data
-        window.dispatchEvent(new CustomEvent('open-modal', {
-            detail: {
-                id: 'talk-to-agent-modal',
-                agentName: '{{ agent.name|escapejs }}',
-                agentEmail: '{{ agent.primary_email_endpoints.0.address|default:''|escapejs }}',
-                agentPhoneNumber: '{{ agent.primary_sms_endpoints.0.address|default:''|escapejs }}',
-            }
-        }));
-        return; // Exit the DOMContentLoaded handler after opening the modal
-    }
-    {% endfor %}
-});
-</script>
-{% endif %}
-{% endblock %}

@@ -37,7 +37,7 @@ class AllowlistModelValidationTests(TestCase):
             whitelist_policy=PersistentAgent.WhitelistPolicy.MANUAL,
         )
 
-    @override_settings(MANUAL_WHITELIST_MAX_PER_AGENT=1)
+    @patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=1)
     @patch("api.models.flag_is_active", return_value=True)
     @patch("api.models.switch_is_active", return_value=True)
     def test_cap_enforced_via_clean(self, *_):
@@ -173,9 +173,5 @@ class WhitelistPolicyAndFlagsTests(TestCase):
             self.assertFalse(agent.is_sender_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
             self.assertFalse(agent.is_recipient_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
 
-            # SMS: verified numbers of active members
-            UserPhoneNumber.objects.create(user=member, phone_number="+15557776666", is_verified=True)
-            self.assertTrue(agent.is_sender_whitelisted(CommsChannel.SMS, "+15557776666"))
-            self.assertTrue(agent.is_recipient_whitelisted(CommsChannel.SMS, "+15557776666"))
-            self.assertFalse(agent.is_sender_whitelisted(CommsChannel.SMS, "+19997776666"))
-            self.assertFalse(agent.is_recipient_whitelisted(CommsChannel.SMS, "+19997776666"))
+            # SMS: only verified numbers of org members
+            # NOTE: Temporarily disabled until we add multi player SMS support

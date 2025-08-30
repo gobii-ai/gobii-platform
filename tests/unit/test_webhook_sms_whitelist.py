@@ -46,7 +46,7 @@ class SmsWebhookWhitelistTests(TestCase):
             },
         )
 
-    @patch("api.models.flag_is_active", return_value=True)
+    @patch("api.models.switch_is_active", return_value=True)
     @patch("api.webhooks.ingest_inbound_message")
     def test_manual_allowlist_sender_allowed(self, mock_ingest, _flag):
         # Switch agent policy to MANUAL and add sender to allowlist
@@ -81,7 +81,7 @@ class SmsWebhookWhitelistTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_called_once()
 
-    @patch("api.models.flag_is_active", return_value=True)
+    @patch("api.models.switch_is_active", return_value=True)
     @patch("api.webhooks.ingest_inbound_message")
     def test_default_policy_org_owned_sender(self, mock_ingest, _flag):
         # Make agent org-owned and add an active member with a verified phone

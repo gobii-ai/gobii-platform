@@ -41,9 +41,16 @@ class EmailWebhookTest(TestCase):
 
     def _create_postmark_request(self, from_email, to_email, subject="Test Subject", body="Test Body"):
         """Helper to create a mock request with a Postmark-style JSON payload."""
+        # Parse to_email to handle comma-separated addresses
+        to_addresses = [addr.strip() for addr in to_email.split(',') if addr.strip()]
+        
+        # Use the new Postmark "Full" format with arrays of objects
         payload = {
             "From": from_email,
-            "To": to_email,
+            "To": to_email,  # Keep old format for backward compatibility
+            "ToFull": [{"Email": addr, "Name": "", "MailboxHash": ""} for addr in to_addresses],
+            "CcFull": [],
+            "BccFull": [],
             "Subject": subject,
             "TextBody": body,
         }
@@ -80,8 +87,9 @@ class EmailWebhookTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_ingest.assert_not_called()
-        mock_logger.assert_called_with(
-            f"Discarding email from non-whitelisted sender '{self.non_owner.email}' to agent '{self.agent.name}'."
+        # The email finds the agent endpoint but fails whitelist check
+        mock_logger.assert_any_call(
+            f"Discarding email from non-whitelisted sender '{self.non_owner.email}' to agent 'Test Agent' (endpoint: {self.agent_endpoint.address})."
         )
 
     @patch("api.webhooks.ingest_inbound_message")
@@ -109,7 +117,7 @@ class EmailWebhookTest(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_ingest.assert_not_called()
         mock_logger.assert_called_with(
-            "Discarding email to unroutable address: nonexistent@my.gobii.ai"
+            "Discarding email - no routable agent addresses found in To/CC/BCC"
         )
 
 

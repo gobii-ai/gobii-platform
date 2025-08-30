@@ -83,15 +83,9 @@
            <span class="text-xs font-medium text-white/80 uppercase tracking-wide">
              {% if agent.is_active %}Active{% else %}Paused{% endif %}
            </span>
-           {% flag "multiplayer_agents" %}
-             <span class="ml-2 inline-flex items-center gap-x-1.5 py-0.5 px-2 rounded-full text-[10px] font-medium bg-white/20 text-white/90 border border-white/30">
-               {% if agent.whitelist_policy == 'manual' %}
-                 Manual Allowlist
-               {% else %}
-                 Default Policy
-               {% endif %}
-             </span>
-           {% endflag %}
+           {% comment %}
+           <!-- Removed policy display - all agents now use manual mode -->
+           {% endcomment %}
          </div>
        </div>
  
@@ -117,7 +111,7 @@
            <div class="flex gap-2">
              <a href="{% url 'agent_detail' pk=agent.id %}" class="flex-1 py-2 px-3 inline-flex justify-center items-center gap-x-2 text-sm font-semibold rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:pointer-events-none">
                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924-1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                </svg>
                Configure
@@ -130,15 +124,6 @@
                </svg>
               Talk to Agent
              </button>
-             {% flag "multiplayer_agents" %}
-               <a href="{% url 'agent_allowlist' pk=agent.id %}"
-                  class="flex-1 py-2 px-3 inline-flex justify-center items-center gap-x-2 text-sm font-semibold rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:pointer-events-none">
-                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 1.657-1.567 3-3.5 3S5 12.657 5 11s1.567-3 3.5-3S12 9.343 12 11zM19 11v5m0 0v2m0-2h2m-2 0h-2"/>
-                 </svg>
-                 Allowlist
-               </a>
-             {% endflag %}
            </div>
          </div>
        </div>

@@ -641,3 +641,22 @@ def has_unlimited_agents(user) -> bool:
             return PLAN_CONFIG[PlanNames.FREE]["agent_limit"] == AGENTS_UNLIMITED
 
         return plan["agent_limit"] == AGENTS_UNLIMITED
+
+
+def get_user_max_contacts_per_agent(user) -> int:
+    """
+    Gets the maximum number of contacts allowed per agent based on the user's plan.
+    
+    Parameters:
+        user (User): The user for whom the contact limit is being retrieved.
+    
+    Returns:
+        int: The maximum number of contacts allowed per agent for the user's plan.
+    """
+    plan = get_user_plan(user)
+    
+    if not plan:
+        logger.warning(f"get_user_max_contacts_per_agent {user.id}: No plan found, defaulting to free plan")
+        return PLAN_CONFIG[PlanNames.FREE].get("max_contacts_per_agent", 3)
+    
+    return plan.get("max_contacts_per_agent", 3)  # Default to 3 if not specified

@@ -54,6 +54,7 @@ from ..tools.charter_updater import execute_update_charter, get_update_charter_t
 from ..tools.sqlite_query import execute_sqlite_query, get_sqlite_query_tool, get_sqlite_schema_prompt, set_sqlite_db_path, reset_sqlite_db_path, agent_sqlite_db
 from ..tools.http_request import execute_http_request, get_http_request_tool
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
+from ..tools.request_contact_permission import execute_request_contact_permission, get_request_contact_permission_tool
 from ..tools.mcp_tools import (
     get_search_tools_tool, get_enable_tool_tool,
     execute_search_tools, execute_enable_tool, execute_mcp_tool
@@ -424,7 +425,7 @@ def process_agent_events(
         logger.error("Error during event processing for agent %s: %s", persistent_agent_id, str(e))
         span.add_event("Event processing error")
         span.set_attribute("processing.error", str(e))
-        
+
         # Clean up budget on exceptions to prevent leaks
         if ctx and lock_acquired:
             try:
@@ -435,7 +436,7 @@ def process_agent_events(
                 logger.info("Closed budget cycle for agent %s due to exception", persistent_agent_id)
             except Exception as cleanup_error:
                 logger.warning("Failed to close budget cycle on exception: %s", cleanup_error)
-        
+
         raise
     finally:
         # Release the lock
@@ -709,6 +710,8 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
                         result = execute_search_web(agent, tool_params)
                     elif tool_name == "secure_credentials_request":
                         result = execute_secure_credentials_request(agent, tool_params)
+                    elif tool_name == "request_contact_permission":
+                        result = execute_request_contact_permission(agent, tool_params)
                     elif tool_name == "search_tools":
                         result = execute_search_tools(agent, tool_params)
                     elif tool_name == "enable_tool":
@@ -970,7 +973,7 @@ def _build_prompt_context(agent: PersistentAgent, event_window: EventWindow, cur
     # Using print() bypasses the 64KB container log truncation limit that affects logger.info()
     # Container runtimes (Docker/Kubernetes) truncate log messages at 64KB, which cuts off
     # our prompts mid-stream, losing critical debugging information especially the high-weight
-    # sections at the end (</critical>, </important>). Using separate print() calls ensures 
+    # sections at the end (</critical>, </important>). Using separate print() calls ensures
     # we can see the complete prompt in production logs for debugging agent issues.
     # The BEGIN/END markers make it easy to extract full prompts with grep/awk.
     # See: test_log_message_truncation.py and proof_64kb_truncation.py for evidence
@@ -1085,6 +1088,43 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
             weight=1
         )
 
+    # Add the creator of the agent as a contact explicitly
+    allowed_lines = []
+    if agent.user and agent.user.email:
+        allowed_lines.append("As the creator of this agent, you can always contact the user at:")
+        allowed_lines.append(f"- email: {agent.user.email} (creator)")
+
+        from api.models import UserPhoneNumber
+        owner_phone = UserPhoneNumber.objects.filter(
+            user=agent.user,
+            is_verified=True
+        ).first()
+
+        # If the user has a phone number, include it as well
+        if owner_phone and owner_phone.phone_number:
+            allowed_lines.append(f"- sms: {owner_phone.phone_number} (creator)")
+
+    # Add explicitly allowed contacts from CommsAllowlistEntry
+    from api.models import CommsAllowlistEntry
+    allowed_contacts = (
+        CommsAllowlistEntry.objects.filter(
+            agent=agent,
+            is_active=True
+        )
+        .order_by("channel", "address")
+    )
+    if allowed_contacts:
+        allowed_lines.append("These are the ADDITIONAL ALLOWED CONTACTS that you can send messages to:")
+        for entry in allowed_contacts:
+            name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
+            allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str}")
+        
+    contacts_group.section_text(
+        "allowed_contacts",
+        "\n".join(allowed_lines),
+        weight=2  # Higher weight since these are explicitly allowed
+    )
+
     # Add the helpful note as a separate section
     contacts_group.section_text(
         "contacts_note",
@@ -1092,6 +1132,21 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         weight=1,
         non_shrinkable=True
     )
+    
+    # Explicitly list allowed communication channels
+    allowed_channels = set()
+    for ep in agent_eps:
+        # ep.channel is already a string value from the database, not an enum object
+        allowed_channels.add(ep.channel)
+    
+    if allowed_channels:
+        channels_list = sorted(allowed_channels)  # Already strings, no need for .value
+        contacts_group.section_text(
+            "allowed_channels",
+            f"IMPORTANT: You can ONLY communicate via these channels: {', '.join(channels_list)}. Do NOT attempt to use any other communication channels. Always include the primary contact endpoint in your messages if one is configured.",
+            weight=3,
+            non_shrinkable=True
+        )
 
 
 def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, current_iteration: int = 1, max_iterations: int = MAX_AGENT_LOOP_ITERATIONS) -> str:
@@ -1517,23 +1572,24 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         # MCP management tools
         get_search_tools_tool(),
         get_enable_tool_tool(),
+        get_request_contact_permission_tool(),
     ]
-    
+
     # Add dynamically enabled MCP tools if agent is provided
     if agent:
         from ..tools.mcp_manager import ensure_default_tools_enabled
-        
+
         # Ensure default MCP tools are enabled
         ensure_default_tools_enabled(agent)
-        
+
         mcp_manager = get_mcp_manager()
         if not mcp_manager._initialized:
             mcp_manager.initialize()
-        
+
         # Get tool definitions for enabled MCP tools
         mcp_tools = mcp_manager.get_enabled_tools_definitions(agent)
         static_tools.extend(mcp_tools)
-    
+
     return static_tools
 
 

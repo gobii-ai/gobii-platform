@@ -1067,16 +1067,15 @@ class PersistentAgent(models.Model):
     
     class WhitelistPolicy(models.TextChoices):
         DEFAULT = "default", "Default (Owner or Org Members)"
-        MANUAL = "manual", "Manual Allowlist"
+        MANUAL = "manual", "Allowed Contacts List"
 
     whitelist_policy = models.CharField(
         max_length=16,
         choices=WhitelistPolicy.choices,
-        default=WhitelistPolicy.DEFAULT,
+        default=WhitelistPolicy.MANUAL,  # Changed to MANUAL - all agents now use manual mode
         help_text=(
             "Controls who can message this agent and who the agent may contact. "
-            "Default: user-owned → owner email + verified phone; org-owned → org members' emails + verified phones. "
-            "Manual: only addresses/numbers listed on the agent's manual allowlist."
+            "Manual: only addresses/numbers listed on the agent's allowlist (includes owner/org members by default)."
         ),
     )
     execution_environment = models.CharField(
@@ -1157,7 +1156,7 @@ class PersistentAgent(models.Model):
             return False
 
         # Feature flag gate: if disabled, fall back to legacy owner-only checks
-        if not flag_is_active(None, MULTIPLAYER_AGENTS):
+        if not switch_is_active(MULTISEND_ENABLED):
             return self._legacy_owner_only(channel_val, addr)
 
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
@@ -1173,6 +1172,13 @@ class PersistentAgent(models.Model):
 
         if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS):
             return False
+        
+        # Block SMS for multi-player agents (org-owned only)
+        # until group SMS functionality is implemented
+        if channel_val == CommsChannel.SMS:
+            if self.organization_id is not None:
+                # Org-owned agents can only use email (group SMS not yet supported)
+                return False
 
         # Feature flag gate: if disabled, fall back to legacy owner-only checks
         if not switch_is_active(MULTISEND_ENABLED):
@@ -1201,11 +1207,53 @@ class PersistentAgent(models.Model):
         return False
 
     def _is_in_manual_allowlist(self, channel_val: str, address: str) -> bool:
-        """Return True if address is present in the agent-level manual allowlist for the given channel."""
+        """Return True if address is present in the agent-level manual allowlist for the given channel.
+        
+        Owner is always implicitly allowed even with manual allowlist policy.
+        For org-owned agents, org members are also implicitly allowed.
+        """
         addr = (address or "").strip()
         if channel_val == CommsChannel.EMAIL:
             # Normalize display-name formats like "Name <email@example.com>"
             addr = (parseaddr(addr)[1] or addr).lower()
+            
+            # Owner is always allowed
+            owner_email = (self.user.email or "").lower()
+            if addr == owner_email:
+                return True
+            
+            # For org-owned agents, org members are implicitly allowed
+            if self.organization_id:
+                from .models import OrganizationMembership
+                if OrganizationMembership.objects.filter(
+                    org=self.organization,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                    user__email__iexact=addr,
+                ).exists():
+                    return True
+                
+        elif channel_val == CommsChannel.SMS:
+            # Owner's verified phone is always allowed
+            from .models import UserPhoneNumber
+            if UserPhoneNumber.objects.filter(
+                user=self.user,
+                phone_number__iexact=addr,
+                is_verified=True,
+            ).exists():
+                return True
+            
+            # For org-owned agents, any verified phone of org members is allowed
+            if self.organization_id:
+                from .models import OrganizationMembership
+                if UserPhoneNumber.objects.filter(
+                    user__organizationmembership__org=self.organization,
+                    user__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
+                    phone_number__iexact=addr,
+                    is_verified=True,
+                ).exists():
+                    return True
+        
+        # Check manual allowlist entries
         try:
             return CommsAllowlistEntry.objects.filter(
                 agent=self,
@@ -1580,16 +1628,44 @@ class CommsAllowlistEntry(models.Model):
             self.address = (self.address or "").strip().lower()
         else:
             self.address = (self.address or "").strip()
+        
+        # Restrict multi-player agents to email-only allowlists
+        # Multi-player = org-owned agents OR agents with manual whitelist policy
+        if self.channel == CommsChannel.SMS:
+            # Check if agent is org-owned or uses manual whitelist (multi-player scenarios)
+            if self.agent.organization_id is not None:
+                raise ValidationError({
+                    "channel": "Organization agents only support email addresses in allowlists. "
+                               "Group SMS functionality is not yet available."
+                })
+            elif self.agent.whitelist_policy == PersistentAgent.WhitelistPolicy.MANUAL:
+                raise ValidationError({
+                    "channel": "Multi-player agents only support email addresses in allowlists. "
+                               "Group SMS functionality is not yet available."
+                })
 
-        # Enforce per-agent cap on *active* entries (only when adding a new row)
+        # Enforce per-agent cap on *active* entries and pending invitations (only when adding a new row)
         if self.is_active and self._state.adding:
-            cap = int(getattr(settings, "MANUAL_WHITELIST_MAX_PER_AGENT", 20))
+            # Get the plan-based limit for this agent's owner
+            from util.subscription_helper import get_user_max_contacts_per_agent
+            cap = get_user_max_contacts_per_agent(self.agent.user)
+            
             try:
+                # Count both active entries and pending invitations
                 active_count = (
                     CommsAllowlistEntry.objects
                     .filter(agent=self.agent, is_active=True)
                     .count()
                 )
+                
+                # Also count pending invitations since they'll become active entries
+                pending_count = (
+                    AgentAllowlistInvite.objects
+                    .filter(agent=self.agent, status=AgentAllowlistInvite.InviteStatus.PENDING)
+                    .count()
+                )
+                
+                total_count = active_count + pending_count
             except Exception as e:
                 logger.error(
                     "Skipping allowlist cap check for agent %s due to error: %s",
@@ -1597,16 +1673,366 @@ class CommsAllowlistEntry(models.Model):
                 )
                 return
 
-            if active_count >= cap:
+            if total_count >= cap:
                 raise ValidationError({
                     "agent": (
-                        f"Cannot add more allowlist entries. Maximum {cap} entries "
-                        f"allowed per agent."
+                        f"Cannot add more contacts. Maximum {cap} contacts "
+                        f"allowed per agent for your plan (including {pending_count} pending invitations)."
                     )
                 })
 
     def __str__(self):
         return f"Allow<{self.channel}:{self.address}> for {self.agent_id}"
+
+
+class AgentAllowlistInvite(models.Model):
+    """Pending invitation for someone to join an agent's allowlist."""
+    
+    class InviteStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"  
+        REJECTED = "rejected", "Rejected"
+        EXPIRED = "expired", "Expired"
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="allowlist_invites",
+        help_text="Agent this invitation is for",
+    )
+    channel = models.CharField(max_length=32, choices=CommsChannel.choices)
+    address = models.CharField(max_length=512, help_text="Email address or E.164 phone number")
+    token = models.CharField(max_length=64, unique=True, help_text="Unique token for accept/reject URLs")
+    status = models.CharField(max_length=16, choices=InviteStatus.choices, default=InviteStatus.PENDING)
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sent_allowlist_invites",
+        help_text="User who sent this invitation"
+    )
+    expires_at = models.DateTimeField(help_text="When this invitation expires")
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True, help_text="When they accepted/rejected")
+    
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "channel", "address"],
+                condition=models.Q(status__in=["pending", "accepted"]),
+                name="uniq_active_allowlist_invite",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["token"], name="allow_invite_token_idx"),
+            models.Index(fields=["agent", "status"], name="allow_invite_agent_status_idx"),
+        ]
+        ordering = ["-created_at"]
+    
+    def clean(self):
+        super().clean()
+        # Normalize address like CommsAllowlistEntry
+        if self.channel == CommsChannel.EMAIL:
+            self.address = (self.address or "").strip().lower()
+        else:
+            self.address = (self.address or "").strip()
+        
+        # Check contact limit when creating new invitation
+        if self._state.adding and self.status == self.InviteStatus.PENDING:
+            # Get the plan-based limit for this agent's owner
+            from util.subscription_helper import get_user_max_contacts_per_agent
+            cap = get_user_max_contacts_per_agent(self.agent.user)
+            
+            try:
+                # Count both active entries and pending invitations
+                active_count = (
+                    CommsAllowlistEntry.objects
+                    .filter(agent=self.agent, is_active=True)
+                    .count()
+                )
+                
+                # Count existing pending invitations (not including this one since it's being added)
+                pending_count = (
+                    AgentAllowlistInvite.objects
+                    .filter(agent=self.agent, status=self.InviteStatus.PENDING)
+                    .count()
+                )
+                
+                total_count = active_count + pending_count
+            except Exception as e:
+                logger.error(
+                    "Skipping invitation cap check for agent %s due to error: %s",
+                    self.agent_id, e
+                )
+                return
+            
+            if total_count >= cap:
+                raise ValidationError({
+                    "agent": (
+                        f"Cannot send more invitations. Maximum {cap} contacts "
+                        f"allowed per agent for your plan (currently {active_count} active, {pending_count} pending)."
+                    )
+                })
+    
+    def is_expired(self):
+        """Check if this invitation has expired."""
+        return timezone.now() > self.expires_at
+    
+    def can_be_accepted(self):
+        """Check if this invitation can still be accepted."""
+        return self.status == self.InviteStatus.PENDING and not self.is_expired()
+    
+    def accept(self):
+        """Accept this invitation and create the allowlist entry."""
+        if not self.can_be_accepted():
+            raise ValueError("This invitation cannot be accepted")
+        
+        # Create the allowlist entry
+        entry, created = CommsAllowlistEntry.objects.get_or_create(
+            agent=self.agent,
+            channel=self.channel,
+            address=self.address,
+            defaults={"is_active": True}
+        )
+        
+        # Switch agent to manual allowlist mode if not already
+        # This ensures the agent respects the allowlist once someone accepts an invitation
+        if self.agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+            self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+            self.agent.save(update_fields=['whitelist_policy'])
+        
+        # Mark invitation as accepted
+        self.status = self.InviteStatus.ACCEPTED
+        self.responded_at = timezone.now()
+        self.save(update_fields=["status", "responded_at"])
+        
+        return entry
+    
+    def reject(self):
+        """Reject this invitation."""
+        if self.status != self.InviteStatus.PENDING:
+            raise ValueError("This invitation has already been responded to")
+        
+        self.status = self.InviteStatus.REJECTED
+        self.responded_at = timezone.now()
+        self.save(update_fields=["status", "responded_at"])
+    
+    def __str__(self):
+        return f"Invite<{self.channel}:{self.address}> for {self.agent.name} ({self.status})"
+
+
+class CommsAllowlistRequest(models.Model):
+    """Request from agent to add a contact to allowlist."""
+    
+    class RequestStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        EXPIRED = "expired", "Expired"
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="contact_requests",
+        help_text="Agent requesting contact permission"
+    )
+    channel = models.CharField(max_length=32, choices=CommsChannel.choices)
+    address = models.CharField(max_length=512, help_text="Email address or E.164 phone number")
+    
+    # Request metadata
+    name = models.CharField(
+        max_length=256, 
+        blank=True,
+        help_text="Contact's name if known"
+    )
+    reason = models.TextField(help_text="Why the agent needs to contact this person")
+    purpose = models.CharField(
+        max_length=512, 
+        help_text="Brief purpose of communication (e.g., 'Schedule meeting', 'Get approval')"
+    )
+    
+    # Status tracking
+    status = models.CharField(
+        max_length=16, 
+        choices=RequestStatus.choices, 
+        default=RequestStatus.PENDING
+    )
+    
+    # Timestamps
+    requested_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text="Optional expiry for this request"
+    )
+    
+    # Link to created invitation if approved
+    allowlist_invitation = models.ForeignKey(
+        "AgentAllowlistInvite",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="from_request",
+        help_text="Invitation created when request was approved"
+    )
+    
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "channel", "address"],
+                condition=models.Q(status="pending"),
+                name="uniq_pending_contact_request",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "status"], name="contact_req_agent_status_idx"),
+            models.Index(fields=["requested_at"], name="contact_req_requested_idx"),
+        ]
+        ordering = ["-requested_at"]
+    
+    def clean(self):
+        super().clean()
+        # Normalize address like CommsAllowlistEntry
+        if self.channel == CommsChannel.EMAIL:
+            self.address = (self.address or "").strip().lower()
+        else:
+            self.address = (self.address or "").strip()
+    
+    def is_expired(self):
+        """Check if this request has expired."""
+        if not self.expires_at:
+            return False
+        return timezone.now() > self.expires_at
+    
+    def can_be_approved(self):
+        """Check if this request can still be approved."""
+        return self.status == self.RequestStatus.PENDING and not self.is_expired()
+    
+    def approve(self, invited_by, skip_limit_check=False, skip_invitation=True):
+        """Approve this request by creating an invitation or direct allowlist entry.
+        
+        Args:
+            invited_by: User approving the request
+            skip_limit_check: Skip validation of contact limits
+            skip_invitation: If True, directly create allowlist entry instead of invitation
+        """
+        import secrets
+        from datetime import timedelta
+        
+        if not self.can_be_approved():
+            raise ValueError("This request cannot be approved")
+        
+        # Check if contact already exists in allowlist
+        existing_entry = CommsAllowlistEntry.objects.filter(
+            agent=self.agent,
+            channel=self.channel,
+            address=self.address,
+            is_active=True
+        ).first()
+        
+        if existing_entry:
+            # Already in allowlist, just mark as approved
+            # But still switch to manual mode if needed
+            if self.agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+                self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+                self.agent.save(update_fields=['whitelist_policy'])
+            
+            self.status = self.RequestStatus.APPROVED
+            self.responded_at = timezone.now()
+            self.save(update_fields=["status", "responded_at"])
+            return existing_entry
+        
+        # If skip_invitation is True, directly create the allowlist entry
+        if skip_invitation:
+            # Create the allowlist entry directly
+            entry = CommsAllowlistEntry.objects.create(
+                agent=self.agent,
+                channel=self.channel,
+                address=self.address,
+                is_active=True
+            )
+            
+            # Switch agent to manual allowlist mode if not already
+            if self.agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+                self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+                self.agent.save(update_fields=['whitelist_policy'])
+            
+            # Mark request as approved
+            self.status = self.RequestStatus.APPROVED
+            self.responded_at = timezone.now()
+            self.save(update_fields=["status", "responded_at"])
+            
+            return entry
+        
+        # Original invitation flow (kept for backwards compatibility)
+        # Check if invitation already exists and is pending
+        existing_invite = AgentAllowlistInvite.objects.filter(
+            agent=self.agent,
+            channel=self.channel,
+            address=self.address,
+            status=AgentAllowlistInvite.InviteStatus.PENDING
+        ).first()
+        
+        if existing_invite:
+            # Invitation already pending, just mark request as approved
+            # But still switch to manual mode if needed
+            if self.agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+                self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+                self.agent.save(update_fields=['whitelist_policy'])
+            
+            self.status = self.RequestStatus.APPROVED
+            self.responded_at = timezone.now()
+            self.allowlist_invitation = existing_invite
+            self.save(update_fields=["status", "responded_at", "allowlist_invitation"])
+            return existing_invite
+        
+        # Create new invitation
+        invitation = AgentAllowlistInvite(
+            agent=self.agent,
+            channel=self.channel,
+            address=self.address,
+            token=secrets.token_urlsafe(32),
+            invited_by=invited_by,
+            expires_at=timezone.now() + timedelta(days=7)
+        )
+        
+        # Check limits unless explicitly skipped
+        if not skip_limit_check:
+            try:
+                invitation.full_clean()
+            except ValidationError:
+                raise
+        
+        invitation.save()
+        
+        # Switch agent to manual allowlist mode if not already
+        # This ensures the agent respects the allowlist once a contact request is approved
+        if self.agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+            self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+            self.agent.save(update_fields=['whitelist_policy'])
+        
+        # Mark request as approved and link to invitation
+        self.status = self.RequestStatus.APPROVED
+        self.responded_at = timezone.now()
+        self.allowlist_invitation = invitation
+        self.save(update_fields=["status", "responded_at", "allowlist_invitation"])
+        
+        return invitation
+    
+    def reject(self):
+        """Reject this request."""
+        if self.status != self.RequestStatus.PENDING:
+            raise ValueError("This request has already been responded to")
+        
+        self.status = self.RequestStatus.REJECTED
+        self.responded_at = timezone.now()
+        self.save(update_fields=["status", "responded_at"])
+    
+    def __str__(self):
+        return f"ContactRequest<{self.channel}:{self.address}> for {self.agent.name} ({self.status})"
+
 
 class PersistentAgentEmailEndpoint(models.Model):
     """Email-specific metadata for an endpoint."""
@@ -1723,6 +2149,12 @@ class PersistentAgentMessage(models.Model):
         null=True,
         blank=True,
         related_name="messages_received",
+    )
+    cc_endpoints = models.ManyToManyField(
+        PersistentAgentCommsEndpoint,
+        related_name="cc_messages",
+        blank=True,
+        help_text="CC recipients for email or additional recipients for group SMS",
     )
     conversation = models.ForeignKey(
         PersistentAgentConversation,
@@ -2019,6 +2451,7 @@ class PersistentAgentSystemStep(models.Model):
         PROCESS_EVENTS = "PROCESS_EVENTS", "Process Events"
         SNAPSHOT = "SNAPSHOT", "Snapshot"
         CREDENTIALS_PROVIDED = "CREDENTIALS_PROVIDED", "Credentials Provided"
+        CONTACTS_APPROVED = "CONTACTS_APPROVED", "Contacts Approved"
         # Add more system-generated step codes here as needed.
 
     step = models.OneToOneField(

@@ -150,6 +150,98 @@
                       placeholder="Describe what you want your agent to do...">{{ agent.charter }}</textarea>
             <p class="mt-2 text-xs text-gray-500">Describe your agent's role, responsibilities, and any specific tasks or goals it should focus on.</p>
           </div>
+          
+          <!-- Allowed Contacts Section (only shown with multiplayer_agents flag) -->
+          {% if show_allowlist %}
+          <div class="sm:col-span-3">
+            <label for="allowed-contacts" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
+              Allowed Contacts
+            </label>
+            <div class="hs-tooltip inline-block">
+              <svg class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+              </svg>
+              <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-48 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
+                Controls who can message this agent and who the agent may contact
+              </span>
+            </div>
+          </div>
+          
+          <div class="sm:col-span-9">
+            <!-- Hidden field to maintain MANUAL policy -->
+            <input type="hidden" name="whitelist_policy" value="manual">
+            
+            <p class="text-xs text-gray-500 mb-4">
+              By default, the agent owner and organization members can communicate with this agent.
+              You can add additional contacts below. Note: Multi-recipient messaging is limited to email only.
+            </p>
+            
+            <!-- Allowed contacts entries (always visible now) -->
+            <div id="allowlist-entries" class="mt-4">
+              
+              <!-- Add Entry Form -->
+              <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg mb-3">
+                <h4 class="text-sm font-medium text-gray-700 mb-2">Add Allowed Contact</h4>
+                <div id="add-allowlist-form" class="flex gap-2">
+                  {% csrf_token %}
+                  <select id="allowlist-channel" name="channel" class="py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+                    <option value="email">Email</option>
+                    <!-- SMS option removed since multi-player agents only support email -->
+                  </select>
+                  <input type="email" 
+                         id="allowlist-address"
+                         name="address" 
+                         placeholder="email@example.com" 
+                         class="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+                  <button type="button" 
+                          onclick="addAllowlistEntry()"
+                          class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                    Add
+                  </button>
+                  <button type="button" 
+                          onclick="cancelAllowlistEntry()"
+                          class="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400">
+                    Cancel
+                  </button>
+                </div>
+                <div id="allowlist-error" class="mt-2 text-xs text-red-600 hidden"></div>
+              </div>
+
+              <!-- Pending Contact Requests Alert -->
+              {% if pending_contact_requests > 0 %}
+              <div class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg mb-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span class="text-sm font-medium text-yellow-800">
+                      {{ pending_contact_requests }} Contact Request{{ pending_contact_requests|pluralize }} Pending
+                    </span>
+                  </div>
+                  <a href="{% url 'agent_contact_requests' agent.id %}" class="text-sm font-medium text-yellow-700 hover:text-yellow-900 underline">
+                    Review
+                  </a>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- Current Entries List -->
+              <div class="p-3 bg-gray-50 rounded-lg">
+                <div class="flex justify-between items-center mb-2">
+                  <h4 class="text-sm font-medium text-gray-700">Allowed Contacts</h4>
+                  <span class="text-xs text-gray-500">
+                    <span id="contact-count">{{ active_allowlist_count }}</span> / {{ account.usage.max_contacts_per_agent }} contacts
+                  </span>
+                </div>
+                <div id="allowlist-entries-container">
+                  {% include "console/partials/_allowlist_entries_inline.html" %}
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
 
           <!-- Created Date -->
           <div class="sm:col-span-3">
@@ -226,4 +318,183 @@
     </div>
   </div>
 </div>
+
+<!-- JavaScript to handle allowlist management -->
+{% if show_allowlist %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Removed policy dropdown handling - all agents now use manual mode
+    
+});
+
+// Function to add allowlist entry
+function addAllowlistEntry() {
+    const channel = document.getElementById('allowlist-channel').value;
+    const address = document.getElementById('allowlist-address').value;
+    const errorDiv = document.getElementById('allowlist-error');
+    
+    // Check if required elements exist
+    if (!channel || !address || !errorDiv) {
+        console.error('Required elements not found');
+        return;
+    }
+    
+    if (!address) {
+        errorDiv.textContent = 'Please enter an email address';
+        errorDiv.classList.remove('hidden');
+        return;
+    }
+    
+    // Get CSRF token from the page
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+    
+    if (!csrfToken) {
+        console.error('CSRF token not found');
+        errorDiv.textContent = 'Security token missing. Please refresh the page.';
+        errorDiv.classList.remove('hidden');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('action', 'add_allowlist');
+    formData.append('channel', channel);
+    formData.append('address', address);
+    formData.append('csrfmiddlewaretoken', csrfToken);
+    
+    fetch('{% url "agent_detail" agent.id %}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        return response.json();  // Parse JSON even if not ok to get error message
+    })
+    .then(data => {
+        console.log('Response data:', data);
+        if (data.success) {
+            // Update the entries list
+            document.getElementById('allowlist-entries-container').innerHTML = data.html;
+            // Clear the form
+            document.getElementById('allowlist-address').value = '';
+            // Hide error message
+            errorDiv.classList.add('hidden');
+            // Update contact count
+            if (data.active_count !== undefined) {
+                document.getElementById('contact-count').textContent = data.active_count;
+            }
+        } else {
+            // Show error message
+            errorDiv.textContent = data.error || 'Failed to add entry';
+            errorDiv.classList.remove('hidden');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        errorDiv.textContent = 'An error occurred. Please try again.';
+        errorDiv.classList.remove('hidden');
+    });
+}
+
+// Function to cancel allowlist entry form
+function cancelAllowlistEntry() {
+    // Clear the form
+    document.getElementById('allowlist-address').value = '';
+    // Hide any error messages
+    const errorDiv = document.getElementById('allowlist-error');
+    if (errorDiv) {
+        errorDiv.classList.add('hidden');
+        errorDiv.textContent = '';
+    }
+}
+
+// Function to cancel an invitation
+function cancelInvite(inviteId) {
+    if (!confirm('Cancel this invitation?')) {
+        return;
+    }
+    
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+    if (!csrfToken) {
+        alert('Security token missing. Please refresh the page.');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('action', 'cancel_invite');
+    formData.append('invite_id', inviteId);
+    formData.append('csrfmiddlewaretoken', csrfToken);
+    
+    fetch('{% url "agent_detail" agent.id %}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the entries list
+            document.getElementById('allowlist-entries-container').innerHTML = data.html;
+            // Update contact count
+            if (data.active_count !== undefined) {
+                document.getElementById('contact-count').textContent = data.active_count;
+            }
+        } else {
+            alert(data.error || 'Failed to cancel invitation');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+    });
+}
+
+// Function to remove allowlist entry
+function removeAllowlistEntry(entryId) {
+    if (!confirm('Remove this contact from the allowlist?')) {
+        return;
+    }
+    
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+    if (!csrfToken) {
+        alert('Security token missing. Please refresh the page.');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('action', 'remove_allowlist');
+    formData.append('entry_id', entryId);
+    formData.append('csrfmiddlewaretoken', csrfToken);
+    
+    fetch('{% url "agent_detail" agent.id %}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the entries list
+            document.getElementById('allowlist-entries-container').innerHTML = data.html;
+            // Update contact count
+            if (data.active_count !== undefined) {
+                document.getElementById('contact-count').textContent = data.active_count;
+            }
+        } else {
+            alert(data.error || 'Failed to remove entry');
+        }
+    })
+    .catch(error => {
+        alert('An error occurred. Please try again.');
+    });
+}
+</script>
+{% endif %}
+
 {% endblock %} 
