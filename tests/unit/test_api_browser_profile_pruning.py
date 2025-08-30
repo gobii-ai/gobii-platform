@@ -5,7 +5,7 @@ import os
 import tempfile
 import shutil
 from unittest.mock import patch, MagicMock
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from api.tasks.browser_agent_tasks import _prune_chrome_profile, CHROME_PROFILE_MAX_SIZE_BYTES
 
@@ -50,6 +50,7 @@ class ChromeProfilePruningTest(TestCase):
                     pass
         return total_size
 
+    @tag("batch_browser_profile")
     @patch('api.tasks.browser_agent_tasks.logger')
     def test_prune_removes_cache_directories(self, mock_logger):
         """Test that cache directories are removed during pruning."""
@@ -84,6 +85,7 @@ class ChromeProfilePruningTest(TestCase):
         # Verify logging occurred
         mock_logger.info.assert_called()
 
+    @tag("batch_browser_profile")
     @patch('api.tasks.browser_agent_tasks.logger')
     def test_prune_removes_temp_files(self, mock_logger):
         """Test that temporary files are removed during pruning."""
@@ -160,6 +162,7 @@ class ChromeProfilePruningTest(TestCase):
         reset_logged = any("Resetting directory" in msg for msg in log_calls)
         self.assertTrue(reset_logged, "Expected reset message in logs")
 
+    @tag("batch_browser_profile")
     @patch('api.tasks.browser_agent_tasks.logger')
     def test_profile_not_reset_when_within_limit(self, mock_logger):
         """Test that profile is NOT reset when within size limit after pruning."""
@@ -183,6 +186,7 @@ class ChromeProfilePruningTest(TestCase):
         final_size = self._get_dir_size(self.test_profile_dir)
         self.assertLess(final_size, CHROME_PROFILE_MAX_SIZE_BYTES)
 
+    @tag("batch_browser_profile")
     @patch('api.tasks.browser_agent_tasks.logger')
     def test_size_logging(self, mock_logger):
         """Test that before/after size logging works correctly."""

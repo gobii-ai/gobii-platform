@@ -1,4 +1,4 @@
-from django.test import TestCase, override_settings
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -29,6 +29,7 @@ class OrganizationInvitesTest(TestCase):
             role=OrganizationMembership.OrgRole.OWNER,
         )
 
+    @tag("batch_organizations")
     def test_invite_email_and_accept_flow(self):
         # Inviter sends invite
         self.client.force_login(self.inviter)
@@ -71,6 +72,7 @@ class OrganizationInvitesTest(TestCase):
         invite.refresh_from_db()
         self.assertIsNotNone(invite.accepted_at)
 
+    @tag("batch_organizations")
     def test_reject_flow(self):
         # Create another invite
         self.client.force_login(self.inviter)
@@ -91,6 +93,7 @@ class OrganizationInvitesTest(TestCase):
         # No membership should be created/modified by rejection
         self.assertFalse(OrganizationMembership.objects.filter(org=self.org, user=self.invitee, role=OrganizationMembership.OrgRole.VIEWER).exists())
 
+    @tag("batch_organizations")
     def test_org_detail_shows_pending_invites(self):
         # Owner creates an invite
         self.client.force_login(self.inviter)
@@ -107,6 +110,7 @@ class OrganizationInvitesTest(TestCase):
         self.assertIsNotNone(pending)
         self.assertIn(invite, list(pending))
 
+    @tag("batch_organizations")
     def test_revoke_and_resend_from_org_detail(self):
         # Owner creates invite
         self.client.force_login(self.inviter)
@@ -166,6 +170,7 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
             status=OrganizationMembership.OrgStatus.REMOVED,
         )
 
+    @tag("batch_organizations")
     def test_org_detail_requires_active_membership(self):
         detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
 
@@ -179,6 +184,7 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
         resp = self.client.get(detail_url)
         self.assertEqual(resp.status_code, 403)
 
+    @tag("batch_organizations")
     def test_only_admin_or_owner_can_manage_invites(self):
         # Create a valid pending invite
         invite = OrganizationInvite.objects.create(
@@ -203,6 +209,7 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
         self.assertEqual(self.client.post(resend_url).status_code, 403)
         self.assertEqual(self.client.post(revoke_url).status_code, 403)
 
+    @tag("batch_organizations")
     def test_only_admin_or_owner_can_remove_or_change_roles(self):
         remove_url = reverse("org_member_remove_org", kwargs={"org_id": self.org.id, "user_id": self.viewer.id})
         role_url = reverse("org_member_role_update_org", kwargs={"org_id": self.org.id, "user_id": self.viewer.id})
@@ -217,12 +224,14 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
         self.assertEqual(self.client.post(remove_url).status_code, 403)
         self.assertEqual(self.client.post(role_url, {"role": OrganizationMembership.OrgRole.ADMIN}).status_code, 403)
 
+    @tag("batch_organizations")
     def test_admin_cannot_remove_owner(self):
         remove_owner_url = reverse("org_member_remove_org", kwargs={"org_id": self.org.id, "user_id": self.owner.id})
         self.client.force_login(self.admin)
         resp = self.client.post(remove_owner_url)
         self.assertEqual(resp.status_code, 403)
 
+    @tag("batch_organizations")
     def test_last_owner_cannot_leave(self):
         leave_url = reverse("org_leave_org", kwargs={"org_id": self.org.id})
         self.client.force_login(self.owner)
@@ -233,6 +242,7 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
         self.assertEqual(m.status, OrganizationMembership.OrgStatus.ACTIVE)
         self.assertEqual(m.role, OrganizationMembership.OrgRole.OWNER)
 
+    @tag("batch_organizations")
     def test_admin_cannot_assign_owner_or_modify_owner(self):
         # Admin cannot promote viewer to owner
         role_viewer_url = reverse("org_member_role_update_org", kwargs={"org_id": self.org.id, "user_id": self.viewer.id})

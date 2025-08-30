@@ -59,6 +59,10 @@ jobs:
             tag: batch_output_schema
           - batch: link_shortener
             tag: batch_link_shortener
+          - batch: organizations
+            tag: batch_organizations
+          - batch: browser_profile
+            tag: batch_browser_profile
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
