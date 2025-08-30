@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   tests:
-    name: tests (shard ${{ matrix.shard_index + 1 }}/${{ matrix.total_shards }})
+    name: tests (shard ${{ matrix.shard_index }}/${{ matrix.total_shards }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -112,5 +112,5 @@ jobs:
           files: |
             test-results/**/*.xml
             TEST-*.xml
-          check_name: "Test Results (shard ${{ matrix.shard_index + 1 }}/${{ matrix.total_shards }})"
+          check_name: "Test Results (shard ${{ matrix.shard_index }}/${{ matrix.total_shards }})"
           comment_mode: off
