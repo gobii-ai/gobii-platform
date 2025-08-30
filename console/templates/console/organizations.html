@@ -1,0 +1,49 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="max-w-3xl space-y-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold text-gray-800">Organizations</h1>
+    <a href="{% url 'organization_add' %}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Add Organization</a>
+  </div>
+
+  {% if pending_invites %}
+  <div class="bg-white shadow rounded-lg p-4">
+    <h2 class="text-lg font-medium text-gray-900 mb-3">Pending Invitations</h2>
+    <ul class="divide-y divide-gray-200">
+      {% for invite in pending_invites %}
+      <li class="py-3 flex items-center justify-between">
+        <div>
+          <div class="text-gray-900 font-medium">{{ invite.org.name }}</div>
+          <div class="text-sm text-gray-500">Invited by {{ invite.invited_by.email }} · Role: {{ invite.get_role_display }} · Expires {{ invite.expires_at|date:"M j, Y" }}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <form method="post" action="{% url 'org_invite_accept' invite.token %}">
+            {% csrf_token %}
+            <button type="submit" class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">Accept</button>
+          </form>
+          <form method="post" action="{% url 'org_invite_reject' invite.token %}">
+            {% csrf_token %}
+            <button type="submit" class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">Decline</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if memberships %}
+  <div class="bg-white shadow rounded-lg divide-y divide-gray-200">
+    {% for membership in memberships %}
+    <a href="{% url 'organization_detail' membership.org.id %}" class="flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+      <span class="font-medium text-gray-900">{{ membership.org.name }}</span>
+      <span class="text-sm text-gray-500 capitalize">{{ membership.get_role_display }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-gray-600">You are not in any organizations.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+Gobii Platform – Notices
+
+1) Trademarks and Brand
+
+- "Gobii", "Gobii AI", the Gobii name, word marks, and logos (the "Gobii Marks") are trademarks or trade names of Gobii, Inc. Whether registered or unregistered, the Gobii Marks are protected under applicable trademark and unfair competition laws.
+- The MIT License in this repository does not grant any rights to use the Gobii Marks, our trade dress, or visual identity. Any use of the Gobii Marks requires prior written permission from Gobii, Inc., except for nominative or descriptive fair use as permitted by law.
+- Do not use the Gobii Marks or confusingly similar names, logos, domain names, or social media handles in a way that suggests sponsorship, affiliation, or endorsement by Gobii, Inc. without an appropriate license or permission.
+- When referring to our products or company in text, please use the marks in a truthful and non‑misleading manner. For unregistered marks, you may see the TM symbol (™) used to indicate claim of rights; do not use the ® symbol unless a mark is registered in your jurisdiction.
+
+2) Proprietary Components
+
+- This repository is licensed under the MIT License, except for any files, modules, or features explicitly designated as "Proprietary" or otherwise marked with a proprietary notice.
+- Certain features may be enabled only when the `GOBII_PROPRIETARY_MODE` setting is true. Enabling or using Proprietary Mode, or any proprietary components, is permitted only for customers who hold a current, valid proprietary software license from Gobii, Inc.
+- Proprietary components are not covered by the MIT License. You may not use, copy, modify, or distribute such components unless you have a separate written license agreement with Gobii, Inc.
+- If you are unsure whether a given file or feature is proprietary, look for explicit proprietary notices in the file header, documentation, or code comments, or contact Gobii, Inc. for clarification.
+
+3) Third‑Party Notices
+
+- This project may include third‑party software, libraries, and assets that are licensed under their own terms. Refer to the respective files, headers, or directories (for example, font and icon licenses under static/ or vendor/) for applicable notices and license terms.
+
+© Gobii, Inc. All rights reserved. The Gobii Marks are the property of Gobii, Inc.
+

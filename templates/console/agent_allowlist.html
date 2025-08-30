@@ -1,0 +1,56 @@
+{% extends "page.html" %}
+{% load static %}
+
+{% block title %}Agent Allowlist{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto py-8">
+  <h1 class="text-2xl font-semibold mb-4">Manual Allowlist for {{ agent.name }}</h1>
+
+  <form method="post" action="" class="mb-6 p-4 bg-white rounded-xl shadow">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="policy" />
+    <label class="block text-sm font-medium text-gray-700 mb-2">Whitelist Policy</label>
+    <select name="whitelist_policy" class="py-2 px-3 border rounded-lg">
+      {% for value,label in agent.WhitelistPolicy.choices %}
+        <option value="{{ value }}" {% if value == policy %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="ml-3 inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">Save Policy</button>
+    <p class="text-sm text-gray-500 mt-2">Default: owner or org members. Manual: only entries listed below.</p>
+  </form>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="p-4 bg-white rounded-xl shadow">
+      <h2 class="text-lg font-medium mb-3">Add Entry</h2>
+      <form method="post" action="" hx-post="" hx-target="#allowlist-entries" hx-swap="innerHTML">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add" />
+        <div class="mb-3">
+          {{ form.channel.label_tag }}
+          {{ form.channel }}
+          {% for e in form.channel.errors %}<p class="text-sm text-red-600">{{ e }}</p>{% endfor %}
+        </div>
+        <div class="mb-3">
+          {{ form.address.label_tag }}
+          {{ form.address }}
+          {% if form.address.help_text %}<p class="text-sm text-gray-500">{{ form.address.help_text }}</p>{% endif %}
+          {% for e in form.address.errors %}<p class="text-sm text-red-600">{{ e }}</p>{% endfor %}
+        </div>
+        <button type="submit" class="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">Add</button>
+      </form>
+    </div>
+
+    <div class="p-4 bg-white rounded-xl shadow">
+      <h2 class="text-lg font-medium mb-3">Current Entries</h2>
+      <div id="allowlist-entries">
+        {% include "console/partials/_allowlist_entries.html" with entries=entries %}
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-6">
+    <a href="{% url 'agent_detail' pk=agent.id %}" class="text-indigo-600 hover:underline">Back to Agent</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,393 @@
+{#{% load widget_tweaks %}#}
+<!-- Agent Contact Form Component (Step 2) -->
+<div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+  <div class="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-blue-50"></div>
+  <div class="relative p-8 sm:p-10">
+    <form method="post" id="create_agent_form">
+      {% csrf_token %}
+
+      <!-- Header -->
+      <div class="text-center mb-8">
+        <div class="flex justify-center mb-4">
+          <div class="flex items-center justify-center size-16 bg-indigo-100 rounded-full">
+            <svg class="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+            </svg>
+          </div>
+        </div>
+        <h2 class="text-2xl font-semibold text-gray-800 mb-2">How should your agent reach you?</h2>
+        <p class="text-gray-600">You will be able to talk to the agent using the communication methods you select:</p>
+      </div>
+
+      <!-- Form Fields -->
+      <div class="max-w-2xl mx-auto space-y-4">
+
+        <!-- Contact Method Cards (Stacked) -->
+        <div class="space-y-4">
+
+          <!-- Email Card -->
+          <div class="bg-gray-50 border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200" id="email-card">
+            <!-- Email Header with Toggle -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="flex items-center justify-center w-10 h-10 rounded-lg">
+                  <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-gray-900">Email</h3>
+                </div>
+              </div>
+
+              <!-- Email Toggle Switch -->
+              <label class="relative inline-flex items-center cursor-pointer">
+                {{ form.email_enabled }}
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            <!-- Email Input Section -->
+            <div class="email-content transition-opacity duration-200 mt-4" id="email-content">
+              <label for="{{ form.contact_endpoint_email.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                {{ form.contact_endpoint_email.label }}
+              </label>
+              <div class="relative">
+                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                  <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                  </svg>
+                </div>
+                {{ form.contact_endpoint_email }}
+              </div>
+              {% if form.contact_endpoint_email.errors %}
+                <div class="text-red-600 text-sm mt-1">
+                  {{ form.contact_endpoint_email.errors.0 }}
+                </div>
+              {% endif %}
+              {% if form.contact_endpoint_email.help_text %}
+                <p class="text-xs text-gray-500 mt-2">{{ form.contact_endpoint_email.help_text }}</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- SMS Card -->
+          <div class="bg-gray-50 border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200" id="sms-card">
+            <!-- SMS Header with Toggle -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="flex items-center justify-center w-10 h-10 rounded-lg">
+                  <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-gray-900">SMS</h3>
+                </div>
+              </div>
+
+              <!-- SMS Toggle Switch -->
+              <label class="relative inline-flex items-center cursor-pointer">
+                {{ form.sms_enabled }}
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            <!-- SMS Content Section -->
+            <div class="sms-content transition-opacity duration-200 mt-4" id="sms-content">
+              <p class="block text-sm font-medium text-gray-700 mb-2">Your phone number:</p>
+              {% include "partials/_sms_form.html" %}
+            </div>
+          </div>
+        </div>
+
+        <!-- Preferred Contact Method -->
+        <div class="bg-gray-50 border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200" id="sms-card">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="flex items-center justify-center w-10 h-10 rounded-lg">
+                  <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke-width="2"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="font-semibold text-gray-900">Primary Contact Method</h3>
+                  <p class="text-sm text-gray-500">Choose your preferred method for communications:</p>
+                </div>
+              </div>
+
+            </div>
+            <!-- Preferred Contact Method -->
+          <div class="my-4">
+                {{ form.preferred_contact_method }}
+              </div>
+        </div>
+
+
+        <!-- Form Errors -->
+        {% if form.preferred_contact_method.errors %}
+          <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <h3 class="text-sm font-medium text-red-800">Please select a contact method</h3>
+                <div class="mt-1 text-sm text-red-700">
+                  {{ form.preferred_contact_method.errors.0 }}
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+
+        <!-- Action Buttons -->
+        <div class="flex gap-3 pt-4">
+          <a href="{% url 'agents' %}" class="flex-1 inline-flex justify-center items-center gap-x-2 rounded-xl border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-base px-5 py-3 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+            Back
+          </a>
+          
+          <button
+            type="submit"
+            id="create-agent"
+            class="flex-1 inline-flex justify-center items-center gap-x-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-white font-semibold text-base px-5 py-3 shadow-md transition-colors disabled:bg-indigo-300 disabled:shadow-none disabled:text-white/70 disabled:cursor-not-allowed disabled:hover:bg-indigo-300">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+            Create Agent
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% load static %}
+<script src="{% static 'js/sms_forms.js' %}"></script>
+
+<script>
+(function () {
+  // Helper – enable or disable the SMS radio
+  function syncCommOptions(selectSms, selectEmail) {
+    const smsCheckbox = document.querySelector('input[type=checkbox][name="sms_enabled"]');
+    const emailCheckbox = document.querySelector('input[type=checkbox][name="email_enabled"]');
+    const smsContent = document.querySelector('#sms-content');
+    const emailContent = document.querySelector('#email-content');
+    const smsInput = document.querySelector('#phone_number_input');
+    const verifySmsButton = document.querySelector('#id_verification_code');
+
+    // Check if the phone number is verified
+    const verified = !!document.querySelector('#sms-verification-form .phone-number-static');
+
+    if (!verified || smsCheckbox.checked === false) {
+      // Disable SMS toggle if phone is not verified
+      // smsCheckbox.disabled = !verified;
+
+      // Find the select list item with the value "sms" and disable it
+      enableCommSelectOption('sms', false, false);
+    } else {
+      // Enable SMS toggle if phone is verified
+      smsCheckbox.disabled = false;
+
+      if (selectSms === true) {
+        smsCheckbox.checked = true;
+      }
+
+      // Find the select list item with the value "sms" and enable it, but don't select
+      enableCommSelectOption('sms', true);
+    }
+
+    if (smsInput) {
+      // If the SMS checkbox is checked, ensure the phone number input is required
+      smsInput.required = smsCheckbox.checked; // Add or remove required attribute based on checkbox state
+    }
+
+    if (verifySmsButton) {
+      // If the SMS checkbox is checked, ensure the verify button is required when SMS is enabled, if on the page
+      verifySmsButton.required = smsCheckbox.checked; // Add or remove disabled attribute based on checkbox state
+    }
+
+    //Show hide SMS card based on the checkbox state
+    if (smsContent) {
+      if (smsCheckbox.checked === false) {
+        //Display hidden for SMS card
+        smsContent.classList.add('hidden');
+      } else {
+        // Show SMS card if SMS is enabled
+        smsContent.classList.remove('hidden');
+      }
+    }
+
+    if (emailContent) {
+      if (emailCheckbox.checked === false) {
+        //Display hidden for email card
+        emailContent.classList.add('hidden');
+      } else {
+        // Show email card if email is enabled
+        emailContent.classList.remove('hidden');
+      }
+    }
+
+    // Enable or disable the email checkbox based on the emailCheckbox state
+    enableCommSelectOption('email', emailCheckbox.checked, selectEmail);
+    updateCreateAgentButtonState();
+  }
+
+
+  function enableCommSelectOption(value, enable, select) {
+    const primarySelectList = document.querySelector('select[name="preferred_contact_method"]');
+
+    // Only tinker with the select list if we are NOT enabling the option
+    if (primarySelectList) {
+      const option = Array.from(primarySelectList.options).find(opt => opt.value === value);
+
+      if (option) {
+        option.disabled = !enable;
+
+        // Go ahead and select it if flagged to do so, OR no existing selection
+        if (select === true || primarySelectList.value === '') {
+          primarySelectList.value = value; // Select the option if enabled
+        }
+
+        // If the option is disabled, ensure it is not selected
+        if (!enable && primarySelectList.value === value) {
+
+          // Find the first enabled option
+          const firstEnabledOption = Array.from(primarySelectList.options).find(opt => !opt.disabled);
+
+          if (firstEnabledOption) {
+            primarySelectList.value = firstEnabledOption.value; // Select the first enabled option
+          } else {
+            // If no options are enabled, deselect
+            primarySelectList.value = ''; // Deselect
+          }
+        }
+      }
+    }
+  }
+
+  // Initial load
+  syncCommOptions();
+
+  /** Enable or disable every form control inside a block */
+  function setBlockEnabled(block, enabled) {
+    if (!block) return;
+    block.querySelectorAll('input, select, textarea, button').forEach(el => {
+      // Remember whether the element was required
+      if (!enabled) el.dataset.wasRequired = el.required;
+      el.disabled = !enabled;
+      el.required = enabled ? (el.dataset.wasRequired === "true") : false;
+    });
+  }
+
+  function updateCreateAgentButtonState() {
+    const createAgentButton = document.getElementById('create-agent');
+    const emailEnabled = document.querySelector('input[type=checkbox][name="email_enabled"]').checked;
+    const smsEnabled = document.querySelector('input[type=checkbox][name="sms_enabled"]').checked;
+
+    // Conditions:
+    //  - At least one communication method must be enabled
+    //  - If SMS is enabled, the phone number must be verified
+    //  - If email is enabled, it must be provided and be an email address
+    const phoneVerified = !!document.querySelector('#sms-verification-form .phone-number-static');
+    const emailInput = document.querySelector('input[name="contact_endpoint_email"]');
+    // Allow localhost emails (no dot required) for development
+    const emailValid = emailInput && emailInput.value && /^[^\s@]+@[^\s@]+(\.[^\s@]+)?$/.test(emailInput.value);
+    let isValid = true;
+
+    // Debug logging
+    console.log('=== Create Agent Button Validation ===');
+    console.log('Email checkbox enabled:', emailEnabled);
+    console.log('SMS checkbox enabled:', smsEnabled);
+    console.log('Email input element found:', !!emailInput);
+    console.log('Email input value:', emailInput?.value);
+    console.log('Email valid:', emailValid);
+    console.log('Phone verified:', phoneVerified);
+
+    isValid = isValid && (emailEnabled ? emailValid : true);
+    isValid = isValid && (smsEnabled ? phoneVerified : true);
+
+    //Make sure one is enabled... edge case
+    isValid = isValid && (emailEnabled || smsEnabled);
+    
+    console.log('Final isValid:', isValid);
+    console.log('Button will be:', isValid ? 'ENABLED' : 'DISABLED');
+    console.log('========================');
+
+    createAgentButton.disabled = !isValid;
+    createAgentButton.classList.toggle('opacity-50', !isValid);
+    createAgentButton.classList.toggle('cursor-not-allowed', !isValid);
+  }
+
+  // Add event listeners to radio buttons
+  const preferredContactMethods = document.querySelectorAll('input[name="preferred_contact_method"]');
+
+  const smsEnabledCheckboxes = document.querySelectorAll('input[type=checkbox][name="sms_enabled"]');
+
+  if (smsEnabledCheckboxes.length > 0) {
+    smsEnabledCheckboxes.forEach(function(checkbox) {
+      checkbox.addEventListener('change', function() {
+        //If it is SMS, select it
+        syncCommOptions(checkbox.checked);
+      });
+
+      updateCreateAgentButtonState();
+    });
+  }
+
+  const emailEnabledCheckboxes = document.querySelectorAll('input[type=checkbox][name="email_enabled"]');
+
+  if (emailEnabledCheckboxes.length > 0) {
+    emailEnabledCheckboxes.forEach(function(checkbox) {
+      checkbox.addEventListener('change', function() {
+        //If it is SMS, select it
+        syncCommOptions();
+
+        updateCreateAgentButtonState();
+      });
+    });
+  }
+
+  // Add event listeners to the email input field to handle autofill and manual input
+  const emailInput = document.querySelector('input[name="contact_endpoint_email"]');
+  if (emailInput) {
+    // Listen for user input
+    emailInput.addEventListener('input', updateCreateAgentButtonState);
+    // Listen for programmatic changes (some autofill scenarios)
+    emailInput.addEventListener('change', updateCreateAgentButtonState);
+    // Listen for blur to catch any remaining edge cases
+    emailInput.addEventListener('blur', updateCreateAgentButtonState);
+  }
+
+  // Handle HTMX swaps
+  document.addEventListener('htmx:afterSwap', (e) => {
+    if (e.detail.target.id === 'sms-island' || e.detail.target.id === 'sms-verification-form') {
+      syncCommOptions(true, false);
+      updateCreateAgentButtonState();
+    }
+  });
+
+  updateCreateAgentButtonState();
+})();
+</script>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('create_agent_form');
+    form.addEventListener('submit', function(event) {
+      // Add any additional validation or processing here if needed
+      if (window.analytics && typeof window.analytics.track === 'function') {
+        window.analytics.track('{{ analytics.cta.CTA_CREATE_AGENT_COMM_CLICKED }}', {
+          preferred_contact_method: form.preferred_contact_method.value,
+          contact_endpoint_email: form.contact_endpoint_email.value
+        });
+      }
+    });
+  });
+</script>

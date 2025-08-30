@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Privacy Policy · Gobii{% endblock %}
+
+{% block content %}
+<style>
+  .prose h1,
+  .prose h2 {
+    @apply font-semibold;
+  }
+</style>
+<article class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 prose prose-slate">
+  <h1>Privacy Policy</h1>
+  <p><em>Last updated: May 20, 2025</em></p>
+
+  <!-- Gobii official address -->
+  <p><strong>Gobii Inc.</strong><br>
+  455 Market St, Ste 1940<br>
+  PMB 790239<br>
+  San Francisco, California 94105, USA</p>
+
+  <h2>1. Scope</h2>
+  <p>This Privacy Policy explains how Gobii Inc. ("Gobii," "we," "us," or "our") collects, uses, and shares information when you:</p>
+  <ul>
+    <li>visit <code>gobii.ai</code> or any sub-domain we operate;</li>
+    <li>create or use an account;</li>
+    <li>call our API or dashboard to run browser-automation / AI-agent tasks; or</li>
+    <li>otherwise interact with us (for example, by contacting support).</li>
+  </ul>
+  <p>It applies worldwide, but is written under U.S. law and designed to satisfy key obligations under the EU General Data Protection Regulation ("GDPR"), the California Consumer Privacy Rights Act ("CPRA"), and emerging 2025 state privacy laws.</p>
+
+  <h2>2. Information We Collect</h2>
+  <table>
+    <thead>
+      <tr><th>Category</th><th>Examples</th><th>Source</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Account Data</td><td>Name, email, password hash, billing address, payment-method tokens</td><td>Provided by you</td></tr>
+      <tr><td>Content &amp; Instructions</td><td>Scripts, prompts, URLs, or other material you submit to the Service; any data an agent collects at your direction</td><td>Provided by you</td></tr>
+      <tr><td>Usage &amp; Log Data</td><td>IP address, user-agent, timestamps, API call parameters, error traces, resource consumption metrics</td><td>Collected automatically</td></tr>
+      <tr><td>Device / Analytics Data</td><td>Cookies or similar IDs, page views, referrers, click-streams</td><td>Collected automatically / third-party analytics</td></tr>
+      <tr><td>Support Data</td><td>Messages, attachments, call recordings</td><td>Provided by you</td></tr>
+    </tbody>
+  </table>
+  <p>We do not intentionally ingest personal information that your agents scrape unless you direct the agent to send it back to our servers. You are the controller of that downstream data.</p>
+
+  <h2>3. How We Use Information</h2>
+  <ul>
+    <li>Provide &amp; operate the Service (set up accounts, run automations, bill usage).</li>
+    <li>Maintain security (fraud detection, abuse prevention, auditing).</li>
+    <li>Improve &amp; develop new features (aggregated analytics, error logging, model tuning).</li>
+    <li>Communicate with you (transactional emails, product updates; marketing only with consent).</li>
+    <li>Comply with law and enforce our Terms of Service.</li>
+  </ul>
+  <p>Legal bases under the GDPR: contract performance, legitimate interests, consent (where required), and legal obligation.</p>
+
+  <h2>4. Sharing &amp; Disclosure</h2>
+  <table>
+    <thead>
+      <tr><th>With…</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Service Providers</td><td>Cloud hosting, payment processors, analytics, customer-support tools (bound by contract).</td></tr>
+      <tr><td>Third-party Websites You Automate</td><td>We transmit your agent's requests and receive any responses solely at your direction.</td></tr>
+      <tr><td>Legal / Compliance</td><td>Court orders, law-enforcement requests, or to exercise / defend legal claims.</td></tr>
+      <tr><td>Business Transfers</td><td>Part of a merger, acquisition, or asset sale (notice will be given).</td></tr>
+      <tr><td>With Consent</td><td>Any other sharing you explicitly authorize.</td></tr>
+    </tbody>
+  </table>
+  <p>We do not "sell" or "share" personal information for cross-context behavioural advertising as those terms are defined by the CPRA.</p>
+
+  <h2>5. Cookies &amp; Tracking</h2>
+  <p>We use first-party cookies and comparable technologies for essential operations and analytics. Your browser settings, our cookie banner, or industry tools (e.g., the Global Privacy Control) let you manage non-essential cookies. We do not respond to legacy "Do Not Track" signals.</p>
+
+  <h2>6. International Data Transfers</h2>
+  <p>We host data primarily in the United States. If you are in the EEA/UK or another region with data-transfer restrictions, we rely on standard contractual clauses or other legally approved mechanisms.</p>
+
+  <h2>7. Data Retention</h2>
+  <ul>
+    <li><strong>Account &amp; billing records</strong> — kept while your account is active and for up to 7&nbsp;years thereafter.</li>
+    <li><strong>Automation logs</strong> — typically 30&nbsp;days, unless needed longer for security, debugging, or legal reasons.</li>
+    <li><strong>Support tickets</strong> — retained as long as necessary to resolve the issue and maintain an accurate support history.</li>
+  </ul>
+  <p>When retention ends, data is deleted or anonymised.</p>
+
+  <h2>8. Security</h2>
+  <p>We employ industry-standard technical and organisational measures: encryption in transit, segmented VPC networks, least-privilege access controls, routine penetration testing, and incident-response procedures. No system is 100&nbsp;% secure, and you use the Service at your own risk.</p>
+
+  <h2>9. Your Rights &amp; Choices</h2>
+  <h3>9.1 GDPR / UK Data-Protection Rights</h3>
+  <p>You may: access; rectify; erase; port; restrict; object to processing; and withdraw consent at any time. You also have the right to lodge a complaint with your local supervisory authority.</p>
+
+  <h3>9.2 California &amp; U.S. State Rights</h3>
+  <p>Under the CPRA and similar state laws you have the right to know, delete, correct, opt-out, and limit use of sensitive data (where applicable). We will not discriminate against you for exercising these rights.</p>
+
+  <h3>9.3 Exercising Your Rights</h3>
+  <p>Email <a href="mailto:privacy@gobii.com">privacy@gobii.com</a> or use the privacy controls in your dashboard. We will verify your identity before fulfilling requests.</p>
+
+  <h2>10. Children's Privacy</h2>
+  <p>Gobii is not directed to children under 13 (or under 16 in the EEA). We do not knowingly collect personal information from children. If we learn we have done so, we will delete it promptly.</p>
+
+  <h2>11. Changes to This Policy</h2>
+  <p>We may update this Privacy Policy from time to time. Material changes will be posted on this page with a revised "Last updated" date. Continued use after changes means you accept the revised Policy.</p>
+
+  <h2>12. Contact Us</h2>
+  <p><strong>Gobii Inc.</strong><br>
+  455 Market St, Ste 1940, PMB 790239<br>
+  San Francisco, California 94105, USA<br>
+  Email: <a href="mailto:privacy@gobii.com">privacy@gobii.com</a></p>
+</article>
+{% endblock %} 

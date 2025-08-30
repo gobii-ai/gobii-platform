@@ -1,0 +1,12 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools %}
+  <ul class="object-tools">
+      <li>
+          <a href="{% url 'admin:api_browseruseagenttask_run_gc' %}" class="button">
+              🗑️ Run Garbage&nbsp;Collection
+          </a>
+      </li>
+      {{ block.super }}
+  </ul>
+{% endblock %}

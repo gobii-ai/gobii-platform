@@ -1,0 +1,233 @@
+{# Talk to Agent Modal – supports email *and* SMS #}
+<div
+  id="talk-to-agent-modal"
+  x-data="{
+    showModal    : false,
+    actionUrl    : '',
+    agentName    : '',
+    agentEmail   : '',
+    agentPhone   : '',
+    get channel () {                      // <-- computed: 'sms' or 'email'
+      return this.agentPhone ? 'sms' : 'email';
+    },
+    reset() {
+      this.showModal  = false;
+      this.actionUrl  = '';
+      this.agentName  = '';
+      this.agentEmail = '';
+      this.agentPhone = '';
+    }
+  }"
+  x-on:open-modal.window="
+      if ($event.detail.id === 'talk-to-agent-modal') {
+        showModal      = true;
+        actionUrl      = $event.detail.url ?? '';
+        agentName      = $event.detail.agentName      ?? '';
+        agentEmail     = $event.detail.agentEmail     ?? '';
+        agentPhone     = $event.detail.agentPhoneNumber ?? '';  // ⭐
+      }"
+  x-on:close-modal.window="if ($event.detail.id === 'talk-to-agent-modal') reset()"
+  x-on:keydown.escape.window="reset()"
+  x-cloak
+  x-show="showModal"
+  class="fixed inset-0 z-50 overflow-y-auto"
+  aria-modal="true"
+  role="dialog"
+  aria-labelledby="modal-title"
+>
+
+
+  <div class="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+
+    <!-- Backdrop -->
+    <div x-show="showModal"
+         x-transition:enter="ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 bg-gray-500/75 backdrop-blur-sm"
+         aria-hidden="true"
+         @click="reset()">
+    </div>
+
+    <span class="hidden sm:inline-block sm:h-screen sm:align-middle" aria-hidden="true">&#8203;</span>
+
+    <!-- Modal panel -->
+    <div x-show="showModal"
+         x-transition:enter="ease-out duration-300"
+         x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+         x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
+         x-transition:leave="ease-in duration-200"
+         x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
+         x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+         @click.stop
+         class="inline-block w-full max-w-lg transform overflow-hidden rounded-lg bg-white text-left align-middle shadow-xl transition-all"
+    >
+      <!-- Header -->
+      <div class="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+        <h3 id="modal-title" class="text-lg font-medium text-gray-900">
+          Talk to Your Agent
+        </h3>
+        <button @click="reset()"
+                class="text-gray-400 transition hover:text-gray-500">
+          <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Body -->
+      <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+        <div class="sm:flex sm:items-start">
+          <!-- icon bubble -->
+          <div class="mx-auto flex h-12 w-12 flex-shrink-0 items-center
+                      justify-center rounded-full bg-indigo-100 sm:mx-0 sm:h-10 sm:w-10">
+            <!-- Mail icon -->
+            <svg x-show="channel==='email'" class="h-6 w-6 text-indigo-600"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            <!-- Phone icon -->
+            <svg x-show="channel==='sms'" class="h-6 w-6 text-indigo-600"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M3 5a2 2 0 012-2h3l2 5-2 1a11 11 0 005 5l1-2 5 2v3a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"/>
+            </svg>
+          </div>
+
+          <!-- text -->
+          <div class="mt-3 flex-1 text-center sm:mt-0 sm:ml-4 sm:text-left">
+            <template x-if="channel==='email'">
+              <div>
+                <p class="mb-4 text-sm text-gray-600">
+                  Your agent <strong x-text="agentName"></strong> is ready to assist you via email.
+                  Simply send an email to communicate directly.
+                </p>
+
+                <!-- Email card -->
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                      <div class="flex-shrink-0 text-gray-400">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                        </svg>
+                      </div>
+                      <div>
+                        <p class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                          Agent Email
+                        </p>
+                        <a :href="'mailto:'+agentEmail"
+                           class="text-sm font-medium text-indigo-600 transition hover:text-indigo-800"
+                           x-text="agentEmail"></a>
+                      </div>
+                    </div>
+                    <button @click="navigator.clipboard.writeText(agentEmail); $dispatch('copied-to-clipboard')"
+                            class="rounded-md p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                            title="Copy email address">
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <p class="mt-4 text-xs text-gray-500">
+                  💡 <strong>Tip:</strong> Your agent responds from that address. Each agent has its own unique email.
+                </p>
+              </div>
+            </template>
+
+            <template x-if="channel==='sms'">
+              <div>
+                <p class="mb-4 text-sm text-gray-600">
+                  Your agent <strong x-text="agentName"></strong> is ready to chat over SMS.
+                  Send a text message to the number below to start the conversation.
+                </p>
+
+                <!-- Phone card -->
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                      <div class="flex-shrink-0 text-gray-400">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 5a2 2 0 012-2h3l2 5-2 1a11 11 0 005 5l1-2 5 2v3a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"/>
+                        </svg>
+                      </div>
+                      <div>
+                        <p class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                          Agent Number
+                        </p>
+                        <a :href="'sms:'+agentPhone"
+                           class="text-sm font-medium text-indigo-600 transition hover:text-indigo-800 phone-number-to-format"
+                           x-text="agentPhone"></a>
+                      </div>
+                    </div>
+                    <button @click="navigator.clipboard.writeText(agentPhone); $dispatch('copied-to-clipboard')"
+                            class="rounded-md p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                            title="Copy phone number">
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <p class="mt-4 text-xs text-gray-500">
+                  💡 <strong>Tip:</strong> Text like you would with a friend—your agent understands natural language.
+                </p>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+        <!-- email CTA -->
+        <a x-show="channel==='email'"
+           :href="'mailto:'+agentEmail"
+           class="inline-flex w-full items-center justify-center gap-2 rounded-md border border-transparent
+                  bg-indigo-600 px-4 py-2 text-base font-medium text-white shadow-sm
+                  transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  sm:ml-3 sm:w-auto sm:text-sm">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+          </svg>
+          Send Email
+        </a>
+
+        <!-- sms CTA -->
+        <a x-show="channel==='sms'"
+           :href="'sms:'+agentPhone"
+           class="inline-flex w-full items-center justify-center gap-2 rounded-md border border-transparent
+                  bg-indigo-600 px-4 py-2 text-base font-medium text-white shadow-sm
+                  transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  sm:ml-3 sm:w-auto sm:text-sm">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M3 5a2 2 0 012-2h3l2 5-2 1a11 11 0 005 5l1-2 5 2v3a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"/>
+          </svg>
+          Send Text
+        </a>
+
+        <button @click="reset()"
+                class="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300
+                       bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm
+                       transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500
+                       sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

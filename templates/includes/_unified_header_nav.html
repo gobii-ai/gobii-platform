@@ -1,0 +1,263 @@
+{% load static %}
+{% load i18n %}
+
+<!-- Unified Header -->
+<header class="sticky top-0 z-30 bg-white/80 backdrop-blur hs-header">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-16">
+      <!-- Brand -->
+      <a href="{% url 'pages:home' %}" class="text-lg font-bold text-slate-900 flex items-center h-10">
+        <img src="{% static 'images/noBgBlue.png' %}" 
+             alt="Gobii Logo" 
+             class="h-10 w-auto"
+             width="120"
+             height="40"
+             loading="eager"
+             decoding="async">
+      </a>
+
+      <!-- Desktop Nav -->
+      <nav class="hidden md:flex items-center gap-x-6 text-sm font-medium">
+        <a href="{% url 'pages:home' %}" class="text-slate-700 hover:text-blue-600">Home</a>
+        <a href="/docs/" class="text-slate-700 hover:text-blue-600">API</a>
+        <a href="{% url 'pages:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a>
+        <a href="/support/" class="text-slate-700 hover:text-blue-600">Support</a>
+
+        {% if request.user.is_authenticated %}
+          <a href="{% url 'console-home' %}" class="text-slate-700 hover:text-blue-600">Console</a>
+          <!-- User Profile Dropdown (Desktop) -->
+          <div x-data="{ open: false }" class="relative inline-flex">
+            <button @click="open = !open"
+                    @keydown.escape.window="open = false"
+                    :aria-expanded="open"
+                    class="inline-flex items-center justify-center gap-x-2 rounded-full text-sm font-medium text-slate-700 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+              {% with social_account_set=request.user.socialaccount_set.all %}
+                {% if social_account_set and social_account_set.0.get_avatar_url %}
+                  <img class="inline-block size-8 rounded-full object-cover" src="{{ social_account_set.0.get_avatar_url }}" alt="{{ request.user.email|default:"User Profile" }}">
+                {% else %}
+                  {% firstof request.user.first_name request.user.email request.user.username as display_name_source %}
+                  {% if display_name_source %}
+                    {% with initial=display_name_source|first|upper %}
+                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-indigo-500 text-white text-sm font-semibold" title="{{ request.user.email|default:request.user.username }}">
+                        {{ initial }}
+                    </div>
+                    {% endwith %}
+                  {% else %}
+                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-gray-300 text-gray-700 text-sm font-semibold" title="User Profile">?</div>
+                  {% endif %}
+                {% endif %}
+              {% endwith %}
+            </button>
+
+            <!-- Dropdown panel -->
+            <div x-cloak
+                 x-show="open"
+                 @click.outside="open = false"
+                 x-transition:enter="transition ease-out duration-150 transform"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 x-transition:leave="transition ease-in duration-100"
+                 x-transition:leave-start="opacity-100 scale-100"
+                 x-transition:leave-end="opacity-0 scale-95"
+                 class="origin-top-right absolute right-0 top-full mt-2 w-64 bg-white/90 backdrop-blur-md shadow-2xl rounded-xl ring-1 ring-slate-200/50 divide-y divide-gray-200">
+              <div class="py-4 px-5">
+                <p class="text-[11px] uppercase tracking-wide text-gray-500">{% translate 'Signed in as' %}</p>
+                <p class="text-sm font-semibold text-slate-800 truncate">{{ request.user.email|default:request.user.username }}</p>
+              </div>
+              <div class="py-2">
+                {% if request.user.is_staff %}
+                <div class="py-1">
+                  <a href="{% url 'admin:index' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                    <svg class="h-4 w-4 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h18M3 9h18M3 15h18M3 21h18" />
+                    </svg>
+                    Django Admin
+                  </a>
+                </div>
+                {% endif %}
+
+                <div class="py-1">
+                  <a href="{% url 'profile' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                    <svg aria-hidden="true" class="h-4 w-4 text-slate-500"
+                         xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" height="24" width="24" fill="currentColor" stroke="currentColor">
+                      <!--!Font Awesome Free v7.0.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2025 Fonticons, Inc.-->
+                     <path d="M240 192C240 147.8 275.8 112 320 112C364.2 112 400 147.8 400 192C400 236.2 364.2 272 320 272C275.8 272 240 236.2 240 192zM448 192C448 121.3 390.7 64 320 64C249.3 64 192 121.3 192 192C192 262.7 249.3 320 320 320C390.7 320 448 262.7 448 192zM144 544C144 473.3 201.3 416 272 416L368 416C438.7 416 496 473.3 496 544L496 552C496 565.3 506.7 576 520 576C533.3 576 544 565.3 544 552L544 544C544 446.8 465.2 368 368 368L272 368C174.8 368 96 446.8 96 544L96 552C96 565.3 106.7 576 120 576C133.3 576 144 565.3 144 552L144 544z"/>
+                    </svg>
+                    Profile
+                  </a>
+                </div>
+
+                <div class="py-1">
+                  <form method="post" action="{% url 'account_logout' %}">
+                    {% csrf_token %}
+                    <button type="submit"
+                            class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                      <svg class="h-4 w-4 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6A2.25 2.25 0 005.25 5.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M18 12H8.25" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M14.25 8.25L18 12l-3.75 3.75" />
+                      </svg>
+                      {% translate 'Sign Out' %}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% else %}
+          <a href="{% url 'account_login' %}" class="text-slate-700 hover:text-blue-600">Login</a>
+          <a href="{% url 'account_login' %}" class="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 shadow">
+            Get started
+          </a>
+        {% endif %}
+
+        <!-- Social Icons (always visible) -->
+        <div class="flex items-center gap-4">
+          <a href="https://discord.gg/yyDB8GwxtE" target="_blank" rel="noopener" aria-label="Join our Discord server" class="text-slate-700 hover:text-[#5865F2] transition-colors">
+            <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M13.545 2.907a13.227 13.227 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.19 12.19 0 0 0-3.658 0 8.258 8.258 0 0 0-.412-.833.051.051 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.041.041 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032c.001.014.01.028.021.037a13.276 13.276 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019c.308-.42.582-.863.818-1.329a.05.05 0 0 0-.01-.059.051.051 0 0 0-.018-.011 8.875 8.875 0 0 1-1.248-.595.05.05 0 0 1-.02-.066.051.051 0 0 1 .015-.019c.084-.063.168-.129.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.052.052 0 0 1 .053.007c.08.066.164.132.248.195a.051.051 0 0 1-.004.085 8.254 8.254 0 0 1-1.249.594.05.05 0 0 0-.03.03.052.052 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.235 13.235 0 0 0 4.001-2.02.049.049 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.034.034 0 0 0-.02-.019Zm-8.198 7.307c-.789 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612Zm5.316 0c-.788 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612Z"/>
+            </svg>
+          </a>
+          <a href="https://x.com/gobii_ai" target="_blank" rel="noopener" aria-label="Follow us on X (Twitter)" class="text-slate-700 hover:text-black transition-colors">
+            <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M12.6.75h2.454l-5.36 6.142L16 15.25h-4.937l-3.867-5.07-4.425 5.07H.316l5.733-6.57L0 .75h5.063l3.495 4.633L12.601.75Zm-.86 13.028h1.36L4.323 2.145H2.865z"/>
+            </svg>
+          </a>
+        </div>
+      </nav>
+
+      <!-- Mobile hamburger -->
+      <button type="button" class="md:hidden flex items-center justify-center w-10 h-10 rounded-lg text-slate-700 hover:text-blue-600" 
+              x-data="{}" 
+              @click="$dispatch('toggle-mobile-nav')" 
+              aria-label="Toggle navigation">
+        <svg class="flex-shrink-0 w-6 h-6" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- Mobile Navigation Modal -->
+<div x-data="{ showMobileNav: false }" 
+     @toggle-mobile-nav.window="showMobileNav = !showMobileNav"
+     @keydown.escape.window="showMobileNav = false"
+     @pagehide.window="showMobileNav = false"
+     @htmx:before-history-save.window="showMobileNav = false"
+     @htmx:before-request.window="showMobileNav = false"
+     @pageshow.window="if (event.persisted) { showMobileNav = false }"
+     @visibilitychange.window="if (document.visibilityState === 'hidden') { showMobileNav = false }"
+     @freeze.window="showMobileNav = false"
+     @close-mobile-nav.window="showMobileNav = false"
+     class="relative z-50">
+     
+  <!-- Background overlay -->
+  <div x-show="showMobileNav" 
+       x-transition:enter="ease-out duration-300"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100"
+       x-transition:leave="ease-in duration-200"
+       x-transition:leave-start="opacity-100"
+       x-transition:leave-end="opacity-0"
+       @click="showMobileNav = false"
+       class="fixed inset-0 top-16 bg-black/20 backdrop-blur-sm z-40"
+       x-cloak></div>
+  
+  <!-- Mobile Nav Panel (Overlay) -->
+  <div x-show="showMobileNav"
+       x-transition:enter="ease-out duration-200"
+       x-transition:enter-start="opacity-0 -translate-y-2"
+       x-transition:enter-end="opacity-100 translate-y-0"
+       x-transition:leave="ease-in duration-150"
+       x-transition:leave-start="opacity-100 translate-y-0"
+       x-transition:leave-end="opacity-0 -translate-y-2"
+       @click.stop
+       class="fixed left-0 right-0 top-16 max-h-[80vh] overflow-y-auto bg-white border-b border-gray-200 shadow-xl z-50"
+       x-cloak>
+    
+    <div class="py-4">
+      <div class="px-4 space-y-3 text-sm font-medium">
+        <a href="{% url 'pages:home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Home</a>
+        <a href="/docs/" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">API</a>
+        <a href="{% url 'pages:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
+        
+        {% if request.user.is_authenticated %}
+          <a href="{% url 'console-home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Console</a>
+          
+          <div class="mt-4 pt-4 border-t border-gray-200">
+            <div class="flex items-center gap-3 px-3 mb-3">
+              {% with social_account_set=request.user.socialaccount_set.all %}
+                {% if social_account_set and social_account_set.0.get_avatar_url %}
+                  <img class="inline-block size-8 rounded-full object-cover" src="{{ social_account_set.0.get_avatar_url }}" alt="{{ request.user.email|default:"User Profile" }}">
+                {% else %}
+                  {% firstof request.user.first_name request.user.email request.user.username as display_name_source %}
+                  {% if display_name_source %}
+                    {% with initial=display_name_source|first|upper %}
+                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-indigo-500 text-white text-sm font-semibold">
+                        {{ initial }}
+                    </div>
+                    {% endwith %}
+                  {% else %}
+                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-indigo-500 text-white text-sm font-semibold">?</div>
+                  {% endif %}
+                {% endif %}
+              {% endwith %}
+              <div>
+                <p class="text-xs text-gray-500">Signed in as</p>
+                <p class="text-sm font-semibold text-slate-800 truncate">{{ request.user.email|default:request.user.username }}</p>
+              </div>
+            </div>
+            
+            {% if request.user.is_staff %}
+            <a href="{% url 'admin:index' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+              <svg class="h-4 w-4 mr-2 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h18M3 9h18M3 15h18M3 21h18" />
+              </svg>
+              Django Admin
+            </a>
+            {% endif %}
+
+            <a href="{% url 'profile' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+              <svg class="h-4 w-4 mr-2 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5.121 17.804A9 9 0 1118 9a7 7 0 00-12.879 8.804z" />
+              </svg>
+              Profile
+            </a>
+            
+            <form method="post" action="{% url 'account_logout' %}" class="mt-2">
+              {% csrf_token %}
+              <button type="submit" class="w-full flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+                <svg class="h-4 w-4 mr-2 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6A2.25 2.25 0 005.25 5.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M18 12H8.25" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M14.25 8.25L18 12l-3.75 3.75" />
+                </svg>
+                {% translate "Sign Out" %}
+              </button>
+            </form>
+          </div>
+        {% else %}
+          <div class="mt-4 pt-4 border-t border-gray-200 space-y-3">
+            <a href="{% url 'account_login' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Login</a>
+            <a href="{% url 'account_login' %}" class="block text-center bg-blue-600 text-white hover:bg-blue-700 rounded-lg py-2.5 px-3 transition-colors">
+              Get started
+            </a>
+          </div>
+        {% endif %}
+        
+        <!-- Mobile Social Links -->
+        <div class="flex items-center justify-center gap-6 pt-6 pb-2">
+          <a href="https://discord.gg/yyDB8GwxtE" target="_blank" rel="noopener" aria-label="Join our Discord server" class="text-slate-700 hover:text-[#5865F2] transition-colors">
+            <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M13.545 2.907a13.227 13.227 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.19 12.19 0 0 0-3.658 0 8.258 8.258 0 0 0-.412-.833.051.051 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.041.041 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032c.001.014.01.028.021.037a13.276 13.276 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019c.308-.42.582-.863.818-1.329a.05.05 0 0 0-.01-.059.051.051 0 0 0-.018-.011 8.875 8.875 0 0 1-1.248-.595.05.05 0 0 1-.02-.066.051.051 0 0 1 .015-.019c.084-.063.168-.129.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.052.052 0 0 1 .053.007c.08.066.164.132.248.195a.051.051 0 0 1-.004.085 8.254 8.254 0 0 1-1.249.594.05.05 0 0 0-.03.03.052.052 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.235 13.235 0 0 0 4.001-2.02.049.049 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.034.034 0 0 0-.02-.019Zm-8.198 7.307c-.789 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612Zm5.316 0c-.788 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612Z"/>
+            </svg>
+          </a>
+          <a href="https://x.com/gobii_ai" target="_blank" rel="noopener" aria-label="Follow us on X (Twitter)" class="text-slate-700 hover:text-black transition-colors">
+            <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M12.6.75h2.454l-5.36 6.142L16 15.25h-4.937l-3.867-5.07-4.425 5.07H.316l5.733-6.57L0 .75h5.063l3.495 4.633L12.601.75Zm-.86 13.028h1.36L4.323 2.145H2.865z"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div> 

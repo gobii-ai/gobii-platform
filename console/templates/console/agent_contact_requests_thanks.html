@@ -1,0 +1,66 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="space-y-6 pb-6">
+  <!-- Success Card -->
+  <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
+    <div class="p-8 text-center">
+      <!-- Success Icon -->
+      <div class="mx-auto flex items-center justify-center w-16 h-16 bg-green-100 rounded-full">
+        <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      
+      <!-- Message -->
+      <h2 class="mt-4 text-2xl font-semibold text-gray-900">Contact Requests Processed</h2>
+      <p class="mt-2 text-gray-600">
+        Your decisions have been saved and your agent has been notified.
+      </p>
+      
+      <!-- Agent Info -->
+      <div class="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-gray-50 rounded-lg">
+        <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <span class="text-sm font-medium text-gray-700">{{ agent.name }}</span>
+      </div>
+      
+      <!-- What Happens Next -->
+      <div class="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-4 text-left max-w-lg mx-auto">
+        <h3 class="text-sm font-semibold text-blue-900 mb-2">What happens next?</h3>
+        <ul class="text-sm text-blue-800 space-y-1">
+          <li class="flex items-start gap-2">
+            <svg class="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/>
+            </svg>
+            <span>Approved contacts have been added to your agent's allowed contacts</span>
+          </li>
+          <li class="flex items-start gap-2">
+            <svg class="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/>
+            </svg>
+            <span>Your agent can now send messages to the approved contacts</span>
+          </li>
+          <li class="flex items-start gap-2">
+            <svg class="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/>
+            </svg>
+            <span>The agent will continue with its tasks automatically</span>
+          </li>
+        </ul>
+      </div>
+      
+      <!-- Actions -->
+      <div class="mt-8 flex items-center justify-center gap-x-4">
+        <a href="{% url 'agent_detail' agent.id %}" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+          View Agent
+        </a>
+        <a href="{% url 'agent_allowlist' agent.id %}" class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+          Manage Allowed Contacts
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% if head_title %}{{ head_title }} · {% endif %}{% trans "Account Management" %}{% endblock %}
+
+{% block content %}
+<div class="flex justify-center pt-20">
+  {# This inner div is where the card styling will go, similar to login/signup pages #}
+  {# Individual templates extending this will provide their own card using block body_inner #}
+  {% block body_inner %}
+    {# Fallback content or structure if a child template doesn't define body_inner #}
+    <div class="bg-white max-w-md w-full sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-2xs">
+      <div class="p-8">
+        <h1 class="text-center text-2xl font-bold text-gray-900">
+          {% if head_title %}{{ head_title }}{% else %}{% trans "Manage Account" %}{% endif %}
+        </h1>
+        <div class="mt-4">
+          {% block manage_content %}
+          {# Specific account management form/content goes here in child templates #}
+          <p class="text-center text-gray-500">Welcome to your account management area.</p>
+          {% endblock manage_content %}
+        </div>
+      </div>
+    </div>
+  {% endblock body_inner %}
+</div>
+{% endblock %} 

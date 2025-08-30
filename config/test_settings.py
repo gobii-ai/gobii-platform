@@ -1,0 +1,79 @@
+"""
+Simple test settings that use SQLite instead of PostgreSQL.
+"""
+import os
+
+# Set environment variables before importing settings
+os.environ.setdefault("DJANGO_SECRET_KEY", "test-secret-key")
+os.environ.setdefault("GOBII_ENCRYPTION_KEY", "dummy-encryption-key-for-testing")
+os.environ.setdefault("POSTGRES_DB", "test")
+os.environ.setdefault("POSTGRES_USER", "test")
+os.environ.setdefault("POSTGRES_PASSWORD", "test")
+os.environ.setdefault("POSTGRES_HOST", "localhost")
+os.environ.setdefault("POSTGRES_PORT", "5432")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("SEGMENT_WRITE_KEY", "")
+
+from .settings import *
+
+# Override database to use SQLite for testing
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': ':memory:',
+    }
+}
+
+# Disable all migrations to avoid PostgreSQL-specific SQL (e.g., CASCADE, EXTENSION) when running
+# the suite in SQLite. Django will instead create the schema directly from models.
+
+class DisableMigrations(dict):
+    def __contains__(self, item):
+        return True
+
+    def __getitem__(self, item):
+        return None
+
+MIGRATION_MODULES = DisableMigrations()
+
+# -----------------------------------------------------------------------------
+#  Celery configuration – run tasks eagerly and keep everything in-process
+# -----------------------------------------------------------------------------
+
+# Execute Celery tasks locally, synchronously (no broker connection required)
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True  # Propagate exceptions to test runner
+
+# Use in-memory transport / backend so Celery never attempts to connect to Redis
+CELERY_BROKER_URL = ""
+CELERY_RESULT_BACKEND = ""
+
+# Ensure email delivery is simulated in tests (no network calls)
+SIMULATE_EMAIL_DELIVERY = True
+
+# -----------------------------------------------------------------------------
+#  Silence Django's noisy "Adding permission ..." output at high verbosity
+# -----------------------------------------------------------------------------
+
+from django.contrib.auth import management as _auth_mgmt
+
+# Django's create_permissions management routine prints one line per permission
+# when verbosity >= 2 (see django/contrib/auth/management/__init__.py).  At the
+# verbosity levels we use in CI (2/3) this floods the GitHub Actions log with
+# hundreds of lines that add no diagnostic value.  Monkey-patch the helper so
+# it always behaves as if verbosity == 1.
+
+_orig_create_permissions = _auth_mgmt.create_permissions
+
+
+def _quiet_create_permissions(app_config, verbosity, *args, **kwargs):  # type: ignore[override]
+    return _orig_create_permissions(app_config, 0, *args, **kwargs)
+
+
+_auth_mgmt.create_permissions = _quiet_create_permissions
+
+# -----------------------------------------------------------------------------
+#  Static files – avoid Manifest storage to prevent missing-hash errors in tests
+# -----------------------------------------------------------------------------
+
+STORAGES["staticfiles"]["BACKEND"] = "django.contrib.staticfiles.storage.StaticFilesStorage"

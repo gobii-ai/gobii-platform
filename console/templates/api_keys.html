@@ -1,0 +1,58 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div x-data="{}">
+  {# The delete modal Alpine state is now handled within the generic modal #}
+  <div id="api-key-result">
+  </div>
+
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-200/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-gray-800">API Keys</h1>
+        <p class="text-sm text-gray-500 mt-1">API keys provide access to the Gobii API. Keep them secure.</p>
+      </div>
+
+      <button hx-get="{% url 'api_key_create_modal' %}" hx-target="#modal-container" hx-swap="innerHTML"
+        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium text-sm shadow-sm hover:shadow-md transition-all w-max">
+        Create New Key
+      </button>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full divide-y divide-gray-200/70">
+        <thead class="bg-gray-50/50">
+          <tr>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Used</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" colspan="2">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200/70" id="api-key-table-body"
+               hx-get="{% url 'api_keys_table' %}"
+               hx-trigger="refreshApiKeysTable from:body"
+               hx-swap="innerHTML">
+          {% for key in api_keys %}
+            {% include "partials/_api_key_row.html" with key=key %}
+          {% empty %}
+            <tr>
+              <td colspan="6" class="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                No API keys found. Create one to get started.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# Include the refactored delete modal - it handles its own visibility #}
+  {% include "partials/_delete_confirm_modal.html" %}
+
+  {# Include the refactored revoke modal #}
+  {% include "partials/_revoke_confirm_modal.html" %}
+
+</div>
+{% endblock %}

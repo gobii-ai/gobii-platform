@@ -1,0 +1,244 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Auto-cancel previous runs on the same PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Needed for posting test summaries/annotations
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  tag-guard:
+    name: Tag Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify all tests are tagged and tags are in CI
+        run: |
+          python3 scripts/check_test_tags.py
+
+  tests:
+    name: tests (${{ matrix.batch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - batch: email
+            tag: batch_email
+          - batch: sms
+            tag: batch_sms
+          - batch: email_body
+            tag: batch_email_body
+          - batch: email_allowlist
+            tag: batch_email_allowlist
+          - batch: pages
+            tag: batch_pages
+          - batch: contact_requests
+            tag: batch_contact_requests
+          - batch: console_agents
+            tag: batch_console_agents
+          - batch: console_allowlist
+            tag: batch_console_allowlist
+          - batch: outbound_email
+            tag: batch_outbound_email
+          - batch: secrets
+            tag: batch_secrets
+          - batch: proxy_selection
+            tag: batch_proxy_selection
+          - batch: compaction
+            tag: batch_compaction
+          - batch: step_compaction
+            tag: batch_step_compaction
+          - batch: subscription
+            tag: batch_subscription
+          - batch: task_credits
+            tag: batch_task_credits
+          - batch: output_schema
+            tag: batch_output_schema
+          - batch: link_shortener
+            tag: batch_link_shortener
+          - batch: organizations
+            tag: batch_organizations
+          - batch: browser_profile
+            tag: batch_browser_profile
+          - batch: forward_detection
+            tag: batch_forward_detection
+          - batch: agent_limits
+            tag: batch_agent_limits
+          - batch: api_agents
+            tag: batch_api_agents
+          - batch: api_serializer
+            tag: batch_api_serializer
+          - batch: api_tasks
+            tag: batch_api_tasks
+          - batch: periodic
+            tag: batch_periodic
+          - batch: celery_redbeat
+            tag: batch_celery_redbeat
+          - batch: email_sender_db
+            tag: batch_email_sender_db
+          - batch: outbound_delivery
+            tag: batch_outbound_delivery
+          - batch: browser_task_db
+            tag: batch_browser_task_db
+          - batch: redis_budget_cleanup
+            tag: batch_redis_budget_cleanup
+          - batch: agent_invite
+            tag: batch_agent_invite
+          - batch: agent_filesystem
+            tag: batch_agent_filesystem
+          - batch: agent_secrets_ctx
+            tag: batch_agent_secrets_ctx
+          - batch: allowlist_rules
+            tag: batch_allowlist_rules
+          - batch: api_decodo
+            tag: batch_api_decodo
+          - batch: api_persistent_agents
+            tag: batch_api_persistent_agents
+          - batch: billing
+            tag: batch_billing
+          - batch: event_llm
+            tag: batch_event_llm
+          - batch: event_processing
+            tag: batch_event_processing
+          - batch: mcp_tools
+            tag: batch_mcp_tools
+          - batch: promptree
+            tag: batch_promptree
+          - batch: redis_leaks
+            tag: batch_redis_leaks
+          - batch: spawn_depth
+            tag: batch_spawn_depth
+          - batch: xvfb
+            tag: batch_xvfb
+    env:
+      # Ensure Django loads test settings; manage.py still imports config.settings first
+      DJANGO_SETTINGS_MODULE: config.test_settings
+      PYTHONUNBUFFERED: "1"
+      TEST_OUTPUT_DIR: test-results
+      UV_PYTHON_DOWNLOADS: "never"  # use setup-python managed interpreter
+
+      # Satisfy config.settings import before test settings override DB to SQLite
+      DJANGO_SECRET_KEY: test-secret
+      GOBII_ENCRYPTION_KEY: dummy-encryption-key-for-testing
+      POSTGRES_DB: test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://localhost:6379/0
+
+      # Satisfy LLM fail-fast check; any one provider key is enough
+      OPENAI_API_KEY: dummy
+      # Disable Celery worker self-shutdown logic in tests to avoid interfering with CI runner
+      BROWSER_USE_TASK_MAX_COUNT: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv (with cache)
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          ignore-nothing-to-cache: true
+
+      - name: Restore venv cache
+        id: restore-venv
+        uses: actions/cache/restore@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            venv-${{ runner.os }}-py3.12-
+
+      # Install dependencies into a project venv using uv, leveraging cache.
+      # Prefer lockfile if present; otherwise resolve from pyproject.
+      - name: Sync deps (locked)
+        if: ${{ hashFiles('uv.lock') != '' }}
+        run: |
+          uv sync --frozen --all-extras --dev
+
+      - name: Sync deps
+        if: ${{ hashFiles('uv.lock') == '' }}
+        run: |
+          uv sync --all-extras --dev
+
+      - name: Add JUnit test runner to venv
+        run: |
+          uv pip install -q unittest-xml-reporting
+
+      - name: Save venv cache
+        if: steps.restore-venv.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}
+
+      - name: Run batch tests (${{ matrix.batch }})
+        run: |
+          set -euo pipefail
+          mkdir -p "$TEST_OUTPUT_DIR"
+          TAG="${{ matrix.tag }}"
+          echo "Running tests with tag: $TAG"
+          uv run python manage.py test --tag "$TAG" \
+            --settings=config.test_settings \
+            --parallel 1 \
+            --testrunner=xmlrunner.extra.djangotestrunner.XMLTestRunner
+          # Collect any stray TEST-*.xml files into the output dir
+          shopt -s nullglob || true
+          for f in TEST-*.xml; do mv "$f" "$TEST_OUTPUT_DIR/"; done || true
+
+      - name: Upload test results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.batch }}
+          path: test-results/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      # No per-batch PR checks to reduce noise; artifacts are uploaded above.
+
+  report:
+    name: Combined Test Results
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs: [tests]
+    steps:
+      - name: Download all test result artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-*
+          merge-multiple: true
+          path: all-results
+
+      - name: Publish combined test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: all-results/**/*.xml
+          check_name: "Combined Test Results"
+          comment_mode: off

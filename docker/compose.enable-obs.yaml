@@ -1,0 +1,6 @@
+services:
+  flower:
+    profiles: []
+  otel-collector:
+    profiles: []
+

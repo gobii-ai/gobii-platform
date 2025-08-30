@@ -1,0 +1,12 @@
+{% extends "admin/change_form.html" %}
+
+{% load i18n %}
+
+{% block object-tools %}
+  {{ block.super }}
+  <li>
+      <a class="button" href="{% url 'admin:smsnumber_test_sms' original.pk %}">
+         📲 Test SMS
+      </a>
+  </li>
+{% endblock %}

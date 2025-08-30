@@ -1,0 +1,21 @@
+{% if entries %}
+  <ul class="divide-y divide-gray-200">
+    {% for e in entries %}
+      <li class="py-2 flex items-center justify-between">
+        <div>
+          <span class="font-mono text-sm">{{ e.channel }}</span>
+          <span class="ml-2">{{ e.address }}</span>
+          {% if not e.is_active %}<span class="ml-2 text-sm text-gray-500">(inactive)</span>{% endif %}
+        </div>
+        <form method="post" action="" hx-post="" hx-target="#allowlist-entries" hx-swap="innerHTML" onsubmit="return confirm('Delete this entry?');">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="delete" />
+          <input type="hidden" name="entry_id" value="{{ e.id }}" />
+          <button type="submit" class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded">Delete</button>
+        </form>
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="text-sm text-gray-500">No entries yet.</p>
+{% endif %}

@@ -1,0 +1,216 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="space-y-6">
+    <!-- Task header with status -->
+    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
+        <div class="p-6 border-b border-gray-200/70">
+            <div class="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                    <h1 class="text-2xl font-semibold text-gray-800 mb-1">Task Details</h1>
+                    <p class="text-sm text-gray-500">Created on {{ task.created_at|date:"F j, Y" }} at {{ task.created_at|time:"H:i" }}</p>
+                    <a href="{% url 'tasks' %}" class="group flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
+                        <svg class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                        </svg>
+                        Back to tasks
+                    </a>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <!-- Status badge -->
+                    {% if task.status == 'pending' %}
+                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-yellow-100 text-yellow-800">
+                        <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Pending
+                    </span>
+                    {% elif task.status == 'in_progress' %}
+                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-blue-100 text-blue-800">
+                        <svg class="w-4 h-4 mr-1.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        In Progress
+                    </span>
+                    {% elif task.status == 'completed' %}
+                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-green-100 text-green-800">
+                        <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        Completed
+                    </span>
+                    {% elif task.status == 'failed' %}
+                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-red-100 text-red-800">
+                        <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        Failed
+                    </span>
+                    {% elif task.status == 'cancelled' %}
+                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-gray-100 text-gray-800">
+                        <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        Cancelled
+                    </span>
+                    {% endif %}
+
+                    <!-- Action buttons -->
+                    <div class="flex gap-2">
+                        {% if task.status == 'pending' or task.status == 'in_progress' %}
+                        <form method="post" action="{% url 'task_cancel' task.id %}">
+                            {% csrf_token %}
+                            <button type="submit" class="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                                Cancel Task
+                            </button>
+                        </form>
+                        {% endif %}
+
+                        {% if task.status == 'completed' %}
+                        <a href="{% url 'task_result' task.id %}" class="px-4 py-2 bg-blue-600 rounded-lg text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                            View Result
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Task information -->
+        <div class="lg:col-span-2 space-y-6">
+            <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
+                <div class="border-b border-gray-200/70 bg-gray-50/80 px-6 py-3">
+                    <h2 class="text-lg font-medium text-gray-800">Task Information</h2>
+                </div>
+                <div class="p-6">
+                    <dl class="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Task ID</dt>
+                            <dd class="mt-1 text-sm text-gray-900 font-mono">{{ task.id }}</dd>
+                        </div>
+
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Created</dt>
+                            <dd class="mt-1 text-sm text-gray-900">{{ task.created_at }}</dd>
+                        </div>
+
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Last Updated</dt>
+                            <dd class="mt-1 text-sm text-gray-900">{{ task.updated_at }}</dd>
+                        </div>
+
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Status</dt>
+                            <dd class="mt-1 text-sm text-gray-900">{{ task.get_status_display }}</dd>
+                        </div>
+
+                        {% if task.agent %}
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Agent</dt>
+                            <dd class="mt-1 text-sm text-gray-900">{{ task.agent }}</dd>
+                        </div>
+                        {% endif %}
+
+                        {% if task.task_credit %}
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Task Credit</dt>
+                            <dd class="mt-1 text-sm text-gray-900">{{ task.task_credit }}</dd>
+                        </div>
+                        {% endif %}
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Task prompt -->
+            <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
+                <div class="border-b border-gray-200/70 bg-gray-50/80 px-6 py-3">
+                    <h2 class="text-lg font-medium text-gray-800">Task Prompt</h2>
+                </div>
+                <div class="p-6">
+                    <div class="bg-gray-50/80 rounded-lg p-4 text-sm text-gray-800 font-mono whitespace-pre-wrap">{{ task.prompt }}</div>
+                </div>
+            </div>
+
+            {% if task.error_message %}
+            <!-- Error message -->
+            <div class="bg-white/80 backdrop-blur-sm border border-red-200/60 rounded-xl shadow-xl overflow-hidden">
+                <div class="border-b border-red-200/70 bg-red-50/80 px-6 py-3">
+                    <h2 class="text-lg font-medium text-red-800">Error</h2>
+                </div>
+                <div class="p-6">
+                    <div class="bg-red-50/80 rounded-lg p-4 text-sm text-red-800 font-mono whitespace-pre-wrap">{{ task.error_message }}</div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Task steps timeline -->
+        <div class="lg:col-span-1">
+            <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden h-full">
+                <div class="border-b border-gray-200/70 bg-gray-50/80 px-6 py-3">
+                    <h2 class="text-lg font-medium text-gray-800">Execution Steps</h2>
+                </div>
+
+                <div class="p-6">
+                    {% if task.steps.exists %}
+                    <div class="flow-root">
+                        <ul class="-mb-8">
+                            {% for step in task.steps.all %}
+                            <li>
+                                <div class="relative pb-8">
+                                    {% if not forloop.last %}
+                                    <span class="absolute top-5 left-5 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
+                                    {% endif %}
+                                    <div class="relative flex items-start space-x-3">
+                                        <div class="relative">
+                                            <div class="size-10 flex items-center justify-center rounded-full bg-blue-100 text-blue-600 ring-8 ring-white">
+                                                <span class="text-sm font-medium">{{ step.step_number }}</span>
+                                            </div>
+                                        </div>
+                                        <div class="min-w-0 flex-1">
+                                            <div>
+                                                <div class="text-sm">
+                                                    <span class="font-medium text-gray-900">Step {{ step.step_number }}</span>
+                                                    {% if step.is_result %}
+                                                    <span class="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                        Result
+                                                    </span>
+                                                    {% endif %}
+                                                </div>
+                                                <p class="mt-0.5 text-xs text-gray-500">{{ step.created_at|date:"M d, H:i:s" }}</p>
+                                            </div>
+                                            <div class="mt-2 text-sm text-gray-700">
+                                                <p>{{ step.description }}</p>
+
+                                                {% if step.is_result and step.result_value %}
+                                                <div class="mt-2 p-3 bg-gray-50/80 rounded-lg text-xs font-mono overflow-auto">
+                                                    <pre>{{ step.result_value|pprint }}</pre>
+                                                </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% else %}
+                    <div class="text-center py-8">
+                        <svg class="mx-auto h-12 w-12 text-gray-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 9l-7 7-7-7" />
+                        </svg>
+                        <p class="mt-2 text-sm text-gray-500">No steps recorded yet</p>
+                        <p class="mt-1 text-xs text-gray-400">Steps will appear here as the task executes</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

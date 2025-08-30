@@ -1,0 +1,87 @@
+<div class="bg-gradient-to-br from-orange-50 to-red-50 border border-orange-200 rounded-xl p-6 shadow-lg">
+  <!-- Icon and Header -->
+  <div class="flex items-start space-x-4">
+    <div class="flex-shrink-0">
+      <div class="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
+        <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+        </svg>
+      </div>
+    </div>
+
+    <div class="flex-1">
+      <h3 class="text-lg font-semibold text-gray-900 mb-2">Agent Limit Reached</h3>
+
+      <!-- Usage Stats -->
+      <div class="bg-white rounded-lg p-4 mb-4 border border-orange-100">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm font-medium text-gray-600">Current Usage</span>
+<span class="text-sm font-bold text-orange-600">{{ account.usage.agents_in_use }}/{{ account.usage.agent_limit }}</span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-2">
+          <div class="bg-gradient-to-r from-orange-400 to-red-500 h-2 rounded-full" style="width: 100%"></div>
+        </div>
+      </div>
+
+      <p class="text-gray-700 mb-4">
+        Your account is currently using its limit of <span class="font-semibold text-orange-600">{{ account.usage.agent_limit }} agent{{ account.usage.agent_limit|pluralize }}</span>.
+        To continue creating agents and unlock more capabilities, an upgrade is required.
+      </p>
+
+      <!-- Call to Action -->
+      <div class="flex flex-col sm:flex-row gap-3">
+        {% if account.paid is not True %}
+          <a href="{% url "pages:pricing" %}"
+             class="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 shadow-lg hover:shadow-xl">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+            </svg>
+            Upgrade to Paid Plan
+          </a>
+        {% else %}
+          <a href="{% url "pages:pricing" %}"
+             class="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-all duration-200 shadow-lg hover:shadow-xl">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-4m-5 0H7m5 0v-9a2 2 0 00-2-2H7a2 2 0 00-2 2v9m8-4h2m-2 0h-4"></path>
+            </svg>
+            Upgrade to Enterprise Plan
+          </a>
+        {% endif %}
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Benefits Preview -->
+  {% if account.paid is not True %}
+    <div class="mt-6 pt-6 border-t border-orange-200">
+      <h4 class="text-sm font-semibold text-gray-900 mb-3">Paid Plan Benefits:</h4>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="flex items-center text-sm text-gray-600">
+          <svg class="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+          </svg>
+          More agents
+        </div>
+        <div class="flex items-center text-sm text-gray-600">
+          <svg class="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+          </svg>
+          Priority support
+        </div>
+        <div class="flex items-center text-sm text-gray-600">
+          <svg class="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+          </svg>
+          Advanced features
+        </div>
+        <div class="flex items-center text-sm text-gray-600">
+          <svg class="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+          </svg>
+          More tasks
+        </div>
+      </div>
+    </div>
+  {% endif %}
+</div>

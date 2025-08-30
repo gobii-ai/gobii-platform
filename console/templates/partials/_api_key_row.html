@@ -1,0 +1,53 @@
+<tr 
+  id="api-key-row-{{ key.id }}"
+  hx-get="{% url 'api_key_detail' pk=key.id %}"
+  hx-trigger="refresh-row-{{ key.id }} from:body"
+  hx-target="this"
+  hx-swap="outerHTML"
+>
+  <td class="px-3 md:px-6 py-4 whitespace-nowrap">
+    <div class="text-sm font-medium text-gray-900">{{ key.name }}</div>
+    <div class="text-xs text-gray-500">Prefix: {{ key.prefix }}</div>
+  </td>
+  <td class="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+    {{ key.created_at|date:"M d, Y" }}
+  </td>
+  <td class="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+    {% if key.last_used_at %}
+      {{ key.last_used_at|date:"M d, Y" }}
+    {% else %}
+      Never
+    {% endif %}
+  </td>
+  <td class="px-3 md:px-6 py-4 whitespace-nowrap">
+    {% if not key.is_active %}
+      <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+        Revoked
+      </span>
+    {% else %}
+      <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+        Active
+      </span>
+    {% endif %}
+  </td>
+  <td class="px-2 md:px-6 py-4 whitespace-nowrap text-center w-16 md:w-24">
+    {% if key.is_active %}
+      <button
+        class="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
+        @click="$dispatch('open-modal', { id: 'revoke-confirm-modal', url: '{% url 'api_key_detail' pk=key.id %}' })"
+      >
+        Revoke
+      </button>
+    {% else %}
+      <span class="text-gray-400">Revoked</span>
+    {% endif %}
+  </td>
+  <td class="px-2 md:px-6 py-4 whitespace-nowrap text-center w-16 md:w-24">
+    <button
+      class="text-red-600 hover:text-red-900 focus:outline-none focus:underline"
+      @click="$dispatch('open-modal', { id: 'delete-confirm-modal', url: '{% url 'api_key_detail' pk=key.id %}' })"
+    >
+      Delete
+    </button>
+  </td>
+</tr>

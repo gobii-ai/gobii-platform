@@ -1,0 +1,163 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="space-y-6 pb-6">
+  <!-- Header -->
+  <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-200/70">
+      <div>
+        <h1 class="text-2xl font-semibold text-gray-800">Contact Requests</h1>
+        <p class="text-sm text-gray-500 mt-1">Your agent <span class="font-medium">{{ agent.name }}</span> has requested permission to contact the following people</p>
+        <a href="{% url 'agent_detail' agent.id %}" class="group flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
+          <svg class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          Back to Agent
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contact Limit Info -->
+  <div class="bg-gray-50/80 backdrop-blur-sm border border-gray-200/60 shadow-xl rounded-xl overflow-hidden">
+    <div class="p-4 sm:p-6">
+      <div class="flex gap-x-4">
+        <div class="flex-shrink-0">
+          <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold text-gray-800 mb-1">Contact Limit Status</h3>
+          <p class="text-sm text-gray-700">
+            Currently using <span class="font-semibold">{{ total_count }}</span> of <span class="font-semibold">{{ max_contacts }}</span> allowed contacts
+            {% if pending_invites > 0 %}
+              (includes {{ pending_invites }} pending invitation{{ pending_invites|pluralize }})
+            {% endif %}
+          </p>
+          {% if remaining_slots <= 0 %}
+            <p class="text-sm text-orange-700 mt-1 font-semibold">
+              ⚠️ Contact limit reached. You must remove existing contacts before sending new invitations.
+            </p>
+          {% elif remaining_slots <= 3 %}
+            <p class="text-sm text-orange-700 mt-1">
+              Only {{ remaining_slots }} slot{{ remaining_slots|pluralize }} remaining.
+            </p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if not has_pending_requests %}
+    <!-- No Pending Requests -->
+    <div class="bg-gray-50/80 backdrop-blur-sm border border-gray-200/60 shadow-xl rounded-xl overflow-hidden">
+      <div class="p-8 text-center">
+        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <h2 class="mt-2 text-lg font-medium text-gray-900">No Pending Requests</h2>
+        <p class="mt-1 text-sm text-gray-500">This agent hasn't requested permission to contact anyone.</p>
+        <div class="mt-6">
+          <a href="{% url 'agent_detail' agent.id %}" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+            Return to Agent
+          </a>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <!-- Contact Approval Form -->
+    <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-200/70">
+        <h2 class="text-lg font-semibold text-gray-800">Review Contact Requests</h2>
+        <p class="text-sm text-gray-500 mt-1">Select which contacts to approve for <span class="font-medium">{{ agent.name }}</span></p>
+      </div>
+      
+      <div class="p-6">
+        <form method="post">
+          {% csrf_token %}
+          
+          <div class="space-y-4">
+            {% for request in pending_requests %}
+              <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                <div class="flex items-start gap-x-3">
+                  <div class="flex h-6 items-center">
+                    <input 
+                      type="checkbox" 
+                      name="approve_{{ request.id }}" 
+                      id="approve_{{ request.id }}"
+                      class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                      checked
+                    >
+                  </div>
+                  <div class="flex-1">
+                    <label for="approve_{{ request.id }}" class="text-sm font-medium text-gray-900 cursor-pointer">
+                      <div class="flex items-center gap-2">
+                        {% if request.channel == "email" %}
+                          <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                          </svg>
+                        {% else %}
+                          <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                          </svg>
+                        {% endif %}
+                        <span>{{ request.name|default:request.address }}</span>
+                        <span class="text-xs text-gray-500">({{ request.address }})</span>
+                      </div>
+                    </label>
+                    
+                    <div class="mt-2 space-y-1">
+                      <p class="text-sm text-gray-600">
+                        <span class="font-medium">Purpose:</span> {{ request.purpose }}
+                      </p>
+                      <p class="text-sm text-gray-600">
+                        <span class="font-medium">Reason:</span> {{ request.reason }}
+                      </p>
+                      <p class="text-xs text-gray-500">
+                        Requested {{ request.requested_at|timesince }} ago
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+
+          <!-- Quick Actions -->
+          <div class="mt-4 flex items-center gap-x-4">
+            <button type="button" onclick="toggleAll(true)" class="text-sm text-blue-600 hover:text-blue-800">
+              Select All
+            </button>
+            <button type="button" onclick="toggleAll(false)" class="text-sm text-gray-600 hover:text-gray-800">
+              Deselect All
+            </button>
+          </div>
+
+          <!-- Form Actions -->
+          <div class="mt-8 flex items-center justify-end gap-x-3">
+            <a href="{% url 'agent_detail' agent.id %}" class="py-2 px-3 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:pointer-events-none">
+              Cancel
+            </a>
+            <button type="submit" class="py-2 px-3 inline-flex items-center gap-x-2 text-sm font-semibold rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:pointer-events-none">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+              </svg>
+              Approve
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<script>
+function toggleAll(checked) {
+  const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="approve_"]');
+  checkboxes.forEach(checkbox => {
+    checkbox.checked = checked;
+  });
+}
+</script>
+{% endblock %}

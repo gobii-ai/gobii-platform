@@ -1,0 +1,42 @@
+{% extends "partials/_generic_modal.html" %}
+
+{% block modal_id %}create-api-key-modal{% endblock %}
+{% block modal_event_id %}create-api-key-modal{% endblock %}
+{% block modal_event_id_close %}create-api-key-modal{% endblock %}
+
+{% block modal_header %}{% endblock %}
+
+{% block modal_icon_bg %}bg-blue-100{% endblock %}
+{% block modal_icon_color %}text-blue-600{% endblock %}
+{% block modal_icon %}
+<svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
+</svg>
+{% endblock %}
+
+{% block modal_body_title %}
+<h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title-body">
+  Create New API Key
+</h3>
+{% endblock %}
+
+{% block modal_content_margin %}sm:ml-4{% endblock %}
+
+{% block modal_body %}
+{% include "partials/_api_key_form.html" %}
+<!-- Fire the event once the modal fragment is attached -->
+<div x-init="$nextTick(() => { $dispatch('open-modal', { id: 'create-api-key-modal' }); $el.remove(); })"></div>
+{% endblock %}
+
+{% block modal_footer %}
+<button type="submit"
+        form="create-api-key-form"
+        class="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm">
+  Create Key
+</button>
+<button type="button"
+        x-on:click="$dispatch('close-modal', { id: 'create-api-key-modal' })"
+        class="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+  Cancel
+</button>
+{% endblock %}

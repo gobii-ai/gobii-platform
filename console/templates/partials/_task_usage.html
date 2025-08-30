@@ -1,0 +1,149 @@
+
+{% if account.usage.tasks_used_pct >= 75 %}
+  <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden p-6 mb-6 {% if account.usage.tasks_used_pct >= 100 %}ring-1 ring-red-200/50{% else %}ring-1 ring-yellow-200/50{% endif %}">
+    <div class="flex items-start">
+      <div class="flex-shrink-0">
+        {% if account.usage.tasks_used_pct >= 100 %}
+          <!-- Critical warning icon -->
+          <div class="flex items-center justify-center w-10 h-10 rounded-full bg-red-100/80 backdrop-blur-sm">
+            <svg class="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+            </svg>
+          </div>
+        {% else %}
+          <!-- Warning icon -->
+          <div class="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-100/80 backdrop-blur-sm">
+            <svg class="w-5 h-5 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+            </svg>
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="ml-4 flex-1">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-lg font-semibold {% if account.usage.tasks_used_pct >= 100 %}text-red-800{% else %}text-yellow-800{% endif %}">
+            {% if account.usage.tasks_used_pct >= 100 %}
+              Task Credits Depleted
+            {% else %}
+              Low Task Credits Warning
+            {% endif %}
+          </h3>
+
+          <!-- Progress indicator -->
+          <div class="flex items-center space-x-3">
+            <div class="w-24 bg-gray-200/60 backdrop-blur-sm rounded-full h-2.5 shadow-inner">
+              <div class="{% if account.usage.tasks_used_pct >= 100 %}bg-gradient-to-r from-red-400 to-red-500{% elif account.usage.tasks_used_pct >= 90 %}bg-gradient-to-r from-orange-400 to-orange-500{% else %}bg-gradient-to-r from-yellow-400 to-yellow-500{% endif %} h-2.5 rounded-full transition-all duration-500 shadow-sm" style="width: {{ account.usage.tasks_used_pct }}%"></div>
+            </div>
+            <span class="text-sm font-semibold {% if account.usage.tasks_used_pct >= 100 %}text-red-700{% else %}text-yellow-700{% endif %} min-w-12 text-right">
+              {{ account.usage.tasks_used_pct|floatformat:0 }}%
+            </span>
+          </div>
+        </div>
+
+        <div class="{% if account.usage.tasks_used_pct >= 100 %}text-red-700{% else %}text-yellow-700{% endif %} text-sm leading-relaxed">
+          {% if account.usage.tasks_used_pct >= 100 %}
+            <p class="mb-4">
+              <span class="font-medium">You have used all your task credits.</span>
+              Your access to Gobii platform features is currently limited.
+            </p>
+          {% else %}
+            <p class="mb-4">
+              <span class="font-medium">You have {{ account.usage.task_credits_available }} task credits remaining.</span>
+              To prevent service interruption, please take action soon.
+            </p>
+          {% endif %}
+
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mt-4 pt-4 border-t border-gray-200/50">
+            <div class="flex items-center space-x-2 text-sm text-gray-600">
+              <div class="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100/80">
+                <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </div>
+              <span>Need more credits to continue using Gobii?</span>
+            </div>
+
+            <div class="flex space-x-3">
+              {% if request.user.is_staff %}
+                <button type="button" 
+                        onclick="grantCredits('{{ user.id }}')"
+                        title="Replenish Task Credits (Admin)"
+                        class="inline-flex items-center px-4 py-2 text-sm font-medium {% if account.usage.tasks_used_pct >= 100 %}text-red-600 border border-red-200 hover:bg-red-50{% else %}text-yellow-600 border border-yellow-200 hover:bg-yellow-50{% endif %} bg-white rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 {% if account.usage.tasks_used_pct >= 100 %}focus:ring-red-500{% else %}focus:ring-yellow-500{% endif %}">
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                  </svg>
+                  <span class="button-text">Replenish Task Credits</span>
+                </button>
+                
+                <script>
+                async function grantCredits(userId) {
+                  const button = event.target.closest('button');
+                  const buttonText = button.querySelector('.button-text');
+                  const originalText = buttonText.textContent;
+                  
+                  // Disable button and show loading state
+                  button.disabled = true;
+                  buttonText.textContent = 'Granting...';
+                  
+                  try {
+                    const response = await fetch('{% url "grant_credits" %}', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value || '{{ csrf_token }}'
+                      },
+                      body: `user_id=${userId}`
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                      buttonText.textContent = '✓ Credits Granted';
+                      // Reload page after short delay to update credit display
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 1500);
+                    } else {
+                      alert('Error: ' + data.error);
+                      buttonText.textContent = originalText;
+                      button.disabled = false;
+                    }
+                  } catch (error) {
+                    alert('Failed to grant credits: ' + error.message);
+                    buttonText.textContent = originalText;
+                    button.disabled = false;
+                  }
+                }
+                </script>
+              {% endif %}
+              {% if account.paid is True %}
+                <a href="{% url 'billing' %}"
+                   title="Billing and Billing Settings"
+                   class="inline-flex items-center px-4 py-2 text-sm font-medium text-white {% if account.usage.tasks_used_pct >= 100 %}bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700{% else %}bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700{% endif %} rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 {% if account.usage.tasks_used_pct >= 100 %}focus:ring-red-500{% else %}focus:ring-yellow-500{% endif %}">
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                  </svg>
+                  {% if account.usage.tasks_addl_enabled is True %}
+                    Increase Additional Task Limit
+                  {% else %}
+                    Enable Additional Tasks
+                  {% endif %}
+                </a>
+              {% else %}
+                <a href="{% url 'pages:pricing' %}"
+                   title="Upgrade your Gobii Plan"
+                   class="inline-flex items-center px-4 py-2 text-sm font-medium text-white {% if account.usage.tasks_used_pct >= 100 %}bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700{% else %}bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700{% endif %} rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 {% if account.usage.tasks_used_pct >= 100 %}focus:ring-red-500{% else %}focus:ring-yellow-500{% endif %}">
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                  </svg>
+                  Upgrade Plan
+                </a>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}

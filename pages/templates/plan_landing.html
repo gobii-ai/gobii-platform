@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ plan.name }} Plan - Gobii{% endblock %}
+
+{% block head_extras %}
+<script>
+ if (window.analytics) {
+   analytics.track('{{ analytics.events.PLAN_INTEREST }}');
+ }
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+  <div class="max-w-4xl mx-auto px-6 py-20">
+    <!-- Header -->
+    <div class="text-center mb-16">
+      <div class="inline-flex items-center justify-center p-3 bg-blue-100 rounded-xl mb-6">
+        <svg class="w-8 h-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+        </svg>
+      </div>
+      
+      <h1 class="text-4xl font-bold text-gray-900 mb-4">Thank you for your interest in {{ plan.name }}</h1>
+      <p class="text-xl text-gray-600">{{ plan.tagline }}</p>
+    </div>
+
+    <!-- Status Card -->
+    <div class="bg-white rounded-2xl shadow-lg border border-gray-100 p-8 mb-12">
+      <div class="flex items-start space-x-4">
+        <div class="flex-shrink-0">
+          <div class="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center">
+            <svg class="w-6 h-6 text-amber-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+        </div>
+        <div class="flex-1">
+          <h2 class="text-xl font-semibold text-gray-900 mb-2">{{ plan.name }} plan is currently in private beta</h2>
+          <p class="text-gray-600 mb-4">
+            We're working to make the {{ plan.name }} plan available. We've recorded your interest and will reach out when we begin accepting new customers for this tier.
+          </p>
+          <p class="text-sm text-gray-500">
+            Your request has been logged for: <strong>{{ user.email }}</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Next Steps -->
+    <div class="bg-blue-50 rounded-xl p-6 mb-12">
+      <h3 class="font-semibold text-gray-900 mb-2">What happens next?</h3>
+      <p class="text-gray-700 mb-4">
+        While the {{ plan.name }} plan is being finalized, you can continue using Gobii with our free tier. 
+        We'll notify you at <strong>{{ user.email }}</strong> as soon as the {{ plan.name }} plan becomes available.
+      </p>
+    </div>
+
+    <!-- Actions -->
+    <div class="flex flex-col sm:flex-row gap-4 justify-center">
+      <a href="/console/" class="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+        Go to Console
+      </a>
+      <a href="/docs/guides/quickstart/" class="inline-flex items-center justify-center px-6 py-3 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+        View Documentation
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %} 

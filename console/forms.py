@@ -1,0 +1,764 @@
+from django import forms
+from django.contrib.auth import get_user_model
+from django.db.utils import IntegrityError
+
+from api.models import ApiKey, PersistentAgent, Organization, OrganizationMembership
+from api.models import UserPhoneNumber
+from django.core.validators import RegexValidator
+from django.utils import timezone
+from django import forms
+from django.core.exceptions import ValidationError
+
+from constants.regex import E164_PHONE_REGEX
+from api.models import CommsChannel
+from util import sms
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class ApiKeyForm(forms.ModelForm):
+    class Meta:
+        model = ApiKey
+        fields = ['name']
+        widgets = {
+            'name': forms.TextInput(attrs={
+                'class': 'block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500',
+                'placeholder': 'Enter API key name'
+            })
+        }
+
+    # let the view inject the current user
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = user
+
+    def clean_name(self):
+        name = self.cleaned_data["name"].strip()
+        # case-insensitive match to avoid "Key" vs "key"
+        if ApiKey.objects.filter(user=self.user, name__iexact=name).exists():
+            raise forms.ValidationError(
+                "You already have an API key with that name."
+            )
+        return name
+
+
+class UserProfileForm(forms.ModelForm):
+    class Meta:
+        model = get_user_model()
+        fields = ["first_name", "last_name"]
+        widgets = {
+            "first_name": forms.TextInput(
+                attrs={
+                    "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+                }
+            ),
+            "last_name": forms.TextInput(
+                attrs={
+                    "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+                }
+            ),
+        }
+
+class UserPhoneNumberForm(forms.Form):
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
+        super().__init__(*args, **kwargs)
+
+    phone_number = forms.CharField(
+        max_length=32,
+        validators=[RegexValidator(E164_PHONE_REGEX, "Enter a valid E.164 phone number")],
+        widget=forms.TextInput(
+            attrs={
+                "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+                "placeholder": "+1234567890",
+            }
+        ),
+        label="SMS Number",
+    )
+    verification_code = forms.CharField(
+        max_length=10,
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+                "placeholder": "Verification code",
+            }
+        ),
+        label="Verification Code",
+    )
+
+    def clean_phone_number(self):
+        phone_number = self.cleaned_data.get("phone_number")
+        if phone_number and self.user:
+            if UserPhoneNumber.objects.filter(phone_number=phone_number).exclude(user=self.user).exists():
+                raise forms.ValidationError("This phone number is already in use by another account.")
+        return phone_number
+
+class StyledRadioSelect(forms.RadioSelect):
+    """Custom RadioSelect widget with Preline styling."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.attrs = {
+            'class': 'shrink-0 mt-0.5 border-gray-300 rounded-full text-indigo-600 focus:ring-indigo-500 checked:border-indigo-500 disabled:opacity-50 disabled:pointer-events-none'
+        }
+
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+
+        return option
+
+
+class PersistentAgentCharterForm(forms.Form):
+    """Form for step 1: defining what the agent should do."""
+    
+    charter = forms.CharField(
+        widget=forms.Textarea(attrs={
+            'rows': 5,
+            'placeholder': 'I want my agent to…',
+            'class': 'block w-full bg-transparent border-none focus:ring-0 text-base px-5 py-4 resize-none placeholder:text-gray-400 min-h-32',
+            'oninput': 'textareaAutoResize(this)',
+            'data-max-height': '400',
+            'style': 'height:auto;overflow:hidden;'
+        }),
+        label='',
+        required=True,
+        help_text='Describe what you want your persistent agent to do'
+    )
+    
+    def clean_charter(self):
+        charter = self.cleaned_data['charter'].strip()
+        if not charter:
+            raise forms.ValidationError("Please describe what you want your agent to do.")
+        return charter
+
+
+class PersistentAgentContactForm(forms.Form):
+    """Form for step 2: contact preferences."""
+
+    CONTACT_METHOD_CHOICES = [
+        ('email', '📧 Email'),
+        ('sms', '📱 SMS (New!)'),
+    ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    preferred_contact_method = forms.ChoiceField(
+        choices=CONTACT_METHOD_CHOICES,
+        initial='email',
+        required=True,
+        widget=forms.Select(attrs={
+            'class': 'py-3 px-4 block w-full border-gray-300 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+        }),
+        label='Preferred Contact Method',
+        help_text='How would you like your agent to contact you?'
+    )
+
+    contact_endpoint_email = forms.EmailField(
+        widget=forms.EmailInput(
+            attrs={
+                'placeholder': 'your.email@example.com',
+                'class': 'py-3 px-4 ps-11 block w-full rounded-xl border-gray-300 bg-white/80 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-base placeholder:text-gray-400'
+            },
+        ),
+        required=False,
+        label='Your email address:',
+        help_text='Once created, your agent will contact you at this address.'
+    )
+
+    email_enabled = forms.BooleanField(
+        widget=forms.CheckboxInput(
+            attrs={
+                'class': 'sr-only peer',
+                'checked': True,
+                'disabled': False
+            }
+        ),
+        initial=True,
+        required=False,
+    )
+
+    sms_enabled = forms.BooleanField(
+        widget=forms.CheckboxInput(
+            attrs={
+                'class': 'sr-only peer',
+                'checked': False,
+                'disabled': False
+            }
+        ),
+        initial=False,
+        required=False,
+    )
+
+
+    def clean_preferred_contact_method(self):
+        contact_method = self.cleaned_data['preferred_contact_method']
+        return contact_method
+
+    def clean(self):
+        cleaned = super().clean()
+        method = cleaned.get('preferred_contact_method')
+        email_address = cleaned.get('contact_endpoint_email')
+
+        if method == 'email' and not email_address:
+            self.add_error('contact_endpoint_email', 'This field is required when email is selected.')
+
+        return cleaned
+
+
+# Keep the original form for backward compatibility
+PersistentAgentForm = PersistentAgentContactForm
+
+
+class PersistentAgentSecretsForm(forms.Form):
+    """Form for managing persistent agent secrets."""
+    
+    def __init__(self, *args, agent=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.agent = agent
+    
+    def clean_secret_key(self, key):
+        """Validate a single secret key."""
+        if not key:
+            raise forms.ValidationError("Secret key cannot be empty.")
+        
+        # Ensure key is alphanumeric with underscores only
+        if not key.replace('_', '').isalnum():
+            raise forms.ValidationError(f"Secret key '{key}' must be alphanumeric with underscores only.")
+        
+        # Ensure key doesn't start with a number
+        if key[0].isdigit():
+            raise forms.ValidationError(f"Secret key '{key}' cannot start with a number.")
+        
+        return key
+    
+    def clean_secret_value(self, value):
+        """Validate a single secret value."""
+        if not value:
+            raise forms.ValidationError("Secret value cannot be empty.")
+        
+        if not isinstance(value, str):
+            raise forms.ValidationError("Secret value must be a string.")
+        
+        return value
+
+
+class AllowlistEntryForm(forms.Form):
+    """Form to add a manual allowlist entry for an agent."""
+
+    CHANNEL_CHOICES = [
+        (CommsChannel.EMAIL, 'Email'),
+        (CommsChannel.SMS, 'SMS'),
+    ]
+
+    channel = forms.ChoiceField(
+        choices=CHANNEL_CHOICES,
+        required=True,
+        widget=forms.Select(attrs={
+            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
+        })
+    )
+    address = forms.CharField(
+        required=True,
+        widget=forms.TextInput(attrs={
+            'placeholder': 'email@example.com or +15551234567',
+            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
+        }),
+        label='Email or Phone',
+        help_text='Emails are case-insensitive. Phone must be in E.164 (+15551234567).'
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        channel = cleaned.get('channel')
+        address = (cleaned.get('address') or '').strip()
+        if not address:
+            self.add_error('address', 'Address is required.')
+            return cleaned
+
+        if channel == CommsChannel.EMAIL:
+            if '@' not in address or '.' not in address.split('@')[-1]:
+                self.add_error('address', 'Enter a valid email address.')
+            cleaned['address'] = address.lower()
+        elif channel == CommsChannel.SMS:
+            import re
+            if not re.fullmatch(E164_PHONE_REGEX, address):
+                self.add_error('address', 'Enter a valid E.164 phone number (e.g., +15551234567).')
+            cleaned['address'] = address
+        else:
+            self.add_error('channel', 'Unsupported channel.')
+
+        return cleaned
+
+
+class PersistentAgentAddSecretForm(forms.Form):
+    """Form for adding a single secret to an agent."""
+    
+    domain = forms.CharField(
+        max_length=256,
+        widget=forms.TextInput(attrs={
+            'placeholder': 'e.g., https://example.com, *.google.com, chrome-extension://abcd1234',
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+        }),
+        label='Domain Pattern',
+        help_text='Website domain pattern where this secret can be used. Required for security.'
+    )
+    
+    name = forms.CharField(
+        max_length=128,
+        widget=forms.TextInput(attrs={
+            'placeholder': 'e.g., X Password, API Key, Database Username',
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+        }),
+        label='Secret Name',
+        help_text='Human-readable name for this secret. The key will be generated automatically.'
+    )
+    
+    description = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={
+            'placeholder': 'Optional description of what this secret is used for...',
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none',
+            'rows': 3
+        }),
+        label='Description',
+        help_text='Optional description to help you remember what this secret is used for'
+    )
+    
+    value = forms.CharField(
+        widget=forms.PasswordInput(attrs={
+            'placeholder': 'Enter the secret value',
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+        }),
+        label='Secret Value',
+        help_text='This will be encrypted and stored securely'
+    )
+    
+    def __init__(self, *args, agent=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.agent = agent
+    
+    def clean_domain(self):
+        domain = self.cleaned_data['domain'].strip()
+        
+        try:
+            from api.domain_validation import DomainPatternValidator
+            from constants.security import SecretLimits
+            
+            # Additional length check with user-friendly message
+            if len(domain) > SecretLimits.MAX_DOMAIN_PATTERN_LENGTH:
+                raise forms.ValidationError(
+                    f"Domain pattern is too long. Maximum {SecretLimits.MAX_DOMAIN_PATTERN_LENGTH} characters allowed."
+                )
+            
+            DomainPatternValidator.validate_domain_pattern(domain)
+            return DomainPatternValidator.normalize_domain_pattern(domain)
+        except ValueError as e:
+            raise forms.ValidationError(str(e))
+    
+    def clean_name(self):
+        name = self.cleaned_data['name'].strip()
+        
+        try:
+            from constants.security import SecretLimits
+            
+            # Check length
+            if len(name) > 128:
+                raise forms.ValidationError(
+                    f"Secret name is too long. Maximum 128 characters allowed."
+                )
+            
+            if not name:
+                raise forms.ValidationError("Secret name is required.")
+            
+            return name
+        except ValueError as e:
+            raise forms.ValidationError(str(e))
+    
+    def clean_value(self):
+        value = self.cleaned_data['value']
+        
+        try:
+            from api.domain_validation import DomainPatternValidator
+            from constants.security import SecretLimits
+            
+            # Check size with user-friendly message
+            value_bytes = len(value.encode('utf-8'))
+            if value_bytes > SecretLimits.MAX_SECRET_VALUE_BYTES:
+                raise forms.ValidationError(
+                    f"Secret value is too large. Maximum {SecretLimits.MAX_SECRET_VALUE_BYTES} bytes allowed (current: {value_bytes} bytes)."
+                )
+            
+            # Use comprehensive validation
+            DomainPatternValidator._validate_secret_value(value)
+            
+            return value
+        except ValueError as e:
+            raise forms.ValidationError(str(e))
+    
+    def clean(self):
+        cleaned_data = super().clean()
+        domain = cleaned_data.get('domain')
+        name = cleaned_data.get('name')
+        
+        if domain and name and self.agent:
+            from api.models import PersistentAgentSecret
+            from constants.security import SecretLimits
+            
+            # Check for duplicates by name (which is now the primary identifier)
+            if PersistentAgentSecret.objects.filter(
+                agent=self.agent,
+                domain_pattern=domain,
+                name=name
+            ).exists():
+                raise forms.ValidationError(f"Secret name '{name}' already exists for domain '{domain}'.")
+            
+            # Check limits before adding new secret
+            total_secrets = PersistentAgentSecret.objects.filter(agent=self.agent).count()
+            if total_secrets >= SecretLimits.MAX_SECRETS_PER_AGENT:
+                raise forms.ValidationError(
+                    f"Cannot add more secrets. Maximum {SecretLimits.MAX_SECRETS_PER_AGENT} secrets allowed per agent."
+                )
+            
+            # Check domain limit
+            distinct_domains = PersistentAgentSecret.objects.filter(
+                agent=self.agent
+            ).values('domain_pattern').distinct().count()
+            
+            if not PersistentAgentSecret.objects.filter(
+                agent=self.agent, 
+                domain_pattern=domain
+            ).exists() and distinct_domains >= SecretLimits.MAX_DOMAINS_PER_AGENT:
+                raise forms.ValidationError(
+                    f"Cannot add more domains. Maximum {SecretLimits.MAX_DOMAINS_PER_AGENT} domains allowed per agent."
+                )
+        
+        return cleaned_data
+
+
+class PersistentAgentEditSecretForm(forms.Form):
+    """Form for editing an existing secret."""
+    
+    name = forms.CharField(
+        max_length=128,
+        widget=forms.TextInput(attrs={
+            'placeholder': 'e.g., X Password, API Key, Database Username',
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+        }),
+        label='Secret Name',
+        help_text='Human-readable name for this secret. The key will be updated automatically.'
+    )
+    
+    description = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={
+            'placeholder': 'Optional description of what this secret is used for...',
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none',
+            'rows': 3
+        }),
+        label='Description',
+        help_text='Optional description to help you remember what this secret is used for'
+    )
+    
+    value = forms.CharField(
+        widget=forms.PasswordInput(attrs={
+            'placeholder': 'Enter the new secret value',
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+        }),
+        label='Secret Value',
+        help_text='This will be encrypted and stored securely'
+    )
+    
+    def __init__(self, *args, agent=None, secret=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.agent = agent
+        self.secret = secret
+        
+        # Pre-populate form with existing values if secret is provided
+        if secret and not kwargs.get('data'):
+            self.fields['name'].initial = secret.name
+            self.fields['description'].initial = secret.description
+
+    def clean_name(self):
+        name = self.cleaned_data['name'].strip()
+        
+        try:
+            if not name:
+                raise forms.ValidationError("Secret name is required.")
+            
+            if len(name) > 128:
+                raise forms.ValidationError(
+                    f"Secret name is too long. Maximum 128 characters allowed."
+                )
+            
+            return name
+        except ValueError as e:
+            raise forms.ValidationError(str(e))
+    
+    def clean(self):
+        cleaned_data = super().clean()
+        name = cleaned_data.get('name')
+        
+        if name and self.agent and self.secret:
+            from api.models import PersistentAgentSecret
+            
+            # Check for duplicates by name (excluding current secret)
+            if PersistentAgentSecret.objects.filter(
+                agent=self.agent,
+                domain_pattern=self.secret.domain_pattern,
+                name=name
+            ).exclude(pk=self.secret.pk).exists():
+                raise forms.ValidationError(f"Secret name '{name}' already exists for this domain.")
+        
+        return cleaned_data
+
+    def clean_value(self):
+        value = self.cleaned_data['value']
+        
+        try:
+            from api.domain_validation import DomainPatternValidator
+            from constants.security import SecretLimits
+            
+            # Check size with user-friendly message
+            value_bytes = len(value.encode('utf-8'))
+            if value_bytes > SecretLimits.MAX_SECRET_VALUE_BYTES:
+                raise forms.ValidationError(
+                    f"Secret value is too large. Maximum {SecretLimits.MAX_SECRET_VALUE_BYTES} bytes allowed (current: {value_bytes} bytes)."
+                )
+            
+            # Use comprehensive validation
+            DomainPatternValidator._validate_secret_value(value)
+            
+            return value
+        except ValueError as e:
+            raise forms.ValidationError(str(e))
+
+
+class PersistentAgentSecretsRequestForm(forms.Form):
+    """Form for providing values to multiple requested secrets at once."""
+    
+    def __init__(self, *args, requested_secrets=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.requested_secrets = requested_secrets or []
+        
+        # Dynamically create fields for each requested secret
+        for secret in self.requested_secrets:
+            field_name = f'secret_{secret.id}'
+            self.fields[field_name] = forms.CharField(
+                widget=forms.PasswordInput(attrs={
+                    'placeholder': f'Enter value for {secret.name}',
+                    'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+                }),
+                label=secret.name,
+                help_text=secret.description if secret.description else f'Secret key: {secret.key}',
+                required=True
+            )
+    
+    def clean(self):
+        cleaned_data = super().clean()
+        
+        # Validate all secret values
+        for secret in self.requested_secrets:
+            field_name = f'secret_{secret.id}'
+            value = cleaned_data.get(field_name)
+            
+            if value:
+                try:
+                    from api.domain_validation import DomainPatternValidator
+                    DomainPatternValidator._validate_secret_value(value)
+                except Exception as e:
+                    self.add_error(field_name, str(e))
+        
+        return cleaned_data
+
+
+class ContactRequestApprovalForm(forms.Form):
+    """Form for approving/rejecting contact requests."""
+    
+    def __init__(self, *args, contact_requests=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.contact_requests = contact_requests or []
+        
+        # Create checkbox fields for each request
+        for request in self.contact_requests:
+            field_name = f'approve_{request.id}'
+            display_name = request.name or request.address
+            self.fields[field_name] = forms.BooleanField(
+                required=False,
+                initial=True,  # Default to checked for convenience
+                label=f"{display_name} ({request.channel})",
+                help_text=f"Purpose: {request.purpose}",
+                widget=forms.CheckboxInput(attrs={
+                    'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
+                })
+            )
+
+
+class PhoneAddForm(forms.Form):
+    phone_number = forms.CharField(
+        label="Phone number",
+        widget = forms.TextInput(
+            attrs={
+                "class": "phone_number w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 py-3 px-4 ps-11 block w-full rounded-xl border-gray-300 bg-white/80 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-base placeholder:text-gray-400",
+                "type": "tel",
+                "autocomplete": "tel",
+                "placeholder": "Enter phone",
+                "id": "phone_number_input",
+            }
+        ),
+    )
+
+    phone_number_hidden = forms.CharField(
+        widget=forms.HiddenInput(
+            attrs={
+                "id": "phone_number_hidden"
+            },
+        ),
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = user
+
+    def save(self):
+        phone_raw = self.cleaned_data["phone_number_hidden"]
+        # Todo: error handling
+
+        # convert to E.164 format using the google libphonenumber library
+        from phonenumbers import parse, format_number, PhoneNumberFormat, is_valid_number
+        from django.utils import timezone
+
+        try:
+            parsed_phone = parse(phone_raw, None)  # None means no region is specified
+            if not is_valid_number(parsed_phone):
+                raise ValidationError("Invalid phone number format.")
+            phone_formatted = format_number(parsed_phone, PhoneNumberFormat.E164)
+        except Exception as e:
+            raise ValidationError(f"Error parsing phone number: {str(e)}")
+
+        try:
+            phone, created = UserPhoneNumber.objects.get_or_create(
+                user=self.user,
+                phone_number=phone_formatted,
+                defaults={
+                    'is_verified': False,
+                    'is_primary': True,  # Set as primary if it's a new phone, and we only support one phone *for now*
+                    'verified_at': None,
+                    'created_at': timezone.now(),
+                    'updated_at': timezone.now(),
+                }
+            )
+        except IntegrityError as e:
+            logger.error(f"Integrity error saving phone number: {str(e)}")
+            raise e
+        except Exception as e:
+            raise ValidationError(f"Error saving phone number: {str(e)}")
+
+        # Go ahead and send verification
+        try:
+            sid = sms.start_verification(phone_number=phone_formatted)
+            phone.last_verification_attempt = timezone.now()
+            phone.verification_sid = sid
+            phone.save(update_fields=["last_verification_attempt", "verification_sid", "updated_at"])
+        except Exception as e:
+            logger.error(f"Error sending verification: {str(e)}")
+            raise ValidationError(f"Error sending verification: {str(e)}")
+
+        return phone
+
+class PhoneVerifyForm(forms.Form):
+    phone_number = forms.CharField(widget=forms.HiddenInput)  # stays in the POST
+    verification_code = forms.CharField(
+        max_length=6,
+        label="Verification Code",
+        required=True,
+        widget=forms.TextInput(
+            attrs={
+                "class": "px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+            }
+        )
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = user
+
+    def clean(self):
+        cleaned = super().clean()
+
+        code = cleaned.get("verification_code")
+        phone_number = cleaned.get("phone_number")
+        # Avoid calling provider when code is missing
+        if not code:
+            raise ValidationError("Verification code is required.")
+
+        verified = sms.check_verification(phone_number=phone_number, code=code)
+
+        if not verified:
+             raise ValidationError("Incorrect or expired code.")
+
+        return cleaned
+
+    def save(self):
+        phone_number = self.cleaned_data["phone_number"]
+
+        phone = UserPhoneNumber.objects.filter(
+            user=self.user,
+            phone_number=phone_number,
+        ).first()
+
+        if phone:
+            phone.is_verified = True
+            phone.verified_at = timezone.now()
+            phone.save()
+            return phone
+        else:
+            raise ValidationError("Phone number not found for this user.")
+
+
+class OrganizationForm(forms.ModelForm):
+    class Meta:
+        model = Organization
+        fields = ["name"]
+        widgets = {
+            "name": forms.TextInput(
+                attrs={
+                    "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+                    "placeholder": "Organization name",
+                }
+            )
+        }
+
+
+class OrganizationInviteForm(forms.Form):
+    email = forms.EmailField(
+        widget=forms.EmailInput(
+            attrs={
+                "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+                "placeholder": "user@example.com",
+            }
+        )
+    )
+    role = forms.ChoiceField(
+        choices=OrganizationMembership.OrgRole.choices,
+        widget=forms.Select(
+            attrs={
+                "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+            }
+        ),
+    )
+
+    def __init__(self, *args, org=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.org = org
+
+    def clean_email(self):
+        email = self.cleaned_data.get('email')
+        if self.org and email and OrganizationMembership.objects.filter(
+                org=self.org,
+                user__email__iexact=email,
+                status=OrganizationMembership.OrgStatus.ACTIVE
+        ).exists():
+            raise forms.ValidationError('This user is already an active member of this organization.')
+        return email

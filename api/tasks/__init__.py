@@ -1,0 +1,37 @@
+# --------------------------------------------------------------------------- #
+#  Backward compatibility shim for tasks.py refactoring
+#  
+#  This file imports all tasks from their new domain-specific modules to
+#  maintain backward compatibility with existing imports and Celery beat schedules.
+# --------------------------------------------------------------------------- #
+
+# Import all tasks from their new modules
+from .browser_agent_tasks import (
+    process_browser_use_task,
+    _process_browser_use_task_core,
+    select_proxy_for_task,
+    _run_agent,
+    _safe_aclose,
+    _jsonify,
+)
+
+from .proxy_tasks import (
+    sync_all_ip_blocks,
+    sync_ip_block,
+    backfill_missing_proxy_records,
+    proxy_health_check_nightly,
+    proxy_health_check_single,
+    _perform_proxy_health_check,
+    _fetch_decodo_ip_data,
+    _update_or_create_ip_record,
+    _update_or_create_proxy_record,
+)
+
+from .subscription_tasks import (
+    grant_monthly_free_credits,
+)
+
+from .maintenance_tasks import (
+    cleanup_temp_files,
+    garbage_collect_timed_out_tasks,
+)

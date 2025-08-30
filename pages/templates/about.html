@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}About • Gobii{% endblock %}
+
+{% block content %}
+<section class="py-20 bg-white text-slate-900">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <h1 class="text-4xl font-semibold mb-6">Empowering AI&nbsp;agents to browse&nbsp;the web for&nbsp;you.</h1>
+    <p class="text-lg leading-relaxed mb-4">
+      Gobii envisions a future where intelligent agents collaborate seamlessly with humans to automate the
+      countless web-based tasks that slow us down today. From gathering research to filling forms to orchestrating
+      multi-step workflows, our cloud-hosted browser agents combine modern large-language models with resilient
+      browser automation to act exactly where the APIs stop.
+    </p>
+    <p class="text-lg leading-relaxed mb-4">
+      We're starting by making <em>browser-use&nbsp;agents in the cloud</em> ridiculously easy: instant instances,
+      built-in proxy rotation, live previews, and a single API call to spin up as many agents as your ideas demand.
+      As models grow more capable, Gobii will give them the infrastructure—and guardrails—to work safely alongside
+      users, turning clicks and keystrokes into pure leverage.
+    </p>
+    <p class="text-lg leading-relaxed mb-4">
+      If you believe the browser should be as programmable as an API, we'd love to hear from you.
+    </p>
+    <p class="text-lg leading-relaxed">
+      <a href="mailto:hello@gobii.ai" class="text-blue-600 hover:underline">Say hello ↗</a>
+    </p>
+  </div>
+</section>
+
+<section class="py-16 bg-white text-slate-900">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex flex-col md:flex-row items-start md:space-x-8">
+      <img src="{% static 'images/andrew.jpg' %}" alt="Andrew I. Christianson" class="w-32 h-32 rounded-full object-cover mb-6 md:mb-0 shrink-0" />
+      <div>
+        <h2 class="text-3xl font-semibold mb-2">Andrew&nbsp;I.&nbsp;Christianson</h2>
+        <p class="text-lg font-medium mb-4">Founder &amp; Chief Technology Officer</p>
+        <p class="leading-relaxed mb-4">
+          Andrew pairs a decade of mission-critical engineering with a passion for open-source AI. His track record
+          spans national-security big-data systems, category-defining open-core companies, and the breakout success of
+          RA.Aid—an autonomous coding agent that grew its community nine-fold in just three months.
+        </p>
+        <ul class="list-disc pl-6 space-y-2 text-base leading-relaxed">
+          <li>
+            Creator of <a href="https://github.com/ai-christianson/RA.Aid" class="text-blue-600 hover:underline">RA.Aid</a>, the open-source AI coding agent. Selected as the inaugural project for <a href="https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth" class="text-blue-600 hover:underline">Open&nbsp;Core&nbsp;Ventures' Catalyst&nbsp;program</a> and scaled to 9× community growth in 90&nbsp;days.
+          </li>
+          <li>
+            Nearly a decade contracting for the U.S. National Security Agency, architecting self-healing distributed computing and big-data pipelines that directly contributed to saving lives and keeping Americans safe.
+          </li>
+          <li>
+            Core contributor to <a href="https://nifi.apache.org/" class="text-blue-600 hover:underline">Apache NiFi</a> &amp; MiNiFi edge-computing—technology originally open-sourced through the <a href="https://www.nsa.gov/Research/Technology-Transfer-Program/Success-Stories/Article/3306190/nsa-releases-niagarafiles-to-open-source-software/" class="text-blue-600 hover:underline">NSA Technology&nbsp;Transfer&nbsp;Program</a>. Worked alongside the project's original creators on domain-specific languages; NiFi became the open core behind Onyara (acquired by Hortonworks) and Datavolo (acquired by Snowflake).
+          </li>
+          <li>
+            Staff Software Engineer at open-core leaders Hortonworks, Cloudera, and FOSSA.
+          </li>
+          <li>
+            Contributor to browser-use
+          </li>
+        </ul>
+        <p class="leading-relaxed mt-4">
+          Andrew is a thought leader, publishing AI and technical content under his initials “AI” Christianson. He grew his <a href="https://www.tiktok.com/@ai.christianson" class="text-blue-600 hover:underline">TikTok</a> and <a href="https://www.instagram.com/ai.christianson/" class="text-blue-600 hover:underline">Instagram</a> audiences to&nbsp;30k+ followers combined in under 30&nbsp;days.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="py-16 bg-white text-slate-900">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex flex-col md:flex-row items-start md:space-x-8">
+      <img src="{% static 'images/will.png' %}" alt="Will Bonde" class="w-32 h-32 rounded-full object-cover mb-6 md:mb-0 shrink-0" />
+      <div>
+        <h2 class="text-3xl font-semibold mb-2">Will Bonde</h2>
+        <p class="text-lg font-medium mb-4">Senior Software Engineer</p>
+        <p class="leading-relaxed mb-4">
+          Will fuses nearly twenty years of secure‑systems expertise with a knack for turning cutting‑edge AI into products people actually use. A cancer survivor, he channels that resilience into building software with real‑world impact to make lives better—now charting the technical course for Gobii’s platform that distills signal from the deluge of information on the internet.
+        </p>
+        <ul class="list-disc pl-6 space-y-2 text-base leading-relaxed">
+          <li>
+            Integration mastermind for high‑security workflows. Led architecture and hands‑on code at Yakabod (acquired by EverFox), wiring ServiceNow, Microsoft Teams, Slack, and classified DoD systems into a self‑healing platform used across multiple secure enclaves.
+          </li>
+          <li>
+            Creator of self‑documenting REST APIs. Designed OpenAPI‑driven services whose endpoints automatically expand and adjust to object configurations on the server, eliminating manual spec drift and accelerating client adoption.
+          </li>
+          <li>
+            Architect and implementer of large‑scale data synchronization. Built a system that syncs millions of legacy‑formatted records across agencies to a modern web stack multiple times per hour, ensuring fresh data without downtime.
+          </li>
+          <li>
+            Co‑creator of Therality, a self‑guided exposure‑therapy app that leverages immersive video to help users tame anxiety. Therality was one of the first applications available on the visionOS store.
+          </li>
+          <li>
+            Maintainer of RA.Aid, the AI coding agent created by Andrew; streamlined Homebrew packaging to slash installation complexity for macOS users
+          </li>
+          <li>
+            Contributor to browser-use
+          </li>
+        </ul>
+        <p class="leading-relaxed mt-4">
+          Off the command line, Will supports fellow survivors through the Testicular Cancer Foundation, facilitating patient and survivor conversation through Discord.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %} 

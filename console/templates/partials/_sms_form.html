@@ -1,0 +1,119 @@
+
+<div class="" id="sms-verification-form">
+
+{%  if error %}
+<div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4">
+  <p class="text-sm">{{ error }}</p>
+</div>
+{% endif %}
+
+  <!-- heading -->
+<div>
+  {% csrf_token %}
+  {% if not phone %}
+    <div>
+      <div class="flex items-center space-x-3">
+        <div class="relative flex-1">
+          <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+            </svg>
+          </div>
+          {{ add_form.phone_number }}
+          {{ add_form.phone_number_hidden }}
+        </div>
+        <div class="flex-[0_0_30%]">
+          <button
+            type="button"                     {# ⭐ not "submit" #}
+            hx-post="{{ post_url }}"
+            hx-target="#sms-verification-form"            {# swap just the widget #}
+            hx-swap="outerHTML"
+            hx-indicator="#add-phone-spinner"
+            hx-include="#sms-verification-form"
+            class="w-full whitespace-nowrap inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-md"
+          >
+            Send Code
+          </button>
+        </div>
+      </div>
+    </div>
+    
+       <p class="text-xs text-gray-500 mt-2">Once created, your agent will contact you at this number.</p>
+  {% elif not phone.is_verified %}
+    {# ---------- existing number but not verified card ---------- #}
+    <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+      {# keep most of your markup intact #}
+      {% if not phone.is_verified %}
+          {{ verify_form.phone_number }}
+          {{ verify_form.verification_code.label_tag }}
+          {{ verify_form.verification_code }}
+          <div class="mt-2 flex items-center gap-3">
+            <button
+                class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md"
+                type="button"
+                hx-post="{{ post_url }}"
+                hx-target="#sms-verification-form"
+                hx-swap="outerHTML"
+                hx-indicator="#verify-phone-spinner"
+                hx-include="#sms-verification-form"
+            >
+              Verify
+            </button>
+
+            <button
+                id="resend-code-btn"
+                type="button"
+                class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                hx-post="{{ post_url }}"
+                hx-target="#sms-verification-form"
+                hx-swap="outerHTML"
+                hx-include="#sms-verification-form"
+                hx-vals='{"resend_code": "1"}'
+                {% if cooldown_remaining and cooldown_remaining > 0 %}disabled{% endif %}
+            >
+              {% if cooldown_remaining and cooldown_remaining > 0 %}
+                  Resend in <span id="resend-timer" data-remaining="{{ cooldown_remaining }}">{{ cooldown_remaining }}</span>s
+              {% else %}
+                Resend code
+              {% endif %}
+            </button>
+          </div>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <div class="flex-shrink-0">
+              <svg class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+              </svg>
+            </div>
+            <div>
+              <p class="text-sm font-medium text-gray-900 phone-number-static phone-number-to-format">{{ phone.phone_number }}</p>
+              <p class="text-xs text-green-600">✓ Verified on {{ phone.verified_at|date:"M d, Y" }}</p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-1">
+            <input type="hidden" name="delete_phone" value="1">
+            <button
+              type="button"                     {# ⭐ not “submit” #}
+              hx-post="{{ post_url }}"
+              hx-target="#sms-verification-form"            {# swap just the widget #}
+              hx-swap="outerHTML"
+              hx-indicator="#delete-phone-spinner"
+              hx-include="#sms-verification-form"
+              class="inline-flex items-center px-3 py-1.5 text-xs font-semibold
+                     text-white bg-red-600 rounded hover:bg-red-700"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+    </div>
+  {% endif %}
+</div>
+
+</div>
+
+<!-- note you need to include the sms forms js in your base template, if we did it here, it'd try to reload on htmx swap -->

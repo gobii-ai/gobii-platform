@@ -1,0 +1,357 @@
+{% extends "base.html" %}
+{% load cache %}
+
+{% block content %}
+<style>
+  .prose h1,
+  .prose h2,
+  .prose h3,
+  .prose h4,
+  .prose h5,
+  .prose h6 {
+    scroll-margin-top: 6rem; /* Adjust this value as needed */
+  }
+  
+  /* Adjust scroll margin for mobile with fixed sub-nav */
+  @media (max-width: 767px) {
+    .prose h1,
+    .prose h2,
+    .prose h3,
+    .prose h4,
+    .prose h5,
+    .prose h6 {
+      scroll-margin-top: 8.5rem; /* Account for header + sub-nav */
+    }
+  }
+</style>
+<div class="flex flex-col md:flex-row min-h-screen relative">
+  <!-- Removed gradient and decorative blobs for cleaner background -->
+  
+  <!-- Subtle grid pattern overlay -->
+  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-10" style="--bg-size-x:40px; --bg-size-y:40px"></div>
+  
+  <!-- API Documentation Banner -->
+  {% if request.path|slice:":3" == "api" %}
+  <div class="sticky top-0 z-20 w-full bg-blue-600 text-white px-4 py-2 flex justify-between items-center">
+    <span class="font-medium">Looking for the interactive API documentation?</span>
+    <a href="{% url 'schema-swagger-ui' %}" target="_blank" class="bg-white text-blue-600 px-3 py-1 rounded-lg text-sm font-semibold hover:bg-blue-50 transition-colors">View Swagger UI</a>
+  </div>
+  {% endif %}
+  
+  <!-- Mobile Documentation Accordion Navigation -->
+  <div class="md:hidden sticky top-16 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200 shadow-sm" x-data="{ openSection: null, isExpanded: false }">
+    <div class="flex items-center justify-between h-[52px]">
+      <button @click="isExpanded = !isExpanded" 
+              class="flex-1 flex items-center gap-2 px-4 text-sm font-medium text-gray-700 hover:text-blue-600 transition-colors h-full">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+        API Menu
+      </button>
+      <button @click="isExpanded = !isExpanded" 
+              class="flex items-center justify-center w-10 h-10 mr-4 sm:mr-6 lg:mr-8 text-gray-700 hover:text-blue-600 rounded-lg transition-colors">
+        <svg class="w-6 h-6 transition-transform duration-200" 
+             :class="{'rotate-180': isExpanded}"
+             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+    </div>
+    
+    <!-- Backdrop -->
+    <div x-show="isExpanded" 
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         @click="isExpanded = false"
+         class="fixed inset-0 top-[calc(4rem+3.25rem)] bg-black/20 backdrop-blur-sm z-10"
+         x-cloak></div>
+    
+    <!-- Accordion Content (Overlay) -->
+    <div x-show="isExpanded" 
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 -translate-y-2"
+         x-transition:enter-end="opacity-100 translate-y-0"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100 translate-y-0"
+         x-transition:leave-end="opacity-0 -translate-y-2"
+         class="absolute left-0 right-0 top-full max-h-[60vh] overflow-y-auto bg-white border-b border-gray-200 shadow-lg z-20"
+         x-cloak>
+      <nav class="py-2">
+        <!-- Documentation pages -->
+        {% for doc_page in all_doc_pages %}
+          {% if doc_page.slug|slice:":6" == "guides" %}
+            <a href="{{ doc_page.url }}" 
+               class="flex items-center {{ doc_page.ml_class|default:'ml-0' }} px-4 py-2.5 text-sm font-medium transition-colors 
+                      {% if request.path == doc_page.url %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}"
+               title="{{ doc_page.title }}">
+              {% if request.path == doc_page.url %}
+                {% if doc_page.icon %}
+                  {% include "includes/_docs_icon.html" with icon_key=doc_page.icon icon_class="flex-shrink-0 w-5 h-5 mr-3 text-blue-600" %}
+                {% else %}
+                  {% include "includes/_docs_icon.html" with icon_key="default" icon_class="flex-shrink-0 w-5 h-5 mr-3 text-blue-600" %}
+                {% endif %}
+              {% else %}
+                {% if doc_page.icon %}
+                  {% include "includes/_docs_icon.html" with icon_key=doc_page.icon icon_class="flex-shrink-0 w-5 h-5 mr-3 text-gray-500" %}
+                {% else %}
+                  {% include "includes/_docs_icon.html" with icon_key="default" icon_class="flex-shrink-0 w-5 h-5 mr-3 text-gray-500" %}
+                {% endif %}
+              {% endif %}
+              <span class="truncate">{{ doc_page.title }}</span>
+            </a>
+          {% endif %}
+        {% endfor %}
+
+        <!-- API Documentation link -->
+        <a href="{% url 'schema-swagger-ui' %}" target="_blank" 
+           class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors 
+                  {% if request.path == '/api/schema/swagger-ui/' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}"
+           title="API Reference">
+          {% include "includes/_docs_icon.html" with icon_key="api" icon_class="flex-shrink-0 w-5 h-5 mr-3 text-blue-600" %}
+          <span class="truncate">API Reference</span>
+        </a>
+        
+        <!-- Previous/Next Navigation -->
+        {% if prev_page or next_page %}
+        <div class="mt-2 pt-2 mx-4 border-t border-gray-200">
+          {% if prev_page %}
+            <a href="{{ prev_page.url }}" class="flex items-center py-2 text-sm text-gray-600 hover:text-blue-600 transition-colors">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+              </svg>
+              <span class="truncate">{{ prev_page.title }}</span>
+            </a>
+          {% endif %}
+          {% if next_page %}
+            <a href="{{ next_page.url }}" class="flex items-center py-2 text-sm text-gray-600 hover:text-blue-600 transition-colors">
+              <span class="truncate flex-1">{{ next_page.title }}</span>
+              <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+              </svg>
+            </a>
+          {% endif %}
+        </div>
+        {% endif %}
+      </nav>
+    </div>
+  </div>
+  
+  <!-- Documentation Sidebar (All Docs Navigation) -->
+  <aside class="hidden md:block sticky top-20 self-start min-w-64 w-64 flex-shrink-0 bg-white/80 backdrop-blur-sm border border-white/60 p-4 mx-4 my-4 rounded-xl shadow-xl overflow-y-auto">
+    <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3 px-3">API Menu</h3>
+    <nav class="space-y-1">
+      <!-- Other documentation pages (excluding API) -->
+      {% for doc_page in all_doc_pages %}
+        {% if doc_page.slug|slice:":6" == "guides" %}
+          {% comment %}<!-- Debug: {{ doc_page.icon }} -->{% endcomment %}
+          <a href="{{ doc_page.url }}" 
+             class="flex items-center {{ doc_page.ml_class }} px-3 py-2.5 {{ doc_page.text_class }} font-medium rounded-lg transition-colors 
+                    {% if request.path == doc_page.url %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}"
+             title="{{ doc_page.title }}">
+            {% if request.path == doc_page.url %}
+              {% if doc_page.icon %}
+                {% include "includes/_docs_icon.html" with icon_key=doc_page.icon icon_class="flex-shrink-0 size-5 me-2 text-blue-600" %}
+              {% else %}
+                {% include "includes/_docs_icon.html" with icon_key="default" icon_class="flex-shrink-0 size-5 me-2 text-blue-600" %}
+              {% endif %}
+            {% else %}
+              {% if doc_page.icon %}
+                {% include "includes/_docs_icon.html" with icon_key=doc_page.icon icon_class="flex-shrink-0 size-5 me-2 text-gray-500" %}
+              {% else %}
+                {% include "includes/_docs_icon.html" with icon_key="default" icon_class="flex-shrink-0 size-5 me-2 text-gray-500" %}
+              {% endif %}
+            {% endif %}
+            <span class="truncate">{{ doc_page.title }}</span>
+          </a>
+        {% endif %}
+      {% endfor %}
+
+      <!-- API Documentation auto-generated link -->
+      <a href="{% url 'schema-swagger-ui' %}" target="_blank" 
+         class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors 
+               {% if request.path == '/api/schema/swagger-ui/' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}"
+         title="API Reference">
+        {% include "includes/_docs_icon.html" with icon_key="api" icon_class="flex-shrink-0 size-5 me-2 text-blue-600" %}
+        <span class="truncate">API Reference</span>
+      </a>
+    </nav>
+    
+    <!-- Prev/Next Page Navigation -->
+    {% if prev_page or next_page %}
+    <div class="mt-6 pt-4 border-t border-gray-200">
+      <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2 px-3">Navigate</h3>
+      <nav class="space-y-1">
+      {% if prev_page %}
+        <a href="{{ prev_page.url }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors text-slate-700 hover:bg-white/80 hover:text-blue-600 mb-1">
+          <svg xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0 size-4 me-2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+          </svg>
+          <span class="truncate" title="{{ prev_page.title }}">{{ prev_page.title }}</span>
+        </a>
+      {% endif %}
+      {% if next_page %}
+        <a href="{{ next_page.url }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors text-slate-700 hover:bg-white/80 hover:text-blue-600">
+          <svg xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0 size-4 me-2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+          </svg>
+          <span class="truncate" title="{{ next_page.title }}">{{ next_page.title }}</span>
+        </a>
+      {% endif %}
+      </nav>
+    </div>
+    {% endif %}
+  </aside>
+
+  <!-- Main Content Area for Documentation -->
+  <main id="docs-main-content" class="relative z-10 flex-1 p-4 md:pl-8 md:pr-8 overflow-x-auto">
+    <!-- If we're on an old API page, redirect to the new auto-generated docs -->
+    {% if request.path|slice:":3" == "api" and request.path != '/api/schema/swagger-ui/' and request.path != '/api/schema/redoc/' and request.path != '/api/docs/' %}
+      <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg mb-6">
+        <p class="font-medium">This API documentation page has moved!</p>
+        <p class="mt-2">We now provide auto-generated, interactive API documentation that's always up-to-date.</p>
+        <div class="mt-4 flex gap-3">
+          <a href="{% url 'schema-swagger-ui' %}" class="inline-flex items-center bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+            View Swagger UI →
+          </a>
+          <a href="{% url 'schema-redoc' %}" class="inline-flex items-center bg-white hover:bg-gray-50 text-yellow-700 border border-yellow-300 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+            View ReDoc →
+          </a>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="max-w-4xl md:mt-2">
+      <article class="prose max-w-none">
+        <!-- Explicitly render the page title from metadata -->
+        <h1 class="text-4xl font-semibold text-slate-900 mt-2 mb-6">{{ meta.title }}</h1>
+        
+        {% if meta.description %}
+          <p class="lead text-xl text-slate-600 mb-6">{{ meta.description }}</p>
+        {% endif %}
+
+        {% if toc_html %}
+          <div class="docs-toc-inline mb-8">
+            <h3 class="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3">On this page</h3>
+            {{ toc_html|safe }}
+          </div>
+        {% endif %}
+
+        <div class="content">
+          {% cache 86400 docs_body slug %}
+          {{ html|safe }}
+          {% endcache %}
+        </div>
+        
+        <!-- API Reference Auto-Doc Notice -->
+        {% if request.path|slice:":3" == "api" %}
+        <div class="mt-8 p-6 bg-blue-50 rounded-lg border border-blue-100">
+          <h2 class="text-xl font-semibold text-blue-700 mb-2">Interactive API Documentation</h2>
+          <p class="text-blue-600 mb-4">
+            We provide auto-generated, interactive API documentation for developers. This documentation is always up-to-date with our latest API features.
+          </p>
+          <div class="flex flex-col sm:flex-row gap-3">
+            <a href="{% url 'schema-swagger-ui' %}" target="_blank" class="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Swagger UI
+            </a>
+            <a href="{% url 'schema-redoc' %}" target="_blank" class="inline-flex items-center justify-center bg-white hover:bg-gray-50 text-blue-600 border border-blue-200 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+              ReDoc
+            </a>
+          </div>
+        </div>
+        {% endif %}
+      </article>
+      
+      <!-- Debug: Print all icons from doc pages -->
+      {% comment %}
+      <div class="mt-8 p-4 border border-gray-200 rounded">
+        <h3>Debug Icon Values:</h3>
+        <ul>
+          {% for doc_page in all_doc_pages %}
+            <li>{{ doc_page.title }}: icon = "{{ doc_page.icon }}"</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endcomment %}
+    </div>
+  </main>
+  
+  <!-- Mobile Navigation Toggle Button -->
+  <!-- Removed the FAB button as we're using the accordion approach -->
+</div>
+
+<style>
+  /* Styles for the inline TOC in the main content */
+  .docs-toc-inline {
+    @apply border-l-4 border-l-slate-200 pl-4;
+  }
+  .docs-toc-inline ul {
+    @apply list-none pl-0 my-1 space-y-1;
+  }
+  .docs-toc-inline ul ul {
+    @apply pl-4 mt-1 space-y-px;
+  }
+  .docs-toc-inline li {
+    @apply mb-0;
+  }
+  .docs-toc-inline a {
+    @apply flex items-center py-1 text-sm transition-colors text-slate-600 hover:text-blue-600 no-underline;
+  }
+  .docs-toc-inline a:hover {
+    @apply text-blue-600;
+  }
+  .docs-toc-inline a.active {
+    @apply text-blue-600 font-medium;
+  }
+
+  /* Prevent double H1 headers in the content */
+  .content h1:first-child {
+    @apply hidden; /* Hide any H1 in content since we're displaying it from metadata */
+  }
+  
+  /* Ensure prose doesn't over-style our TOC */
+  .prose .docs-toc-inline ul,
+  .prose .docs-toc-inline ol {
+      @apply list-none p-0 m-0;
+  }
+  .prose .docs-toc-inline li::before {
+      @apply content-none;
+  }
+  .prose .docs-toc-inline a {
+      @apply no-underline font-normal;
+  }
+  .prose .docs-toc-inline a.active {
+      @apply font-medium;
+  }
+</style>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const inlineTocObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            const id = entry.target.getAttribute('id');
+            const tocLink = document.querySelector(`.docs-toc-inline a[href="#${id}"]`);
+            if (tocLink) {
+                if (entry.isIntersecting) {
+                    document.querySelectorAll('.docs-toc-inline a.active').forEach(link => link.classList.remove('active'));
+                    tocLink.classList.add('active');
+                }
+            }
+        });
+    }, { rootMargin: "0px 0px -85% 0px" }); 
+
+    document.querySelectorAll('article div.content h2[id], article div.content h3[id], article div.content h4[id]').forEach((section) => {
+        inlineTocObserver.observe(section);
+    });
+  });
+</script>
+{% endblock %}

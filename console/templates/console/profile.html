@@ -1,0 +1,73 @@
+{% extends "console_page.html" %}
+
+{% block head_extras %}
+  <style>
+    .code-input {
+      display: flex;
+      gap: 8px;
+    }
+    .code-input input {
+      width: 45px;
+      height: 50px;
+      font-size: 22px;
+      text-align: center;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+    .code-input input:focus {
+      border-color: #007bff;
+      outline: none;
+      box-shadow: 0 0 3px #007bff;
+    }
+  </style>
+{% endblock %}
+
+
+{% block console_content %}
+  {% load static %}
+  <script src="{% static 'js/sms_forms.js' %}"></script>
+  <div class="max-w-xl space-y-8">
+    <h1 class="text-2xl font-semibold text-gray-800">Profile</h1>
+
+    <!-- Basic Information Section -->
+    <form type="POST" id="profile-form" method="post" class="space-y-6">
+      {% csrf_token %}
+      {{ profile_form.non_field_errors }}
+      <div class="space-y-4">
+        <h2 class="text-lg font-medium text-gray-800 border-b border-gray-200 pb-2">Basics</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            {{ profile_form.first_name.label_tag }}
+            {{ profile_form.first_name }}
+          </div>
+          <div>
+            {{ profile_form.last_name.label_tag }}
+            {{ profile_form.last_name }}
+          </div>
+        </div>
+      </div>
+      <!-- Hidden input for action -->
+      <input type="hidden" name="action" id="action-input" value="">
+      <div class="pt-4">
+        <button
+          type="submit"
+          class="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150 ease-in-out"
+        >
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          Save Changes
+        </button>
+      </div>
+    </form>
+
+    <!-- Phone Numbers Section -->
+    <div class="space-y-4">
+      <div class="flex items-center justify-between border-b border-gray-200 pb-2">
+        <h2 class="text-lg font-medium text-gray-800">Phone Numbers</h2>
+      </div>
+
+      {% include "partials/_sms_form.html" with phone=phone add_form=add_form verify_form=verify_form post_url=post_url %}
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>You're invited to communicate with {{ agent.name }}</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px 20px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h1 style="margin: 0; font-size: 24px;">You're invited to communicate with {{ agent.name }}!</h1>
+        <p style="margin: 10px 0 0; opacity: 0.9; font-size: 16px;">An AI agent on Gobii</p>
+    </div>
+    
+    <div style="background: #f8f9fa; padding: 30px 20px; border-radius: 0 0 8px 8px; border: 1px solid #e9ecef; border-top: none;">
+        <p style="font-size: 16px; margin-bottom: 20px;">
+            Hi there! 👋
+        </p>
+        
+        <p style="font-size: 16px; margin-bottom: 20px;">
+            <strong>{{ agent_owner.get_full_name|default:agent_owner.username }}</strong> has added you to the communication list for their AI agent <strong>{{ agent.name }}</strong> on Gobii.
+        </p>
+        
+        <div style="background: white; border: 1px solid #e9ecef; border-radius: 6px; padding: 20px; margin: 20px 0;">
+            <h3 style="margin: 0 0 10px; color: #495057; font-size: 18px;">About {{ agent.name }}:</h3>
+            <p style="margin: 0; color: #6c757d; font-size: 14px; font-style: italic;">{{ agent.charter|truncatewords:30 }}</p>
+        </div>
+        
+        <p style="font-size: 16px; margin-bottom: 20px;">
+            To confirm you'd like to communicate with {{ agent.name }}, please respond to this invitation:
+        </p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{{ accept_url }}" 
+               style="display: inline-block; background: #28a745; color: white; text-decoration: none; padding: 15px 40px; border-radius: 6px; font-weight: bold; font-size: 16px; margin: 0 10px;">
+                ✓ Accept Invitation
+            </a>
+            <a href="{{ reject_url }}" 
+               style="display: inline-block; background: #dc3545; color: white; text-decoration: none; padding: 15px 40px; border-radius: 6px; font-weight: bold; font-size: 16px; margin: 0 10px;">
+                ✗ Decline Invitation
+            </a>
+        </div>
+        
+        <p style="font-size: 14px; color: #6c757d; text-align: center; margin: 20px 0;">
+            Once you accept, you'll be able to email {{ agent.name }} directly at <strong>{{ agent_email }}</strong>
+        </p>
+        
+        <div style="background: #e7f3ff; border-left: 4px solid #007bff; padding: 15px; margin: 20px 0; border-radius: 0 4px 4px 0;">
+            <p style="margin: 0; font-size: 14px; color: #495057;">
+                <strong>💡 Tip:</strong> Simply reply to emails from {{ agent.name }} or send new emails to start conversations about anything you need help with!
+            </p>
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid #dee2e6; margin: 30px 0;">
+        
+        <p style="font-size: 14px; color: #6c757d; text-align: center; margin: 0;">
+            This invitation was sent by {{ agent_owner.get_full_name|default:agent_owner.username }} via <a href="https://gobii.ai" style="color: #007bff;">Gobii</a>
+        </p>
+    </div>
+</body>
+</html>

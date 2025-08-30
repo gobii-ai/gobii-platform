@@ -1,0 +1,12 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <form method="post" novalidate>
+      {% csrf_token %}
+      {{ form.as_p }}
+      <input type="submit" class="default" value="Send">
+      <a href="{{ request.META.HTTP_REFERER }}" class="button">Cancel</a>
+  </form>
+{% endblock %}

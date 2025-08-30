@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        /*
+         * Mobile-first, personal email styling that mimics what mainstream email 
+         * clients like Gmail, Apple Mail, and Outlook generate for personal messages.
+         * Based on research of authentic personal email formatting patterns.
+         */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            line-height: 1.4;
+            color: #000;
+            /* inherit background so it blends with client */
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+        }
+
+        /* Container that mimics Gmail/Apple Mail's message body spacing */
+        .email-body {
+            padding: 20px;
+            font-size: 14px;
+            word-break: break-word; /* prevent long URLs from forcing horizontal scroll */
+            max-width: 100%;
+        }
+
+        /* Reset paragraph spacing to match personal email clients */
+        p {
+            margin: 0 0 1em 0;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-body">
+        {{ body|safe }}
+    </div>
+</body>
+</html>

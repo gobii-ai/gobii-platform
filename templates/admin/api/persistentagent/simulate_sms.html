@@ -1,0 +1,109 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+<a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+&rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+&rsaquo; <a href="{% url 'admin:api_persistentagent_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+&rsaquo; <a href="{% url 'admin:api_persistentagent_change' agent.pk %}">{{ agent.name }}</a>
+&rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+<div class="module aligned">
+    <h2>Simulate an incoming SMS to {{ agent.name }}</h2>
+    <p>This will create a new inbound message that the agent can process. After submitting, you can trigger event processing to see the agent's response.</p>
+    
+    <form method="post">
+        {% csrf_token %}
+        
+        <div class="form-row">
+            <div class="field-box">
+                <label for="id_from_address" class="required">From SMS Number:</label>
+                <input type="text" name="from_address" id="id_from_address" class="vTextField" required>
+                <p class="help">The SMS number of the person sending the message to the agent. Use E.164 format, which includes country code!! (+12401234567).</p>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="field-box">
+                <label for="id_body" class="required">Message Body:</label>
+                <textarea name="body" id="id_body" class="vLargeTextField" rows="10" cols="40" required></textarea>
+                <p class="help">The content of the SMS message.</p>
+            </div>
+        </div>
+        
+        <div class="submit-row">
+            <input type="submit" value="Simulate Incoming SMS" class="default" name="_simulate">
+            <a href="{% url 'admin:api_persistentagent_change' agent.pk %}" class="button cancel-link">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<div class="module">
+    <h2>Current Agent Configuration</h2>
+    <table>
+        <tr>
+            <th>Agent Name:</th>
+            <td>{{ agent.name }}</td>
+        </tr>
+        <tr>
+            <th>User:</th>
+            <td>{{ agent.user.email }} ({{ agent.user.id }})</td>
+        </tr>
+        <tr>
+            <th>Charter:</th>
+            <td>{{ agent.charter|truncatewords:20 }}</td>
+        </tr>
+        <tr>
+            <th>Is Active:</th>
+            <td>{{ agent.is_active|yesno:"Yes,No" }}</td>
+        </tr>
+        <tr>
+            <th>SMS Endpoints:</th>
+            <td>
+                {% for endpoint in agent.comms_endpoints.all %}
+                    {% if endpoint.channel == "sms" %}
+                        {{ endpoint.address }}{% if endpoint.is_primary %} (primary){% endif %}<br>
+                    {% endif %}
+                {% empty %}
+                    <em>No SMS endpoints configured</em>
+                {% endfor %}
+            </td>
+        </tr>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.form-row {
+    margin-bottom: 20px;
+}
+.field-box label {
+    display: block;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+.field-box input, .field-box textarea {
+    width: 100%;
+    max-width: 600px;
+}
+.help {
+    color: #666;
+    font-size: 12px;
+    margin-top: 5px;
+}
+.cancel-link {
+    margin-left: 10px;
+}
+</style>
+{% endblock %} 

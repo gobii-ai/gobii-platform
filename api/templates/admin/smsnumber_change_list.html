@@ -1,0 +1,17 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools %}
+  <ul class="object-tools">
+      <li>
+          <a href="{% url 'admin:smsnumber_sync' %}" class="button">
+              🔄 Sync from Twilio
+          </a>
+      </li>
+      {{ block.super }}
+  </ul>
+{% endblock %}
+
+{% block content_title %}
+  {{ block.super }}
+  <p>{{ in_use_count }} of {{ total_count }} SMS Numbers in Use</p>
+{% endblock %}

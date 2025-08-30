@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% load static %}
+{% load waffle_tags %}
+{% block title %}Pricing - Gobii{% endblock %}
+{% block content %}
+<div class="relative">
+  <!-- Grid pattern overlay -->
+  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[-1]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
+  
+  <!-- ========================================================= -->
+  <!-- Pricing Hero -->
+  <section class="relative py-12">
+    <div class="max-w-4xl mx-auto px-6 text-center">
+      <h1 class="text-4xl sm:text-5xl font-bold text-gray-900 leading-tight mb-6">
+        <span class="font-semibold">Simple, transparent</span>
+        <span class="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"> pricing</span>
+      </h1>
+      <p class="text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
+        Start free, upgrade for serious work.
+      </p>
+    </div>
+  </section>
+
+  <!-- ========================================================= -->
+  <!-- Pricing Cards -->
+  <section id="pricing" class="py-12">
+    <div class="max-w-7xl mx-auto px-8">
+      <!-- Cards -->
+      <div class="grid sm:grid-cols-3 gap-6">
+        {% comment %} Card component {% endcomment %}
+        {% for plan in pricing_plans %}
+        <div class="flex flex-col rounded-2xl border {% if plan.highlight %}border-violet-100 bg-gradient-to-br from-white via-violet-50/10 to-purple-50/20 shadow-md{% else %}border-slate-200 bg-white shadow-sm{% endif %} p-6 text-center relative">
+          {% if plan.highlight %}
+          <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white text-xs px-3 py-1 rounded-full font-semibold">Popular</div>
+          {% endif %}
+          
+          <h3 class="text-lg font-semibold text-slate-900 mb-2">{{ plan.name }}</h3>
+          <p class="text-sm text-slate-600 mb-5">{{ plan.desc }}</p>
+          
+          <div class="mb-2">
+            {% if plan.price is None %}
+            <span class="text-2xl font-semibold text-slate-900">{{ plan.price_label }}</span>
+            {% else %}
+            <span class="text-3xl font-semibold text-slate-900">{{ plan.price_label }}</span>
+            {% endif %}
+          </div>
+          
+          <p class="text-xs text-slate-500 mb-6">{{ plan.pricing_model }}</p>
+          
+          <ul class="text-sm text-slate-600 space-y-3 flex-1 mb-6">
+            <li><span class="font-semibold">{{ plan.tasks }}</span> tasks included</li>
+            {% for feature in plan.features %}
+            <li>{{ feature }}</li>
+            {% endfor %}
+          </ul>
+          
+          <a href="{{ plan.cta_url }}" 
+            class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg
+            {% if plan.highlight %}
+            bg-blue-600 text-white hover:bg-blue-700 shadow-md
+            {% else %}
+            bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-blue-600
+            {% endif %}">{{ plan.cta }}</a>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= -->
+  <!-- Comparison Table -->
+  <section class="py-12">
+    <div class="max-w-7xl mx-auto px-8">
+      <h2 class="text-3xl sm:text-4xl font-semibold text-slate-900 text-center mb-12">Compare plans</h2>
+      <div class="overflow-x-auto">
+        <table class="min-w-full border border-slate-200 text-xs sm:text-sm">
+          <thead>
+            <tr>
+              <th class="p-2 sm:p-3 text-left font-semibold">Feature</th>
+              <th class="p-2 sm:p-3 font-semibold">Free</th>
+              <th class="p-2 sm:p-3 font-semibold">Pro</th>
+              <th class="p-2 sm:p-3 font-semibold">Enterprise</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in comparison_rows %}
+            <tr class="divide-x divide-slate-200">
+              <td class="p-2 sm:p-3 font-medium text-slate-700">{{ row.0 }}</td>
+              {% for col in row|slice:"1:" %}
+              <td class="p-2 sm:p-3 text-center">{{ col }}</td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= -->
+  <!-- FAQ -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-4">
+      <h2 class="text-3xl sm:text-4xl font-semibold text-slate-900 text-center mb-12">Frequently asked questions</h2>
+      <div class="hs-accordion-group space-y-4">
+        {% for q,a in faqs %}
+        <div class="hs-accordion border border-slate-200 rounded-lg" id="faq-{{ forloop.counter }}">
+          <button class="hs-accordion-toggle w-full px-6 py-4 flex justify-between items-center text-left">
+            <span class="font-medium text-slate-900">{{ q }}</span>
+            <svg class="w-4 h-4 hs-accordion-active:hidden" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            <svg class="w-4 h-4 hidden hs-accordion-active:block" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
+          </button>
+          <div class="hs-accordion-content hidden px-6 pb-4">
+            <p class="text-slate-600">{{ a }}</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= -->
+  <!-- Enterprise Demo Modal -->
+  <div id="demo-modal" class="hs-overlay hidden w-full h-full fixed top-0 start-0 z-[80] overflow-x-hidden overflow-y-auto">
+    <div class="hs-overlay-open:mt-7 hs-overlay-open:opacity-100 hs-overlay-open:duration-500 mt-0 opacity-0 ease-out transition-all sm:max-w-lg sm:w-full m-3 sm:mx-auto">
+      <div class="bg-white border border-gray-200 rounded-xl shadow-sm">
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-5">
+            <h3 class="text-xl font-semibold text-slate-900">Schedule Enterprise Demo</h3>
+            <button type="button" class="flex justify-center items-center w-7 h-7 text-sm font-semibold rounded-full border border-transparent text-slate-800 hover:bg-slate-100" data-hs-overlay="#demo-modal">
+              <span class="sr-only">Close</span>
+              <svg class="flex-shrink-0 w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+            </button>
+          </div>
+          
+          <form>
+            <div class="grid gap-y-4">
+              <div>
+                <label for="name" class="block text-sm font-medium mb-2">Full name</label>
+                <input type="text" id="name" name="name" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Your name">
+              </div>
+              
+              <div>
+                <label for="email" class="block text-sm font-medium mb-2">Email</label>
+                <input type="email" id="email" name="email" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="your.email@company.com">
+              </div>
+              
+              <div>
+                <label for="company" class="block text-sm font-medium mb-2">Company</label>
+                <input type="text" id="company" name="company" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Company name">
+              </div>
+              
+              <div>
+                <label for="message" class="block text-sm font-medium mb-2">Message (optional)</label>
+                <textarea id="message" name="message" rows="3" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Tell us about your needs"></textarea>
+              </div>
+              
+              <div class="mt-3">
+                <button type="button" class="w-full py-3 px-4 inline-flex justify-center items-center gap-x-2 text-sm font-semibold rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">
+                  Schedule demo
+                </button>
+              </div>
+              
+              <div class="text-center text-xs text-slate-500">
+                <p>This form is currently for demo purposes only.</p>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} 
