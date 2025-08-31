@@ -66,12 +66,14 @@
             <p class="text-xs text-gray-500">No additional tasks are currently enabled for your account.</p>
             <div class="mt-3 flex items-center justify-center">
               <p class="mt-1.5">
+                {% if settings.GOBII_PROPRIETARY_MODE %}
                 <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
                   Update settings
                   <svg aria-hidden="true" class="ml-0.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                   </svg>
                 </a>
+                {% endif %}
               </p>
             </div>
           </div>
@@ -95,12 +97,14 @@
             </div>
             <div class="mt-3 flex items-center justify-center">
               <p class="mt-1.5">
-                <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
-                  Update settings
-                  <svg aria-hidden="true" class="ml-0.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                  </svg>
-                </a>
+              {% if settings.GOBII_PROPRIETARY_MODE %}
+              <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
+                Update settings
+                <svg aria-hidden="true" class="ml-0.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+              </a>
+              {% endif %}
               </p>
             </div>
           </div>
@@ -135,12 +139,14 @@
           </div>
           <div class="mt-3 flex items-center justify-center">
             <p class="mt-1.5">
+              {% if settings.GOBII_PROPRIETARY_MODE %}
               <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
                 Update settings
                 <svg aria-hidden="true" class="ml-0.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                 </svg>
               </a>
+              {% endif %}
             </p>
           </div>
         </div>

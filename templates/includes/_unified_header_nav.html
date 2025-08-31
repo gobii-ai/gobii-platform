@@ -20,8 +20,10 @@
       <nav class="hidden md:flex items-center gap-x-6 text-sm font-medium">
         <a href="{% url 'pages:home' %}" class="text-slate-700 hover:text-blue-600">Home</a>
         <a href="/docs/" class="text-slate-700 hover:text-blue-600">API</a>
-        <a href="{% url 'pages:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a>
-        <a href="/support/" class="text-slate-700 hover:text-blue-600">Support</a>
+        {% if settings.GOBII_PROPRIETARY_MODE %}
+          <a href="{% url 'pages:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a>
+          <a href="{% url 'pages:support' %}" class="text-slate-700 hover:text-blue-600">Support</a>
+        {% endif %}
 
         {% if request.user.is_authenticated %}
           <a href="{% url 'console-home' %}" class="text-slate-700 hover:text-blue-600">Console</a>
@@ -178,7 +180,10 @@
       <div class="px-4 space-y-3 text-sm font-medium">
         <a href="{% url 'pages:home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Home</a>
         <a href="/docs/" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">API</a>
-        <a href="{% url 'pages:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
+        {% if settings.GOBII_PROPRIETARY_MODE %}
+          <a href="{% url 'pages:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
+          <a href="{% url 'pages:support' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Support</a>
+        {% endif %}
         
         {% if request.user.is_authenticated %}
           <a href="{% url 'console-home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Console</a>

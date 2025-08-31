@@ -383,9 +383,8 @@ class StaticViewSitemap(sitemaps.Sitemap):
 
     def items(self):
         # List of all static view names that should be included in the sitemap
-        return [
+        items = [
             'pages:home',
-            'pages:pricing',
             'pages:docs_index',
             'pages:tos',
             'pages:privacy',
@@ -393,6 +392,13 @@ class StaticViewSitemap(sitemaps.Sitemap):
             'pages:careers',
             'pages:startup_checkout',
         ]
+        # Include pricing only when proprietary mode is enabled
+        try:
+            if settings.GOBII_PROPRIETARY_MODE:
+                items.insert(1, 'pages:pricing')
+        except Exception:
+            pass
+        return items
 
     def location(self, item):
         return reverse(item)
