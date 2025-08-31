@@ -13,6 +13,8 @@ os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SEGMENT_WRITE_KEY", "")
+os.environ.setdefault("GOBII_PROPRIETARY_MODE", "1")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 
 from .settings import *
 
