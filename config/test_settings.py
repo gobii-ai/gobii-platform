@@ -13,6 +13,10 @@ os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SEGMENT_WRITE_KEY", "")
+# Keep proprietary mode off by default in tests; specific tests can override
+# Disable the community unlimited override so plan limits behave predictably in tests
+os.environ.setdefault("GOBII_ENABLE_COMMUNITY_UNLIMITED", "0")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 
 from .settings import *
 

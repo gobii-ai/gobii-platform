@@ -1,0 +1,12 @@
+<!-- Simple Examples Section (Proprietary) -->
+<div class="max-w-4xl mx-auto mt-2 text-center px-4">
+  <p class="text-sm text-gray-500 mb-4">Or, try an example:</p>
+  <div class="flex flex-wrap justify-center gap-2">
+    {% for example in simple_examples %}
+      <button type="button" class="bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:text-gray-800 text-sm font-medium py-1.5 px-3 rounded-full transition-colors" onclick="setPrompt('{{ example.prompt|escapejs }}')">
+          "{{ example.label }}"
+      </button>
+    {% endfor %}
+  </div>
+  </div>
+

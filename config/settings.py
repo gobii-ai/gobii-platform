@@ -37,6 +37,9 @@ os.environ.setdefault("GOBII_RELEASE_ENV", "local")
 # applicable license terms. By setting this flag you represent and warrant that
 # you are authorized to do so under a written license agreement with Gobii, Inc.
 GOBII_PROPRIETARY_MODE = env.bool("GOBII_PROPRIETARY_MODE", default=False)
+# In Community Edition, we optionally override limits to be effectively unlimited
+# for agents/tasks. Can be disabled (e.g., in tests) via env.
+GOBII_ENABLE_COMMUNITY_UNLIMITED = env.bool("GOBII_ENABLE_COMMUNITY_UNLIMITED", default=True)
 
 # ────────── Core ──────────
 DEBUG = env.bool("DEBUG", default=False)
@@ -98,6 +101,11 @@ INSTALLED_APPS = [
 
     "config.apps.TracingInitialization"
 ]
+
+# Load proprietary overrides (templates, etc.) if enabled
+if GOBII_PROPRIETARY_MODE:
+    # Prepend so its templates override base/app templates cleanly
+    INSTALLED_APPS = ["proprietary", *INSTALLED_APPS]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -375,10 +383,6 @@ CELERY_BEAT_SCHEDULE = {
         "task": "api.tasks.grant_monthly_free_credits",
         "schedule": crontab(minute=5, hour=0),
     },
-    "twilio-sync-numbers": {
-        "task": "api.tasks.sms_tasks.sync_twilio_numbers",
-        "schedule": crontab(minute="*/60"),   # every 30 min
-    },
     # Hourly garbage collection of timed-out tasks
     "garbage-collect-timed-out-tasks": {
         "task": "api.tasks.maintenance_tasks.garbage_collect_timed_out_tasks",
@@ -389,6 +393,14 @@ CELERY_BEAT_SCHEDULE = {
         },
     },
 }
+
+# Conditionally enable Twilio sync task only when explicitly enabled
+TWILIO_ENABLED = env.bool("TWILIO_ENABLED", default=False)
+if TWILIO_ENABLED and env("TWILIO_MESSAGING_SERVICE_SID", default=""):
+    CELERY_BEAT_SCHEDULE["twilio-sync-numbers"] = {
+        "task": "api.tasks.sms_tasks.sync_twilio_numbers",
+        "schedule": crontab(minute="*/60"),   # hourly
+    }
 
 # RedBeat scheduler configuration
 CELERY_BEAT_SCHEDULER = "redbeat.RedBeatScheduler"

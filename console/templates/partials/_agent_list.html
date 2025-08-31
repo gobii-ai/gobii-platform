@@ -18,6 +18,7 @@
         <span class="relative">Spawn Agent</span>
       </a>
       {% else %}
+        {% if settings.GOBII_PROPRIETARY_MODE %}
         <div class="inline-flex items-center bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 rounded-lg p-4 shadow-sm">
           <div class="flex items-center space-x-3">
             <div class="flex-shrink-0">
@@ -42,6 +43,7 @@
             </div>
           </div>
         </div>
+        {% endif %}
       {% endif %}
 
     </div>

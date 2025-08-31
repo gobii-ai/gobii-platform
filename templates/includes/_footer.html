@@ -4,10 +4,13 @@
     <div>
       <h3 class="font-semibold mb-4">Product</h3>
       <ul class="space-y-2">
-        <li><a href="{% url 'pages:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a></li>
+        {% if settings.GOBII_PROPRIETARY_MODE %}
+          <li><a href="{% url 'pages:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a></li>
+        {% endif %}
         <li><a href="/console/" class="text-slate-700 hover:text-blue-600">Console</a></li>
       </ul>
     </div>
+    {% if settings.GOBII_PROPRIETARY_MODE %}
     <div>
       <h3 class="font-semibold mb-4">Company</h3>
       <ul class="space-y-2">
@@ -16,6 +19,7 @@
         <li><a href="mailto:hello@gobii.ai" class="text-slate-700 hover:text-blue-600">Contact</a></li>
       </ul>
     </div>
+    {% endif %}
     <div>
       <h3 class="font-semibold mb-4">Developers</h3>
       <ul class="space-y-2">

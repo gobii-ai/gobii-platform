@@ -13,7 +13,6 @@
       </svg>
       Dashboard
     </a>
-    {% flag "persistent_agents" %}
     <a href="{% url 'agents' %}"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'agents' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
       <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'agents' %}text-blue-600{% else %}text-gray-500{% endif %}"
@@ -22,7 +21,6 @@
       </svg>
       Agents
     </a>
-    {% endflag %}
     <a href="{% url 'tasks' %}"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'tasks' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
       <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'tasks' %}text-blue-600{% else %}text-gray-500{% endif %}"
@@ -55,33 +53,35 @@
       </svg>
       Profile
     </a>
-    <a href="{% url 'billing' %}"
-       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'billing' %}text-blue-600{% else %}text-gray-500{% endif %}"
-           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M2 7a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V7z"
-        />
-        <!-- dividing stripe -->
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M2 10h20"
-        />
-        <!-- detail lines -->
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M6 16h2m4 0h6"
-        />
-      </svg>
-      Billing
-    </a>
+    {% if settings.GOBII_PROPRIETARY_MODE %}
+      <a href="{% url 'billing' %}"
+         class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+        <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'billing' %}text-blue-600{% else %}text-gray-500{% endif %}"
+             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M2 7a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V7z"
+          />
+          <!-- dividing stripe -->
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M2 10h20"
+          />
+          <!-- detail lines -->
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M6 16h2m4 0h6"
+          />
+        </svg>
+        Billing
+      </a>
+    {% endif %}
     <!-- Add other console-specific links here -->
   </nav>
 </aside>

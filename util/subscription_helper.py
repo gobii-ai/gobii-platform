@@ -130,26 +130,36 @@ def get_user_plan(user) -> dict[str, int | str]:
 
         if not subscription:
             logger.debug(f"get_user_plan {user.id}: No active subscription found")
-            return PLAN_CONFIG[PlanNames.FREE]
+            plan = PLAN_CONFIG[PlanNames.FREE]
+        else:
+            # Absolutely ridiculous but this is how dj-stripe works
+            stripe_sub = subscription.stripe_data
 
-        # Absolutely ridiculous but this is how dj-stripe works
-        stripe_sub = subscription.stripe_data
+            product_id = None
+            for item_data in stripe_sub.get("items", {}).get("data", []):
+                if item_data.get("plan", {}).get("usage_type") == "licensed":
+                    product_id = item_data.get("price", {}).get("product")
+                    break # Found the licensed item, no need to check further
 
-        product_id = None
-        for item_data in stripe_sub.get("items", {}).get("data", []):
-            if item_data.get("plan", {}).get("usage_type") == "licensed":
-                product_id = item_data.get("price", {}).get("product")
-                break # Found the licensed item, no need to check further
+            logger.debug(f"get_user_plan {user.id} product_id: {product_id}")
 
-        logger.debug(f"get_user_plan {user.id} product_id: {product_id}")
+            if not product_id:
+                logger.warning(f"get_user_plan {user.id}: Subscription product is None")
+                plan = PLAN_CONFIG[PlanNames.FREE]
+            else:
+                plan = get_plan_by_product_id(product_id) or PLAN_CONFIG[PlanNames.FREE]
+        # Community Edition override: unlimited agents and tasks, regardless of plan
+        if (not settings.GOBII_PROPRIETARY_MODE) and getattr(settings, "GOBII_ENABLE_COMMUNITY_UNLIMITED", True):
+            from util.constants.task_constants import TASKS_UNLIMITED
+            from config.plans import AGENTS_UNLIMITED as AGENTS_UNL
+            copy = dict(plan)
+            copy["monthly_task_credits"] = TASKS_UNLIMITED
+            copy["agent_limit"] = AGENTS_UNL
+            # Generous API limit in community edition
+            copy["api_rate_limit"] = max(plan.get("api_rate_limit", 0), 10000)
+            return copy
 
-        if not product_id:
-            logger.warning(f"get_user_plan {user.id}: Subscription product is None")
-            return PLAN_CONFIG[PlanNames.FREE]
-
-        plan = get_plan_by_product_id(product_id)
-
-        return plan if plan else PLAN_CONFIG[PlanNames.FREE]
+        return plan
 
 def get_user_task_credit_limit(user) -> int:
     """

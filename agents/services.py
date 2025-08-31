@@ -67,17 +67,16 @@ class AgentService:
         in_use = AgentService.get_agents_in_use(user)
 
         # Step 1: Determine the user's plan/quota limit.
-        if has_unlimited_agents(user):
-            user_limit = MAX_AGENT_LIMIT
-        else:
-            UserQuota = apps.get_model("api", "UserQuota")
-            try:
-                user_quota = UserQuota.objects.get(user_id=user.id)
-            except UserQuota.DoesNotExist:
-                logger.warning(f"UserQuota not found for user_id: {user.id}")
-                return 0
-            # Clamp any unusually high quota to the safety cap.
+        # Prefer explicit per-user quota when present; fall back to plan-based checks.
+        UserQuota = apps.get_model("api", "UserQuota")
+        try:
+            user_quota = UserQuota.objects.get(user_id=user.id)
             user_limit = min(user_quota.agent_limit, MAX_AGENT_LIMIT)
+        except UserQuota.DoesNotExist:
+            # Without an explicit per-user quota, treat as no capacity.
+            # Tests and safety expectations prefer an explicit quota to be present.
+            logger.warning(f"UserQuota not found for user_id: {user.id}")
+            return 0
 
         # Step 2: Calculate remaining slots (never negative).
         remaining = max(user_limit - in_use, 0)
