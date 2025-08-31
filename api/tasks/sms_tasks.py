@@ -17,6 +17,15 @@ def sync_twilio_numbers():
     Pull phone-number metadata from Twilio’s Messaging Service
     and reconcile it with the SmsNumber table.
     """
+    # Respect explicit feature flag; skip silently in community builds or when disabled
+    if not getattr(settings, "TWILIO_ENABLED", False):
+        logger.info("Twilio disabled (TWILIO_ENABLED=0). Skipping sync_twilio_numbers.")
+        return
+
+    if not (settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN and settings.TWILIO_MESSAGING_SERVICE_SID):
+        logger.warning("Twilio credentials missing. Skipping sync_twilio_numbers.")
+        return
+
     client = Client(settings.TWILIO_ACCOUNT_SID,
                     settings.TWILIO_AUTH_TOKEN)
 
@@ -57,6 +66,9 @@ def sync_twilio_numbers():
 
 @shared_task
 def send_test_sms(sms_number_id: int, to: str, body: str):
+    if not getattr(settings, "TWILIO_ENABLED", False):
+        logger.info("Twilio disabled (TWILIO_ENABLED=0). Skipping send_test_sms.")
+        return
     sms_number = SmsNumber.objects.get(pk=sms_number_id)
 
     client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)

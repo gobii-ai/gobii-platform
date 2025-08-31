@@ -1,0 +1,42 @@
+<!-- Rich Examples Grid Section (Proprietary) -->
+<div class="max-w-7xl mx-auto mt-12 px-4">
+  <!-- Examples Grid -->
+  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+    {% for example in rich_examples %}
+    <div class="group relative bg-white border border-gray-200 rounded-2xl p-6 hover:shadow-xl hover:border-blue-200 transition-all duration-300 cursor-pointer" onclick="setPrompt('{{ example.prompt|escapejs }}')">
+      <div class="flex items-center mb-4">
+        <div class="p-3 bg-gradient-to-r {{ example.gradient }} rounded-xl shadow-lg">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ example.icon }}"></path>
+          </svg>
+        </div>
+        <div class="ml-4">
+          <h3 class="text-lg font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">{{ example.title }}</h3>
+          <p class="text-sm text-gray-500">{{ example.subtitle }}</p>
+        </div>
+      </div>
+      <p class="text-gray-600 text-sm leading-relaxed mb-4">
+        {{ example.description }}
+      </p>
+      <div class="flex items-center text-blue-600 text-sm font-medium">
+        <span>Try this agent</span>
+        <svg class="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Call to Action -->
+  <div class="text-center px-4">
+    <p class="text-gray-600 mb-6">Don't see what you're looking for?</p>
+    <button type="button" class="inline-flex items-center justify-center w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105" onclick="setPrompt('');">
+      <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+      </svg>
+      Create Custom Agent
+    </button>
+  </div>
+</div>
+

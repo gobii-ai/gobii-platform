@@ -9,8 +9,7 @@ from .views import (
     health_check,
     AboutView,
     CareersView,
-    PricingView,
-    StartupCheckoutView, StaticViewSitemap, SupportView, LandingRedirectView, ClearSignupTrackingView,
+    StartupCheckoutView, StaticViewSitemap, LandingRedirectView, ClearSignupTrackingView,
 )
 
 from djstripe import views as djstripe_views
@@ -26,7 +25,6 @@ sitemaps = {
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
     path("spawn-agent/", HomeAgentSpawnView.as_view(), name="home_agent_spawn"),
-    path("pricing/", PricingView.as_view(), name="pricing"),
     path("health/", health_check, name="health_check"),
     path("healthz/", health_check, name="health_check_k8s"),  # Kubernetes health check endpoint - matches /healthz/ in BackendConfig
     
@@ -39,7 +37,6 @@ urlpatterns = [
     path("careers/", CareersView.as_view(), name="careers"),
     path("subscribe/startup/", StartupCheckoutView.as_view(), name="startup_checkout"),
 
-    path("support/", SupportView.as_view(), name="support"),
 
     # Short landing page redirects
     path("g/<slug:code>/", LandingRedirectView.as_view(), name="landing_redirect"),

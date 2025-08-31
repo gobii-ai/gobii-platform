@@ -99,6 +99,11 @@ INSTALLED_APPS = [
     "config.apps.TracingInitialization"
 ]
 
+# Load proprietary overrides (templates, etc.) if enabled
+if GOBII_PROPRIETARY_MODE:
+    # Prepend so its templates override base/app templates cleanly
+    INSTALLED_APPS = ["proprietary", *INSTALLED_APPS]
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -375,10 +380,6 @@ CELERY_BEAT_SCHEDULE = {
         "task": "api.tasks.grant_monthly_free_credits",
         "schedule": crontab(minute=5, hour=0),
     },
-    "twilio-sync-numbers": {
-        "task": "api.tasks.sms_tasks.sync_twilio_numbers",
-        "schedule": crontab(minute="*/60"),   # every 30 min
-    },
     # Hourly garbage collection of timed-out tasks
     "garbage-collect-timed-out-tasks": {
         "task": "api.tasks.maintenance_tasks.garbage_collect_timed_out_tasks",
@@ -389,6 +390,14 @@ CELERY_BEAT_SCHEDULE = {
         },
     },
 }
+
+# Conditionally enable Twilio sync task only when explicitly enabled
+TWILIO_ENABLED = env.bool("TWILIO_ENABLED", default=False)
+if TWILIO_ENABLED and env("TWILIO_MESSAGING_SERVICE_SID", default=""):
+    CELERY_BEAT_SCHEDULE["twilio-sync-numbers"] = {
+        "task": "api.tasks.sms_tasks.sync_twilio_numbers",
+        "schedule": crontab(minute="*/60"),   # hourly
+    }
 
 # RedBeat scheduler configuration
 CELERY_BEAT_SCHEDULER = "redbeat.RedBeatScheduler"

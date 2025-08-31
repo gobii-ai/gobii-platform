@@ -1,0 +1,13 @@
+<div class="text-center mb-8">
+  <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 leading-tight max-w-3xl mx-auto">
+    {% if landing_hero_text %}
+      <span class="font-semibold">{{ landing_hero_text|safe }}</span>
+    {% else %}
+      <span class="font-semibold">Community Edition</span>
+    {% endif %}
+  </h1>
+  <p class="mt-4 text-lg text-gray-600 max-w-3xl mx-auto leading-relaxed">
+    Open-source build of Gobii for self-hosting. Some features are disabled in this edition.
+  </p>
+</div>
+

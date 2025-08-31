@@ -146,6 +146,11 @@ urlpatterns = [
     path("stripe/", include("djstripe.urls", namespace="djstripe")),
 ]
 
+# Proprietary-only routes
+if settings.GOBII_PROPRIETARY_MODE:
+    # Include proprietary URLs at root so names remain 'pages:*' as defined in proprietary/urls.py
+    urlpatterns.insert(1, path("", include("proprietary.urls")))
+
 # Serve static files in development
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
