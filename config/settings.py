@@ -37,6 +37,9 @@ os.environ.setdefault("GOBII_RELEASE_ENV", "local")
 # applicable license terms. By setting this flag you represent and warrant that
 # you are authorized to do so under a written license agreement with Gobii, Inc.
 GOBII_PROPRIETARY_MODE = env.bool("GOBII_PROPRIETARY_MODE", default=False)
+# In Community Edition, we optionally override limits to be effectively unlimited
+# for agents/tasks. Can be disabled (e.g., in tests) via env.
+GOBII_ENABLE_COMMUNITY_UNLIMITED = env.bool("GOBII_ENABLE_COMMUNITY_UNLIMITED", default=True)
 
 # ────────── Core ──────────
 DEBUG = env.bool("DEBUG", default=False)

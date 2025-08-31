@@ -149,7 +149,7 @@ def get_user_plan(user) -> dict[str, int | str]:
             else:
                 plan = get_plan_by_product_id(product_id) or PLAN_CONFIG[PlanNames.FREE]
         # Community Edition override: unlimited agents and tasks, regardless of plan
-        if not settings.GOBII_PROPRIETARY_MODE:
+        if (not settings.GOBII_PROPRIETARY_MODE) and getattr(settings, "GOBII_ENABLE_COMMUNITY_UNLIMITED", True):
             from util.constants.task_constants import TASKS_UNLIMITED
             from config.plans import AGENTS_UNLIMITED as AGENTS_UNL
             copy = dict(plan)
