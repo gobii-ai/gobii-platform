@@ -83,6 +83,8 @@ jobs:
             tag: batch_forward_detection
           - batch: agent_limits
             tag: batch_agent_limits
+          - batch: soft_expiration
+            tag: batch_soft_expiration
           - batch: api_agents
             tag: batch_api_agents
           - batch: api_serializer
