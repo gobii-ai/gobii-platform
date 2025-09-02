@@ -1176,7 +1176,7 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
         messages.success(self.request, "SMS has been enabled for this agent.")
         return redirect("agent_detail", pk=self.agent.pk)
 
-class AgentDetailView(LoginRequiredMixin, DetailView):
+class AgentDetailView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
     """Configuration page for a single agent."""
     model = PersistentAgent
     template_name = "console/agent_detail.html"
@@ -1563,11 +1563,26 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
                         agent.whitelist_policy = new_whitelist_policy
                         agent_fields_to_update.append('whitelist_policy')
 
+                # Mark interaction time and reactivate if previously expired
+                from django.utils import timezone
+                agent.last_interaction_at = timezone.now()
+                agent_fields_to_update.append('last_interaction_at')
+
                 # Persist changes if needed
                 if agent_fields_to_update:
                     agent.save(update_fields=agent_fields_to_update)
                 if browser_agent_fields_to_update:
                     agent.browser_use_agent.save(update_fields=browser_agent_fields_to_update)
+
+                # If agent was soft-expired, restore schedule (from snapshot if missing) and mark active
+                if agent.life_state == PersistentAgent.LifeState.EXPIRED and agent.is_active:
+                    fields = []
+                    if agent.schedule_snapshot:
+                        agent.schedule = agent.schedule_snapshot
+                        fields.append('schedule')
+                    agent.life_state = PersistentAgent.LifeState.ACTIVE
+                    fields.append('life_state')
+                    agent.save(update_fields=fields)
 
                 messages.success(request, "Agent updated successfully.")
 

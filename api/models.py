@@ -880,6 +880,11 @@ class UserBilling(models.Model):
             MaxValueValidator(31),
         ]
     )
+    downgraded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when user was downgraded to free (for soft-expiration grace)."
+    )
 
     def __str__(self):
         return f"Billing for {self.user.email}"
@@ -1064,7 +1069,31 @@ class PersistentAgent(models.Model):
         related_name="persistent_agent"
     )
     is_active = models.BooleanField(default=True, help_text="Whether this agent is currently active")
-    
+    # Soft-expiration state and interaction tracking
+    class LifeState(models.TextChoices):
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+
+    life_state = models.CharField(
+        max_length=16,
+        choices=LifeState.choices,
+        default=LifeState.ACTIVE,
+        help_text="Lifecycle state for soft-expiration. 'paused' is represented by is_active=False."
+    )
+    last_interaction_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the last user interaction (reply, edit, etc.)."
+    )
+    schedule_snapshot = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="Snapshot of cron schedule for restoration."
+    )
+    last_expired_at = models.DateTimeField(null=True, blank=True)
+    sleep_email_sent_at = models.DateTimeField(null=True, blank=True)
+
     class WhitelistPolicy(models.TextChoices):
         DEFAULT = "default", "Default (Owner or Org Members)"
         MANUAL = "manual", "Allowed Contacts List"
@@ -1111,6 +1140,8 @@ class PersistentAgent(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['schedule'], name='pa_schedule_idx'),
+            models.Index(fields=['life_state', 'is_active'], name='pa_life_active_idx'),
+            models.Index(fields=['last_interaction_at'], name='pa_last_interact_idx'),
         ]
         constraints = [
             # Unique per user when no organization is set

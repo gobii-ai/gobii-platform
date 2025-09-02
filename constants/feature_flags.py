@@ -3,6 +3,9 @@ PERSISTENT_AGENTS = "persistent_agents"
 ORGANIZATIONS = "organizations"
 MULTIPLAYER_AGENTS = "multiplayer_agents"
 
+# Soft-expiration for free-plan agents that go inactive
+AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
+
 
 
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
