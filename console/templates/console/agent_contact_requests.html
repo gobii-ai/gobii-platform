@@ -88,6 +88,7 @@
                       id="approve_{{ request.id }}"
                       class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
                       checked
+                      onchange="toggleDirectionCheckboxes('{{ request.id }}')"
                     >
                   </div>
                   <div class="flex-1">
@@ -117,6 +118,40 @@
                       <p class="text-xs text-gray-500">
                         Requested {{ request.requested_at|timesince }} ago
                       </p>
+                      
+                      <!-- Direction checkboxes -->
+                      <div class="mt-3 ml-7 space-y-2" id="direction_{{ request.id }}">
+                        <div class="flex items-center gap-x-2">
+                          <input 
+                            type="checkbox" 
+                            name="inbound_{{ request.id }}" 
+                            id="inbound_{{ request.id }}"
+                            class="w-4 h-4 text-green-600 bg-gray-100 border-gray-300 rounded focus:ring-green-500"
+                            {% if request.request_inbound %}checked{% endif %}
+                          >
+                          <label for="inbound_{{ request.id }}" class="text-sm text-gray-700 cursor-pointer flex items-center gap-1">
+                            <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                            </svg>
+                            Allow receiving messages from this contact
+                          </label>
+                        </div>
+                        <div class="flex items-center gap-x-2">
+                          <input 
+                            type="checkbox" 
+                            name="outbound_{{ request.id }}" 
+                            id="outbound_{{ request.id }}"
+                            class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                            {% if request.request_outbound %}checked{% endif %}
+                          >
+                          <label for="outbound_{{ request.id }}" class="text-sm text-gray-700 cursor-pointer flex items-center gap-1">
+                            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
+                            </svg>
+                            Allow sending messages to this contact
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -157,7 +192,38 @@ function toggleAll(checked) {
   const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="approve_"]');
   checkboxes.forEach(checkbox => {
     checkbox.checked = checked;
+    // Get the request ID from the checkbox name
+    const requestId = checkbox.name.replace('approve_', '');
+    toggleDirectionCheckboxes(requestId);
   });
 }
+
+function toggleDirectionCheckboxes(requestId) {
+  const approveCheckbox = document.getElementById('approve_' + requestId);
+  const directionDiv = document.getElementById('direction_' + requestId);
+  const inboundCheckbox = document.getElementById('inbound_' + requestId);
+  const outboundCheckbox = document.getElementById('outbound_' + requestId);
+  
+  if (approveCheckbox && directionDiv) {
+    if (approveCheckbox.checked) {
+      directionDiv.style.display = 'block';
+      if (inboundCheckbox) inboundCheckbox.disabled = false;
+      if (outboundCheckbox) outboundCheckbox.disabled = false;
+    } else {
+      directionDiv.style.display = 'none';
+      if (inboundCheckbox) inboundCheckbox.disabled = true;
+      if (outboundCheckbox) outboundCheckbox.disabled = true;
+    }
+  }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+  const approveCheckboxes = document.querySelectorAll('input[type="checkbox"][name^="approve_"]');
+  approveCheckboxes.forEach(checkbox => {
+    const requestId = checkbox.name.replace('approve_', '');
+    toggleDirectionCheckboxes(requestId);
+  });
+});
 </script>
 {% endblock %}

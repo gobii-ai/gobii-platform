@@ -183,27 +183,43 @@
               <!-- Add Entry Form -->
               <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg mb-3">
                 <h4 class="text-sm font-medium text-gray-700 mb-2">Add Allowed Contact</h4>
-                <div id="add-allowlist-form" class="flex gap-2">
+                <div id="add-allowlist-form" class="space-y-2">
                   {% csrf_token %}
-                  <select id="allowlist-channel" name="channel" class="py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
-                    <option value="email">Email</option>
-                    <!-- SMS option removed since multi-player agents only support email -->
-                  </select>
-                  <input type="email" 
-                         id="allowlist-address"
-                         name="address" 
-                         placeholder="email@example.com" 
-                         class="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
-                  <button type="button" 
-                          onclick="addAllowlistEntry()"
-                          class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                    Add
-                  </button>
-                  <button type="button" 
-                          onclick="cancelAllowlistEntry()"
-                          class="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400">
-                    Cancel
-                  </button>
+                  <div class="flex gap-2">
+                    <select id="allowlist-channel" name="channel" class="py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+                      <option value="email">Email</option>
+                      <!-- SMS option removed since multi-player agents only support email -->
+                    </select>
+                    <input type="email" 
+                           id="allowlist-address"
+                           name="address" 
+                           placeholder="email@example.com" 
+                           class="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+                  </div>
+                  <div class="flex gap-4 items-center">
+                    <label class="flex items-center gap-1 text-sm">
+                      <input type="checkbox" id="allow-inbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                      <span>Allow Inbound</span>
+                      <span class="text-xs text-gray-500">(can send to agent)</span>
+                    </label>
+                    <label class="flex items-center gap-1 text-sm">
+                      <input type="checkbox" id="allow-outbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                      <span>Allow Outbound</span>
+                      <span class="text-xs text-gray-500">(agent can send to)</span>
+                    </label>
+                  </div>
+                  <div class="flex gap-2">
+                    <button type="button" 
+                            onclick="addAllowlistEntry()"
+                            class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                      Add
+                    </button>
+                    <button type="button" 
+                            onclick="cancelAllowlistEntry()"
+                            class="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400">
+                      Cancel
+                    </button>
+                  </div>
                 </div>
                 <div id="allowlist-error" class="mt-2 text-xs text-red-600 hidden"></div>
               </div>
@@ -355,10 +371,16 @@ function addAllowlistEntry() {
         return;
     }
     
+    // Get inbound/outbound settings
+    const allowInbound = document.getElementById('allow-inbound').checked;
+    const allowOutbound = document.getElementById('allow-outbound').checked;
+    
     const formData = new FormData();
     formData.append('action', 'add_allowlist');
     formData.append('channel', channel);
     formData.append('address', address);
+    formData.append('allow_inbound', allowInbound);
+    formData.append('allow_outbound', allowOutbound);
     formData.append('csrfmiddlewaretoken', csrfToken);
     
     fetch('{% url "agent_detail" agent.id %}', {
@@ -402,6 +424,9 @@ function addAllowlistEntry() {
 function cancelAllowlistEntry() {
     // Clear the form
     document.getElementById('allowlist-address').value = '';
+    // Reset checkboxes to default (both checked)
+    document.getElementById('allow-inbound').checked = true;
+    document.getElementById('allow-outbound').checked = true;
     // Hide any error messages
     const errorDiv = document.getElementById('allowlist-error');
     if (errorDiv) {
