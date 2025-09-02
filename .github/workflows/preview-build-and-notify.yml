@@ -13,23 +13,14 @@ permissions:
   packages: write
 
 jobs:
-  debug-context:
-    if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Print PR context
-        run: |
-          echo "author_association=${{ github.event.pull_request.author_association }}"
-          echo "is_fork=${{ github.event.pull_request.head.repo.fork }}"
-          echo "head_repo=${{ github.event.pull_request.head.repo.full_name }}"
-          echo "base_repo=${{ github.event.pull_request.base.repo.full_name }}"
   build-and-dispatch:
     name: Build image and notify infra
     runs-on: ubuntu-latest
     # Only run for trusted authors (org OWNER or MEMBER)
     if: |
       github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'MEMBER'
+      github.event.pull_request.author_association == 'MEMBER' ||
+      github.event.pull_request.author_association == 'COLLABORATOR'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
