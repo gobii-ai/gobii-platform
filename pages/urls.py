@@ -32,8 +32,6 @@ urlpatterns = [
     path("docs/", DocsIndexRedirectView.as_view(), name="docs_index"),
     path("docs/<path:slug>/", MarkdownPageView.as_view(), name="markdown_page"),
 
-    path("subscribe/startup/", StartupCheckoutView.as_view(), name="startup_checkout"),
-
     # Short landing page redirects
     path("g/<slug:code>/", LandingRedirectView.as_view(), name="landing_redirect"),
 

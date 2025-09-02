@@ -73,7 +73,7 @@ class PricingView(TemplateView):
                     "Higher rate limits",
                 ],
                 "cta": startup_cta_text,
-                "cta_url": reverse("pages:startup_checkout"),
+                "cta_url": reverse("proprietary:startup_checkout"),
             },
             {
                 "name": "Enterprise",
