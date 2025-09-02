@@ -5,7 +5,7 @@
       <h3 class="font-semibold mb-4">Product</h3>
       <ul class="space-y-2">
         {% if settings.GOBII_PROPRIETARY_MODE %}
-          <li><a href="{% url 'pages:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a></li>
+          <li><a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a></li>
         {% endif %}
         <li><a href="/console/" class="text-slate-700 hover:text-blue-600">Console</a></li>
       </ul>
@@ -14,8 +14,8 @@
     <div>
       <h3 class="font-semibold mb-4">Company</h3>
       <ul class="space-y-2">
-        <li><a href="{% url 'pages:about' %}" class="text-slate-700 hover:text-blue-600">About</a></li>
-        <li><a href="{% url 'pages:careers' %}" class="text-slate-700 hover:text-blue-600">Careers</a></li>
+        <li><a href="{% url 'proprietary:about' %}" class="text-slate-700 hover:text-blue-600">About</a></li>
+        <li><a href="{% url 'proprietary:careers' %}" class="text-slate-700 hover:text-blue-600">Careers</a></li>
         <li><a href="mailto:hello@gobii.ai" class="text-slate-700 hover:text-blue-600">Contact</a></li>
       </ul>
     </div>
@@ -56,9 +56,11 @@
   
   <div class="py-6 text-center text-xs text-slate-500 space-x-2">
     <span>&copy; {% now "Y" %} Gobii. All rights reserved.</span>
+    {% if settings.GOBII_PROPRIETARY_MODE %}
     <span>&bull;</span>
-    <a href="{% url 'pages:tos' %}" class="hover:text-blue-600 underline">Terms&nbsp;of&nbsp;Service</a>
+    <a href="{% url 'proprietary:tos' %}" class="hover:text-blue-600 underline">Terms&nbsp;of&nbsp;Service</a>
     <span>&bull;</span>
-    <a href="{% url 'pages:privacy' %}" class="hover:text-blue-600 underline">Privacy&nbsp;Policy</a>
+    <a href="{% url 'proprietary:privacy' %}" class="hover:text-blue-600 underline">Privacy&nbsp;Policy</a>
+    {%  endif %}
   </div>
 </footer> 

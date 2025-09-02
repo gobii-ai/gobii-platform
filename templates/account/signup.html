@@ -68,12 +68,14 @@
                      hover:bg-blue-700">
         {% trans "Create account" %}
       </button>
+      {% if settings.GOBII_PROPRIETARY_MODE %}
       <p class="mt-4 text-xs text-gray-500 text-center">
         By creating an account, you agree to our
-        <a href="{% url 'pages:tos' %}" class="text-blue-600 hover:underline">Terms of Service</a>
+        <a href="{% url 'proprietary:tos' %}" class="text-blue-600 hover:underline">Terms of Service</a>
         and
-        <a href="{% url 'pages:privacy' %}" class="text-blue-600 hover:underline">Privacy Policy</a>.
+        <a href="{% url 'proprietary:privacy' %}" class="text-blue-600 hover:underline">Privacy Policy</a>.
       </p>
+      {% endif %}
     </form>
   </div>
 </div>

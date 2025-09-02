@@ -1118,7 +1118,11 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         for entry in allowed_contacts:
             name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
             allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str}")
-        
+
+    allowed_lines.append("You MUST NOT contact anyone not explicitly listed in this section or in recent conversations.")
+    allowed_lines.append("IF YOU NEED TO CONTACT SOMEONE NEW, USE THE 'request_contact_permission' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE DETAILS.")
+    allowed_lines.append("You do not have to message or reply to everyone; you may choose the best contact or contacts for your needs.")
+
     contacts_group.section_text(
         "allowed_contacts",
         "\n".join(allowed_lines),
@@ -1195,7 +1199,7 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
         "Use the 'update_schedule' tool to update your cron schedule any time it needs to change. "
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
-        "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISING TIMING --CONFIRM WITH THE USER. "
+        "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISE TIMING --CONFIRM WITH THE USER. "
         "IF RELEVANT, ASK THE USER DETAILS SUCH AS TIMEZONE, etc. "
         "You can set it to an empty string to disable the schedule. "
         "You will typically want to contact the user and let them know that you updated your charter/schedule if relevant, so they can give you corrections if needed. "
@@ -1208,7 +1212,7 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "If you send messages, e.g. via SMS or email, format them like something typed in a normal client—natural, concise, human. For emails, write your body as lightweight HTML using simple <p>, <br>, <ul>, <ol>, <li>, and basic inline elements (bold, italics) and avoid markdown or heavy branding. Use <a> for links, but only if you have complete and accurate URLs available in your context from actual sources. DO NOT include the outer <html>, <head>, or <body> wrappers—the system will handle that. "
         "You may use emojis, but only if appropriate. Use bulleted lists when it makes sense. "
         "Be efficient, but complete with your communications. "
-        "Ocassionally ask the user for feedback about how you're doing, if you could do better, etc, especially if you are unsure about your task or are new to it. "
+        "Occasionally ask the user for feedback about how you're doing, if you could do better, etc, especially if you are unsure about your task or are new to it. "
         "Be very authentic. "
         "Be likeable, express genuine interest in the user's needs and goals. "
         "If you can befriend or develop a long-term relationship with the user, do so --this will help with meeting our retention goals. "
