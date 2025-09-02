@@ -395,7 +395,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
         # Include pricing only when proprietary mode is enabled
         try:
             if settings.GOBII_PROPRIETARY_MODE:
-                items.insert(1, 'pages:pricing')
+                items.insert(1, 'proprietary:pricing')
         except Exception:
             pass
         return items
