@@ -12,10 +12,10 @@ permissions:
   contents: read
   packages: write
 
-  jobs:
-    build-and-dispatch:
-      name: Build image and notify infra
-      runs-on: ubuntu-latest
+jobs:
+  build-and-dispatch:
+    name: Build image and notify infra
+    runs-on: ubuntu-latest
     # Only run for trusted authors (org OWNER or MEMBER)
     if: |
       github.event.pull_request.author_association == 'OWNER' ||
