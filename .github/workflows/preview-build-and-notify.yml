@@ -51,12 +51,19 @@ jobs:
           cache-from: type=gha,scope=gobii-platform
           cache-to: type=gha,mode=max,scope=gobii-platform
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          installation_retrieval_mode: repository
+          installation_retrieval_payload: gobii-ai/gobii
+
       - name: Trigger infra preview deploy
-        # Requires a secret PAT with repo:write and workflow scope on gobii repo
-        # Create fine-grained token limited to gobii repo and store as GOBII_REPO_TOKEN
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.GOBII_REPO_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           repository: gobii-ai/gobii
           event-type: preview-deploy
           client-payload: |
@@ -68,4 +75,3 @@ jobs:
               "image_tag": "sha-${{ github.sha }}",
               "html_url": "${{ github.event.pull_request.html_url }}"
             }
-
