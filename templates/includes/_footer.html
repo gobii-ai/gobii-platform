@@ -5,7 +5,7 @@
       <h3 class="font-semibold mb-4">Product</h3>
       <ul class="space-y-2">
         {% if settings.GOBII_PROPRIETARY_MODE %}
-          <li><a href="{% url 'pages:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a></li>
+          <li><a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a></li>
         {% endif %}
         <li><a href="/console/" class="text-slate-700 hover:text-blue-600">Console</a></li>
       </ul>
