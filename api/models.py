@@ -1191,7 +1191,7 @@ class PersistentAgent(models.Model):
             return self._legacy_owner_only(channel_val, addr)
 
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
-            return self._is_in_manual_allowlist(channel_val, addr)
+            return self._is_in_manual_allowlist(channel_val, addr, direction="inbound")
 
         return self._is_allowed_default(channel_val, addr)
 
@@ -1216,7 +1216,7 @@ class PersistentAgent(models.Model):
             return self._legacy_owner_only(channel_val, addr)
 
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
-            return self._is_in_manual_allowlist(channel_val, addr)
+            return self._is_in_manual_allowlist(channel_val, addr, direction="outbound")
 
         return self._is_allowed_default(channel_val, addr)
 
@@ -1237,8 +1237,13 @@ class PersistentAgent(models.Model):
             ).exists()
         return False
 
-    def _is_in_manual_allowlist(self, channel_val: str, address: str) -> bool:
+    def _is_in_manual_allowlist(self, channel_val: str, address: str, direction: str = "both") -> bool:
         """Return True if address is present in the agent-level manual allowlist for the given channel.
+        
+        Args:
+            channel_val: The communication channel (email, sms, etc.)
+            address: The address to check
+            direction: "inbound" (can send to agent), "outbound" (agent can send to), or "both"
         
         Owner is always implicitly allowed even with manual allowlist policy.
         For org-owned agents, org members are also implicitly allowed.
@@ -1284,14 +1289,28 @@ class PersistentAgent(models.Model):
                 ).exists():
                     return True
         
-        # Check manual allowlist entries
+        # Check manual allowlist entries with direction
         try:
-            return CommsAllowlistEntry.objects.filter(
+            query = CommsAllowlistEntry.objects.filter(
                 agent=self,
                 channel=channel_val,
                 address__iexact=addr,
                 is_active=True,
-            ).exists()
+            )
+            
+            # Apply direction-specific filtering
+            if direction == "inbound":
+                query = query.filter(allow_inbound=True)
+            elif direction == "outbound":
+                query = query.filter(allow_outbound=True)
+            elif direction == "both":
+                # For "both", we check if either inbound or outbound is allowed
+                # This is mainly for backward compatibility
+                query = query.filter(
+                    models.Q(allow_inbound=True) | models.Q(allow_outbound=True)
+                )
+            
+            return query.exists()
         except Exception as e:
             logger.error(
                 "Error checking manual allowlist for agent %s: %s", self.id, e, exc_info=True
@@ -1636,6 +1655,14 @@ class CommsAllowlistEntry(models.Model):
         default=True,
         help_text="Reserved for future use. Manual verification flag; currently not enforced."
     )
+    allow_inbound = models.BooleanField(
+        default=True,
+        help_text="Whether this contact can send messages to the agent"
+    )
+    allow_outbound = models.BooleanField(
+        default=True,
+        help_text="Whether the agent can send messages to this contact"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1883,6 +1910,16 @@ class CommsAllowlistRequest(models.Model):
         help_text="Brief purpose of communication (e.g., 'Schedule meeting', 'Get approval')"
     )
     
+    # Direction settings for the request
+    request_inbound = models.BooleanField(
+        default=True,
+        help_text="Agent is requesting to receive messages from this contact"
+    )
+    request_outbound = models.BooleanField(
+        default=True,
+        help_text="Agent is requesting to send messages to this contact"
+    )
+    
     # Status tracking
     status = models.CharField(
         max_length=16, 
@@ -1977,12 +2014,14 @@ class CommsAllowlistRequest(models.Model):
         
         # If skip_invitation is True, directly create the allowlist entry
         if skip_invitation:
-            # Create the allowlist entry directly
+            # Create the allowlist entry directly with requested direction settings
             entry = CommsAllowlistEntry.objects.create(
                 agent=self.agent,
                 channel=self.channel,
                 address=self.address,
-                is_active=True
+                is_active=True,
+                allow_inbound=self.request_inbound,
+                allow_outbound=self.request_outbound
             )
             
             # Switch agent to manual allowlist mode if not already
