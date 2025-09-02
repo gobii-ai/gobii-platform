@@ -31,12 +31,8 @@ urlpatterns = [
     # Documentation URLs
     path("docs/", DocsIndexRedirectView.as_view(), name="docs_index"),
     path("docs/<path:slug>/", MarkdownPageView.as_view(), name="markdown_page"),
-    path("tos/", TermsOfServiceView.as_view(), name="tos"),
-    path("privacy/", PrivacyPolicyView.as_view(), name="privacy"),
-    path("about/", AboutView.as_view(), name="about"),
-    path("careers/", CareersView.as_view(), name="careers"),
-    path("subscribe/startup/", StartupCheckoutView.as_view(), name="startup_checkout"),
 
+    path("subscribe/startup/", StartupCheckoutView.as_view(), name="startup_checkout"),
 
     # Short landing page redirects
     path("g/<slug:code>/", LandingRedirectView.as_view(), name="landing_redirect"),

@@ -386,10 +386,10 @@ class StaticViewSitemap(sitemaps.Sitemap):
         items = [
             'pages:home',
             'pages:docs_index',
-            'pages:tos',
-            'pages:privacy',
+            'proprietary:tos',
+            'proprietary:privacy',
             'pages:about',
-            'pages:careers',
+            'proprietary:careers',
             'pages:startup_checkout',
         ]
         # Include pricing only when proprietary mode is enabled
