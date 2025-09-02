@@ -174,6 +174,34 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
 
         owner_id = message.owner_agent_id
         if owner_id:
+            # Update last interaction timestamp and reactivate if needed
+            from django.utils import timezone
+            from api.models import PersistentAgent
+            try:
+                with transaction.atomic():
+                    agent_locked: PersistentAgent = (
+                        PersistentAgent.objects.select_for_update().get(id=owner_id)
+                    )
+                    # Update last interaction
+                    agent_locked.last_interaction_at = timezone.now()
+                    updates = ["last_interaction_at"]
+                    # Reactivate if expired: restore schedule from snapshot if needed
+                    if (
+                        agent_locked.life_state == PersistentAgent.LifeState.EXPIRED
+                        and agent_locked.is_active
+                    ):
+                        if agent_locked.schedule_snapshot:
+                            agent_locked.schedule = agent_locked.schedule_snapshot
+                            updates.append("schedule")
+                        agent_locked.life_state = PersistentAgent.LifeState.ACTIVE
+                        updates.append("life_state")
+                        # Save; model will sync beat on commit due to schedule change
+                        agent_locked.save(update_fields=updates)
+                    else:
+                        agent_locked.save(update_fields=updates)
+            except PersistentAgent.DoesNotExist:
+                pass
+
             from api.agent.tasks import process_agent_events_task
             # Top-level trigger: no budget context provided
             process_agent_events_task.delay(str(owner_id))

@@ -130,36 +130,26 @@ def get_user_plan(user) -> dict[str, int | str]:
 
         if not subscription:
             logger.debug(f"get_user_plan {user.id}: No active subscription found")
-            plan = PLAN_CONFIG[PlanNames.FREE]
-        else:
-            # Absolutely ridiculous but this is how dj-stripe works
-            stripe_sub = subscription.stripe_data
+            return PLAN_CONFIG[PlanNames.FREE]
 
-            product_id = None
-            for item_data in stripe_sub.get("items", {}).get("data", []):
-                if item_data.get("plan", {}).get("usage_type") == "licensed":
-                    product_id = item_data.get("price", {}).get("product")
-                    break # Found the licensed item, no need to check further
+        # Absolutely ridiculous but this is how dj-stripe works
+        stripe_sub = subscription.stripe_data
 
-            logger.debug(f"get_user_plan {user.id} product_id: {product_id}")
+        product_id = None
+        for item_data in stripe_sub.get("items", {}).get("data", []):
+            if item_data.get("plan", {}).get("usage_type") == "licensed":
+                product_id = item_data.get("price", {}).get("product")
+                break # Found the licensed item, no need to check further
 
-            if not product_id:
-                logger.warning(f"get_user_plan {user.id}: Subscription product is None")
-                plan = PLAN_CONFIG[PlanNames.FREE]
-            else:
-                plan = get_plan_by_product_id(product_id) or PLAN_CONFIG[PlanNames.FREE]
-        # Community Edition override: unlimited agents and tasks, regardless of plan
-        if (not settings.GOBII_PROPRIETARY_MODE) and getattr(settings, "GOBII_ENABLE_COMMUNITY_UNLIMITED", True):
-            from util.constants.task_constants import TASKS_UNLIMITED
-            from config.plans import AGENTS_UNLIMITED as AGENTS_UNL
-            copy = dict(plan)
-            copy["monthly_task_credits"] = TASKS_UNLIMITED
-            copy["agent_limit"] = AGENTS_UNL
-            # Generous API limit in community edition
-            copy["api_rate_limit"] = max(plan.get("api_rate_limit", 0), 10000)
-            return copy
+        logger.debug(f"get_user_plan {user.id} product_id: {product_id}")
 
-        return plan
+        if not product_id:
+            logger.warning(f"get_user_plan {user.id}: Subscription product is None")
+            return PLAN_CONFIG[PlanNames.FREE]
+
+        plan = get_plan_by_product_id(product_id)
+
+        return plan if plan else PLAN_CONFIG[PlanNames.FREE]
 
 def get_user_task_credit_limit(user) -> int:
     """
@@ -485,16 +475,50 @@ def mark_user_billing_with_plan(user, plan_name: str, update_anchor: bool = True
             user=user,
             defaults=defaults
         )
+        prev_plan = billing_record.subscription if not created else None
         if not created:
             # If the record already existed, update it with the new values from defaults.
             for key, value in defaults.items():
                 setattr(billing_record, key, value)
-            billing_record.save(update_fields=list(defaults.keys()))
+            # Set downgrade timestamp if moving to free; clear otherwise
+            from constants.plans import PlanNames
+            if prev_plan and prev_plan != PlanNames.FREE and plan_name == PlanNames.FREE:
+                billing_record.downgraded_at = timezone.now()
+            elif plan_name != PlanNames.FREE:
+                billing_record.downgraded_at = None
+            update_fields = list(defaults.keys()) + ["downgraded_at"]
+            billing_record.save(update_fields=update_fields)
+        else:
+            # New record; initialize downgrade timestamp if free
+            from constants.plans import PlanNames
+            if plan_name == PlanNames.FREE:
+                billing_record.downgraded_at = timezone.now()
+                billing_record.save(update_fields=["downgraded_at"])
 
         span.add_event('Subscription - Updated', {
             'user.id': user.id,
             'plan.name': plan_name
         })
+
+        # If upgrading to a paid plan, restore any soft-expired agent schedules
+        try:
+            from constants.plans import PlanNames
+            if plan_name != PlanNames.FREE:
+                from api.models import PersistentAgent
+                agents = (
+                    PersistentAgent.objects
+                    .filter(user=user, life_state=PersistentAgent.LifeState.EXPIRED)
+                    .exclude(schedule__isnull=True)
+                    .exclude(schedule="")
+                )
+                for agent in agents:
+                    # Mark active and recreate beat entry
+                    agent.life_state = PersistentAgent.LifeState.ACTIVE
+                    agent.save(update_fields=["life_state"])
+                    from django.db import transaction
+                    transaction.on_commit(agent._sync_celery_beat_task)
+        except Exception as e:
+            logger.error("Failed restoring agent schedules on upgrade for user %s: %s", user.id, e)
 
 def get_user_extra_task_limit(user) -> int:
     """

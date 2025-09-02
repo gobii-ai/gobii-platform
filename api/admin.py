@@ -57,6 +57,25 @@ class OwnershipTypeFilter(SimpleListFilter):
         return queryset
 
 
+class SoftExpirationFilter(SimpleListFilter):
+    title = 'Soft-expiration'
+    parameter_name = 'soft_expired'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('yes', 'Expired'),
+            ('no', 'Not expired'),
+        )
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val == 'yes':
+            return queryset.filter(life_state='expired')
+        if val == 'no':
+            return queryset.exclude(life_state='expired')
+        return queryset
+
+
 # --- TASK CREDIT ADMIN (Optimized) ---
 @admin.register(TaskCredit)
 class TaskCreditAdmin(admin.ModelAdmin):
@@ -1024,11 +1043,19 @@ class AgentMessageInline(admin.TabularInline):
 
 @admin.register(PersistentAgent)
 class PersistentAgentAdmin(admin.ModelAdmin):
-    list_display = ('name', 'user_email', 'ownership_scope', 'organization', 'browser_use_agent_link', 'is_active', 'execution_environment', 'schedule', 'message_count', 'created_at')
-    list_filter = (OwnershipTypeFilter, 'organization', 'is_active', 'execution_environment', 'schedule', 'created_at')
+    list_display = (
+        'name', 'user_email', 'ownership_scope', 'organization', 'browser_use_agent_link',
+        'is_active', 'execution_environment', 'schedule', 'life_state', 'last_interaction_at',
+        'message_count', 'created_at'
+    )
+    list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'execution_environment', 'schedule', 'created_at')
     search_fields = ('name', 'user__email', 'organization__name', 'charter')
     raw_id_fields = ('user', 'browser_use_agent')
-    readonly_fields = ('id', 'ownership_scope', 'created_at', 'updated_at', 'browser_use_agent_link', 'agent_actions', 'messages_summary_link')
+    readonly_fields = (
+        'id', 'ownership_scope', 'created_at', 'updated_at',
+        'browser_use_agent_link', 'agent_actions', 'messages_summary_link',
+        'last_expired_at', 'sleep_email_sent_at',
+    )
     inlines = [PersistentAgentCommsEndpointInline, CommsAllowlistEntryInline, AgentMessageInline]
 
     # ------------------------------------------------------------------
@@ -1044,6 +1071,10 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         }),
         ('Configuration', {
             'fields': ('browser_use_agent', 'browser_use_agent_link', 'schedule', 'is_active', 'execution_environment')
+        }),
+        ('Soft Expiration (Testing)', {
+            'description': 'Override last_interaction_at to simulate inactivity windows. last_expired_at and notices are read-only for audit.',
+            'fields': ('life_state', 'last_interaction_at', 'last_expired_at', 'sleep_email_sent_at')
         }),
         ('Actions', {
             'fields': ('agent_actions',)
@@ -1066,11 +1097,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 '<path:object_id>/simulate-sms/',
                 self.admin_site.admin_view(self.simulate_sms_view),
                 name='api_persistentagent_simulate_sms',
-            ),
-            path(
-                '<path:object_id>/process-events/',
-                self.admin_site.admin_view(self.process_events_view),
-                name='api_persistentagent_process_events',
             ),
         ]
         return custom_urls + urls
@@ -1150,10 +1176,8 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         if obj and obj.pk:
             simulate_email_url = reverse("admin:api_persistentagent_simulate_email", args=[obj.pk])
             simulate_sms_url = reverse("admin:api_persistentagent_simulate_sms", args=[obj.pk])
-            process_url = reverse("admin:api_persistentagent_process_events", args=[obj.pk])
             buttons = f'<a class="button" href="{simulate_email_url}">Simulate Email</a>'
             buttons += f'&nbsp;<a class="button" href="{simulate_sms_url}">Simulate SMS</a>'
-            buttons += f'&nbsp;<a class="button" href="{process_url}">Process Events</a>'
             return format_html(buttons)
         return "Save agent to see actions"
 
@@ -1200,84 +1224,27 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                         )
                         return HttpResponseRedirect(reverse('admin:api_persistentagent_change', args=[object_id]))
                     
-                    # Get or create sender endpoint (external user)
-                    from_ep, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                        channel=CommsChannel.EMAIL,
-                        address=from_address,
-                        defaults={'owner_agent': None}
-                    )
-                    
-                    # Create or get conversation
-                    from .models import PersistentAgentConversation, PersistentAgentConversationParticipant
-                    conv, _ = PersistentAgentConversation.objects.get_or_create(
-                        channel=CommsChannel.EMAIL,
-                        address=from_address,
-                        defaults={'owner_agent': agent}
-                    )
-                    
-                    # Ensure participants
-                    PersistentAgentConversationParticipant.objects.get_or_create(
-                        conversation=conv, 
-                        endpoint=from_ep,
-                        defaults={'role': PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL}
-                    )
-                    PersistentAgentConversationParticipant.objects.get_or_create(
-                        conversation=conv, 
-                        endpoint=to_endpoint,
-                        defaults={'role': PersistentAgentConversationParticipant.ParticipantRole.AGENT}
-                    )
-                    
-                    # Create the message
-                    message = PersistentAgentMessage.objects.create(
-                        owner_agent=agent,
-                        from_endpoint=from_ep,
-                        conversation=conv,
-                        is_outbound=False,
+                    # Normalize through the same ingestion pipeline as webhooks
+                    from api.agent.comms.adapters import ParsedMessage
+                    from api.agent.comms.message_service import ingest_inbound_message
+
+                    parsed = ParsedMessage(
+                        sender=from_address,
+                        recipient=to_endpoint.address,
+                        subject=subject or "",
                         body=body,
-                        raw_payload={'subject': subject} if subject else {}
+                        attachments=list(attachments or []),  # file-like objects supported by ingest
+                        raw_payload={"_source": "admin_simulation"},
+                        msg_channel=CommsChannel.EMAIL,
                     )
 
-                    # Save any uploaded attachments (enforcing MAX_FILE_SIZE)
-                    try:
-                        max_size = int(settings.MAX_FILE_SIZE)
-                        dropped = 0
-                        for file in attachments or []:
-                            try:
-                                size = int(getattr(file, 'size', 0) or 0)
-                            except Exception:
-                                size = 0
-                            if size and size > max_size:
-                                dropped += 1
-                                continue
-                            PersistentAgentMessageAttachment.objects.create(
-                                message=message,
-                                file=file,
-                                content_type=getattr(file, 'content_type', '') or '',
-                                file_size=size,
-                                filename=getattr(file, 'name', 'attachment') or 'attachment',
-                            )
-                        if dropped:
-                            self.message_user(
-                                request,
-                                f"Dropped {dropped} attachment(s) exceeding the max size of {max_size} bytes.",
-                                messages.WARNING,
-                            )
-                    except Exception as att_err:
-                        # Non-fatal: attachment persistence failed
-                        self.message_user(
-                            request,
-                            f"Email saved but failed to save one or more attachments: {att_err}",
-                            messages.WARNING,
-                        )
-
-                    # After commit, enqueue filespace import only if any attachments were actually saved
-                    if message.attachments.exists():
-                        enqueue_import_after_commit(str(message.id))
+                    msg_info = ingest_inbound_message(CommsChannel.EMAIL, parsed)
+                    message = msg_info.message
                     
                     self.message_user(
                         request, 
                         f"Incoming email simulated successfully from {from_address}. "
-                        f"Message ID: {message.id}. Now trigger processing to see the agent's response.", 
+                        f"Message ID: {message.id}. The agent will react as in production (including wake-up).",
                         messages.SUCCESS
                     )
                     
@@ -1301,7 +1268,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             return TemplateResponse(request, "admin/api/persistentagent/simulate_email.html", context)
 
     def simulate_sms_view(self, request, object_id):
-        """Handle email simulation for an agent."""
+        """Handle SMS simulation for an agent using the same ingestion pipeline as webhooks."""
         try:
             agent = PersistentAgent.objects.get(pk=object_id)
         except PersistentAgent.DoesNotExist:
@@ -1341,54 +1308,33 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                         )
                         return HttpResponseRedirect(reverse('admin:api_persistentagent_change', args=[object_id]))
 
-                    # Get or create sender endpoint (external user)
-                    from_ep, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                        channel=CommsChannel.SMS,
-                        address=from_address,
-                        defaults={'owner_agent': None}
-                    )
+                    # Normalize through the same ingestion pipeline as webhooks
+                    from api.agent.comms.adapters import ParsedMessage
+                    from api.agent.comms.message_service import ingest_inbound_message
 
-                    # Create or get conversation
-                    from .models import PersistentAgentConversation, PersistentAgentConversationParticipant
-                    conv, _ = PersistentAgentConversation.objects.get_or_create(
-                        channel=CommsChannel.SMS,
-                        address=from_address,
-                        defaults={'owner_agent': agent}
-                    )
-
-                    # Ensure participants
-                    PersistentAgentConversationParticipant.objects.get_or_create(
-                        conversation=conv,
-                        endpoint=from_ep,
-                        defaults={'role': PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL}
-                    )
-                    PersistentAgentConversationParticipant.objects.get_or_create(
-                        conversation=conv,
-                        endpoint=to_endpoint,
-                        defaults={'role': PersistentAgentConversationParticipant.ParticipantRole.AGENT}
-                    )
-
-                    # Create the message
-                    message = PersistentAgentMessage.objects.create(
-                        owner_agent=agent,
-                        from_endpoint=from_ep,
-                        conversation=conv,
-                        is_outbound=False,
+                    parsed = ParsedMessage(
+                        sender=from_address,
+                        recipient=to_endpoint.address,
+                        subject=None,
                         body=body,
-                        raw_payload={}
+                        attachments=[],
+                        raw_payload={"_source": "admin_simulation"},
+                        msg_channel=CommsChannel.SMS,
                     )
+                    msg_info = ingest_inbound_message(CommsChannel.SMS, parsed)
+                    message = msg_info.message
 
                     self.message_user(
                         request,
                         f"Incoming SMS simulated successfully from {from_address}. "
-                        f"Message ID: {message.id}. Now trigger processing to see the agent's response.",
+                        f"Message ID: {message.id}. The agent will react as in production (including wake-up).",
                         messages.SUCCESS
                     )
 
                 except Exception as e:
                     self.message_user(
                         request,
-                        f"Error creating simulated email: {str(e)}",
+                        f"Error creating simulated SMS: {str(e)}",
                         messages.ERROR
                     )
 
@@ -1403,34 +1349,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 'opts': self.model._meta,
             }
             return TemplateResponse(request, "admin/api/persistentagent/simulate_sms.html", context)
-
-    def process_events_view(self, request, object_id):
-        """Handle manual event processing trigger for an agent."""
-        try:
-            agent = PersistentAgent.objects.get(pk=object_id)
-        except PersistentAgent.DoesNotExist:
-            self.message_user(request, "Agent not found", messages.ERROR)
-            return HttpResponseRedirect(reverse("admin:api_persistentagent_changelist"))
-
-        try:
-            # Import and trigger the processing task
-            from api.agent.tasks.process_events import process_agent_events_task
-            process_agent_events_task.delay(str(agent.id))
-            
-            self.message_user(
-                request,
-                f"Event processing triggered for agent '{agent.name}'. Check logs for output.",
-                messages.SUCCESS
-            )
-        except Exception as e:
-            self.message_user(
-                request,
-                f"Error triggering event processing: {str(e)}",
-                messages.ERROR
-            )
-
-        return HttpResponseRedirect(reverse('admin:api_persistentagent_change', args=[object_id]))
-
 
 @admin.register(PersistentAgentCommsEndpoint)
 class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):

@@ -1,5 +1,6 @@
 import logging
 
+from django.db import transaction
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -8,6 +9,7 @@ from django.utils import timezone
 from api.agent.comms import ingest_inbound_message, TwilioSmsAdapter, PostmarkEmailAdapter
 from api.models import (
     CommsChannel,
+    PersistentAgent,
     PersistentAgentCommsEndpoint,
     OutboundMessageAttempt,
     DeliveryStatus,
@@ -402,6 +404,31 @@ def open_and_link_webhook(request):
             Analytics.track_agent_email_link_clicked(data)
         else:
             logger.warning(f"Received email event webhook '{record_type}' which is not handled; disregarding it.")
+
+        # Try to attribute the event back to an agent and update last_interaction_at
+        try:
+
+            provider_msg_id = data.get('MessageID') or data.get('MessageId')
+            agent: PersistentAgent | None = None
+
+            if provider_msg_id:
+                attempt = (
+                    OutboundMessageAttempt.objects
+                    .select_related('message__owner_agent')
+                    .filter(provider_message_id=provider_msg_id)
+                    .order_by('-queued_at')
+                    .first()
+                )
+                if attempt and attempt.message and attempt.message.owner_agent_id:
+                    agent = attempt.message.owner_agent
+
+            if agent is not None:
+                with transaction.atomic():
+                    locked_agent = PersistentAgent.objects.select_for_update().get(pk=agent.pk)
+                    locked_agent.last_interaction_at = timezone.now()
+                    locked_agent.save(update_fields=['last_interaction_at'])
+        except Exception as attr_err:
+            logger.warning("Email %s event attribution failed: %s", record_type, attr_err)
 
         return HttpResponse(status=200)
     except Exception as e:
