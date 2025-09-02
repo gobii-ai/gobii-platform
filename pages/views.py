@@ -388,7 +388,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
             'pages:docs_index',
             'proprietary:tos',
             'proprietary:privacy',
-            'pages:about',
+            'proprietary:about',
             'proprietary:careers',
             'pages:startup_checkout',
         ]
