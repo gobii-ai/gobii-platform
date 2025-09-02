@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.conf import settings
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from unittest.mock import patch, MagicMock
@@ -15,7 +15,7 @@ def _create_browser_agent_without_proxy(user, name: str):
     with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
         return BrowserUseAgent.objects.create(user=user, name=name)
 
-
+@tag("batch_soft_expiration")
 class SoftExpirationTaskTests(TestCase):
     def setUp(self):
         User = get_user_model()
