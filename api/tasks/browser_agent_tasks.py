@@ -12,7 +12,7 @@ import time
 from typing import Any, Awaitable, Callable, List, Dict, Tuple, Optional
 import tarfile
 import zstandard as zstd
-from browser_use.browser import ProxySettings
+from browser_use.browser.profile import ProxySettings
 from django.core.files.storage import default_storage
 from django.core.files import File
 
