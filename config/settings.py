@@ -413,6 +413,12 @@ TIME_ZONE = "UTC"
 USE_I18N = USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# ────────── Soft Expiration Settings ──────────
+# Number of days of inactivity before a free-plan agent is soft-expired
+AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS = env.int("AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS", default=7)
+# Hours of grace after a user downgrades to Free before expiration checks apply
+AGENT_SOFT_EXPIRATION_DOWNGRADE_GRACE_HOURS = env.int("AGENT_SOFT_EXPIRATION_DOWNGRADE_GRACE_HOURS", default=48)
+
 # Feature flags (django-waffle)
 # Default to explicit management in admin; core features are not gated anymore.
 # You can still override with WAFFLE_FLAG_DEFAULT=1 in environments where you want missing flags active.

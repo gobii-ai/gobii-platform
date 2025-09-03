@@ -56,6 +56,7 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENT_UPDATED = 'Persistent Agent Updated'
     PERSISTENT_AGENT_DELETED = 'Persistent Agent Deleted'
     PERSISTENT_AGENT_VIEWED = 'Persistent Agent Viewed'
+    PERSISTENT_AGENT_SOFT_EXPIRED = 'Persistent Agent Soft Expired'
     PERSISTENT_AGENT_CHARTER_SUBMIT = 'Persistent Agent Charter Submitted'
     PERSISTENT_AGENTS_LISTED = 'Persistent Agents Listed'
     PERSISTENT_AGENT_EMAIL_SENT = 'Persistent Agent Message Sent'

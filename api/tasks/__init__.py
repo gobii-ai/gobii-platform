@@ -35,3 +35,6 @@ from .maintenance_tasks import (
     cleanup_temp_files,
     garbage_collect_timed_out_tasks,
 )
+
+# Soft-expiration task (global sweeper)
+from .soft_expiration_task import soft_expire_inactive_agents_task

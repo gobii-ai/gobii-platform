@@ -40,6 +40,13 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    # Hourly soft-expiration sweep for inactive free-plan agents
+    beat_schedule["agent-soft-expire-hourly"] = {
+        "task": "gobii_platform.api.tasks.soft_expire_inactive_agents_task",
+        "schedule": crontab(minute=0),  # Top of every hour UTC
+        "args": [],
+    }
+
 def clean_up_old_decodo_schedules():
     """Clean up old per-block schedule entries from Redis Beat."""
     logger.info("Starting cleanup of old Decodo IP block sync schedules")
