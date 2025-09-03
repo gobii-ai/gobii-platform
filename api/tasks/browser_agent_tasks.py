@@ -12,6 +12,7 @@ import time
 from typing import Any, Awaitable, Callable, List, Dict, Tuple, Optional
 import tarfile
 import zstandard as zstd
+from browser_use.browser import ProxySettings
 from django.core.files.storage import default_storage
 from django.core.files import File
 
@@ -38,7 +39,6 @@ os.environ["ANONYMIZED_TELEMETRY"] = "false"
 
 try:
     from browser_use import BrowserSession, BrowserProfile, Agent as BUAgent, Controller  # safe: telemetry is already off
-    from patchright import async_api as patchright
     from browser_use.llm import ChatGoogle, ChatOpenAI, ChatAnthropic  # safe: telemetry is already off
     from json_schema_to_pydantic import create_model
     from opentelemetry import baggage
@@ -46,7 +46,7 @@ try:
     LIBS_AVAILABLE = True
     IMPORT_ERROR = None
 except ImportError as e:  # e.g. when running manage.py commands
-    BrowserSession = BrowserProfile = BUAgent = ChatGoogle = ChatOpenAI = ChatAnthropic = Controller = create_model = patchright = baggage = None  # type: ignore
+    BrowserSession = BrowserProfile = BUAgent = ChatGoogle = ChatOpenAI = ChatAnthropic = Controller = create_model = baggage = None  # type: ignore
     LIBS_AVAILABLE = False
     IMPORT_ERROR = str(e)
 
@@ -170,7 +170,7 @@ def _prune_chrome_profile(profile_dir: str) -> None:
         logger.info(
             "Chrome profile size after pruning within limit: %.1f MB",
             post_prune_size_bytes / (1024 * 1024),
-        )
+            )
 
 # --------------------------------------------------------------------------- #
 #  Provider config / tiers / defaults
@@ -475,18 +475,15 @@ async def _run_agent(
                 xvfb_manager = EphemeralXvfb()
                 xvfb_manager.start()
 
-            playwright = await patchright.async_playwright().start()
-            kwargs = {"headless": settings.BROWSER_HEADLESS, "timeout": 30_000}
-
-            proxy_kwargs = None
+            proxy_settings = None
             if proxy_server:
-                proxy_kwargs = {
-                    "server": f"{proxy_server.proxy_type.lower()}://{proxy_server.host}:{proxy_server.port}"
-                }
+                proxy_settings = ProxySettings(
+                    server=f"{proxy_server.proxy_type.lower()}://{proxy_server.host}:{proxy_server.port}"
+                )
                 if proxy_server.username:
-                    proxy_kwargs["username"] = proxy_server.username
+                    proxy_settings.username = proxy_server.username
                 if proxy_server.password:
-                    proxy_kwargs["password"] = proxy_server.password
+                    proxy_settings.password = proxy_server.password
                 logger.info(
                     "Starting stealth browser with proxy: %s:%s",
                     proxy_server.host,
@@ -496,23 +493,18 @@ async def _run_agent(
                 logger.info("Starting stealth browser without proxy")
 
             profile = BrowserProfile(
-                stealth=True,           # Since you're using patchright
-                channel="chrome",
+                stealth=True,
                 headless=settings.BROWSER_HEADLESS,
                 user_data_dir=temp_profile_dir,
                 timeout=30_000,
                 no_viewport=True,
-                proxy=proxy_kwargs,
-                accept_downloads=False
+                accept_downloads=False,
+                auto_download_pdfs=False,
+                proxy=proxy_settings
             )
 
-            launch_kwargs = profile.kwargs_for_launch_persistent_context().model_dump(mode='json')
-
-            browser_ctx = await playwright.chromium.launch_persistent_context(**launch_kwargs)
-
             browser_session = BrowserSession(
-                browser_context=browser_ctx,
-                **kwargs,
+                browser_profile=profile,
             )
             await browser_session.start()
 
