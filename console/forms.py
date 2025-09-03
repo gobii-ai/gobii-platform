@@ -11,6 +11,7 @@ from django.core.exceptions import ValidationError
 
 from constants.regex import E164_PHONE_REGEX
 from constants.phone_countries import SUPPORTED_REGION_CODES
+from util.phone import validate_and_format_e164
 from api.models import CommsChannel
 from util import sms
 import logging
@@ -94,24 +95,12 @@ class UserPhoneNumberForm(forms.Form):
         if not phone_number:
             return phone_number
 
-        # Validate region support using libphonenumber
-        try:
-            from phonenumbers import parse, is_valid_number, region_code_for_number
-            parsed = parse(phone_number, None)
-            if not is_valid_number(parsed):
-                raise forms.ValidationError("Enter a valid E.164 phone number")
-            region = region_code_for_number(parsed)
-            if not region or region not in SUPPORTED_REGION_CODES:
-                raise forms.ValidationError("Phone numbers from this country are not yet supported.")
-        except forms.ValidationError:
-            raise
-        except Exception:
-            # Fallback generic error to avoid leaking details
-            raise forms.ValidationError("Enter a valid E.164 phone number")
+        # Use shared validator to ensure consistent behavior and codes
+        e164 = validate_and_format_e164(phone_number)
 
-        if self.user and UserPhoneNumber.objects.filter(phone_number=phone_number).exclude(user=self.user).exists():
+        if self.user and UserPhoneNumber.objects.filter(phone_number=e164).exclude(user=self.user).exists():
             raise forms.ValidationError("This phone number is already in use by another account.")
-        return phone_number
+        return e164
 
 class StyledRadioSelect(forms.RadioSelect):
     """Custom RadioSelect widget with Preline styling."""
@@ -300,22 +289,14 @@ class AllowlistEntryForm(forms.Form):
                 self.add_error('address', 'Enter a valid email address.')
             cleaned['address'] = address.lower()
         elif channel == CommsChannel.SMS:
-            import re
-            if not re.fullmatch(E164_PHONE_REGEX, address):
-                self.add_error('address', 'Enter a valid E.164 phone number (e.g., +15551234567).')
-            else:
-                try:
-                    from phonenumbers import parse, is_valid_number, region_code_for_number
-                    parsed = parse(address, None)
-                    if not is_valid_number(parsed):
-                        self.add_error('address', 'Enter a valid E.164 phone number (e.g., +15551234567).')
-                    else:
-                        region = region_code_for_number(parsed)
-                        if not region or region not in SUPPORTED_REGION_CODES:
-                            self.add_error('address', 'Phone numbers from this country are not yet supported.')
-                except Exception:
+            from util.phone import validate_and_format_e164
+            try:
+                cleaned['address'] = validate_and_format_e164(address)
+            except ValidationError as e:
+                if getattr(e, 'code', None) == 'unsupported_region':
+                    self.add_error('address', 'Phone numbers from this country are not yet supported.')
+                else:
                     self.add_error('address', 'Enter a valid E.164 phone number (e.g., +15551234567).')
-            cleaned['address'] = address
         else:
             self.add_error('channel', 'Unsupported channel.')
 
@@ -657,20 +638,9 @@ class PhoneAddForm(forms.Form):
         if not phone_raw:
             return cleaned
 
-        # Validate format and supported country
-        try:
-            from phonenumbers import parse, is_valid_number, region_code_for_number
-            parsed = parse(phone_raw, None)
-            if not is_valid_number(parsed):
-                raise ValidationError("Enter a valid phone number.")
-            region = region_code_for_number(parsed)
-            if not region or region not in SUPPORTED_REGION_CODES:
-                raise ValidationError("Phone numbers from this country are not yet supported.")
-        except ValidationError:
-            raise
-        except Exception:
-            # Generic minimal message
-            raise ValidationError("Enter a valid phone number.")
+        # Validate format and supported country (shared util)
+        from util.phone import validate_and_format_e164
+        validate_and_format_e164(phone_raw)
 
         return cleaned
 
@@ -678,17 +648,14 @@ class PhoneAddForm(forms.Form):
         phone_raw = self.cleaned_data["phone_number_hidden"]
         # Todo: error handling
 
-        # convert to E.164 format using the google libphonenumber library
-        from phonenumbers import parse, format_number, PhoneNumberFormat, is_valid_number
+        # Convert to E.164 using shared util
         from django.utils import timezone
+        from util.phone import validate_and_format_e164
 
         try:
-            parsed_phone = parse(phone_raw, None)  # None means no region is specified
-            if not is_valid_number(parsed_phone):
-                raise ValidationError("Invalid phone number format.")
-            phone_formatted = format_number(parsed_phone, PhoneNumberFormat.E164)
-        except Exception as e:
-            raise ValidationError(f"Error parsing phone number: {str(e)}")
+            phone_formatted = validate_and_format_e164(phone_raw)
+        except ValidationError as e:
+            raise e
 
         try:
             phone, created = UserPhoneNumber.objects.get_or_create(
