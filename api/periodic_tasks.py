@@ -42,7 +42,7 @@ def add_dynamic_schedules():
 
     # Hourly soft-expiration sweep for inactive free-plan agents
     beat_schedule["agent-soft-expire-hourly"] = {
-        "task": "api.agent.tasks.soft_expire_inactive_agents",
+        "task": "gobii_platform.api.tasks.soft_expire_inactive_agents_task",
         "schedule": crontab(minute=0),  # Top of every hour UTC
         "args": [],
     }

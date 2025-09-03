@@ -81,7 +81,7 @@ def _send_sleep_notification(agent) -> None:
     current_site = Site.objects.get_current()
     protocol = "https://"                       # your outbound scheme
     base = f"{protocol}{current_site.domain}"
-    upgrade_link = f"{base}/subscribe/startup/"
+    upgrade_link = f"{base}/subscribe/pro/"
 
     now = timezone.now()
     subject = "I’m going to sleep for now 💤"
@@ -134,7 +134,7 @@ def _send_sleep_notification(agent) -> None:
     agent.sleep_email_sent_at = now
     agent.save(update_fields=["sleep_email_sent_at"])
 
-@shared_task(name="api.agent.tasks.soft_expire_inactive_agents")
+@shared_task(name="gobii_platform.api.tasks.soft_expire_inactive_agents")
 def soft_expire_inactive_agents_task() -> int:
     """Scan for eligible agents and soft-expire them. Returns count expired."""
     if not switch_is_active(AGENT_SOFT_EXPIRATION):
