@@ -14,6 +14,7 @@ from api.models import PersistentAgent, PersistentAgentMessage, CommsChannel
 
 from constants.feature_flags import AGENT_SOFT_EXPIRATION
 from constants.plans import PlanNames
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,27 @@ def soft_expire_inactive_agents_task() -> int:
                 locked_agent.life_state = locked_agent.LifeState.EXPIRED
                 locked_agent.last_expired_at = now
                 locked_agent.save(update_fields=["schedule_snapshot", "schedule", "life_state", "last_expired_at"])
+
+                # Emit analytics event on successful soft-expiration (after commit)
+                try:
+                    last_ts_eff = last_ts_locked
+                    inactivity_days = (now - last_ts_eff).days if last_ts_eff else None
+                    transaction.on_commit(lambda: Analytics.track_event(
+                        user_id=locked_agent.user_id,
+                        event=AnalyticsEvent.PERSISTENT_AGENT_SOFT_EXPIRED,
+                        source=AnalyticsSource.NA,
+                        properties={
+                            "agent_id": str(locked_agent.id),
+                            "agent_name": locked_agent.name,
+                            "life_state_from": "active",
+                            "life_state_to": "expired",
+                            "inactivity_days": inactivity_days if inactivity_days is not None else 0,
+                            "plan": "free",
+                            "org_owned": bool(locked_agent.organization_id),
+                        }
+                    ))
+                except Exception as ae:
+                    logger.error("Failed to enqueue analytics event for agent %s soft-expire: %s", locked_agent.id, ae)
 
                 # Send notification (skip if manually paused)
                 try:
