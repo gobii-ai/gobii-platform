@@ -15,7 +15,7 @@ from api.models import (
 User = get_user_model()
 
 
-@tag("allowlist_direction")
+@tag("batch_allowlist_direction")
 class AllowlistDirectionTests(TestCase):
     """Test the directional allowlist functionality."""
     
