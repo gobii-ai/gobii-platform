@@ -249,3 +249,135 @@ class AllowlistDirectionTests(TestCase):
                 allow_inbound=False,
                 allow_outbound=True
             )
+    
+    def test_invitation_flow_with_directional_settings(self):
+        """Test the full invitation flow preserves directional settings.
+        
+        This test ensures that when a CommsAllowlistRequest is approved with
+        skip_invitation=False, the created AgentAllowlistInvite and eventual
+        CommsAllowlistEntry have the correct directional permissions.
+        """
+        from api.models import AgentAllowlistInvite
+        
+        # Create a request with specific directional settings (inbound only)
+        request = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="invite@example.com",
+            reason="Need inbound only access",
+            purpose="Receiving notifications",
+            request_inbound=True,
+            request_outbound=False  # Only requesting inbound
+        )
+        
+        # Approve the request with skip_invitation=False to trigger invitation flow
+        result = request.approve(invited_by=self.owner, skip_invitation=False)
+        
+        # Verify that an invitation was created (not a direct entry)
+        self.assertIsInstance(result, AgentAllowlistInvite)
+        invitation = result
+        
+        # Verify the invitation has the correct directional settings
+        self.assertTrue(invitation.allow_inbound)
+        self.assertFalse(invitation.allow_outbound)
+        self.assertEqual(invitation.channel, CommsChannel.EMAIL)
+        self.assertEqual(invitation.address, "invite@example.com")
+        self.assertEqual(invitation.status, AgentAllowlistInvite.InviteStatus.PENDING)
+        
+        # Verify request is marked as approved and linked to invitation
+        request.refresh_from_db()
+        self.assertEqual(request.status, CommsAllowlistRequest.RequestStatus.APPROVED)
+        self.assertEqual(request.allowlist_invitation, invitation)
+        
+        # Accept the invitation
+        entry = invitation.accept()
+        
+        # Verify the created entry has the correct directional permissions
+        self.assertIsInstance(entry, CommsAllowlistEntry)
+        self.assertTrue(entry.allow_inbound)
+        self.assertFalse(entry.allow_outbound)
+        self.assertEqual(entry.channel, CommsChannel.EMAIL)
+        self.assertEqual(entry.address, "invite@example.com")
+        self.assertTrue(entry.is_active)
+        
+        # Verify the invitation is now accepted
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, AgentAllowlistInvite.InviteStatus.ACCEPTED)
+        
+        # Verify the allowlist checks respect the directional settings
+        self.assertTrue(
+            self.agent.is_sender_whitelisted(CommsChannel.EMAIL, "invite@example.com")
+        )
+        self.assertFalse(
+            self.agent.is_recipient_whitelisted(CommsChannel.EMAIL, "invite@example.com")
+        )
+    
+    def test_invitation_flow_outbound_only(self):
+        """Test invitation flow with outbound-only permissions."""
+        from api.models import AgentAllowlistInvite
+        
+        # Create a request for outbound-only access
+        request = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="outbound-invite@example.com",
+            reason="Need to send updates",
+            purpose="Sending status updates",
+            request_inbound=False,
+            request_outbound=True  # Only requesting outbound
+        )
+        
+        # Approve with invitation flow
+        invitation = request.approve(invited_by=self.owner, skip_invitation=False)
+        
+        # Verify invitation has correct settings
+        self.assertFalse(invitation.allow_inbound)
+        self.assertTrue(invitation.allow_outbound)
+        
+        # Accept and verify entry
+        entry = invitation.accept()
+        self.assertFalse(entry.allow_inbound)
+        self.assertTrue(entry.allow_outbound)
+        
+        # Verify allowlist behavior
+        self.assertFalse(
+            self.agent.is_sender_whitelisted(CommsChannel.EMAIL, "outbound-invite@example.com")
+        )
+        self.assertTrue(
+            self.agent.is_recipient_whitelisted(CommsChannel.EMAIL, "outbound-invite@example.com")
+        )
+    
+    def test_invitation_flow_bidirectional(self):
+        """Test invitation flow with bidirectional permissions."""
+        from api.models import AgentAllowlistInvite
+        
+        # Create a request for both directions
+        request = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="both-invite@example.com",
+            reason="Full communication needed",
+            purpose="Collaborative work",
+            request_inbound=True,
+            request_outbound=True  # Requesting both directions
+        )
+        
+        # Approve with invitation flow
+        invitation = request.approve(invited_by=self.owner, skip_invitation=False)
+        
+        # Verify invitation has both directions enabled
+        self.assertTrue(invitation.allow_inbound)
+        self.assertTrue(invitation.allow_outbound)
+        
+        # Accept and verify entry
+        entry = invitation.accept()
+        self.assertTrue(entry.allow_inbound)
+        self.assertTrue(entry.allow_outbound)
+        
+        # Verify both directions work
+        self.assertTrue(
+            self.agent.is_sender_whitelisted(CommsChannel.EMAIL, "both-invite@example.com")
+        )
+        self.assertTrue(
+            self.agent.is_recipient_whitelisted(CommsChannel.EMAIL, "both-invite@example.com")
+        )
