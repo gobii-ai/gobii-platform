@@ -170,7 +170,7 @@ def _prune_chrome_profile(profile_dir: str) -> None:
         logger.info(
             "Chrome profile size after pruning within limit: %.1f MB",
             post_prune_size_bytes / (1024 * 1024),
-            )
+        )
 
 # --------------------------------------------------------------------------- #
 #  Provider config / tiers / defaults
