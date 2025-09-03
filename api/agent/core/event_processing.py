@@ -1109,7 +1109,8 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     allowed_contacts = (
         CommsAllowlistEntry.objects.filter(
             agent=agent,
-            is_active=True
+            is_active=True,
+            allow_outbound=True
         )
         .order_by("channel", "address")
     )
