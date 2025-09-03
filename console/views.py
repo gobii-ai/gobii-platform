@@ -1296,17 +1296,30 @@ class AgentDetailView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
                         if existing_entry.is_active:
                             return JsonResponse({'success': False, 'error': 'This address is already in the allowlist'})
                         else:
-                            # Reactivate the existing entry
+                            # Reactivate the existing entry and update inbound/outbound settings
                             existing_entry.is_active = True
-                            existing_entry.save(update_fields=['is_active'])
+                            # Update inbound/outbound settings from POST or keep existing
+                            allow_inbound = request.POST.get('allow_inbound')
+                            allow_outbound = request.POST.get('allow_outbound')
+                            if allow_inbound is not None:
+                                existing_entry.allow_inbound = allow_inbound.lower() == 'true'
+                            if allow_outbound is not None:
+                                existing_entry.allow_outbound = allow_outbound.lower() == 'true'
+                            existing_entry.save(update_fields=['is_active', 'allow_inbound', 'allow_outbound'])
                             entry = existing_entry
                     else:
                         # Directly create the allowlist entry (skip invitation process)
+                        # Get inbound/outbound settings from POST or default to both
+                        allow_inbound = request.POST.get('allow_inbound', 'true').lower() == 'true'
+                        allow_outbound = request.POST.get('allow_outbound', 'true').lower() == 'true'
+                        
                         entry = CommsAllowlistEntry.objects.create(
                             agent=agent,
                             channel=channel,
                             address=address,
-                            is_active=True
+                            is_active=True,
+                            allow_inbound=allow_inbound,
+                            allow_outbound=allow_outbound
                         )
 
                         Analytics.track_event(
@@ -1664,6 +1677,8 @@ class AgentAllowlistView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
                     agent=agent,
                     channel=form.cleaned_data['channel'],
                     address=form.cleaned_data['address'],
+                    allow_inbound=form.cleaned_data.get('allow_inbound', True),
+                    allow_outbound=form.cleaned_data.get('allow_outbound', True),
                 )
                 entry.full_clean()  # This will run model validation
                 entry.save()
@@ -2416,6 +2431,17 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                         
                         try:
                             if should_approve:
+                                # Get the direction settings from the form
+                                inbound_field = f'inbound_{request_obj.id}'
+                                outbound_field = f'outbound_{request_obj.id}'
+                                allow_inbound = form.cleaned_data.get(inbound_field, True)
+                                allow_outbound = form.cleaned_data.get(outbound_field, True)
+                                
+                                # Update the request's direction settings before approving
+                                request_obj.request_inbound = allow_inbound
+                                request_obj.request_outbound = allow_outbound
+                                request_obj.save(update_fields=['request_inbound', 'request_outbound'])
+                                
                                 # Try to approve (will directly add to allowlist, skipping invitation)
                                 result = request_obj.approve(invited_by=request.user, skip_invitation=True)
                                 approved_count += 1

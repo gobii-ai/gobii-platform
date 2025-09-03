@@ -275,6 +275,24 @@ class AllowlistEntryForm(forms.Form):
         label='Email or Phone',
         help_text='Emails are case-insensitive. Phone must be in E.164 (+15551234567).'
     )
+    allow_inbound = forms.BooleanField(
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={
+            'class': 'rounded border-gray-300 text-indigo-600 focus:ring-indigo-500'
+        }),
+        label='Allow Inbound',
+        help_text='Allow this contact to send messages to the agent'
+    )
+    allow_outbound = forms.BooleanField(
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={
+            'class': 'rounded border-gray-300 text-indigo-600 focus:ring-indigo-500'
+        }),
+        label='Allow Outbound',
+        help_text='Allow the agent to send messages to this contact'
+    )
 
     def clean(self):
         cleaned = super().clean()
@@ -593,6 +611,7 @@ class ContactRequestApprovalForm(forms.Form):
         
         # Create checkbox fields for each request
         for request in self.contact_requests:
+            # Approval checkbox
             field_name = f'approve_{request.id}'
             display_name = request.name or request.address
             self.fields[field_name] = forms.BooleanField(
@@ -600,6 +619,28 @@ class ContactRequestApprovalForm(forms.Form):
                 initial=True,  # Default to checked for convenience
                 label=f"{display_name} ({request.channel})",
                 help_text=f"Purpose: {request.purpose}",
+                widget=forms.CheckboxInput(attrs={
+                    'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
+                })
+            )
+            
+            # Inbound permission checkbox
+            inbound_field_name = f'inbound_{request.id}'
+            self.fields[inbound_field_name] = forms.BooleanField(
+                required=False,
+                initial=request.request_inbound,  # Use the request's setting
+                label="Allow receiving messages",
+                widget=forms.CheckboxInput(attrs={
+                    'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
+                })
+            )
+            
+            # Outbound permission checkbox
+            outbound_field_name = f'outbound_{request.id}'
+            self.fields[outbound_field_name] = forms.BooleanField(
+                required=False,
+                initial=request.request_outbound,  # Use the request's setting
+                label="Allow sending messages",
                 widget=forms.CheckboxInput(attrs={
                     'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
                 })

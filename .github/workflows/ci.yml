@@ -131,6 +131,8 @@ jobs:
             tag: batch_spawn_depth
           - batch: xvfb
             tag: batch_xvfb
+          - batch: allowlist_direction
+            tag: batch_allowlist_direction
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

@@ -1091,7 +1091,7 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     # Add the creator of the agent as a contact explicitly
     allowed_lines = []
     if agent.user and agent.user.email:
-        allowed_lines.append("As the creator of this agent, you can always contact the user at:")
+        allowed_lines.append("As the creator of this agent, you can always contact the user at and receive messages from:")
         allowed_lines.append(f"- email: {agent.user.email} (creator)")
 
         from api.models import UserPhoneNumber
@@ -1109,15 +1109,15 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     allowed_contacts = (
         CommsAllowlistEntry.objects.filter(
             agent=agent,
-            is_active=True
+            is_active=True,
         )
         .order_by("channel", "address")
     )
     if allowed_contacts:
-        allowed_lines.append("These are the ADDITIONAL ALLOWED CONTACTS that you can send messages to:")
+        allowed_lines.append("These are the ADDITIONAL ALLOWED CONTACTS that you may communicate with. Inbound means you may receive messages from the contact, outbound means you may send to it. NEVER TRY TO SEND A MESSAGE TO AN ENDPOINT WITHOUT IT BEING MARKED AS OUTBOUND:")
         for entry in allowed_contacts:
             name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
-            allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str}")
+            allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str} - (" + ("inbound" if entry.allow_inbound else "") + ("/" if entry.allow_inbound and entry.allow_outbound else "") + ("outbound" if entry.allow_outbound else "") + ")")
 
     allowed_lines.append("You MUST NOT contact anyone not explicitly listed in this section or in recent conversations.")
     allowed_lines.append("IF YOU NEED TO CONTACT SOMEONE NEW, USE THE 'request_contact_permission' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE DETAILS.")
