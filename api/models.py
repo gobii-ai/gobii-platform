@@ -1772,6 +1772,8 @@ class AgentAllowlistInvite(models.Model):
     expires_at = models.DateTimeField(help_text="When this invitation expires")
     created_at = models.DateTimeField(auto_now_add=True)
     responded_at = models.DateTimeField(null=True, blank=True, help_text="When they accepted/rejected")
+    allow_inbound = models.BooleanField(default=True)
+    allow_outbound = models.BooleanField(default=True)
     
     class Meta:
         constraints = [
@@ -1850,7 +1852,11 @@ class AgentAllowlistInvite(models.Model):
             agent=self.agent,
             channel=self.channel,
             address=self.address,
-            defaults={"is_active": True}
+            defaults={
+                "is_active": True,
+                "allow_inbound": self.allow_inbound,
+                "allow_outbound": self.allow_outbound,
+            }
         )
         
         # Switch agent to manual allowlist mode if not already
@@ -2065,6 +2071,8 @@ class CommsAllowlistRequest(models.Model):
             address=self.address,
             token=secrets.token_urlsafe(32),
             invited_by=invited_by,
+            allow_inbound=self.request_inbound,
+            allow_outbound=self.request_outbound,
             expires_at=timezone.now() + timedelta(days=7)
         )
         
