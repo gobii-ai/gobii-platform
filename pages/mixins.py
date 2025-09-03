@@ -134,6 +134,27 @@ class PhoneNumberMixin:
                     form.save()
                 except IntegrityError as e:
                     return self._render_phone_partial(error="This phone number is already in use.") if req.headers.get("HX-Request") else redirect(req.path)
+            else:
+                # Provide a minimal error message without listing supported countries
+                # Check error codes rather than brittle string matching
+                unsupported_msg = "Phone numbers from this country are not yet supported."
+                error_msg = unsupported_msg
+                try:
+                    data = form.errors.as_data()
+                    has_unsupported = False
+                    for _field, errors in data.items():
+                        for err in errors:
+                            if getattr(err, "code", None) == "unsupported_region":
+                                has_unsupported = True
+                                break
+                        if has_unsupported:
+                            break
+                    if not has_unsupported:
+                        error_msg = "Enter a valid phone number."
+                except Exception:
+                    error_msg = unsupported_msg
+
+                return self._render_phone_partial(error=error_msg) if req.headers.get("HX-Request") else redirect(req.path)
 
             return self._render_phone_partial() if req.headers.get("HX-Request") else redirect(req.path)
             # fall through: invalid

@@ -2,7 +2,7 @@
 <div class="" id="sms-verification-form">
 
 {%  if error %}
-<div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4">
+<div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-2">
   <p class="text-sm">{{ error }}</p>
 </div>
 {% endif %}
@@ -76,6 +76,19 @@
               {% else %}
                 Resend code
               {% endif %}
+            </button>
+
+            {# Allow user to cancel verification and change number #}
+            <button
+                type="button"
+                class="px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-md hover:bg-red-100"
+                hx-post="{{ post_url }}"
+                hx-target="#sms-verification-form"
+                hx-swap="outerHTML"
+                hx-include="#sms-verification-form"
+                hx-vals='{"delete_phone": "1"}'
+            >
+              Cancel
             </button>
           </div>
       {% endif %}
