@@ -10,6 +10,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 
 from constants.regex import E164_PHONE_REGEX
+from constants.phone_countries import SUPPORTED_REGION_CODES
 from api.models import CommsChannel
 from util import sms
 import logging
@@ -90,9 +91,26 @@ class UserPhoneNumberForm(forms.Form):
 
     def clean_phone_number(self):
         phone_number = self.cleaned_data.get("phone_number")
-        if phone_number and self.user:
-            if UserPhoneNumber.objects.filter(phone_number=phone_number).exclude(user=self.user).exists():
-                raise forms.ValidationError("This phone number is already in use by another account.")
+        if not phone_number:
+            return phone_number
+
+        # Validate region support using libphonenumber
+        try:
+            from phonenumbers import parse, is_valid_number, region_code_for_number
+            parsed = parse(phone_number, None)
+            if not is_valid_number(parsed):
+                raise forms.ValidationError("Enter a valid E.164 phone number")
+            region = region_code_for_number(parsed)
+            if not region or region not in SUPPORTED_REGION_CODES:
+                raise forms.ValidationError("Phone numbers from this country are not yet supported.")
+        except forms.ValidationError:
+            raise
+        except Exception:
+            # Fallback generic error to avoid leaking details
+            raise forms.ValidationError("Enter a valid E.164 phone number")
+
+        if self.user and UserPhoneNumber.objects.filter(phone_number=phone_number).exclude(user=self.user).exists():
+            raise forms.ValidationError("This phone number is already in use by another account.")
         return phone_number
 
 class StyledRadioSelect(forms.RadioSelect):
@@ -285,6 +303,18 @@ class AllowlistEntryForm(forms.Form):
             import re
             if not re.fullmatch(E164_PHONE_REGEX, address):
                 self.add_error('address', 'Enter a valid E.164 phone number (e.g., +15551234567).')
+            else:
+                try:
+                    from phonenumbers import parse, is_valid_number, region_code_for_number
+                    parsed = parse(address, None)
+                    if not is_valid_number(parsed):
+                        self.add_error('address', 'Enter a valid E.164 phone number (e.g., +15551234567).')
+                    else:
+                        region = region_code_for_number(parsed)
+                        if not region or region not in SUPPORTED_REGION_CODES:
+                            self.add_error('address', 'Phone numbers from this country are not yet supported.')
+                except Exception:
+                    self.add_error('address', 'Enter a valid E.164 phone number (e.g., +15551234567).')
             cleaned['address'] = address
         else:
             self.add_error('channel', 'Unsupported channel.')
@@ -620,6 +650,29 @@ class PhoneAddForm(forms.Form):
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.user = user
+
+    def clean(self):
+        cleaned = super().clean()
+        phone_raw = cleaned.get("phone_number_hidden") or cleaned.get("phone_number")
+        if not phone_raw:
+            return cleaned
+
+        # Validate format and supported country
+        try:
+            from phonenumbers import parse, is_valid_number, region_code_for_number
+            parsed = parse(phone_raw, None)
+            if not is_valid_number(parsed):
+                raise ValidationError("Enter a valid phone number.")
+            region = region_code_for_number(parsed)
+            if not region or region not in SUPPORTED_REGION_CODES:
+                raise ValidationError("Phone numbers from this country are not yet supported.")
+        except ValidationError:
+            raise
+        except Exception:
+            # Generic minimal message
+            raise ValidationError("Enter a valid phone number.")
+
+        return cleaned
 
     def save(self):
         phone_raw = self.cleaned_data["phone_number_hidden"]
