@@ -7,8 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
   "pottery==3.0.1",
   "boto3~=1.38.39",
-  "browser-use==0.5.3",
-  "openai==1.91.0",
+  "browser-use==0.7.1",
+  "openai==1.99.2",
   "pypandoc-binary==1.15",
   "inscriptis==2.6.0",
   "celery~=5.5.2",

@@ -642,12 +642,6 @@ async def _run_agent(
             await _safe_aclose(browser_session, "stop")
             await _safe_aclose(browser_session, "kill")
 
-            if playwright is not None:
-                try:
-                    await playwright.stop()
-                except Exception:  # noqa: BLE001
-                    logger.debug("playwright.stop failed during cleanup", exc_info=True)
-
             # --------------------------------------------------------------
             #  Browser profile save (if applicable)
             # --------------------------------------------------------------
