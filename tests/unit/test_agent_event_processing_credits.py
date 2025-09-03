@@ -22,7 +22,7 @@ class _DummySpan:
         return None
 
 
-@tag('unit')
+@tag("batch_event_processing")
 class PersistentAgentCreditGateTests(TestCase):
     @classmethod
     def setUpTestData(cls):
