@@ -1151,17 +1151,22 @@ def _process_browser_use_task_core(
                 )
 
         finally:
-            # Clean up branch on task failure to prevent leaks
-            if branch_id and task_obj.status == BrowserUseAgentTask.StatusChoices.FAILED:
-                if hasattr(task_obj.agent, 'persistent_agent'):
-                    try:
-                        AgentBudgetManager.remove_branch(
-                            agent_id=str(task_obj.agent.persistent_agent.id),
-                            branch_id=str(branch_id)
-                        )
-                        logger.info("Cleaned up branch %s for failed task %s", branch_id, task_obj.id)
-                    except Exception as e:
-                        logger.warning("Failed to clean up branch %s: %s", branch_id, e)
+            # Decrement outstanding-children counter regardless of success/failure
+            if branch_id and task_obj.agent and hasattr(task_obj.agent, 'persistent_agent'):
+                try:
+                    AgentBudgetManager.bump_branch_depth(
+                        agent_id=str(task_obj.agent.persistent_agent.id),
+                        branch_id=str(branch_id),
+                        delta=-1,
+                    )
+                    logger.info(
+                        "Decremented outstanding children for agent %s branch %s after task %s",
+                        task_obj.agent.persistent_agent.id,
+                        branch_id,
+                        task_obj.id,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to decrement outstanding children for branch %s: %s", branch_id, e)
 
             # Refresh/validate DB connection before final status save
             close_old_connections()

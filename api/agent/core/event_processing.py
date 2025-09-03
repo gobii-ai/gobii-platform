@@ -346,27 +346,31 @@ def process_agent_events(
                 agent_id=str(persistent_agent_id), budget_id=budget_id, depth=depth
             )
 
-    # Phase 1 (soft): validate branch existence/depth; warn and correct if needed.
+    # Phase 1 (soft): validate branch existence and decouple counters
+    # We treat the stored branch "depth" as an outstanding-children counter.
+    # Do NOT overwrite recursion depth (ctx.depth) with the stored counter.
     try:
-        stored_depth = AgentBudgetManager.get_branch_depth(agent_id=str(persistent_agent_id), branch_id=str(branch_id))
+        stored_depth = AgentBudgetManager.get_branch_depth(
+            agent_id=str(persistent_agent_id), branch_id=str(branch_id)
+        )
         if stored_depth is None:
+            # Initialize counter to 0 when missing; leave recursion depth unchanged
+            AgentBudgetManager.set_branch_depth(
+                agent_id=str(persistent_agent_id), branch_id=str(branch_id), depth=0
+            )
             logger.warning(
-                "Budget branch missing for agent %s (branch_id=%s). Initializing to claimed depth=%s.",
+                "Initialized missing branch counter for agent %s (branch_id=%s) to 0",
                 persistent_agent_id,
                 branch_id,
-                depth,
             )
-            AgentBudgetManager.set_branch_depth(agent_id=str(persistent_agent_id), branch_id=str(branch_id), depth=int(depth))
-            stored_depth = int(depth)
-        elif stored_depth != int(depth):
-            logger.warning(
-                "Budget branch depth mismatch for agent %s (branch_id=%s): stored=%s, claimed=%s. Correcting to stored.",
+        else:
+            # Keep for diagnostics only
+            logger.debug(
+                "Branch counter present for agent %s (branch_id=%s): %s",
                 persistent_agent_id,
                 branch_id,
                 stored_depth,
-                depth,
             )
-            depth = stored_depth
     except Exception:
         logger.debug("Branch validation failed; proceeding softly", exc_info=True)
 

@@ -144,6 +144,25 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             task.secret_keys = secret_keys_by_domain
             task.save(update_fields=['encrypted_secrets', 'secret_keys'])
 
+        # If we have a parent branch, increment its outstanding-children counter
+        try:
+            if branch_id and budget_id:
+                AgentBudgetManager.bump_branch_depth(
+                    agent_id=str(agent.id), branch_id=str(branch_id), delta=+1
+                )
+                logger.info(
+                    "Incremented outstanding children for agent %s branch %s",
+                    agent.id,
+                    branch_id,
+                )
+        except Exception:
+            logger.warning(
+                "Failed to increment outstanding children for agent %s branch %s",
+                agent.id,
+                branch_id,
+                exc_info=True,
+            )
+
         # Spawn the browser task asynchronously via Celery, propagating budget context
 
         process_browser_use_task.delay(

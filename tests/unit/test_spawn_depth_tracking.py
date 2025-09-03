@@ -1,7 +1,8 @@
-"""Tests for spawn_web_task recursion depth tracking.
+"""Tests for spawn_web_task child-count tracking.
 
-This test demonstrates a critical bug where parallel spawned tasks
-incorrectly share and mutate the same branch depth counter.
+Validates that parallel spawned tasks do not affect recursion depth
+argument but correctly increment the outstanding-children counter in
+Redis so the agent loop keeps the cycle open while children run.
 """
 
 import threading
@@ -67,16 +68,8 @@ class SpawnDepthTrackingTests(TransactionTestCase):
         )
     
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
-    def test_parallel_spawn_depth_tracking_bug(self, mock_process_task):
-        """Test that parallel spawns incorrectly share depth counter.
-        
-        This test SHOULD FAIL with the current implementation, demonstrating
-        the bug where multiple parallel spawns at the same level incorrectly
-        increment a shared depth counter.
-        
-        Expected behavior: All 3 spawned tasks should be at depth 1
-        Actual buggy behavior: Tasks will be at depths 1, 2, and 3
-        """
+    def test_parallel_spawn_increments_outstanding_children(self, mock_process_task):
+        """Parallel spawns should each pass recursion depth=1 and increment outstanding-children counter."""
         mock_process_task.delay = MagicMock()
         
         # Results will be stored here by each thread
@@ -134,8 +127,7 @@ class SpawnDepthTrackingTests(TransactionTestCase):
         if spawn_errors:
             self.fail(f"Some spawns failed: {spawn_errors}")
         
-        # CRITICAL CHECK: All spawned tasks should be at depth 1
-        # since they're all spawned from depth 0 in parallel
+        # All spawned tasks should be at depth 1 since they're all spawned from depth 0 in parallel
         expected_depth = 1
         
         # Sort observed depths by task number for consistent reporting
@@ -150,18 +142,14 @@ class SpawnDepthTrackingTests(TransactionTestCase):
                 f"All observed depths: {observed_depths}"
             )
         
-        # Also verify the branch depth in Redis hasn't been over-incremented
+        # Verify the branch counter in Redis reflects all outstanding children (3)
         final_branch_depth = AgentBudgetManager.get_branch_depth(
             agent_id=str(self.agent.id),
             branch_id=self.branch_id
         )
-        
-        # The branch depth should still be 0 or at most 1 after parallel spawns
-        # (depending on implementation details), but definitely not 3
-        self.assertLessEqual(
-            final_branch_depth, 1,
-            f"Branch depth should not exceed 1 for parallel spawns from depth 0, "
-            f"but is {final_branch_depth}"
+        self.assertEqual(
+            final_branch_depth, 3,
+            f"Branch counter should equal number of parallel spawns; got {final_branch_depth}"
         )
     
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
