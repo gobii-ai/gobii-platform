@@ -16,10 +16,19 @@ RUN --mount=type=cache,target=/var/cache/apt \
     apt-get install --no-install-recommends -y \
         procps \
         xvfb x11-utils xauth libx11-6 libxext6 libxrender1 \
-        libxtst6 libxi6 libxrandr2 libxfont2 curl && \
+        libxtst6 libxi6 libxrandr2 libxfont2 curl \
+        gnupg ca-certificates && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-linux.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/google-linux.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && \
     apt-get install --no-install-recommends -y \
-    nodejs && \
+        google-chrome-stable \
+        fonts-liberation fonts-noto fonts-unifont \
+        libasound2 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdbus-1-3 \
+        libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3 libu2f-udev \
+        libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 xdg-utils nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip
@@ -28,8 +37,7 @@ RUN pip install --upgrade pip
 COPY pyproject.toml poetry.lock* ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir . && \
-    patchright install chrome --with-deps
+    pip install --no-cache-dir .
 
 # ────────────────────────────────────────────────
 # builder stage – copy code, install editable, test
