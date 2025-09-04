@@ -3,8 +3,15 @@
 
 <!-- Console Sub-Navigation Panel - Visible on medium and large screens -->
 <aside class="hidden md:block sticky top-20 self-start min-w-64 w-64 flex-shrink-0 bg-white/80 backdrop-blur-sm border border-white/60 p-4 mx-4 my-4 rounded-xl shadow-xl overflow-y-auto">
+  <!-- Context Switcher -->
+  {% flag "organizations" %}
+  <div class="mb-4">
+    {% include "console/includes/_context_switcher.html" %}
+  </div>
+  {% endflag %}
+
   <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Console Menu</h3>
-  <nav class="space-y-1">
+  <nav class="space-y-1" x-data="navigationMenu()">
     <a href="{% url 'console-home' %}" 
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-home' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
       <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"
@@ -37,13 +44,6 @@
       </svg>
       API Keys
     </a>
-    {% flag "organizations" %}
-    <a href="{% url 'organizations' %}"
-       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'organizations' or request.resolver_match.url_name == 'organization_detail' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'organizations' or request.resolver_match.url_name == 'organization_detail' %}text-blue-600{% else %}text-gray-500{% endif %}" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      Organizations
-    </a>
-    {% endflag %}
     <a href="{% url 'profile' %}"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'profile' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
       <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'profile' %}text-blue-600{% else %}text-gray-500{% endif %}"
@@ -55,6 +55,7 @@
     </a>
     {% if settings.GOBII_PROPRIETARY_MODE %}
       <a href="{% url 'billing' %}"
+         x-show="showBilling"
          class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
         <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'billing' %}text-blue-600{% else %}text-gray-500{% endif %}"
              xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -85,3 +86,38 @@
     <!-- Add other console-specific links here -->
   </nav>
 </aside>
+
+<script>
+function navigationMenu() {
+  return {
+    showBilling: false,
+    userRole: null,
+    
+    init() {
+      // Get current context from localStorage
+      const contextType = localStorage.getItem('contextType') || 'personal';
+      const contextId = localStorage.getItem('contextId') || '{{ user.id }}';
+      
+      // Set billing visibility based on context and role
+      if (contextType === 'personal') {
+        // Personal account always shows billing
+        this.showBilling = true;
+      } else {
+        // For organizations, check user role
+        this.checkOrganizationRole(contextId);
+      }
+    },
+    
+    checkOrganizationRole(orgId) {
+      // Get user's role in the organization from backend data
+      {% for membership in user_organizations %}
+      if ('{{ membership.org.id }}' === orgId) {
+        this.userRole = '{{ membership.role }}';
+        // Show billing only for owners, admins, and billing admins
+        this.showBilling = ['owner', 'admin', 'billing_admin'].includes(this.userRole);
+      }
+      {% endfor %}
+    }
+  }
+}
+</script>
