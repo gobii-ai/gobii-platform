@@ -2,8 +2,11 @@
 import json
 from unittest.mock import patch, MagicMock
 from django.test import TestCase, tag
-from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
+from django.contrib.auth import get_user_model
+from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall, BrowserUseAgent
 from api.agent.core.event_processing import _completion_with_failover
+
+User = get_user_model()
 
 @tag("batch_token_usage")
 class TokenUsageTrackingTest(TestCase):
@@ -11,7 +14,23 @@ class TokenUsageTrackingTest(TestCase):
     
     def setUp(self):
         """Set up test data."""
+        # Create a test user
+        self.user = User.objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123"
+        )
+        
+        # Create a BrowserUseAgent
+        self.browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Test Browser Agent"
+        )
+        
+        # Create the PersistentAgent with required fields
         self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            browser_use_agent=self.browser_agent,
             name="Test Agent",
             charter="Test charter"
         )
