@@ -1176,7 +1176,7 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
         messages.success(self.request, "SMS has been enabled for this agent.")
         return redirect("agent_detail", pk=self.agent.pk)
 
-class AgentDetailView(WaffleFlagMixin, LoginRequiredMixin, DetailView):
+class AgentDetailView(LoginRequiredMixin, DetailView):
     """Configuration page for a single agent."""
     model = PersistentAgent
     template_name = "console/agent_detail.html"
