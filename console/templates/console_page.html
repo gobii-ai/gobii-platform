@@ -171,7 +171,9 @@
   <!-- Main Content Area for Console -->
   <main id="console-main-content" class="relative z-35 flex-1 p-4 md:pr-8 overflow-x-auto">
     <div class="max-w-full">
-      {% include "partials/_task_usage.html" %}
+      {% if current_context.type != 'organization' %}
+        {% include "partials/_task_usage.html" %}
+      {% endif %}
       {# This block will be overridden by child templates like console/index.html #}
       {% block console_content %}{% endblock %}
     </div>
