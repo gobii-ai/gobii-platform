@@ -188,7 +188,7 @@ class TestEventProcessingTokenCounting(TestCase):
                     self.assertGreaterEqual(len(configs), 1)
                     
                     # Due to weighted selection, we can't guarantee order,
-                    # but both providers should be available
+                    # but providers from available tiers should be accessible
                     providers = [config[0] for config in configs]
-                    self.assertIn("google", providers)
                     self.assertIn("anthropic", providers)
+                    # Note: Google is no longer in the medium token tier configuration

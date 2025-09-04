@@ -14,6 +14,14 @@ import random
 
 logger = logging.getLogger(__name__)
 
+# MODEL TESTING NOTES FOR PERSISTENT AGENTS:
+# - GLM-4.5 (OpenRouter): PASSED manual testing - works well with persistent agents
+# - Qwen3-235B (Fireworks): NOT WORKING GREAT - performance issues with persistent agents
+# - DeepSeek V3.1 (Fireworks): NOT WORKING WELL - issues with persistent agents
+# - GPT-OSS-120B (Fireworks): WORKING WELL - good performance with persistent agents
+# - Kimi K2 Instruct (Fireworks): NOT GOOD - too loopy behavior, not suitable for persistent agents
+# - Add other model test results here as we validate them...
+
 # Provider configuration mapping provider names to environment variables and models
 PROVIDER_CONFIG: Dict[str, Dict[str, str]] = {
     "anthropic": {
@@ -36,9 +44,21 @@ PROVIDER_CONFIG: Dict[str, Dict[str, str]] = {
         "env_var": "OPENROUTER_API_KEY",
         "model": "openrouter/z-ai/glm-4.5"
     },
-    "fireworks_deepseek": {
+    "fireworks_qwen3_235b_a22b": {
         "env_var": "FIREWORKS_AI_API_KEY",
         "model": "fireworks_ai/accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
+    },
+    "fireworks_deepseek_v31": {
+        "env_var": "FIREWORKS_AI_API_KEY",
+        "model": "fireworks_ai/accounts/fireworks/models/deepseek-v3p1"
+    },
+    "fireworks_gpt_oss_120b": {
+        "env_var": "FIREWORKS_AI_API_KEY",
+        "model": "fireworks_ai/accounts/fireworks/models/gpt-oss-120b"
+    },
+    "fireworks_kimi_k2_instruct": {
+        "env_var": "FIREWORKS_AI_API_KEY",
+        "model": "fireworks_ai/accounts/fireworks/models/kimi-k2-instruct"
     }
 }
 
@@ -48,32 +68,32 @@ REFERENCE_TOKENIZER_MODEL = "openai/gpt-4o"
 
 # Token-based tier configurations
 TOKEN_BASED_TIER_CONFIGS = {
-    # 0-10000 tokens: GPT-5/Google split primary, then Google, then Anthropic/GLM-4.5 split
+    # 0-7500 tokens: GPT-5/Google split primary, then Google, then Anthropic/GLM-4.5 split
     "small": {
-        "range": (0, 10000),
+        "range": (0, 7500),
         "tiers": [
-            [("openai_gpt5", 0.75), ("google", 0.25)],  # Tier 1: 75% GPT-5, 25% Google Gemini 2.5 Pro
+            [("openai_gpt5", 0.90), ("google", 0.10)],  # Tier 1: 90% GPT-5, 10% Google Gemini 2.5 Pro
             [("google", 1.0)],  # Tier 2: 100% Google Gemini 2.5 Pro
             [("anthropic", 0.5), ("openrouter_glm", 0.5)],  # Tier 3: 50/50 Anthropic/GLM-4.5 split
         ]
     },
-    # 10000-20000 tokens: Google Gemini primary, then even split between GLM-4.5, GPT-5, and Anthropic, then GPT-5 as last resort
+    # 7500-20000 tokens: 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5 primary tier
     "medium": {
-        "range": (10000, 20000),
+        "range": (7500, 20000),
         "tiers": [
-            [("google", 1.0)],  # Tier 1: 100% Google Gemini 2.5 Pro
+            [("openrouter_glm", 0.45), ("fireworks_gpt_oss_120b", 0.45), ("openai_gpt5", 0.10)],  # Tier 1: 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5
             [("openrouter_glm", 0.34), ("openai_gpt5", 0.33), ("anthropic", 0.33)],  # Tier 2: Even split between GLM-4.5, GPT-5, and Anthropic
             [("openai_gpt5", 1.0)],  # Tier 3: 100% GPT-5 (last resort)
         ]
     },
-    # 20000+ tokens: Google primary, then GPT-5, then Anthropic, then Fireworks as last resort
+    # 20000+ tokens: 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5 primary tier
     "large": {
         "range": (20000, float('inf')),
         "tiers": [
-            [("google", 1.0)],     # Tier 1: 100% Google (Gemini 2.5 Pro)
+            [("openrouter_glm", 0.45), ("fireworks_gpt_oss_120b", 0.45), ("openai_gpt5", 0.10)],  # Tier 1: 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5
             [("openai_gpt5", 1.0)],  # Tier 2: 100% GPT-5
             [("anthropic", 1.0)],  # Tier 3: 100% Anthropic (Sonnet 4)
-            [("fireworks_deepseek", 1.0)],  # Tier 4: 100% Fireworks Qwen3-235B (last resort)
+            [("fireworks_qwen3_235b_a22b", 1.0)],  # Tier 4: 100% Fireworks Qwen3-235B (last resort)
         ]
     }
 }
