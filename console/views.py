@@ -1334,7 +1334,7 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
                         )
 
                     from api.agent.tasks.process_events import process_agent_events_task
-                    transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.id)))
+                    process_agent_events_task.delay(str(agent.id))
                     
                     # Switch agent to manual allowlist mode if not already
                     # (though it should already be manual with our new changes)
