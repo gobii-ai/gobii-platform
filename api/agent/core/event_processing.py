@@ -166,7 +166,7 @@ def _completion_with_failover(
     tools: List[dict], 
     failover_configs: List[Tuple[str, str, dict]],
     agent_id: str = None
-) -> dict:
+) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
     
@@ -177,7 +177,9 @@ def _completion_with_failover(
         agent_id: Optional agent ID for logging
         
     Returns:
-        LiteLLM completion response
+        Tuple of (LiteLLM completion response, token usage dict)
+        Token usage dict contains: prompt_tokens, completion_tokens, total_tokens, 
+        cached_tokens (optional), model, provider
         
     Raises:
         Exception: If all providers in all tiers fail
@@ -221,19 +223,31 @@ def _completion_with_failover(
                     agent_id or "unknown",
                 )
 
-                # Record usage if available
+                # Record usage if available and prepare token usage dict
+                token_usage = None
                 usage = response.model_extra.get("usage", None)
                 if usage:
                     llm_span.set_attribute("llm.usage.prompt_tokens", usage.prompt_tokens)
                     llm_span.set_attribute("llm.usage.completion_tokens", usage.completion_tokens)
                     llm_span.set_attribute("llm.usage.total_tokens", usage.total_tokens)
+                    
+                    # Build token usage dict to return
+                    token_usage = {
+                        "prompt_tokens": usage.prompt_tokens,
+                        "completion_tokens": usage.completion_tokens,
+                        "total_tokens": usage.total_tokens,
+                        "model": model,
+                        "provider": provider
+                    }
+                    
                     details = usage.prompt_tokens_details
                     if details:
                         cached_tokens = getattr(details, "cached_tokens", None) or 0
                         llm_span.set_attribute("llm.usage.cached_tokens", cached_tokens)
+                        if cached_tokens:
+                            token_usage["cached_tokens"] = cached_tokens
 
-
-                return response
+                return response, token_usage
                 
         except Exception as exc:
             last_exc = exc
@@ -577,24 +591,57 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     span.set_attribute('event_window.messages.count', len(event_window.messages))
     span.set_attribute('event_window.cron_triggers.count', len(event_window.cron_triggers))
 
-    _run_agent_loop(sys_step.step.agent, event_window)
+    cumulative_token_usage = _run_agent_loop(sys_step.step.agent, event_window)
 
+    # Update system step with cumulative token usage
     sys_step.notes = f"{len(event_window.messages)} msgs, {len(event_window.cron_triggers)} cron"
+    
+    # Update the associated step with token usage
+    if cumulative_token_usage and cumulative_token_usage.get("total_tokens"):
+        sys_step.step.prompt_tokens = cumulative_token_usage.get("prompt_tokens")
+        sys_step.step.completion_tokens = cumulative_token_usage.get("completion_tokens")
+        sys_step.step.total_tokens = cumulative_token_usage.get("total_tokens")
+        sys_step.step.cached_tokens = cumulative_token_usage.get("cached_tokens") if cumulative_token_usage.get("cached_tokens") else None
+        sys_step.step.llm_model = cumulative_token_usage.get("model")
+        sys_step.step.llm_provider = cumulative_token_usage.get("provider")
+        
     close_old_connections()
     try:
+        sys_step.step.save(update_fields=[
+            "prompt_tokens", "completion_tokens", "total_tokens", 
+            "cached_tokens", "llm_model", "llm_provider"
+        ])
         sys_step.save(update_fields=["notes"])
     except OperationalError:
         close_old_connections()
+        sys_step.step.save(update_fields=[
+            "prompt_tokens", "completion_tokens", "total_tokens", 
+            "cached_tokens", "llm_model", "llm_provider"
+        ])
         sys_step.save(update_fields=["notes"])
 
 
 @tracer.start_as_current_span("Agent Loop")
-def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
-    """The core tool‑calling loop for a persistent agent."""
+def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
+    """The core tool‑calling loop for a persistent agent.
+    
+    Returns:
+        dict: Cumulative token usage across all iterations
+    """
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     logger.info("Starting agent loop for agent %s", agent.id)
     tools = _get_agent_tools(agent)
+    
+    # Track cumulative token usage across all iterations
+    cumulative_token_usage = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cached_tokens": 0,
+        "model": None,
+        "provider": None
+    }
 
     span.set_attribute("persistent_agent.tools.count", len(tools))
     span.set_attribute("MAX_AGENT_LOOP_ITERATIONS", MAX_AGENT_LOOP_ITERATIONS)
@@ -617,7 +664,7 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
                 logger.info("Agent %s step budget exhausted at entry; closing cycle.", agent.id)
             except Exception:
                 logger.debug("Failed to close budget cycle at entry", exc_info=True)
-            return
+            return cumulative_token_usage
 
     for i in range(max_remaining):
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
@@ -635,7 +682,7 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
                         AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
                     except Exception:
                         logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
-                    return
+                    return cumulative_token_usage
             history, fitted_token_count = _build_prompt_context(agent, event_window, current_iteration=i + 1, max_iterations=MAX_AGENT_LOOP_ITERATIONS)
             
             # Use the fitted token count from promptree for LLM selection
@@ -654,12 +701,23 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
             )
 
             try:
-                response = _completion_with_failover(
+                response, token_usage = _completion_with_failover(
                     messages=history,
                     tools=tools,
                     failover_configs=failover_configs,
                     agent_id=str(agent.id),
                 )
+                
+                # Accumulate token usage
+                if token_usage:
+                    cumulative_token_usage["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
+                    cumulative_token_usage["completion_tokens"] += token_usage.get("completion_tokens", 0)
+                    cumulative_token_usage["total_tokens"] += token_usage.get("total_tokens", 0)
+                    cumulative_token_usage["cached_tokens"] += token_usage.get("cached_tokens", 0)
+                    # Keep the last model and provider
+                    cumulative_token_usage["model"] = token_usage.get("model")
+                    cumulative_token_usage["provider"] = token_usage.get("provider")
+                    
             except Exception as e:
                 current_span = trace.get_current_span()
                 mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")
@@ -671,6 +729,21 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
             if not getattr(msg, "tool_calls", None):
                 if msg.content:
                     logger.info("Agent %s reasoning: %s", agent.id, msg.content)
+                    # Create a reasoning step with token usage
+                    step_kwargs = {
+                        "agent": agent,
+                        "description": f"Internal reasoning: {msg.content[:500]}",
+                    }
+                    if token_usage:
+                        step_kwargs.update({
+                            "prompt_tokens": token_usage.get("prompt_tokens"),
+                            "completion_tokens": token_usage.get("completion_tokens"),
+                            "total_tokens": token_usage.get("total_tokens"),
+                            "cached_tokens": token_usage.get("cached_tokens"),
+                            "llm_model": token_usage.get("model"),
+                            "llm_provider": token_usage.get("provider"),
+                        })
+                    PersistentAgentStep.objects.create(**step_kwargs)
                 continue
 
             all_calls_sleep = True
@@ -682,10 +755,21 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
                     logger.info("Agent %s calling tool: %s", agent.id, tool_name)
 
                     if tool_name == "sleep_until_next_trigger":
-                        PersistentAgentStep.objects.create(
-                            agent=agent,
-                            description="Decided to sleep until next trigger.",
-                        )
+                        # Create sleep step with token usage if available
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": "Decided to sleep until next trigger.",
+                        }
+                        if token_usage:
+                            step_kwargs.update({
+                                "prompt_tokens": token_usage.get("prompt_tokens"),
+                                "completion_tokens": token_usage.get("completion_tokens"),
+                                "total_tokens": token_usage.get("total_tokens"),
+                                "cached_tokens": token_usage.get("cached_tokens"),
+                                "llm_model": token_usage.get("model"),
+                                "llm_provider": token_usage.get("provider"),
+                            })
+                        PersistentAgentStep.objects.create(**step_kwargs)
                         continue
 
                     all_calls_sleep = False
@@ -736,10 +820,21 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
                     # Guard ORM writes against stale connections; retry once on OperationalError
                     close_old_connections()
                     try:
-                        step = PersistentAgentStep.objects.create(
-                            agent=agent,
-                            description=f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
-                        )
+                        # Create step with token usage if available
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
+                        }
+                        if token_usage:
+                            step_kwargs.update({
+                                "prompt_tokens": token_usage.get("prompt_tokens"),
+                                "completion_tokens": token_usage.get("completion_tokens"),
+                                "total_tokens": token_usage.get("total_tokens"),
+                                "cached_tokens": token_usage.get("cached_tokens"),
+                                "llm_model": token_usage.get("model"),
+                                "llm_provider": token_usage.get("provider"),
+                            })
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
                         PersistentAgentToolCall.objects.create(
                             step=step,
                             tool_name=tool_name,
@@ -748,10 +843,21 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
                         )
                     except OperationalError:
                         close_old_connections()
-                        step = PersistentAgentStep.objects.create(
-                            agent=agent,
-                            description=f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
-                        )
+                        # Create step with token usage if available (retry)
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
+                        }
+                        if token_usage:
+                            step_kwargs.update({
+                                "prompt_tokens": token_usage.get("prompt_tokens"),
+                                "completion_tokens": token_usage.get("completion_tokens"),
+                                "total_tokens": token_usage.get("total_tokens"),
+                                "cached_tokens": token_usage.get("cached_tokens"),
+                                "llm_model": token_usage.get("model"),
+                                "llm_provider": token_usage.get("provider"),
+                            })
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
                         PersistentAgentToolCall.objects.create(
                             step=step,
                             tool_name=tool_name,
@@ -780,7 +886,7 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
                             agent.id,
                             current_depth,
                         )
-                        return
+                        return cumulative_token_usage
 
                     try:
                         AgentBudgetManager.close_cycle(
@@ -788,10 +894,12 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow):
                         )
                     except Exception:
                         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
-                return
+                return cumulative_token_usage
 
     else:
         logger.warning("Agent %s reached max iterations.", agent.id)
+    
+    return cumulative_token_usage
 
 
 # --------------------------------------------------------------------------- #
