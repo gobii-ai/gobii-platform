@@ -41,6 +41,7 @@ from api.models import (
     OrganizationMembership,
     OrganizationInvite,
 )
+from console.mixins import ConsoleViewMixin
 from observability import traced
 from pages.mixins import PhoneNumberMixin
 from tasks.services import TaskCreditService
@@ -88,7 +89,7 @@ tracer = trace.get_tracer("gobii.utils")
 # phone screen even when a verified number exists.
 SKIP_VERIFIED_SMS_SCREEN = True
 
-class ConsoleHome(LoginRequiredMixin, TemplateView):
+class ConsoleHome(ConsoleViewMixin, TemplateView):
     """Dashboard homepage for the console."""
     template_name = "index.html"
 
@@ -205,7 +206,7 @@ class ExampleConsolePage(LoginRequiredMixin, TemplateView):
     """Example console page."""
     template_name = "example_console_page.html"
 
-class ApiKeyListView(LoginRequiredMixin, FormMixin, ListView):
+class ApiKeyListView(ConsoleViewMixin, FormMixin, ListView):
     """List all API keys for the current user and handle creation."""
     model = ApiKey
     template_name = "api_keys.html"
@@ -435,7 +436,7 @@ class ApiKeyCreateModalView(LoginRequiredMixin, View):
         form = ApiKeyForm(user=request.user)
         return render(request, "partials/_api_key_modal.html", {"form": form})
 
-class BillingView(LoginRequiredMixin, TemplateView):
+class BillingView(ConsoleViewMixin, TemplateView):
     """View for billing information."""
     template_name = "billing.html"
 
@@ -467,7 +468,7 @@ class BillingView(LoginRequiredMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
-class ProfileView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
+class ProfileView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
     """Allow users to manage basic profile information and phone number."""
 
     template_name = "console/profile.html"
@@ -603,12 +604,28 @@ def cancel_subscription(request):
 
 @login_required
 def tasks_view(request):
-    # Get tasks for the current user
+    # Get current context from session
+    context_type = request.session.get('context_type', 'personal')
+    context_id = request.session.get('context_id', str(request.user.id))
+    
+    # Get tasks for the current context
     with traced("CONSOLE Tasks View") as span:
-        tasks_queryset = BrowserUseAgentTask.objects.filter(
-            user=request.user,
-            is_deleted=False
-        ).order_by('-created_at')
+        if context_type == 'organization':
+            # For organization context, show tasks from agents owned by the organization
+            # Get BrowserUseAgents that are linked to PersistentAgents in this organization
+            persistent_agent_ids = PersistentAgent.objects.filter(
+                organization_id=context_id
+            ).values_list('browser_use_agent_id', flat=True)
+            tasks_queryset = BrowserUseAgentTask.objects.filter(
+                agent_id__in=persistent_agent_ids,
+                is_deleted=False
+            ).order_by('-created_at')
+        else:
+            # For personal context, show user's personal tasks
+            tasks_queryset = BrowserUseAgentTask.objects.filter(
+                user=request.user,
+                is_deleted=False
+            ).order_by('-created_at')
 
         # Handle filtering by status
         status_filter = request.GET.get('status')
@@ -630,7 +647,24 @@ def tasks_view(request):
             span.set_attribute('tasks.page_number', page_number)
             tasks = paginator.get_page(page_number)
 
-        return render(request, 'tasks.html', {'tasks': tasks})
+        # Get user's organization memberships for context switcher
+        user_organizations = OrganizationMembership.objects.filter(
+            user=request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE
+        ).select_related('org').order_by('org__name')
+        
+        context = {
+            'tasks': tasks,
+            'status_filter': status_filter,
+            'user_organizations': user_organizations,
+            'current_context': {
+                'type': context_type,
+                'id': context_id,
+                'name': request.session.get('context_name', request.user.get_full_name() or request.user.username)
+            }
+        }
+        
+        return render(request, 'tasks.html', context)
 
 @login_required
 def task_detail_view(request, task_id):
@@ -751,7 +785,7 @@ def task_result_view(request, task_id):
     return render(request, 'task_result.html', context)
 
 # ────────── Persistent Agents (Feature-Flagged) ──────────
-class PersistentAgentsView(LoginRequiredMixin, TemplateView):
+class PersistentAgentsView(ConsoleViewMixin, TemplateView):
     template_name = "console/persistent_agents.html"
 
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
@@ -771,10 +805,19 @@ class PersistentAgentsView(LoginRequiredMixin, TemplateView):
             to_attr='primary_sms_endpoints'  # Use a plural name as it's a list
         )
 
-        # Get all persistent agents for this user
-        persistent_agents = PersistentAgent.objects.filter(
-            user=self.request.user
-        ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+        # Filter agents based on current context
+        current_context = context.get('current_context', {})
+        if current_context.get('type') == 'organization':
+            # Show organization's agents
+            persistent_agents = PersistentAgent.objects.filter(
+                organization_id=current_context.get('id')
+            ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+        else:
+            # Show personal agents
+            persistent_agents = PersistentAgent.objects.filter(
+                user=self.request.user,
+                organization__isnull=True  # Only personal agents
+            ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
         context['persistent_agents'] = persistent_agents
 
@@ -861,10 +904,28 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                         name=agent_name
                     )
 
+                    # Get current context from session
+                    context_type = request.session.get('context_type', 'personal')
+                    context_id = request.session.get('context_id', str(request.user.id))
+                    
+                    # Set organization if in organization context
+                    organization = None
+                    if context_type == 'organization':
+                        try:
+                            membership = OrganizationMembership.objects.get(
+                                user=request.user,
+                                org_id=context_id,
+                                status=OrganizationMembership.OrgStatus.ACTIVE
+                            )
+                            organization = membership.org
+                        except OrganizationMembership.DoesNotExist:
+                            pass
+                    
                     # Then create the PersistentAgent with no initial charter
                     # The agent will set its own charter based on the user's message
                     persistent_agent = PersistentAgent.objects.create(
                         user=request.user,
+                        organization=organization,  # Set organization if in org context
                         name=agent_name,
                         charter="",  # Empty charter - agent will set this itself
                         schedule=None,
