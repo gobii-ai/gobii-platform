@@ -199,7 +199,7 @@ def _completion_with_failover(
                 llm_span.set_attribute("llm.provider", provider)
                 
                 # Fireworks doesn't support tool_choice parameter
-                if provider == "fireworks_deepseek":
+                if provider == "fireworks_qwen3_235b_a22b":
                     response = litellm.completion(
                         model=model,
                         messages=messages,
