@@ -21,8 +21,15 @@
   
   {% if request.user.is_authenticated %}
     <!-- Mobile Console Accordion Navigation -->
-    <div class="md:hidden sticky top-16 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200 shadow-sm" x-data="{ isExpanded: false }">
+    <div class="md:hidden sticky top-16 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200 shadow-sm" x-data="{ isExpanded: false, ...navigationMenu() }">
       <div class="flex items-center justify-between h-[52px]">
+        {% flag "organizations" %}
+        <!-- Context Switcher for Mobile -->
+        <div class="px-4 py-2 border-r border-gray-200">
+          {% include "console/includes/_context_switcher.html" %}
+        </div>
+        {% endflag %}
+        
         <button @click="isExpanded = !isExpanded" 
                 class="flex-1 flex items-center gap-2 px-4 text-sm font-medium text-gray-700 hover:text-blue-600 transition-colors h-full">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -103,6 +110,7 @@
           {% endflag %}
           {% if settings.GOBII_PROPRIETARY_MODE %}
           <a href="{% url 'billing' %}"
+              x-show="showBilling"
               class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
               <svg class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'billing' %}text-blue-600{% else %}text-gray-500{% endif %}"
                   xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24" stroke="currentColor">
@@ -162,4 +170,39 @@
 
 {# Allow child templates to add extra JavaScript #}
 {% block extra_js %}{% endblock %}
+
+<script>
+function navigationMenu() {
+  return {
+    showBilling: false,
+    userRole: null,
+    
+    init() {
+      // Get current context from localStorage
+      const contextType = localStorage.getItem('contextType') || 'personal';
+      const contextId = localStorage.getItem('contextId') || '{{ user.id }}';
+      
+      // Set billing visibility based on context and role
+      if (contextType === 'personal') {
+        // Personal account always shows billing
+        this.showBilling = true;
+      } else {
+        // For organizations, check user role
+        this.checkOrganizationRole(contextId);
+      }
+    },
+    
+    checkOrganizationRole(orgId) {
+      // Get user's role in the organization from backend data
+      {% for membership in user_organizations %}
+      if ('{{ membership.org.id }}' === orgId) {
+        this.userRole = '{{ membership.role }}';
+        // Show billing only for owners, admins, and billing admins
+        this.showBilling = ['owner', 'admin', 'billing_admin'].includes(this.userRole);
+      }
+      {% endfor %}
+    }
+  }
+}
+</script>
 {% endblock %}
