@@ -47,11 +47,17 @@
         <p class="text-sm font-medium text-slate-500">Available Tasks</p>
       </div>
       <div class="flex-grow flex items-center justify-center mt-auto">
-        <h3 class="text-3xl font-semibold text-slate-900">{% if account.usage.tasks_available >= 0 %}{{ account.usage.tasks_available|floatformat:0 }}{% else %}∞{% endif %}</h3>
+        {% if current_context.type == 'organization' %}
+          <h3 class="text-3xl font-semibold text-slate-900">{{ org_tasks_available }}</h3>
+        {% else %}
+          <h3 class="text-3xl font-semibold text-slate-900">{% if account.usage.tasks_available >= 0 %}{{ account.usage.tasks_available|floatformat:0 }}{% else %}∞{% endif %}</h3>
+        {% endif %}
       </div>
       <!-- additional task quota information -->
       <div>
-        {% if not addl_tasks_enabled %}
+        {% if current_context.type == 'organization' %}
+          <!-- Hide personal additional tasks UI in organization context -->
+        {% elif not addl_tasks_enabled %}
         <!-- Tasks disabled state -->
         <div class="mt-3 flex items-center p-3 bg-gray-50 rounded-lg border border-gray-200">
           <div class="flex-shrink-0 mr-3">

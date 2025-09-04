@@ -1,6 +1,19 @@
 {% extends "console_page.html" %}
 
 {% block console_content %}
+  {% if current_context.type == 'organization' %}
+  <div class="bg-white/90 backdrop-blur-sm border border-amber-200 shadow rounded-xl p-4 mb-6">
+    <div class="flex items-start gap-3">
+      <svg class="w-5 h-5 text-amber-500 mt-0.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 4h.01M10.29 3.86l-7.4 12.84A2 2 0 004.53 20h14.94a2 2 0 001.64-3.2L13.71 3.86a2 2 0 00-3.42 0z" />
+      </svg>
+      <div>
+        <h2 class="text-sm font-semibold text-amber-700">Organization Billing not yet implemented</h2>
+        <p class="text-sm text-amber-700/90 mt-1">Billing settings and subscriptions for organizations are coming soon. Switch to your personal context to manage your personal subscription.</p>
+      </div>
+    </div>
+  </div>
+  {% else %}
   <div x-data="billingSettings()" x-init="loadSettings()">
     <div class="hs-accordion-group bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
       <div class="px-6 py-3 border-gray-200/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -338,4 +351,5 @@
     };
   }
 </script>
+{% endif %}
 {% endblock %}

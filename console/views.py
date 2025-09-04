@@ -114,14 +114,91 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
         else:
             context['has_api_key'] = False
 
-        # Add agent statistics
+        # Add agent statistics (personal vs organization)
         from api.models import BrowserUseAgent, BrowserUseAgentTask
 
-        # Count active agents
-        agent_count = BrowserUseAgent.objects.filter(
-            user=self.request.user
-        ).count()
-        context['agent_count'] = agent_count
+        current_ctx = context.get('current_context', {})
+        ctx_type = current_ctx.get('type', 'personal')
+
+        if ctx_type == 'organization' and current_ctx.get('id'):
+            org_id = current_ctx.get('id')
+            # Verify active membership; if missing, fall back to personal context values
+            if OrganizationMembership.objects.filter(
+                user=self.request.user,
+                org_id=org_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists():
+                # Agents (org-owned persistent agents)
+                context['agent_count'] = PersistentAgent.objects.filter(organization_id=org_id).count()
+
+                # Task status for org-owned agents
+                from django.db.models import Count, Sum
+                pa_browser_ids = (
+                    PersistentAgent.objects.filter(organization_id=org_id)
+                    .values_list('browser_use_agent_id', flat=True)
+                )
+                task_stats = (
+                    BrowserUseAgentTask.objects.filter(
+                        agent_id__in=pa_browser_ids,
+                        is_deleted=False,
+                    )
+                    .values('status')
+                    .annotate(count=Count('status'))
+                )
+
+                # Initialize counters
+                completed_count = in_progress_count = pending_count = failed_count = cancelled_count = 0
+                for stat in task_stats:
+                    status = stat['status']
+                    count = stat['count']
+                    if status == 'completed':
+                        completed_count = count
+                    elif status == 'in_progress':
+                        in_progress_count = count
+                    elif status == 'pending':
+                        pending_count = count
+                    elif status == 'failed':
+                        failed_count = count
+                    elif status == 'cancelled':
+                        cancelled_count = count
+
+                context['completed_tasks'] = completed_count
+                context['in_progress_tasks'] = in_progress_count
+                context['pending_tasks'] = pending_count
+                context['failed_tasks'] = failed_count
+                context['cancelled_tasks'] = cancelled_count
+                context['total_active_tasks'] = in_progress_count + pending_count
+
+                # Credits available for organization
+                from django.apps import apps
+                TaskCredit = apps.get_model('api', 'TaskCredit')
+                now = timezone.now()
+                qs = TaskCredit.objects.filter(
+                    organization_id=org_id,
+                    granted_date__lte=now,
+                    expiration_date__gte=now,
+                    voided=False,
+                )
+                agg = qs.aggregate(
+                    avail=Sum('available_credits'),
+                    total=Sum('credits'),
+                    used=Sum('credits_used'),
+                )
+                org_tasks_available = (agg['avail'] or 0)
+                total = (agg['total'] or 0)
+                used = (agg['used'] or 0)
+                tasks_used_pct = 0.0 if total == 0 else min(100.0, (used / total) * 100.0)
+
+                # Expose org metrics for dashboard rendering
+                context['org_tasks_available'] = org_tasks_available
+                context['org_tasks_used_pct'] = tasks_used_pct
+            else:
+                # Fallback to personal if no membership
+                context['agent_count'] = BrowserUseAgent.objects.filter(user=self.request.user).count()
+        else:
+            # Personal context defaults
+            agent_count = BrowserUseAgent.objects.filter(user=self.request.user).count()
+            context['agent_count'] = agent_count
 
         # Get the user's subscription plan (defaults to 'free' if not set)
         context['subscription_plan'] = get_user_plan(self.request.user)
@@ -166,41 +243,40 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
         # Get task status breakdown
         from django.db.models import Count
 
-        with traced("CONSOLE Task Stats") as task_span:
-            task_stats = BrowserUseAgentTask.objects.filter(
-                user=self.request.user,
-                is_deleted=False
-            ).values('status').annotate(count=Count('status'))
+        # If not in org context above, compute personal task stats
+        if not (ctx_type == 'organization' and current_ctx.get('id')):
+            with traced("CONSOLE Task Stats") as task_span:
+                from django.db.models import Count
+                task_stats = BrowserUseAgentTask.objects.filter(
+                    user=self.request.user,
+                    is_deleted=False
+                ).values('status').annotate(count=Count('status'))
 
-            # Initialize counters
-            completed_count = 0
-            in_progress_count = 0
-            pending_count = 0
-            failed_count = 0
-            cancelled_count = 0
+                # Initialize counters
+                completed_count = in_progress_count = pending_count = failed_count = cancelled_count = 0
 
-            # Populate counters from query results
-            for stat in task_stats:
-                status = stat['status']
-                count = stat['count']
-                if status == 'completed':
-                    completed_count = count
-                elif status == 'in_progress':
-                    in_progress_count = count
-                elif status == 'pending':
-                    pending_count = count
-                elif status == 'failed':
-                    failed_count = count
-                elif status == 'cancelled':
-                    cancelled_count = count
+                # Populate counters from query results
+                for stat in task_stats:
+                    status = stat['status']
+                    count = stat['count']
+                    if status == 'completed':
+                        completed_count = count
+                    elif status == 'in_progress':
+                        in_progress_count = count
+                    elif status == 'pending':
+                        pending_count = count
+                    elif status == 'failed':
+                        failed_count = count
+                    elif status == 'cancelled':
+                        cancelled_count = count
 
-            # Add task statistics to context
-            context['completed_tasks'] = completed_count
-            context['in_progress_tasks'] = in_progress_count
-            context['pending_tasks'] = pending_count
-            context['failed_tasks'] = failed_count
-            context['cancelled_tasks'] = cancelled_count
-            context['total_active_tasks'] = in_progress_count + pending_count
+                # Add task statistics to context
+                context['completed_tasks'] = completed_count
+                context['in_progress_tasks'] = in_progress_count
+                context['pending_tasks'] = pending_count
+                context['failed_tasks'] = failed_count
+                context['cancelled_tasks'] = cancelled_count
+                context['total_active_tasks'] = in_progress_count + pending_count
 
         return context
 
