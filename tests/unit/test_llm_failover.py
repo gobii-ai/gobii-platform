@@ -121,7 +121,7 @@ class TestLLMFailover(TestCase):
 
     def test_provider_config_structure(self):
         """Provider config contains expected keys."""
-        required_providers = ["anthropic", "google", "openai", "openai_gpt5", "openrouter_glm", "fireworks_deepseek"]
+        required_providers = ["anthropic", "google", "openai", "openai_gpt5", "openrouter_glm", "fireworks_qwen3_235b_a22b"]
         for provider in required_providers:
             self.assertIn(provider, PROVIDER_CONFIG)
             config = PROVIDER_CONFIG[provider]
@@ -147,19 +147,19 @@ class TestTokenBasedTierSelection(TestCase):
         self.assertIn("medium", TOKEN_BASED_TIER_CONFIGS)
         self.assertIn("large", TOKEN_BASED_TIER_CONFIGS)
         
-        # Check small config (0-10000 tokens)
+        # Check small config (0-7500 tokens)
         small_config = TOKEN_BASED_TIER_CONFIGS["small"]
-        self.assertEqual(small_config["range"], (0, 10000))
+        self.assertEqual(small_config["range"], (0, 7500))
         self.assertEqual(len(small_config["tiers"]), 3)
-        self.assertEqual(small_config["tiers"][0], [("openai_gpt5", 0.75), ("google", 0.25)])
+        self.assertEqual(small_config["tiers"][0], [("openai_gpt5", 0.90), ("google", 0.10)])
         self.assertEqual(small_config["tiers"][1], [("google", 1.0)])
         self.assertEqual(small_config["tiers"][2], [("anthropic", 0.5), ("openrouter_glm", 0.5)])
         
-        # Check medium config (10000-20000 tokens)
+        # Check medium config (7500-20000 tokens)
         medium_config = TOKEN_BASED_TIER_CONFIGS["medium"]
-        self.assertEqual(medium_config["range"], (10000, 20000))
+        self.assertEqual(medium_config["range"], (7500, 20000))
         self.assertEqual(len(medium_config["tiers"]), 3)
-        self.assertEqual(medium_config["tiers"][0], [("google", 1.0)])
+        self.assertEqual(medium_config["tiers"][0], [("openrouter_glm", 0.45), ("fireworks_gpt_oss_120b", 0.45), ("openai_gpt5", 0.10)])
         self.assertEqual(medium_config["tiers"][1], [("openrouter_glm", 0.34), ("openai_gpt5", 0.33), ("anthropic", 0.33)])
         self.assertEqual(medium_config["tiers"][2], [("openai_gpt5", 1.0)])
         
@@ -167,42 +167,42 @@ class TestTokenBasedTierSelection(TestCase):
         large_config = TOKEN_BASED_TIER_CONFIGS["large"]
         self.assertEqual(large_config["range"], (20000, float('inf')))
         self.assertEqual(len(large_config["tiers"]), 4)
-        self.assertEqual(large_config["tiers"][0], [("google", 1.0)])
+        self.assertEqual(large_config["tiers"][0], [("openrouter_glm", 0.45), ("fireworks_gpt_oss_120b", 0.45), ("openai_gpt5", 0.10)])
         self.assertEqual(large_config["tiers"][1], [("openai_gpt5", 1.0)])
         self.assertEqual(large_config["tiers"][2], [("anthropic", 1.0)])
-        self.assertEqual(large_config["tiers"][3], [("fireworks_deepseek", 1.0)])
+        self.assertEqual(large_config["tiers"][3], [("fireworks_qwen3_235b_a22b", 1.0)])
 
     def test_get_tier_config_for_tokens_small_range(self):
         """Small token range returns GPT-5/Google split primary with Google secondary configuration."""
         config = get_tier_config_for_tokens(2000)
         self.assertEqual(len(config), 3)
-        self.assertEqual(config[0], [("openai_gpt5", 0.75), ("google", 0.25)])
+        self.assertEqual(config[0], [("openai_gpt5", 0.90), ("google", 0.10)])
         self.assertEqual(config[1], [("google", 1.0)])
         self.assertEqual(config[2], [("anthropic", 0.5), ("openrouter_glm", 0.5)])
 
     def test_get_tier_config_for_tokens_medium_range(self):
-        """Medium token range returns Google primary with split secondary configuration."""
+        """Medium token range returns 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5 primary configuration."""
         config = get_tier_config_for_tokens(15000)
         self.assertEqual(len(config), 3)
-        self.assertEqual(config[0], [("google", 1.0)])
+        self.assertEqual(config[0], [("openrouter_glm", 0.45), ("fireworks_gpt_oss_120b", 0.45), ("openai_gpt5", 0.10)])
         self.assertEqual(config[1], [("openrouter_glm", 0.34), ("openai_gpt5", 0.33), ("anthropic", 0.33)])
         self.assertEqual(config[2], [("openai_gpt5", 1.0)])
 
     def test_get_tier_config_for_tokens_large_range(self):
-        """Large token range returns Google primary with GPT-5, Anthropic and Fireworks fallback configuration."""
+        """Large token range returns 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5 primary with fallback configuration."""
         config = get_tier_config_for_tokens(25000)
         self.assertEqual(len(config), 4)
-        self.assertEqual(config[0], [("google", 1.0)])
+        self.assertEqual(config[0], [("openrouter_glm", 0.45), ("fireworks_gpt_oss_120b", 0.45), ("openai_gpt5", 0.10)])
         self.assertEqual(config[1], [("openai_gpt5", 1.0)])
         self.assertEqual(config[2], [("anthropic", 1.0)])
-        self.assertEqual(config[3], [("fireworks_deepseek", 1.0)])
+        self.assertEqual(config[3], [("fireworks_qwen3_235b_a22b", 1.0)])
 
     def test_get_tier_config_for_tokens_boundary_conditions(self):
         """Boundary conditions work correctly."""
         # Test exact boundaries
         self.assertEqual(get_tier_config_for_tokens(0), TOKEN_BASED_TIER_CONFIGS["small"]["tiers"])
-        self.assertEqual(get_tier_config_for_tokens(9999), TOKEN_BASED_TIER_CONFIGS["small"]["tiers"])
-        self.assertEqual(get_tier_config_for_tokens(10000), TOKEN_BASED_TIER_CONFIGS["medium"]["tiers"])
+        self.assertEqual(get_tier_config_for_tokens(7499), TOKEN_BASED_TIER_CONFIGS["small"]["tiers"])
+        self.assertEqual(get_tier_config_for_tokens(7500), TOKEN_BASED_TIER_CONFIGS["medium"]["tiers"])
         self.assertEqual(get_tier_config_for_tokens(19999), TOKEN_BASED_TIER_CONFIGS["medium"]["tiers"])
         self.assertEqual(get_tier_config_for_tokens(20000), TOKEN_BASED_TIER_CONFIGS["large"]["tiers"])
 
@@ -244,21 +244,22 @@ class TestTokenBasedTierSelection(TestCase):
             # Medium range has 3 tiers with available providers
             self.assertEqual(len(configs), 3)
             
-            # First provider should be Google (tier 1 = 100% Google)
+            # First provider should be from tier 1 (45% GLM, 45% GPT-OSS-120B, 10% GPT-5) 
+            # Since only OPENROUTER_API_KEY is available, should get openrouter_glm from tier 1
             provider1, model1, _ = configs[0]
-            self.assertEqual(provider1, "google")
-            self.assertEqual(model1, "vertex_ai/gemini-2.5-pro")
+            self.assertEqual(provider1, "openrouter_glm")
+            self.assertEqual(model1, "openrouter/z-ai/glm-4.5")
             
             # Tier 2 has weighted split, tier 3 would be GPT-5 but not available
             providers = [config[0] for config in configs]
             models = [config[1] for config in configs]
             
             self.assertIn("openrouter_glm", providers)
-            self.assertIn("google", providers)
             self.assertIn("anthropic", providers)
+            # Note: Google is no longer in the medium token tier configuration
             self.assertIn("openrouter/z-ai/glm-4.5", models)
-            self.assertIn("vertex_ai/gemini-2.5-pro", models)
             self.assertIn("anthropic/claude-sonnet-4-20250514", models)
+            # Note: Google model is no longer in the medium token tier configuration
 
     def test_token_based_failover_large_range(self):
         """Token-based failover works for large token range."""
@@ -267,17 +268,14 @@ class TestTokenBasedTierSelection(TestCase):
             "GOOGLE_API_KEY": "google-key",
         }, clear=True):
             configs = get_llm_config_with_failover(token_count=25000)
-            self.assertEqual(len(configs), 2)
+            self.assertEqual(len(configs), 1)
             
-            # First provider should be Google for large prompts
+            # Since tier 1 providers aren't available, should go to tier 2 (GPT-5 - not available)
+            # then tier 3 (Anthropic - available), tier 4 (Fireworks - not available)
+            # Only Anthropic is available from the large config tiers
             provider1, model1, _ = configs[0]
-            self.assertEqual(provider1, "google")
-            self.assertEqual(model1, "vertex_ai/gemini-2.5-pro")
-            
-            # Second provider should be Anthropic
-            provider2, model2, _ = configs[1]
-            self.assertEqual(provider2, "anthropic")
-            self.assertEqual(model2, "anthropic/claude-sonnet-4-20250514")
+            self.assertEqual(provider1, "anthropic")
+            self.assertEqual(model1, "anthropic/claude-sonnet-4-20250514")
 
     def test_token_based_failover_missing_providers(self):
         """Token-based failover gracefully handles missing API keys."""
@@ -323,7 +321,8 @@ class TestTokenBasedTierSelection(TestCase):
             "OPENROUTER_API_KEY": "openrouter-key",
             "OPENAI_API_KEY": "openai-key",
         }, clear=True):
-            # Test medium range - should always get Google as primary (100% in tier 1)
+            # Test medium range - should get weighted distribution from tier 1 (45% GLM, 45% GPT-OSS, 10% GPT-5)
+            # But since FIREWORKS_AI_API_KEY is not set, GPT-OSS won't be available
             provider_counts = {"google": 0, "anthropic": 0, "openrouter_glm": 0, "openai_gpt5": 0}
             num_tests = 100
             
@@ -333,7 +332,10 @@ class TestTokenBasedTierSelection(TestCase):
                 if first_provider in provider_counts:
                     provider_counts[first_provider] += 1
             
-            # Medium range (10000-20000) has Google as 100% in tier 1
-            google_percentage = provider_counts["google"] / num_tests
+            # Medium range tier 1: 45% GLM, 45% GPT-OSS (not available), 10% GPT-5
+            # Should get mix of openrouter_glm and openai_gpt5 from tier 1
+            openrouter_percentage = provider_counts["openrouter_glm"] / num_tests
+            gpt5_percentage = provider_counts["openai_gpt5"] / num_tests
             
-            self.assertEqual(google_percentage, 1.0)  # Should be 100% Google as primary
+            # Should have some distribution between available providers from tier 1
+            self.assertGreater(openrouter_percentage + gpt5_percentage, 0.8)  # Most should be from tier 1
