@@ -161,11 +161,11 @@ class RedisBudgetCleanupTests(TestCase):
     @patch('api.encryption.SecretsEncryption')
     @patch('api.tasks.browser_agent_tasks.AgentBudgetManager')
     @patch('api.tasks.browser_agent_tasks.BrowserUseAgentTask')
-    def test_failed_browser_task_calls_remove_branch(
+    def test_failed_browser_task_decrements_branch_counter(
         self, mock_task_class, mock_budget_mgr, mock_secrets, mock_execute, 
         mock_select_proxy, mock_task_step, mock_close_conn, mock_tz
     ):
-        """Test that a FAILED browser task ACTUALLY calls remove_branch."""
+        """Test that a FAILED browser task decrements outstanding-children counter."""
         from api.tasks.browser_agent_tasks import _process_browser_use_task_core
         
         task_id = str(uuid.uuid4())
@@ -211,11 +211,12 @@ class RedisBudgetCleanupTests(TestCase):
             depth=1
         )
         
-        # Verify task was marked failed and cleanup was called
+        # Verify task was marked failed and counter was decremented
         self.assertEqual(status_val[0], 'failed')
-        mock_budget_mgr.remove_branch.assert_called_once_with(
+        mock_budget_mgr.bump_branch_depth.assert_called_with(
             agent_id=str(agent_id),
-            branch_id=str(branch_id)
+            branch_id=str(branch_id),
+            delta=-1,
         )
 
     @patch('api.agent.core.budget.get_redis_client')

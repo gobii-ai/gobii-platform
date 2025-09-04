@@ -152,10 +152,9 @@ class RedisBudgetLeakTests(TestCase):
         # Get the source code of _process_browser_use_task_core
         source = inspect.getsource(tasks_module._process_browser_use_task_core)
         
-        # Check that it includes branch cleanup on failure
+        # Check that it includes decrement of outstanding-children on completion/failure
         has_cleanup = (
-            'remove_branch' in source or
-            'Clean up branch' in source
+            'bump_branch_depth' in source and '-1' in source
         )
         
         self.assertTrue(
