@@ -975,8 +975,8 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                         owner_agent=persistent_agent,
                     )
 
-                    # Trigger the first event processing run
-                    process_agent_events_task.delay(str(persistent_agent.id))
+                    # Trigger the first event processing run after commit
+                    transaction.on_commit(lambda: process_agent_events_task.delay(str(persistent_agent.id)))
                     
                     # Clear session data
                     if 'agent_charter' in request.session:
@@ -1163,8 +1163,8 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
                     owner_agent=self.agent,
                 )
 
-                # Trigger the first event processing run
-                process_agent_events_task.delay(str(self.agent.id))
+                # Trigger the first event processing run after commit
+                transaction.on_commit(lambda: process_agent_events_task.delay(str(self.agent.id)))
 
         except Exception as e:
             messages.error(
@@ -2258,7 +2258,7 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
 
                         # Trigger agent event processing to resume agent with new credentials
                         from api.agent.tasks.process_events import process_agent_events_task
-                        process_agent_events_task.delay(str(agent.pk))
+                        transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
 
                         Analytics.track_event(
                             user_id=self.request.user.id,
@@ -2544,7 +2544,7 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                         
                         # Trigger agent event processing
                         from api.agent.tasks.process_events import process_agent_events_task
-                        process_agent_events_task.delay(str(agent.pk))
+                        transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
                         
                         Analytics.track_event(
                             user_id=self.request.user.id,
