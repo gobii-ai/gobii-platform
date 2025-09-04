@@ -613,6 +613,13 @@ def tasks_view(request):
     # Get tasks for the current context
     with traced("CONSOLE Tasks View") as span:
         if context_type == 'organization':
+            # Ensure the requester is an active member of the organization context
+            if not OrganizationMembership.objects.filter(
+                user=request.user,
+                org_id=context_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists():
+                return HttpResponseForbidden("You do not have access to this organization.")
             # For organization context, show tasks from agents owned by the organization
             # Get BrowserUseAgents that are linked to PersistentAgents in this organization
             persistent_agent_ids = PersistentAgent.objects.filter(
@@ -623,11 +630,16 @@ def tasks_view(request):
                 is_deleted=False
             ).order_by('-created_at')
         else:
-            # For personal context, show user's personal tasks
-            tasks_queryset = BrowserUseAgentTask.objects.filter(
-                user=request.user,
-                is_deleted=False
-            ).order_by('-created_at')
+            # For personal context, show user's personal tasks only
+            # Exclude tasks for org-owned agents; include agent-less tasks
+            tasks_queryset = (
+                BrowserUseAgentTask.objects.filter(
+                    user=request.user,
+                    is_deleted=False
+                )
+                .exclude(agent__persistent_agent__organization__isnull=False)
+                .order_by('-created_at')
+            )
 
         # Handle filtering by status
         status_filter = request.GET.get('status')
@@ -1319,8 +1331,14 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
         messages.success(self.request, "SMS has been enabled for this agent.")
         return redirect("agent_detail", pk=self.agent.pk)
 
-class AgentDetailView(LoginRequiredMixin, DetailView):
-    """Configuration page for a single agent."""
+class AgentDetailView(ConsoleViewMixin, DetailView):
+    """Configuration page for a single agent.
+
+    Uses ConsoleViewMixin to respect the current console context. When in
+    organization context, only agents belonging to that organization are
+    visible. In personal context, only the user's personal agents (no org)
+    are visible.
+    """
     model = PersistentAgent
     template_name = "console/agent_detail.html"
     context_object_name = "agent"
@@ -1328,8 +1346,29 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - get_object")
     def get_queryset(self):
-        # Ensure users can only access their own agents
-        return super().get_queryset().filter(user=self.request.user)
+        """Scope agents to the active console context.
+
+        - Organization context: agents owned by the org, and only if the user
+          is an active member of that organization.
+        - Personal context: user-owned agents without an organization.
+        """
+        qs = super().get_queryset()
+
+        context_type = self.request.session.get('context_type', 'personal')
+        if context_type == 'organization':
+            org_id = self.request.session.get('context_id')
+            # Verify membership; if not a member, return no rows to force 404
+            if not OrganizationMembership.objects.filter(
+                user=self.request.user,
+                org_id=org_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists():
+                return qs.none()
+
+            return qs.filter(organization_id=org_id)
+
+        # Personal context
+        return qs.filter(user=self.request.user, organization__isnull=True)
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - get_context_data")
     def get_context_data(self, **kwargs):
@@ -3357,7 +3396,7 @@ def handle_confirm_code(request, phone_number, verification_code):
     return JsonResponse({'success': False, 'error': "Failed to confirm verification code. Please try again."})
 
 
-class OrganizationListView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class OrganizationListView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     """List organizations the user belongs to."""
 
     waffle_flag = ORGANIZATIONS
@@ -3391,7 +3430,7 @@ class OrganizationListView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
         return context
 
 
-class OrganizationCreateView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class OrganizationCreateView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     """Create a new organization."""
 
     waffle_flag = ORGANIZATIONS
@@ -3421,7 +3460,7 @@ class OrganizationCreateView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
         return render(request, self.template_name, {"form": form})
 
 
-class OrganizationDetailView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     """Display organization details and members."""
 
     waffle_flag = ORGANIZATIONS
@@ -3433,6 +3472,11 @@ class OrganizationDetailView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
             org=self.org, user=request.user, status=OrganizationMembership.OrgStatus.ACTIVE
         ).exists():
             return HttpResponseForbidden()
+        # Set console context to this organization when visiting its page directly
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(self.org.id)
+        request.session['context_name'] = self.org.name
+        request.session.modified = True
         return super().dispatch(request, *args, **kwargs)
 
     @tracer.start_as_current_span("CONSOLE Organization Detail")
@@ -3619,6 +3663,12 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
             ctx.update(extra)
             return render(request, "console/approval_link_issue.html", ctx, status=200)
 
+        # Set console context to the invited organization for continuity
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(invite.org.id)
+        request.session['context_name'] = invite.org.name
+        request.session.modified = True
+
         # Create or reactivate membership
         membership, created = OrganizationMembership.objects.get_or_create(
             org=invite.org,
@@ -3662,6 +3712,12 @@ class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlag
             ctx = {"issue": issue, "context_type": "organization_invite", "action": "reject"}
             ctx.update(extra)
             return render(request, "console/approval_link_issue.html", ctx, status=200)
+
+        # Set console context to the invite's organization for continuity
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(invite.org.id)
+        request.session['context_name'] = invite.org.name
+        request.session.modified = True
 
         if invite.accepted_at is None and invite.revoked_at is None:
             invite.revoked_at = timezone.now()
@@ -3718,6 +3774,11 @@ class OrganizationInviteRevokeOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
     @transaction.atomic
     def post(self, request, org_id: str, token: str):
         org = get_object_or_404(Organization, id=org_id)
+        # Set context to this organization
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         if not self._require_org_admin(request, org):
             return HttpResponseForbidden()
 
@@ -3740,6 +3801,11 @@ class OrganizationInviteResendOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
     @transaction.atomic
     def post(self, request, org_id: str, token: str):
         org = get_object_or_404(Organization, id=org_id)
+        # Set context to this organization
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         if not self._require_org_admin(request, org):
             return HttpResponseForbidden()
 
@@ -3790,6 +3856,11 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
     @transaction.atomic
     def post(self, request, org_id: str, user_id: int):
         org = get_object_or_404(Organization, id=org_id)
+        # Set context to this organization
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         acting_membership = self._require_org_admin(request, org)
         if not acting_membership:
             return HttpResponseForbidden()
@@ -3842,6 +3913,11 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
     @transaction.atomic
     def post(self, request, org_id: str):
         org = get_object_or_404(Organization, id=org_id)
+        # Ensure context is set to this org for the operation
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         try:
             membership = OrganizationMembership.objects.get(org=org, user=request.user)
         except OrganizationMembership.DoesNotExist:
@@ -3864,6 +3940,11 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
 
         membership.status = OrganizationMembership.OrgStatus.REMOVED
         membership.save(update_fields=["status"])
+        # After leaving, reset context back to personal
+        request.session['context_type'] = 'personal'
+        request.session['context_id'] = str(request.user.id)
+        request.session['context_name'] = request.user.get_full_name() or request.user.username
+        request.session.modified = True
         messages.success(request, f"You left {org.name}.")
         return redirect("organizations")
 
@@ -3877,6 +3958,11 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
     @transaction.atomic
     def post(self, request, org_id: str, user_id: int):
         org = get_object_or_404(Organization, id=org_id)
+        # Set context to this organization
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         acting_membership = self._require_org_admin(request, org)
         if not acting_membership:
             return HttpResponseForbidden()
