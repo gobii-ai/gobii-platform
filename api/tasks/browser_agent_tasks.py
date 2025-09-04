@@ -90,7 +90,7 @@ CHROME_PROFILE_PRUNE_DIRS = [
     "Safe Browsing",
 ]
 
-CHROME_PROFILE_PRUNE_FILES = ["BrowserMetrics-spare.pma"]
+CHROME_PROFILE_PRUNE_FILES = ["BrowserMetrics-spare.pma", "SingletonCookie", "SingletonLock", "SingletonSocket"]
 
 # Reset profile if bigger than this after pruning (in bytes)
 CHROME_PROFILE_MAX_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
