@@ -616,6 +616,17 @@ async def _run_agent(
 
             agent = BUAgent(**agent_kwargs)
             history = await agent.run()
+
+            try:
+                span = trace.get_current_span()
+                if history.usage:
+                    span.set_attribute("llm.usage.prompt_tokens", history.usage.total_prompt_tokens)
+                    span.set_attribute("llm.usage.completion_tokens", history.usage.total_completion_tokens)
+                    span.set_attribute("llm.usage.total_tokens", history.usage.total_tokens)
+                    span.set_attribute("llm.usage.cached_tokens", history.usage.total_prompt_cached_tokens)
+            except Exception as e:
+                logger.warning("Usage logging failed with exception", exc_info=e)
+
             return history.final_result()
 
         finally:
