@@ -128,9 +128,25 @@ function contextSwitcher() {
   return {
     open: false,
     currentContext: {
-      type: localStorage.getItem('contextType') || 'personal',
-      id: localStorage.getItem('contextId') || '{{ user.id }}',
-      name: localStorage.getItem('contextName') || '{{ user.get_full_name|default:user.username }}'
+      type: localStorage.getItem('contextType') || '{{ current_context.type|default:"personal" }}',
+      id: localStorage.getItem('contextId') || '{{ current_context.id|default:user.id }}',
+      name: localStorage.getItem('contextName') || '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}'
+    },
+
+    init() {
+      // Sync localStorage with server session context if they differ
+      const serverType = '{{ current_context.type|default:"personal" }}';
+      const serverId = '{{ current_context.id|default:user.id }}';
+      const serverName = '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}';
+
+      const lsType = localStorage.getItem('contextType');
+      const lsId = localStorage.getItem('contextId');
+      if (!lsType || lsType !== serverType || lsId !== serverId) {
+        localStorage.setItem('contextType', serverType);
+        localStorage.setItem('contextId', serverId);
+        localStorage.setItem('contextName', serverName);
+        this.currentContext = { type: serverType, id: serverId, name: serverName };
+      }
     },
     
     async switchContext(type, id, name) {
