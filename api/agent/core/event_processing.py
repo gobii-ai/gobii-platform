@@ -40,6 +40,7 @@ from .budget import (
 )
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from tasks.services import TaskCreditService
+from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps
 from .llm_config import get_llm_config, get_llm_config_with_failover, REFERENCE_TOKENIZER_MODEL
 from .promptree import Prompt
@@ -518,7 +519,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     )
                     available = None
 
-                if available is not None and available <= 0:
+                if available is not None and available != TASKS_UNLIMITED and available <= 0:
                     msg = f"Skipped processing due to insufficient credits (proprietary mode)."
                     logger.warning(
                         "Persistent agent %s not processed – user %s has no remaining task credits.",

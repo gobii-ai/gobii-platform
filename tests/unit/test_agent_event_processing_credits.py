@@ -12,6 +12,7 @@ from django.contrib.auth import get_user_model
 from unittest.mock import patch
 
 import uuid
+from util.constants.task_constants import TASKS_UNLIMITED
 
 
 class _DummySpan:
@@ -126,6 +127,27 @@ class PersistentAgentCreditGateTests(TestCase):
             loop_mock.assert_called()
 
         # No credit_insufficient note expected
+        self.assertFalse(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                notes__icontains="credit_insufficient",
+            ).exists()
+        )
+
+    def test_proprietary_mode_unlimited_allows_processing(self):
+        # In proprietary mode, if availability is unlimited (-1), we should proceed
+        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), patch(
+            "api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available",
+            return_value=TASKS_UNLIMITED,
+        ), patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+            from api.agent.core.event_processing import _process_agent_events_locked
+
+            _process_agent_events_locked(self.agent.id, _DummySpan())
+
+            loop_mock.assert_called()
+        
+        # Ensure no credit_insufficient note was written
         self.assertFalse(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,
