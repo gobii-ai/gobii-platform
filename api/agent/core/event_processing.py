@@ -40,6 +40,7 @@ from .budget import (
 )
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from tasks.services import TaskCreditService
+from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps
 from .llm_config import get_llm_config, get_llm_config_with_failover, REFERENCE_TOKENIZER_MODEL
 from .promptree import Prompt
@@ -517,61 +518,61 @@ def process_agent_events(
 
 def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) -> None:
     """Core event processing logic, called while holding the distributed lock."""
-    # Check and consume task credit before processing events
+    # Exit early in proprietary mode if the agent's owner has no credits
     try:
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
-        user = agent.user
-        
-        if user:
-            # TODO/NOTE: If re-enabled, make sure organizations are accounted for
-            # TEMPORARILY DISABLED: Task credit consumption for persistent agent event processing
-            # Use consolidated credit checking and consumption logic inside a DB transaction
-            # with transaction.atomic():
-            #     result = TaskCreditService.check_and_consume_credit(user)
 
-            #     if not result['success']:
-            #         logger.warning(
-            #             "Persistent agent %s triggered but user %s has insufficient credits: %s",
-            #             persistent_agent_id,
-            #             user.id,
-            #             result['error_message'],
-            #         )
+        if settings.GOBII_PROPRIETARY_MODE:
+            owner_user = getattr(agent, "user", None)
+            if owner_user is not None:
+                try:
+                    available = TaskCreditService.get_user_task_credits_available(owner_user)
+                except Exception as e:
+                    # Defensive: if availability calc fails, log and proceed (do not block agent)
+                    logger.error(
+                        "Credit availability check failed for agent %s (user %s): %s",
+                        persistent_agent_id,
+                        owner_user.id,
+                        str(e),
+                    )
+                    available = None
 
-            #         # Record the credit-failure system step atomically
-            #         step = PersistentAgentStep.objects.create(
-            #             agent=agent,
-            #             description=f"Skipped processing due to insufficient credits: {result['error_message']}",
-            #         )
-            #         PersistentAgentSystemStep.objects.create(
-            #             step=step,
-            #             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-            #             notes="Credit insufficient",
-            #         )
+                if available is not None and available != TASKS_UNLIMITED and available <= 0:
+                    msg = f"Skipped processing due to insufficient credits (proprietary mode)."
+                    logger.warning(
+                        "Persistent agent %s not processed – user %s has no remaining task credits.",
+                        persistent_agent_id,
+                        owner_user.id,
+                    )
 
-            #         span.add_event("Agent processing skipped - insufficient credits")
-            #         span.set_attribute("credit_check.success", False)
-            #         span.set_attribute("credit_check.error", result["error_message"])
-            #         return
+                    step = PersistentAgentStep.objects.create(
+                        agent=agent,
+                        description=msg,
+                    )
+                    PersistentAgentSystemStep.objects.create(
+                        step=step,
+                        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                        notes="credit_insufficient",
+                    )
 
-            logger.info(
-                "Processing persistent agent %s (user %s) - credit check temporarily disabled",
-                persistent_agent_id,
-                user.id,
-            )
-            span.add_event("Task credit check temporarily disabled")
-            span.set_attribute("credit_check.disabled", True)
+                    span.add_event("Agent processing skipped - insufficient credits")
+                    span.set_attribute("credit_check.available", int(available))
+                    span.set_attribute("credit_check.proprietary_mode", True)
+                    return
+            else:
+                # Agents without a linked user (system/automation) are not gated
+                span.add_event("Agent has no linked user; skipping credit gate")
         else:
-            # For agents without users (e.g., system agents), skip credit check
-            logger.info(f"Processing persistent agent {persistent_agent_id} without user - skipping credit check")
-            span.add_event('Agent processing without credit check - no user')
-            
+            # Non-proprietary mode: do not gate on credits
+            span.add_event("Proprietary mode disabled; skipping credit gate")
+
     except PersistentAgent.DoesNotExist:
         logger.error(f"PersistentAgent {persistent_agent_id} does not exist")
         span.add_event('Agent not found')
         return
     except Exception as e:
-        logger.error(f"Error during credit consumption for agent {persistent_agent_id}: {str(e)}")
-        span.add_event('Credit consumption error')
+        logger.error(f"Error during credit gate for agent {persistent_agent_id}: {str(e)}")
+        span.add_event('Credit gate error')
         span.set_attribute('credit_check.error', str(e))
         return
 
