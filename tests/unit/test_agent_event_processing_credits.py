@@ -92,7 +92,10 @@ class PersistentAgentCreditGateTests(TestCase):
         # Give at least one available credit
         self._grant_credits(credits=1, used=0)
 
-        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
+             patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+            # Return empty dict for token usage
+            loop_mock.return_value = {}
             from api.agent.core.event_processing import _process_agent_events_locked
 
             _process_agent_events_locked(self.agent.id, _DummySpan())
@@ -119,7 +122,10 @@ class PersistentAgentCreditGateTests(TestCase):
         # Even with no available credits, in non-proprietary mode we proceed
         self._grant_credits(credits=100, used=100)
 
-        with patch("config.settings.GOBII_PROPRIETARY_MODE", False), patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+        with patch("config.settings.GOBII_PROPRIETARY_MODE", False), \
+             patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+            # Return empty dict for token usage
+            loop_mock.return_value = {}
             from api.agent.core.event_processing import _process_agent_events_locked
 
             _process_agent_events_locked(self.agent.id, _DummySpan())
@@ -137,10 +143,11 @@ class PersistentAgentCreditGateTests(TestCase):
 
     def test_proprietary_mode_unlimited_allows_processing(self):
         # In proprietary mode, if availability is unlimited (-1), we should proceed
-        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), patch(
-            "api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available",
-            return_value=TASKS_UNLIMITED,
-        ), patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
+             patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=TASKS_UNLIMITED), \
+             patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+            # Return empty dict for token usage
+            loop_mock.return_value = {}
             from api.agent.core.event_processing import _process_agent_events_locked
 
             _process_agent_events_locked(self.agent.id, _DummySpan())

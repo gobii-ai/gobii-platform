@@ -292,6 +292,107 @@ def _completion_with_backoff(**kwargs):
 
 
 # --------------------------------------------------------------------------- #
+#  Credit gating utilities
+# --------------------------------------------------------------------------- #
+def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -> bool:
+    """Ensure the agent's owner has a task credit and consume it just-in-time.
+
+    Returns True if execution may proceed; False if insufficient or consumption fails.
+    In failure cases, this function records a step + system step and logging.
+    """
+    if not settings.GOBII_PROPRIETARY_MODE or not getattr(agent, "user_id", None):
+        return True
+
+    owner_user = agent.user
+    try:
+        available = TaskCreditService.get_user_task_credits_available(owner_user)
+    except Exception as e:
+        logger.error(
+            "Credit availability check (in-loop) failed for agent %s (user %s): %s",
+            agent.id,
+            owner_user.id,
+            str(e),
+        )
+        available = None
+
+    if span is not None:
+        try:
+            span.set_attribute(
+                "credit_check.available_in_loop",
+                int(available) if available is not None else -2,
+            )
+        except Exception:
+            pass
+
+    if available is not None and available != TASKS_UNLIMITED and available <= 0:
+        msg_desc = (
+            f"Skipped tool '{tool_name}' due to insufficient credits mid-loop."
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description=msg_desc,
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes="credit_insufficient_mid_loop",
+        )
+        if span is not None:
+            try:
+                span.add_event("Tool skipped - insufficient credits mid-loop")
+            except Exception:
+                pass
+        logger.warning(
+            "Agent %s insufficient credits mid-loop; halting further processing.",
+            agent.id,
+        )
+        return False
+
+    try:
+        with transaction.atomic():
+            consumed = TaskCreditService.check_and_consume_credit(owner_user)
+    except Exception as e:
+        logger.error(
+            "Credit consumption (in-loop) failed for agent %s (user %s): %s",
+            agent.id,
+            owner_user.id,
+            str(e),
+        )
+        consumed = None
+
+    if span is not None:
+        try:
+            span.set_attribute("credit_check.consumed_in_loop", bool(consumed['success']))
+        except Exception:
+            pass
+    if not consumed['success'] or consumed['success'] is False:
+        msg_desc = (
+            f"Skipped tool '{tool_name}' due to credit consumption failure mid-loop."
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description=msg_desc,
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes="credit_consumption_failure_mid_loop",
+        )
+        if span is not None:
+            try:
+                span.add_event("Tool skipped - credit consumption failure mid-loop")
+            except Exception:
+                pass
+        logger.warning(
+            "Agent %s credit consumption failed mid-loop; halting further processing.",
+            agent.id,
+        )
+        return False
+
+    return True
+
+
+# --------------------------------------------------------------------------- #
 #  Helper dataclass returned by collect_event_window for easier testing
 # --------------------------------------------------------------------------- #
 @dataclass(slots=True)
@@ -537,6 +638,9 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     )
                     available = None
 
+                span.set_attribute("credit_check.available", int(available) if available is not None else 0)
+                span.set_attribute("credit_check.proprietary_mode", True)
+
                 if available is not None and available != TASKS_UNLIMITED and available <= 0:
                     msg = f"Skipped processing due to insufficient credits (proprietary mode)."
                     logger.warning(
@@ -556,8 +660,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     )
 
                     span.add_event("Agent processing skipped - insufficient credits")
-                    span.set_attribute("credit_check.available", int(available))
-                    span.set_attribute("credit_check.proprietary_mode", True)
+                    span.set_attribute("credit_check.sufficient", False)
                     return
             else:
                 # Agents without a linked user (system/automation) are not gated
@@ -619,7 +722,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         if isinstance(provider, str):
             sys_step.step.llm_provider = provider
         
-    close_old_connections()
+    # close_old_connections()
     try:
         sys_step.step.save(update_fields=[
             "prompt_tokens", "completion_tokens", "total_tokens", 
@@ -767,6 +870,11 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     tool_name = call.function.name
                     tool_span.set_attribute("tool.name", tool_name)
                     logger.info("Agent %s calling tool: %s", agent.id, tool_name)
+
+                    # Ensure credit is available and consume just-in-time
+                    if not _ensure_credit_for_tool(agent, tool_name, span=tool_span):
+                        # Credit insufficient or consumption failed; halt processing
+                        return cumulative_token_usage
 
                     if tool_name == "sleep_until_next_trigger":
                         # Create sleep step with token usage if available
