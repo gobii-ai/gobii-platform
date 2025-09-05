@@ -57,4 +57,7 @@ class SwitchContextView(LoginRequiredMixin, View):
             })
             
         except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
+            # Consider logging the exception here for debugging, e.g.:
+            # import logging
+            # logging.exception("Error switching context")
+            return JsonResponse({'error': 'An unexpected error occurred.'}, status=500)
