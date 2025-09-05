@@ -30,7 +30,7 @@ class BrowserTaskDbConnectionTests(TestCase):
         with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
              patch("api.tasks.browser_agent_tasks.Controller") as MockController, \
              patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
-             patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value={"ok": True}), \
+             patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value=({"ok": True}, None)), \
              patch("api.tasks.browser_agent_tasks.close_old_connections") as mock_close:
 
             # Import inside the context to ensure patches are in effect
@@ -58,7 +58,7 @@ class BrowserTaskDbConnectionTests(TestCase):
         with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
              patch("api.tasks.browser_agent_tasks.Controller") as MockController, \
              patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
-             patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value={"ok": True}), \
+             patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value=({"ok": True}, None)), \
              patch("api.tasks.browser_agent_tasks.close_old_connections") as mock_close, \
              patch("api.tasks.browser_agent_tasks.BrowserUseAgentTaskStep.objects.create") as mock_create:
 
@@ -76,4 +76,3 @@ class BrowserTaskDbConnectionTests(TestCase):
         steps = BrowserUseAgentTaskStep.objects.filter(task=task, step_number=1)
         self.assertEqual(steps.count(), 1)
         self.assertTrue(steps.first().is_result)
-
