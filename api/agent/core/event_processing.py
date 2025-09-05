@@ -349,7 +349,8 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         return False
 
     try:
-        consumed = TaskCreditService.check_and_consume_credit(owner_user)
+        with transaction.atomic():
+            consumed = TaskCreditService.check_and_consume_credit(owner_user)
     except Exception as e:
         logger.error(
             "Credit consumption (in-loop) failed for agent %s (user %s): %s",
