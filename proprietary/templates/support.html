@@ -48,7 +48,7 @@
             </div>
           {% else %}
             <h3 class="text-lg font-medium text-gray-900 mb-4">Send us a message</h3>
-            <form class="space-y-4" hx-post="{% url 'pages:support' %}" hx-swap="innerHTML" hx-target="#form-response">
+            <form class="space-y-4" hx-post="{% url 'proprietary:support' %}" hx-swap="innerHTML" hx-target="#form-response">
               <div>
                 <label for="name" class="sr-only">Name</label>
                 <input type="text" id="name" name="name" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Name" required>
@@ -134,4 +134,3 @@
 </script>
 
 {% endblock %}
-
