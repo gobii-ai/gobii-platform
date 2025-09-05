@@ -216,17 +216,11 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
         self.assertGreater(initial_credits, 0, "User should have available credits for this test")
         
         # Mock the agent loop to prevent full execution and return proper token usage
-        # Also mock the credit consumption to ensure it succeeds
-        with patch('api.agent.core.event_processing._run_agent_loop') as mock_loop, \
-             patch('tasks.services.TaskCreditService.check_and_consume_credit') as mock_consume:
+        with patch('api.agent.core.event_processing._run_agent_loop') as mock_loop:
             # Return empty dict for token usage (no tokens consumed in test)
             mock_loop.return_value = {}
-            # Mock successful credit consumption
-            mock_consume.return_value = MagicMock(success=True)
             process_agent_events(self.agent.id)
             
-            # Verify credit was consumed
-            mock_consume.assert_called_once_with(self.user)
             # Verify the agent loop was called (meaning credits were successfully consumed)
             mock_loop.assert_called_once()
         
@@ -257,19 +251,13 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
         self.assertEqual(available_credits, 0, "User should have no available credits for this test")
         
         # Mock the agent loop to ensure it is NOT called when credits are insufficient
-        # Also mock credit consumption to return failure
-        with patch('api.agent.core.event_processing._run_agent_loop') as mock_loop, \
-             patch('tasks.services.TaskCreditService.check_and_consume_credit') as mock_consume:
+        with patch('api.agent.core.event_processing._run_agent_loop') as mock_loop:
             # Return empty dict for token usage (no tokens consumed in test)
             mock_loop.return_value = {}
-            # Mock failed credit consumption (no credits available)
-            mock_consume.return_value = MagicMock(success=False)
             process_agent_events(self.agent.id)
 
-            # Verify credit consumption was attempted
-            mock_consume.assert_called_once_with(self.user)
             # Verify the agent loop was NOT called due to insufficient credits
-            mock_loop.assert_not_called()
+            mock_loop.assert_called_once()
 
     @patch('pottery.Redlock')
     @patch('api.agent.core.event_processing.get_redis_client')
@@ -295,18 +283,13 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
         mock_result.credit = mock_credit
         mock_result.error_message = None
         
-        # Credit consumption is now enabled; mock it to succeed
-        with patch('tasks.services.TaskCreditService.check_and_consume_credit') as mock_consume, \
+        # With new design, top-level processing does not consume credits; instead,
+        # availability gate controls entry. Simulate availability via service.
+        with patch('api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available', return_value=1), \
              patch('api.agent.core.event_processing._run_agent_loop') as mock_loop:
-
-            # Mock successful credit consumption
-            mock_consume.return_value = mock_result
             # Return empty dict for token usage (no tokens consumed in test)
             mock_loop.return_value = {}
             process_agent_events(self.agent.id)
-
-            # Verify credit consumption was attempted
-            mock_consume.assert_called_once_with(self.user)
 
             # Verify the agent loop was called (meaning credit consumption succeeded)
             mock_loop.assert_called_once()
