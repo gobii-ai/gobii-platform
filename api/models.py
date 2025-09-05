@@ -456,6 +456,39 @@ class BrowserUseAgentTask(models.Model):
         default=StatusChoices.PENDING
     )
     error_message = models.TextField(null=True, blank=True)
+    # Token usage tracking fields
+    prompt_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of tokens used in the prompt for this step's LLM call",
+    )
+    completion_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of tokens generated in the completion for this step's LLM call",
+    )
+    total_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Total tokens used (prompt + completion) for this step's LLM call",
+    )
+    cached_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of cached tokens used (if provider supports caching)",
+    )
+    llm_model = models.CharField(
+        max_length=256,
+        null=True,
+        blank=True,
+        help_text="LLM model used for this step (e.g., 'claude-3-opus-20240229')",
+    )
+    llm_provider = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="LLM provider used for this step (e.g., 'anthropic', 'openai')",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

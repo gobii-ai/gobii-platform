@@ -347,7 +347,7 @@ async def _run_agent(
     output_schema: Optional[dict] = None,
     browser_use_agent_id: Optional[str] = None,
     persistent_agent_id: Optional[str] = None,
-) -> Any:
+) -> Tuple[Optional[str], Optional[dict]]:
     """Execute the Browser‑Use agent for a single provider."""
     if baggage:
         baggage.set_baggage("task.id", str(task_id))
@@ -616,7 +616,35 @@ async def _run_agent(
 
             agent = BUAgent(**agent_kwargs)
             history = await agent.run()
-            return history.final_result()
+
+            # Extract usage details (if available) and annotate tracing
+            token_usage = None
+            try:
+                token_usage = {
+                    "model": llm_params.get("model"),
+                    "provider": provider
+                }
+
+                if getattr(history, "usage", None):
+                    token_usage.update({
+                        "prompt_tokens": getattr(history.usage, "total_prompt_tokens", None),
+                        "completion_tokens": getattr(history.usage, "total_completion_tokens", None),
+                        "total_tokens": getattr(history.usage, "total_tokens", None),
+                        "cached_tokens": getattr(history.usage, "total_prompt_cached_tokens", None),
+                    })
+                    # Add to span for observability
+                    agent_span.set_attributes({
+                        "llm.model": token_usage["model"],
+                        "llm.provider": token_usage["provider"],
+                        "llm.usage.prompt_tokens": token_usage["prompt_tokens"],
+                        "llm.usage.completion_tokens": token_usage["completion_tokens"],
+                        "llm.usage.total_tokens": token_usage["total_tokens"],
+                        "llm.usage.cached_tokens": token_usage["cached_tokens"],
+                    })
+            except Exception as e:
+                logger.warning("Usage logging failed with exception", exc_info=e)
+
+            return history.final_result(), token_usage
 
         finally:
             await _safe_aclose(browser_session, "stop")
@@ -807,7 +835,7 @@ def _execute_agent_with_failover(
     output_schema: Optional[dict] = None,
     browser_use_agent_id: Optional[str] = None,
     persistent_agent_id: Optional[str] = None,
-):
+) -> Tuple[Optional[str], Optional[dict]]:
     """
     Execute the agent with tiered, weighted load-balancing and fail-over.
 
@@ -889,7 +917,7 @@ def _execute_agent_with_failover(
                 task_id,
             )
             try:
-                result = asyncio.run(
+                result, token_usage = asyncio.run(
                     _run_agent(
                         task_input=task_input,
                         llm_api_key=llm_api_key,
@@ -913,7 +941,7 @@ def _execute_agent_with_failover(
                     task_id,
                     tier_idx,
                 )
-                return result
+                return result, token_usage
 
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
@@ -1065,7 +1093,7 @@ def _process_browser_use_task_core(
                 logger.warning("Failed to register custom actions for task %s: %s", task_obj.id, str(exc))
 
             with traced("Execute Agent") as agent_span:
-                raw_result = _execute_agent_with_failover(
+                raw_result, token_usage = _execute_agent_with_failover(
                     task_input=task_obj.prompt,
                     task_id=str(task_obj.id),
                     proxy_server=proxy_server,
@@ -1108,6 +1136,18 @@ def _process_browser_use_task_core(
                             "result_value": safe_result,
                         },
                     )
+
+                # Record LLM usage and metadata if available
+                if token_usage:
+                    try:
+                        task_obj.prompt_tokens = token_usage.get("prompt_tokens")
+                        task_obj.completion_tokens = token_usage.get("completion_tokens")
+                        task_obj.total_tokens = token_usage.get("total_tokens")
+                        task_obj.cached_tokens = token_usage.get("cached_tokens")
+                        task_obj.llm_model = token_usage.get("model")
+                        task_obj.llm_provider = token_usage.get("provider")
+                    except Exception:
+                        logger.warning("Failed to assign usage metadata to task %s", task_obj.id, exc_info=True)
 
                 task_obj.status = BrowserUseAgentTask.StatusChoices.COMPLETED
                 task_obj.error_message = None
@@ -1172,10 +1212,30 @@ def _process_browser_use_task_core(
             close_old_connections()
             task_obj.updated_at = timezone.now()
             try:
-                task_obj.save(update_fields=["status", "error_message", "updated_at"])
+                task_obj.save(update_fields=[
+                    "status",
+                    "error_message",
+                    "updated_at",
+                    "prompt_tokens",
+                    "completion_tokens",
+                    "total_tokens",
+                    "cached_tokens",
+                    "llm_model",
+                    "llm_provider",
+                ])
             except OperationalError:
                 close_old_connections()
-                task_obj.save(update_fields=["status", "error_message", "updated_at"])
+                task_obj.save(update_fields=[
+                    "status",
+                    "error_message",
+                    "updated_at",
+                    "prompt_tokens",
+                    "completion_tokens",
+                    "total_tokens",
+                    "cached_tokens",
+                    "llm_model",
+                    "llm_provider",
+                ])
 
             # Trigger agent event processing if this task belongs to a persistent agent
             if task_obj.agent and hasattr(task_obj.agent, 'persistent_agent'):
