@@ -647,7 +647,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         if isinstance(provider, str):
             sys_step.step.llm_provider = provider
         
-    close_old_connections()
+    # close_old_connections()
     try:
         sys_step.step.save(update_fields=[
             "prompt_tokens", "completion_tokens", "total_tokens", 
