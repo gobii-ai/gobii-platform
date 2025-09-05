@@ -215,8 +215,10 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
         initial_credits = sum(tc.remaining for tc in TaskCredit.objects.filter(user=self.user))
         self.assertGreater(initial_credits, 0, "User should have available credits for this test")
         
-        # Mock the agent loop to prevent full execution
+        # Mock the agent loop to prevent full execution and return proper token usage
         with patch('api.agent.core.event_processing._run_agent_loop') as mock_loop:
+            # Return empty dict for token usage (no tokens consumed in test)
+            mock_loop.return_value = {}
             process_agent_events(self.agent.id)
             
             # Verify the agent loop was called (meaning credits were successfully consumed)
@@ -250,6 +252,8 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
         
         # Mock the agent loop to ensure it IS called even without credits
         with patch('api.agent.core.event_processing._run_agent_loop') as mock_loop:
+            # Return empty dict for token usage (no tokens consumed in test)
+            mock_loop.return_value = {}
             process_agent_events(self.agent.id)
 
             # Verify the agent loop was called despite having no credits
@@ -284,6 +288,8 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
         with patch('tasks.services.TaskCreditService.check_and_consume_credit') as mock_consume, \
              patch('api.agent.core.event_processing._run_agent_loop') as mock_loop:
 
+            # Return empty dict for token usage (no tokens consumed in test)
+            mock_loop.return_value = {}
             process_agent_events(self.agent.id)
 
             # Verify credit consumption was attempted
@@ -317,6 +323,8 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
         
         # Mock the agent loop to ensure it's not called
         with patch('api.agent.core.event_processing._run_agent_loop') as mock_loop:
+            # Return empty dict for token usage (no tokens consumed in test)
+            mock_loop.return_value = {}
             # This should not raise an exception, just return early
             process_agent_events(fake_agent_id)
             
