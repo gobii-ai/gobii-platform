@@ -537,6 +537,9 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     )
                     available = None
 
+                span.set_attribute("credit_check.available", int(available))
+                span.set_attribute("credit_check.proprietary_mode", True)
+
                 if available is not None and available != TASKS_UNLIMITED and available <= 0:
                     msg = f"Skipped processing due to insufficient credits (proprietary mode)."
                     logger.warning(
@@ -556,9 +559,34 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     )
 
                     span.add_event("Agent processing skipped - insufficient credits")
-                    span.set_attribute("credit_check.available", int(available))
-                    span.set_attribute("credit_check.proprietary_mode", True)
+                    span.set_attribute("credit_check.sufficient", False)
                     return
+                else:
+                    # Consume credit for this processing run
+                    consumed = TaskCreditService.check_and_consume_credit(owner_user)
+
+                    if hasattr(consumed, "success") and consumed.success:
+                        span.set_attribute("credit_check.sufficient", True)
+                    else:
+                        msg = f"Skipped processing due to failure to consume credit (proprietary mode)."
+                        logger.warning(
+                            "Persistent agent %s not processed – user %s credit consumption failed.",
+                            persistent_agent_id,
+                            owner_user.id,
+                        )
+                        step = PersistentAgentStep.objects.create(
+                            agent=agent,
+                            description=msg,
+                        )
+                        PersistentAgentSystemStep.objects.create(
+                            step=step,
+                            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                            notes="credit_consumption_failure",
+                        )
+
+                        span.add_event("Agent processing skipped - credit consumption failed")
+                        span.set_attribute("credit_check.sufficient", False)
+                        return
             else:
                 # Agents without a linked user (system/automation) are not gated
                 span.add_event("Agent has no linked user; skipping credit gate")
