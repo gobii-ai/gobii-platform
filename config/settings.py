@@ -4,6 +4,7 @@ Gobii settings – dev profile
 
 from pathlib import Path
 import environ, os
+from decimal import Decimal
 from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 
@@ -515,6 +516,11 @@ STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID = env("STRIPE_STARTUP_ADDITIONAL_TASK_PR
 STRIPE_STARTUP_PRODUCT_ID = env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup")
 STRIPE_TASK_METER_ID = env("STRIPE_TASK_METER_ID", default="meter_dummy_task")
 STRIPE_TASK_METER_EVENT_NAME = env("STRIPE_TASK_METER_EVENT_NAME", default="task")
+
+# Credits configuration
+# How many credits a single task consumes from plan credits.
+# Keep as Decimal to support fractional credits (e.g., 0.1).
+CREDITS_PER_TASK = Decimal(env("CREDITS_PER_TASK", default="1"))
 
 # Analytics
 SEGMENT_WRITE_KEY = env("SEGMENT_WRITE_KEY", default="")

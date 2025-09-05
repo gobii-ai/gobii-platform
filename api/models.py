@@ -180,8 +180,9 @@ class TaskCredit(models.Model):
         blank=True,
         help_text="Exactly one of user or organization must be set."
     )
-    credits = models.PositiveIntegerField()
-    credits_used = models.PositiveIntegerField(default=0)
+    # Support fractional credits by using DecimalField
+    credits = models.DecimalField(max_digits=12, decimal_places=3)
+    credits_used = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     granted_date = models.DateTimeField()
     expiration_date = models.DateTimeField()
     stripe_invoice_id = models.CharField(max_length=128, null=True, blank=True)
@@ -198,8 +199,8 @@ class TaskCredit(models.Model):
 
     available_credits = models.GeneratedField(
         expression=models.F('credits') - models.F('credits_used'),
-        output_field=models.IntegerField(),
-        db_persist=True,  # Set to True for stored generated columns
+        output_field=models.DecimalField(max_digits=12, decimal_places=3),
+        db_persist=True,  # Stored generated column
     )
 
     grant_month = models.GeneratedField(
@@ -258,7 +259,7 @@ class TaskCredit(models.Model):
         ]
 
     @property
-    def remaining(self) -> int:
+    def remaining(self):
         return (self.credits or 0) - (self.credits_used or 0)
 
 class BrowserUseAgent(models.Model):
@@ -472,6 +473,14 @@ class BrowserUseAgentTask(models.Model):
         blank=True,
         help_text="Total tokens used (prompt + completion) for this step's LLM call",
     )
+    # Credits charged for this task (for audit). If not provided, defaults to configured per‑task cost.
+    credits_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Credits charged for this task; defaults to configured per‑task cost.",
+    )
     cached_tokens = models.IntegerField(
         null=True,
         blank=True,
@@ -567,14 +576,20 @@ class BrowserUseAgentTask(models.Model):
                         owner = pa.organization
 
                 # Use consolidated credit checking and consumption logic (owner-aware)
-                result = TaskCreditService.check_and_consume_credit_for_owner(owner)
+                # Determine amount to consume; persist it on the task for auditability
+                from django.conf import settings as dj_settings
+                amount = self.credits_cost if self.credits_cost is not None else dj_settings.CREDITS_PER_TASK
+                result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
                 
                 if not result['success']:
                     raise ValidationError({"quota": result['error_message']})
                 
                 # Associate the consumed credit with this task
                 self.task_credit = result['credit']
-                
+                # Persist the actual credits charged for this task
+                if self.credits_cost is None:
+                    self.credits_cost = amount
+
                 super().save(*args, **kwargs)
         else:
             super().save(*args, **kwargs)
