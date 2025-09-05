@@ -1525,6 +1525,12 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "DO NOT CONTACT THE USER REDUNDANTLY OR PERFORM REPEATED, REDUNDANT WORK. PAY ATTENTION TO EVENT AND TOOL CALL HISTORY TO AVOID REPETITION. "
         "DO NOT SPAM THE USER. "
         "DO NOT RESPOND TO THE SAME MESSAGE MULTIPLE TIMES. "
+        
+        "When you receive an email, check if there's a 'recipients' component showing additional To/CC recipients not in your allowed contacts. "
+        "If present, consider offering to add those recipients to your allowed contacts list so you can include them in future communications. "
+        "This is especially important for group email threads where you may need to reply-all. "
+        "Use the 'request_contact_permission' tool to create invitations for them. "
+        "Be selective - only suggest adding recipients who seem relevant to ongoing collaboration, not one-time recipients. "
 
         "ONLY CALL SLEEP_UNTIL_NEXT_TRIGGER IF YOU ARE TRULY FINISHED WORKING FOR THIS CYCLE. "
         "DO NOT FORGET TO CALL update_schedule TO UPDATE YOUR SCHEDULE IF YOU HAVE A SCHEDULE OR NEED TO CONTINUE DOING MORE WORK LATER. "
@@ -1704,6 +1710,69 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             if subject:
                 components["subject"] = subject
 
+            # Extract To and CC recipients from raw_payload for inbound emails
+            if not m.is_outbound and isinstance(m.raw_payload, dict):
+                # Build a set of already allowed email addresses for efficient lookup
+                from api.models import CommsAllowlistEntry, UserPhoneNumber
+                
+                allowed_emails = set()
+                
+                # Add agent's own endpoints
+                agent_endpoints = PersistentAgentCommsEndpoint.objects.filter(
+                    owner_agent=agent, channel=CommsChannel.EMAIL
+                )
+                for ep in agent_endpoints:
+                    allowed_emails.add(ep.address.lower())
+                
+                # Add agent creator's email
+                if agent.user and agent.user.email:
+                    allowed_emails.add(agent.user.email.lower())
+                
+                # Add explicitly allowed contacts
+                allowed_contacts = CommsAllowlistEntry.objects.filter(
+                    agent=agent,
+                    channel=CommsChannel.EMAIL,
+                    is_active=True
+                )
+                for contact in allowed_contacts:
+                    allowed_emails.add(contact.address.lower())
+                
+                # Extract To recipients
+                to_full = m.raw_payload.get("ToFull", [])
+                cc_full = m.raw_payload.get("CcFull", [])
+                
+                additional_recipients = []
+                
+                # Process To recipients (excluding already allowed contacts)
+                if isinstance(to_full, list):
+                    for recipient in to_full:
+                        if isinstance(recipient, dict):
+                            email = recipient.get("Email", "").strip()
+                            name = recipient.get("Name", "").strip()
+                            # Exclude if already allowed
+                            if email and email.lower() not in allowed_emails:
+                                if name:
+                                    additional_recipients.append(f"To: {name} <{email}>")
+                                else:
+                                    additional_recipients.append(f"To: {email}")
+                
+                # Process CC recipients (excluding already allowed contacts)
+                if isinstance(cc_full, list):
+                    for recipient in cc_full:
+                        if isinstance(recipient, dict):
+                            email = recipient.get("Email", "").strip()
+                            name = recipient.get("Name", "").strip()
+                            # Exclude if already allowed
+                            if email and email.lower() not in allowed_emails:
+                                if name:
+                                    additional_recipients.append(f"CC: {name} <{email}>")
+                                else:
+                                    additional_recipients.append(f"CC: {email}")
+                
+                # Add recipients info as a separate component if any were found
+                if additional_recipients:
+                    components["recipients"] = "Additional recipients not in your allowed contacts:\n" + "\n".join(additional_recipients)
+
             # For outbound emails, include first 2000 bytes of body with truncation indicator
             if m.is_outbound:
                 if body:
@@ -1766,6 +1835,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "header": 3,      # High priority - message routing info
             "subject": 2,     # Medium priority - email subject
             "body": 1,        # Low priority - email body (can be long and shrunk)
+            "recipients": 3,  # High priority - important for understanding group emails
         }
 
         for idx, (timestamp, event_type, components) in enumerate(structured_events):
