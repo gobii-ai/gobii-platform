@@ -360,13 +360,12 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         )
         consumed = None
 
-    ok = getattr(consumed, "success", False)
     if span is not None:
         try:
-            span.set_attribute("credit_check.consumed_in_loop", bool(ok))
+            span.set_attribute("credit_check.consumed_in_loop", bool(consumed['success']))
         except Exception:
             pass
-    if not ok:
+    if not consumed['success'] or consumed['success'] is False:
         msg_desc = (
             f"Skipped tool '{tool_name}' due to credit consumption failure mid-loop."
         )
