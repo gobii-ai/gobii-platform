@@ -620,7 +620,6 @@ async def _run_agent(
             # Extract usage details (if available) and annotate tracing
             token_usage = None
             try:
-                span = trace.get_current_span()
                 token_usage = {
                     "model": llm_params.get("model"),
                     "provider": provider
@@ -634,10 +633,14 @@ async def _run_agent(
                         "cached_tokens": getattr(history.usage, "total_prompt_cached_tokens", None),
                     })
                     # Add to span for observability
-                    span.set_attribute("llm.usage.prompt_tokens", token_usage["prompt_tokens"])
-                    span.set_attribute("llm.usage.completion_tokens", token_usage["completion_tokens"])
-                    span.set_attribute("llm.usage.total_tokens", token_usage["total_tokens"])
-                    span.set_attribute("llm.usage.cached_tokens", token_usage["cached_tokens"])
+                    agent_span.set_attributes({
+                        "llm.model": token_usage["model"],
+                        "llm.provider": token_usage["provider"],
+                        "llm.usage.prompt_tokens": token_usage["prompt_tokens"],
+                        "llm.usage.completion_tokens": token_usage["completion_tokens"],
+                        "llm.usage.total_tokens": token_usage["total_tokens"],
+                        "llm.usage.cached_tokens": token_usage["cached_tokens"],
+                    })
             except Exception as e:
                 logger.warning("Usage logging failed with exception", exc_info=e)
 
