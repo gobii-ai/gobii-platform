@@ -234,6 +234,340 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(system_message)
         self.assertIn(f"You are a persistent AI agent named '{self.agent.name}'.", system_message['content'])
 
+    def test_email_recipients_extraction(self):
+        """Test that To/CC recipients are extracted from email raw_payload and shown in prompt."""
+        # Create a message with multiple To and CC recipients
+        msg = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Group email message",
+            seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+            raw_payload={
+                "subject": "Team Meeting",
+                "ToFull": [
+                    {"Email": "agent@example.com", "Name": "Agent", "MailboxHash": ""},
+                    {"Email": "alice@example.com", "Name": "Alice Smith", "MailboxHash": ""},
+                    {"Email": "bob@example.com", "Name": "", "MailboxHash": ""},
+                ],
+                "CcFull": [
+                    {"Email": "charlie@example.com", "Name": "Charlie Brown", "MailboxHash": ""},
+                    {"Email": "diana@example.com", "Name": "", "MailboxHash": ""},
+                ],
+            }
+        )
+        
+        event_window = EventWindow(
+            cut_off=timezone.now() - timedelta(minutes=1),
+            upper=timezone.now(),
+            messages=[msg],
+            cron_triggers=[],
+            is_first_run=False,
+        )
+
+        # Build the prompt context
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _ = _build_prompt_context(self.agent, event_window)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        content = user_message['content']
+        
+        # Verify recipients component is present
+        self.assertIn('<recipients>', content)
+        self.assertIn('Additional recipients not in your allowed contacts:', content)
+        
+        # Check that recipients are formatted correctly with names
+        self.assertIn('To: Alice Smith <alice@example.com>', content)
+        self.assertIn('To: bob@example.com', content)  # No name provided
+        self.assertIn('CC: Charlie Brown <charlie@example.com>', content)
+        self.assertIn('CC: diana@example.com', content)  # No name provided
+        
+        # Verify agent's own endpoint is NOT included
+        self.assertNotIn('To: Agent <agent@example.com>', content)
+        self.assertIn('</recipients>', content)
+
+    def test_email_recipients_filtering_allowed_contacts(self):
+        """Test that already-allowed contacts are filtered from recipients list."""
+        from api.models import CommsAllowlistEntry
+        
+        # Add some allowed contacts
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel="email",
+            address="alice@example.com",
+            is_active=True,
+            allow_inbound=True,
+            allow_outbound=True,
+        )
+        
+        # Create a message with multiple recipients, some already allowed
+        msg = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Group email",
+            seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+            raw_payload={
+                "subject": "Project Update",
+                "ToFull": [
+                    {"Email": "agent@example.com", "Name": "Agent", "MailboxHash": ""},
+                    {"Email": "alice@example.com", "Name": "Alice", "MailboxHash": ""},  # Already allowed
+                    {"Email": "bob@example.com", "Name": "Bob", "MailboxHash": ""},  # New contact
+                    {"Email": "prompt_tester@example.com", "Name": "Owner", "MailboxHash": ""},  # Agent owner
+                ],
+                "CcFull": [
+                    {"Email": "charlie@example.com", "Name": "Charlie", "MailboxHash": ""},  # New contact
+                ],
+            }
+        )
+        
+        event_window = EventWindow(
+            cut_off=timezone.now() - timedelta(minutes=1),
+            upper=timezone.now(),
+            messages=[msg],
+            cron_triggers=[],
+            is_first_run=False,
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _ = _build_prompt_context(self.agent, event_window)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        content = user_message['content']
+        
+        # Verify only NEW recipients are shown
+        self.assertIn('<recipients>', content)
+        self.assertIn('To: Bob <bob@example.com>', content)
+        self.assertIn('CC: Charlie <charlie@example.com>', content)
+        
+        # Verify already-allowed contacts are NOT shown
+        self.assertNotIn('alice@example.com', content.split('<recipients>')[1].split('</recipients>')[0] if '<recipients>' in content else '')
+        self.assertNotIn('prompt_tester@example.com', content.split('<recipients>')[1].split('</recipients>')[0] if '<recipients>' in content else '')
+
+    def test_no_recipients_component_for_simple_emails(self):
+        """Test that single-recipient emails don't show recipients component."""
+        # Create a simple email with only one recipient (the agent)
+        msg = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Simple email",
+            seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+            raw_payload={
+                "subject": "Simple Subject",
+                "ToFull": [
+                    {"Email": "agent@example.com", "Name": "Agent", "MailboxHash": ""},
+                ],
+                "CcFull": [],
+            }
+        )
+        
+        event_window = EventWindow(
+            cut_off=timezone.now() - timedelta(minutes=1),
+            upper=timezone.now(),
+            messages=[msg],
+            cron_triggers=[],
+            is_first_run=False,
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _ = _build_prompt_context(self.agent, event_window)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        content = user_message['content']
+        
+        # Verify no recipients component is added when there are no additional recipients
+        self.assertNotIn('<recipients>', content)
+        self.assertNotIn('Additional recipients not in your allowed contacts:', content)
+
+    def test_no_recipients_extraction_for_outbound_emails(self):
+        """Test that outbound messages don't extract recipients."""
+        # Create an outbound email
+        msg = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.endpoint,
+            to_endpoint=self.external_endpoint,
+            is_outbound=True,
+            body="Outbound email",
+            seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+            raw_payload={
+                "subject": "Outbound Subject",
+                "ToFull": [
+                    {"Email": "user@example.com", "Name": "User", "MailboxHash": ""},
+                    {"Email": "other@example.com", "Name": "Other", "MailboxHash": ""},
+                ],
+                "CcFull": [],
+            }
+        )
+        
+        event_window = EventWindow(
+            cut_off=timezone.now() - timedelta(minutes=1),
+            upper=timezone.now(),
+            messages=[msg],
+            cron_triggers=[],
+            is_first_run=False,
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _ = _build_prompt_context(self.agent, event_window)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        content = user_message['content']
+        
+        # Verify no recipients component for outbound messages
+        self.assertNotIn('<recipients>', content)
+
+    def test_no_recipients_extraction_for_sms(self):
+        """Test that SMS messages don't attempt recipient extraction."""
+        # Create an SMS endpoint
+        sms_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel="sms",
+            address="+12345678901",
+        )
+        external_sms = PersistentAgentCommsEndpoint.objects.create(
+            channel="sms",
+            address="+19876543210",
+        )
+        
+        # Create an SMS message
+        msg = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=external_sms,
+            to_endpoint=sms_endpoint,
+            is_outbound=False,
+            body="SMS message",
+            seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+            raw_payload={"Body": "SMS message"},
+        )
+        
+        event_window = EventWindow(
+            cut_off=timezone.now() - timedelta(minutes=1),
+            upper=timezone.now(),
+            messages=[msg],
+            cron_triggers=[],
+            is_first_run=False,
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _ = _build_prompt_context(self.agent, event_window)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        content = user_message['content']
+        
+        # Verify no recipients component for SMS messages
+        self.assertNotIn('<recipients>', content)
+        self.assertNotIn('Additional recipients', content)
+
+    def test_recipients_case_insensitive_filtering(self):
+        """Test that email filtering is case-insensitive."""
+        from api.models import CommsAllowlistEntry
+        
+        # Add allowed contact with different case
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel="email",
+            address="Alice@Example.COM",  # Mixed case
+            is_active=True,
+            allow_inbound=True,
+            allow_outbound=True,
+        )
+        
+        # Create a message with the same email in different case
+        msg = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Case test",
+            seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+            raw_payload={
+                "subject": "Case Test",
+                "ToFull": [
+                    {"Email": "agent@example.com", "Name": "", "MailboxHash": ""},
+                    {"Email": "alice@example.com", "Name": "Alice", "MailboxHash": ""},  # Lowercase version
+                    {"Email": "bob@example.com", "Name": "Bob", "MailboxHash": ""},
+                ],
+                "CcFull": [],
+            }
+        )
+        
+        event_window = EventWindow(
+            cut_off=timezone.now() - timedelta(minutes=1),
+            upper=timezone.now(),
+            messages=[msg],
+            cron_triggers=[],
+            is_first_run=False,
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _ = _build_prompt_context(self.agent, event_window)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        content = user_message['content']
+        
+        # Alice should be filtered out despite case difference
+        if '<recipients>' in content:
+            recipients_section = content.split('<recipients>')[1].split('</recipients>')[0]
+            self.assertNotIn('alice@example.com', recipients_section.lower())
+            self.assertIn('bob@example.com', recipients_section)
+
+    def test_malformed_recipient_objects_handled_gracefully(self):
+        """Test that malformed recipient objects are handled gracefully."""
+        # Create a message with various malformed recipient entries
+        msg = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Malformed test",
+            seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+            raw_payload={
+                "subject": "Malformed Test",
+                "ToFull": [
+                    {"Email": "agent@example.com", "Name": "", "MailboxHash": ""},
+                    {"Email": "valid@example.com", "Name": "Valid", "MailboxHash": ""},
+                    {},  # Empty object
+                    {"Name": "No Email"},  # Missing Email field
+                    {"Email": "", "Name": "Empty Email"},  # Empty email
+                    {"Email": "   ", "Name": "Whitespace"},  # Whitespace email
+                ],
+                "CcFull": None,  # Null instead of array
+            }
+        )
+        
+        event_window = EventWindow(
+            cut_off=timezone.now() - timedelta(minutes=1),
+            upper=timezone.now(),
+            messages=[msg],
+            cron_triggers=[],
+            is_first_run=False,
+        )
+
+        # Should not raise an exception
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _ = _build_prompt_context(self.agent, event_window)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        content = user_message['content']
+        
+        # Only valid recipient should appear
+        if '<recipients>' in content:
+            self.assertIn('valid@example.com', content)
+            self.assertNotIn('No Email', content)
+            self.assertNotIn('Empty Email', content)
+            self.assertNotIn('Whitespace', content)
+
 
 @tag("batch_event_processing")
 class CronTriggerTaskTests(TestCase):
