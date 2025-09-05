@@ -336,10 +336,10 @@ class BrowserUseAgentTaskStepInline(admin.TabularInline):
 class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
     change_list_template = "admin/browseruseagenttask_change_list.html"
 
-    list_display = ('id', 'get_agent_name', 'get_user_email', 'status', 'display_task_result_summary', 'created_at', 'updated_at')
+    list_display = ('id', 'get_agent_name', 'get_user_email', 'status', 'credits_cost', 'display_task_result_summary', 'created_at', 'updated_at')
     list_filter = ('status', 'user', 'agent')
     search_fields = ('id', 'agent__name', 'user__email')
-    readonly_fields = ('id', 'created_at', 'updated_at', 'display_full_task_result') # Added full result display
+    readonly_fields = ('id', 'created_at', 'updated_at', 'display_full_task_result', 'credits_cost') # Show charged credits
     raw_id_fields = ('agent', 'user')
     inlines = [BrowserUseAgentTaskStepInline] # Added inline for steps
 
