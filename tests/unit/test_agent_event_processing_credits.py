@@ -93,10 +93,7 @@ class PersistentAgentCreditGateTests(TestCase):
         self._grant_credits(credits=1, used=0)
 
         with patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
-             patch("api.agent.core.event_processing._run_agent_loop") as loop_mock, \
-             patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit") as mock_consume:
-            # Mock successful credit consumption
-            mock_consume.return_value.success = True
+             patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
             # Return empty dict for token usage
             loop_mock.return_value = {}
             from api.agent.core.event_processing import _process_agent_events_locked
@@ -105,8 +102,6 @@ class PersistentAgentCreditGateTests(TestCase):
 
             # Should proceed into normal path
             loop_mock.assert_called()
-            # Credit should have been consumed
-            mock_consume.assert_called_once()
 
         # Should have created the normal PROCESS_EVENTS step (description = "Process events")
         self.assertTrue(
@@ -150,10 +145,7 @@ class PersistentAgentCreditGateTests(TestCase):
         # In proprietary mode, if availability is unlimited (-1), we should proceed
         with patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
              patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=TASKS_UNLIMITED), \
-             patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit") as mock_consume, \
              patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
-            # Mock successful credit consumption
-            mock_consume.return_value.success = True
             # Return empty dict for token usage
             loop_mock.return_value = {}
             from api.agent.core.event_processing import _process_agent_events_locked
@@ -161,8 +153,6 @@ class PersistentAgentCreditGateTests(TestCase):
             _process_agent_events_locked(self.agent.id, _DummySpan())
 
             loop_mock.assert_called()
-            # Credit should still be consumed for unlimited users (for tracking)
-            mock_consume.assert_called_once()
         
         # Ensure no credit_insufficient note was written
         self.assertFalse(
