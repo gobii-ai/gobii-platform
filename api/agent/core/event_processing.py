@@ -597,14 +597,27 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     # Update system step with cumulative token usage
     sys_step.notes = f"{len(event_window.messages)} msgs, {len(event_window.cron_triggers)} cron"
     
-    # Update the associated step with token usage
-    if cumulative_token_usage and cumulative_token_usage.get("total_tokens"):
-        sys_step.step.prompt_tokens = cumulative_token_usage.get("prompt_tokens")
-        sys_step.step.completion_tokens = cumulative_token_usage.get("completion_tokens")
-        sys_step.step.total_tokens = cumulative_token_usage.get("total_tokens")
-        sys_step.step.cached_tokens = cumulative_token_usage.get("cached_tokens") if cumulative_token_usage.get("cached_tokens") else None
-        sys_step.step.llm_model = cumulative_token_usage.get("model")
-        sys_step.step.llm_provider = cumulative_token_usage.get("provider")
+    # Update the associated step with token usage (defensively handle mocks/expressions)
+    # Tests may patch `_run_agent_loop` and return a MagicMock; avoid assigning those to DB fields.
+    if isinstance(cumulative_token_usage, dict):
+        pt = cumulative_token_usage.get("prompt_tokens")
+        if isinstance(pt, int):
+            sys_step.step.prompt_tokens = pt
+        ct = cumulative_token_usage.get("completion_tokens")
+        if isinstance(ct, int):
+            sys_step.step.completion_tokens = ct
+        tt = cumulative_token_usage.get("total_tokens")
+        if isinstance(tt, int):
+            sys_step.step.total_tokens = tt
+        cached = cumulative_token_usage.get("cached_tokens")
+        if isinstance(cached, int):
+            sys_step.step.cached_tokens = cached
+        model = cumulative_token_usage.get("model")
+        if isinstance(model, str):
+            sys_step.step.llm_model = model
+        provider = cumulative_token_usage.get("provider")
+        if isinstance(provider, str):
+            sys_step.step.llm_provider = provider
         
     close_old_connections()
     try:

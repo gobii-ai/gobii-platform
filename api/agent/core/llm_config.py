@@ -77,20 +77,20 @@ TOKEN_BASED_TIER_CONFIGS = {
             [("anthropic", 0.5), ("openrouter_glm", 0.5)],  # Tier 3: 50/50 Anthropic/GLM-4.5 split
         ]
     },
-    # 7500-20000 tokens: 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5 primary tier
+    # 7500-20000 tokens: 62.5% GLM-4.5, 27.5% GPT-5, 10% GPT-OSS-120B primary tier
     "medium": {
         "range": (7500, 20000),
         "tiers": [
-            [("openrouter_glm", 0.45), ("fireworks_gpt_oss_120b", 0.45), ("openai_gpt5", 0.10)],  # Tier 1: 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5
+            [("openrouter_glm", 0.625), ("openai_gpt5", 0.275), ("fireworks_gpt_oss_120b", 0.10)],  # Tier 1: 62.5% GLM-4.5, 27.5% GPT-5, 10% GPT-OSS-120B
             [("openrouter_glm", 0.34), ("openai_gpt5", 0.33), ("anthropic", 0.33)],  # Tier 2: Even split between GLM-4.5, GPT-5, and Anthropic
             [("openai_gpt5", 1.0)],  # Tier 3: 100% GPT-5 (last resort)
         ]
     },
-    # 20000+ tokens: 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5 primary tier
+    # 20000+ tokens: 62.5% GLM-4.5, 27.5% GPT-5, 10% GPT-OSS-120B primary tier
     "large": {
         "range": (20000, float('inf')),
         "tiers": [
-            [("openrouter_glm", 0.45), ("fireworks_gpt_oss_120b", 0.45), ("openai_gpt5", 0.10)],  # Tier 1: 45% GLM-4.5, 45% GPT-OSS-120B, 10% GPT-5
+            [("openrouter_glm", 0.625), ("openai_gpt5", 0.275), ("fireworks_gpt_oss_120b", 0.10)],  # Tier 1: 62.5% GLM-4.5, 27.5% GPT-5, 10% GPT-OSS-120B
             [("openai_gpt5", 1.0)],  # Tier 2: 100% GPT-5
             [("anthropic", 1.0)],  # Tier 3: 100% Anthropic (Sonnet 4)
             [("fireworks_qwen3_235b_a22b", 1.0)],  # Tier 4: 100% Fireworks Qwen3-235B (last resort)
