@@ -2,6 +2,19 @@
 
 {% block console_content %}
 <div x-data="{}">
+  {% if current_context.type == 'organization' %}
+  <div class="bg-white/90 backdrop-blur-sm border border-amber-200 shadow rounded-xl p-4 mb-6">
+    <div class="flex items-start gap-3">
+      <svg class="w-5 h-5 text-amber-500 mt-0.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 4h.01M10.29 3.86l-7.4 12.84A2 2 0 004.53 20h14.94a2 2 0 001.64-3.2L13.71 3.86a2 2 0 00-3.42 0z" />
+      </svg>
+      <div>
+        <h2 class="text-sm font-semibold text-amber-700">Organization API Keys not yet implemented</h2>
+        <p class="text-sm text-amber-700/90 mt-1">API keys scoped to organizations are coming soon. Switch to your personal context to manage your personal API keys.</p>
+      </div>
+    </div>
+  </div>
+  {% else %}
   {# The delete modal Alpine state is now handled within the generic modal #}
   <div id="api-key-result">
   </div>
@@ -55,4 +68,5 @@
   {% include "partials/_revoke_confirm_modal.html" %}
 
 </div>
+{% endif %}
 {% endblock %}
