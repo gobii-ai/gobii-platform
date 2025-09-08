@@ -5,6 +5,9 @@
   {{ block.super }}
   {{ form.media }}
   <script src="{% url 'admin:jsi18n' %}"></script>
+  <script src="{% static 'admin/js/core.js' %}"></script>
+  <script src="{% static 'admin/js/calendar.js' %}"></script>
+  <script src="{% static 'admin/js/admin/DateTimeShortcuts.js' %}"></script>
 {% endblock %}
 
 {% block content %}
