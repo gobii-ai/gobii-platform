@@ -41,6 +41,7 @@ from api.models import (
     OrganizationMembership,
     OrganizationInvite,
 )
+from console.mixins import ConsoleViewMixin
 from observability import traced
 from pages.mixins import PhoneNumberMixin
 from tasks.services import TaskCreditService
@@ -88,7 +89,7 @@ tracer = trace.get_tracer("gobii.utils")
 # phone screen even when a verified number exists.
 SKIP_VERIFIED_SMS_SCREEN = True
 
-class ConsoleHome(LoginRequiredMixin, TemplateView):
+class ConsoleHome(ConsoleViewMixin, TemplateView):
     """Dashboard homepage for the console."""
     template_name = "index.html"
 
@@ -111,14 +112,91 @@ class ConsoleHome(LoginRequiredMixin, TemplateView):
         else:
             context['has_api_key'] = False
 
-        # Add agent statistics
+        # Add agent statistics (personal vs organization)
         from api.models import BrowserUseAgent, BrowserUseAgentTask
 
-        # Count active agents
-        agent_count = BrowserUseAgent.objects.filter(
-            user=self.request.user
-        ).count()
-        context['agent_count'] = agent_count
+        current_ctx = context.get('current_context', {})
+        ctx_type = current_ctx.get('type', 'personal')
+
+        if ctx_type == 'organization' and current_ctx.get('id'):
+            org_id = current_ctx.get('id')
+            # Verify active membership; if missing, fall back to personal context values
+            if OrganizationMembership.objects.filter(
+                user=self.request.user,
+                org_id=org_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists():
+                # Agents (org-owned persistent agents)
+                context['agent_count'] = PersistentAgent.objects.filter(organization_id=org_id).count()
+
+                # Task status for org-owned agents
+                from django.db.models import Count, Sum
+                pa_browser_ids = (
+                    PersistentAgent.objects.filter(organization_id=org_id)
+                    .values_list('browser_use_agent_id', flat=True)
+                )
+                task_stats = (
+                    BrowserUseAgentTask.objects.filter(
+                        agent_id__in=pa_browser_ids,
+                        is_deleted=False,
+                    )
+                    .values('status')
+                    .annotate(count=Count('status'))
+                )
+
+                # Initialize counters
+                completed_count = in_progress_count = pending_count = failed_count = cancelled_count = 0
+                for stat in task_stats:
+                    status = stat['status']
+                    count = stat['count']
+                    if status == 'completed':
+                        completed_count = count
+                    elif status == 'in_progress':
+                        in_progress_count = count
+                    elif status == 'pending':
+                        pending_count = count
+                    elif status == 'failed':
+                        failed_count = count
+                    elif status == 'cancelled':
+                        cancelled_count = count
+
+                context['completed_tasks'] = completed_count
+                context['in_progress_tasks'] = in_progress_count
+                context['pending_tasks'] = pending_count
+                context['failed_tasks'] = failed_count
+                context['cancelled_tasks'] = cancelled_count
+                context['total_active_tasks'] = in_progress_count + pending_count
+
+                # Credits available for organization
+                from django.apps import apps
+                TaskCredit = apps.get_model('api', 'TaskCredit')
+                now = timezone.now()
+                qs = TaskCredit.objects.filter(
+                    organization_id=org_id,
+                    granted_date__lte=now,
+                    expiration_date__gte=now,
+                    voided=False,
+                )
+                agg = qs.aggregate(
+                    avail=Sum('available_credits'),
+                    total=Sum('credits'),
+                    used=Sum('credits_used'),
+                )
+                org_tasks_available = (agg['avail'] or 0)
+                total = (agg['total'] or 0)
+                used = (agg['used'] or 0)
+                tasks_used_pct = 0.0 if total == 0 else min(100.0, (used / total) * 100.0)
+
+                # Expose org metrics for dashboard rendering
+                context['org_tasks_available'] = org_tasks_available
+                context['org_tasks_used_pct'] = tasks_used_pct
+            else:
+                # Fallback to personal if no membership
+                context['agent_count'] = BrowserUseAgent.objects.filter(user=self.request.user).count()
+        else:
+            # Personal context defaults
+            agent_count = BrowserUseAgent.objects.filter(user=self.request.user).count()
+            context['agent_count'] = agent_count
 
         # Get the user's subscription plan (defaults to 'free' if not set)
         context['subscription_plan'] = get_user_plan(self.request.user)
@@ -163,41 +241,40 @@ class ConsoleHome(LoginRequiredMixin, TemplateView):
         # Get task status breakdown
         from django.db.models import Count
 
-        with traced("CONSOLE Task Stats") as task_span:
-            task_stats = BrowserUseAgentTask.objects.filter(
-                user=self.request.user,
-                is_deleted=False
-            ).values('status').annotate(count=Count('status'))
+        # If not in org context above, compute personal task stats
+        if not (ctx_type == 'organization' and current_ctx.get('id')):
+            with traced("CONSOLE Task Stats") as task_span:
+                from django.db.models import Count
+                task_stats = BrowserUseAgentTask.objects.filter(
+                    user=self.request.user,
+                    is_deleted=False
+                ).values('status').annotate(count=Count('status'))
 
-            # Initialize counters
-            completed_count = 0
-            in_progress_count = 0
-            pending_count = 0
-            failed_count = 0
-            cancelled_count = 0
+                # Initialize counters
+                completed_count = in_progress_count = pending_count = failed_count = cancelled_count = 0
 
-            # Populate counters from query results
-            for stat in task_stats:
-                status = stat['status']
-                count = stat['count']
-                if status == 'completed':
-                    completed_count = count
-                elif status == 'in_progress':
-                    in_progress_count = count
-                elif status == 'pending':
-                    pending_count = count
-                elif status == 'failed':
-                    failed_count = count
-                elif status == 'cancelled':
-                    cancelled_count = count
+                # Populate counters from query results
+                for stat in task_stats:
+                    status = stat['status']
+                    count = stat['count']
+                    if status == 'completed':
+                        completed_count = count
+                    elif status == 'in_progress':
+                        in_progress_count = count
+                    elif status == 'pending':
+                        pending_count = count
+                    elif status == 'failed':
+                        failed_count = count
+                    elif status == 'cancelled':
+                        cancelled_count = count
 
-            # Add task statistics to context
-            context['completed_tasks'] = completed_count
-            context['in_progress_tasks'] = in_progress_count
-            context['pending_tasks'] = pending_count
-            context['failed_tasks'] = failed_count
-            context['cancelled_tasks'] = cancelled_count
-            context['total_active_tasks'] = in_progress_count + pending_count
+                # Add task statistics to context
+                context['completed_tasks'] = completed_count
+                context['in_progress_tasks'] = in_progress_count
+                context['pending_tasks'] = pending_count
+                context['failed_tasks'] = failed_count
+                context['cancelled_tasks'] = cancelled_count
+                context['total_active_tasks'] = in_progress_count + pending_count
 
         return context
 
@@ -205,7 +282,7 @@ class ExampleConsolePage(LoginRequiredMixin, TemplateView):
     """Example console page."""
     template_name = "example_console_page.html"
 
-class ApiKeyListView(LoginRequiredMixin, FormMixin, ListView):
+class ApiKeyListView(ConsoleViewMixin, FormMixin, ListView):
     """List all API keys for the current user and handle creation."""
     model = ApiKey
     template_name = "api_keys.html"
@@ -435,7 +512,7 @@ class ApiKeyCreateModalView(LoginRequiredMixin, View):
         form = ApiKeyForm(user=request.user)
         return render(request, "partials/_api_key_modal.html", {"form": form})
 
-class BillingView(LoginRequiredMixin, TemplateView):
+class BillingView(ConsoleViewMixin, TemplateView):
     """View for billing information."""
     template_name = "billing.html"
 
@@ -467,7 +544,7 @@ class BillingView(LoginRequiredMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
-class ProfileView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
+class ProfileView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
     """Allow users to manage basic profile information and phone number."""
 
     template_name = "console/profile.html"
@@ -603,12 +680,40 @@ def cancel_subscription(request):
 
 @login_required
 def tasks_view(request):
-    # Get tasks for the current user
+    # Get current context from session
+    context_type = request.session.get('context_type', 'personal')
+    context_id = request.session.get('context_id', str(request.user.id))
+    
+    # Get tasks for the current context
     with traced("CONSOLE Tasks View") as span:
-        tasks_queryset = BrowserUseAgentTask.objects.filter(
-            user=request.user,
-            is_deleted=False
-        ).order_by('-created_at')
+        if context_type == 'organization':
+            # Ensure the requester is an active member of the organization context
+            if not OrganizationMembership.objects.filter(
+                user=request.user,
+                org_id=context_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists():
+                return HttpResponseForbidden("You do not have access to this organization.")
+            # For organization context, show tasks from agents owned by the organization
+            # Get BrowserUseAgents that are linked to PersistentAgents in this organization
+            persistent_agent_ids = PersistentAgent.objects.filter(
+                organization_id=context_id
+            ).values_list('browser_use_agent_id', flat=True)
+            tasks_queryset = BrowserUseAgentTask.objects.filter(
+                agent_id__in=persistent_agent_ids,
+                is_deleted=False
+            ).order_by('-created_at')
+        else:
+            # For personal context, show user's personal tasks only
+            # Exclude tasks for org-owned agents; include agent-less tasks
+            tasks_queryset = (
+                BrowserUseAgentTask.objects.filter(
+                    user=request.user,
+                    is_deleted=False
+                )
+                .exclude(agent__persistent_agent__organization__isnull=False)
+                .order_by('-created_at')
+            )
 
         # Handle filtering by status
         status_filter = request.GET.get('status')
@@ -630,7 +735,24 @@ def tasks_view(request):
             span.set_attribute('tasks.page_number', page_number)
             tasks = paginator.get_page(page_number)
 
-        return render(request, 'tasks.html', {'tasks': tasks})
+        # Get user's organization memberships for context switcher
+        user_organizations = OrganizationMembership.objects.filter(
+            user=request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE
+        ).select_related('org').order_by('org__name')
+        
+        context = {
+            'tasks': tasks,
+            'status_filter': status_filter,
+            'user_organizations': user_organizations,
+            'current_context': {
+                'type': context_type,
+                'id': context_id,
+                'name': request.session.get('context_name', request.user.get_full_name() or request.user.username)
+            }
+        }
+        
+        return render(request, 'tasks.html', context)
 
 @login_required
 def task_detail_view(request, task_id):
@@ -751,7 +873,7 @@ def task_result_view(request, task_id):
     return render(request, 'task_result.html', context)
 
 # ────────── Persistent Agents (Feature-Flagged) ──────────
-class PersistentAgentsView(LoginRequiredMixin, TemplateView):
+class PersistentAgentsView(ConsoleViewMixin, TemplateView):
     template_name = "console/persistent_agents.html"
 
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
@@ -771,10 +893,19 @@ class PersistentAgentsView(LoginRequiredMixin, TemplateView):
             to_attr='primary_sms_endpoints'  # Use a plural name as it's a list
         )
 
-        # Get all persistent agents for this user
-        persistent_agents = PersistentAgent.objects.filter(
-            user=self.request.user
-        ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+        # Filter agents based on current context
+        current_context = context.get('current_context', {})
+        if current_context.get('type') == 'organization':
+            # Show organization's agents
+            persistent_agents = PersistentAgent.objects.filter(
+                organization_id=current_context.get('id')
+            ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+        else:
+            # Show personal agents
+            persistent_agents = PersistentAgent.objects.filter(
+                user=self.request.user,
+                organization__isnull=True  # Only personal agents
+            ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
         context['persistent_agents'] = persistent_agents
 
@@ -861,10 +992,28 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                         name=agent_name
                     )
 
+                    # Get current context from session
+                    context_type = request.session.get('context_type', 'personal')
+                    context_id = request.session.get('context_id', str(request.user.id))
+                    
+                    # Set organization if in organization context
+                    organization = None
+                    if context_type == 'organization':
+                        try:
+                            membership = OrganizationMembership.objects.get(
+                                user=request.user,
+                                org_id=context_id,
+                                status=OrganizationMembership.OrgStatus.ACTIVE
+                            )
+                            organization = membership.org
+                        except OrganizationMembership.DoesNotExist:
+                            pass
+                    
                     # Then create the PersistentAgent with no initial charter
                     # The agent will set its own charter based on the user's message
                     persistent_agent = PersistentAgent.objects.create(
                         user=request.user,
+                        organization=organization,  # Set organization if in org context
                         name=agent_name,
                         charter="",  # Empty charter - agent will set this itself
                         schedule=None,
@@ -1176,8 +1325,14 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
         messages.success(self.request, "SMS has been enabled for this agent.")
         return redirect("agent_detail", pk=self.agent.pk)
 
-class AgentDetailView(LoginRequiredMixin, DetailView):
-    """Configuration page for a single agent."""
+class AgentDetailView(ConsoleViewMixin, DetailView):
+    """Configuration page for a single agent.
+
+    Uses ConsoleViewMixin to respect the current console context. When in
+    organization context, only agents belonging to that organization are
+    visible. In personal context, only the user's personal agents (no org)
+    are visible.
+    """
     model = PersistentAgent
     template_name = "console/agent_detail.html"
     context_object_name = "agent"
@@ -1185,8 +1340,29 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - get_object")
     def get_queryset(self):
-        # Ensure users can only access their own agents
-        return super().get_queryset().filter(user=self.request.user)
+        """Scope agents to the active console context.
+
+        - Organization context: agents owned by the org, and only if the user
+          is an active member of that organization.
+        - Personal context: user-owned agents without an organization.
+        """
+        qs = super().get_queryset()
+
+        context_type = self.request.session.get('context_type', 'personal')
+        if context_type == 'organization':
+            org_id = self.request.session.get('context_id')
+            # Verify membership; if not a member, return no rows to force 404
+            if not OrganizationMembership.objects.filter(
+                user=self.request.user,
+                org_id=org_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists():
+                return qs.none()
+
+            return qs.filter(organization_id=org_id)
+
+        # Personal context
+        return qs.filter(user=self.request.user, organization__isnull=True)
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - get_context_data")
     def get_context_data(self, **kwargs):
@@ -2839,7 +3015,7 @@ def handle_confirm_code(request, phone_number, verification_code):
     return JsonResponse({'success': False, 'error': "Failed to confirm verification code. Please try again."})
 
 
-class OrganizationListView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class OrganizationListView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     """List organizations the user belongs to."""
 
     waffle_flag = ORGANIZATIONS
@@ -2873,7 +3049,7 @@ class OrganizationListView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
         return context
 
 
-class OrganizationCreateView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class OrganizationCreateView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     """Create a new organization."""
 
     waffle_flag = ORGANIZATIONS
@@ -2903,7 +3079,7 @@ class OrganizationCreateView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
         return render(request, self.template_name, {"form": form})
 
 
-class OrganizationDetailView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     """Display organization details and members."""
 
     waffle_flag = ORGANIZATIONS
@@ -2915,6 +3091,11 @@ class OrganizationDetailView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
             org=self.org, user=request.user, status=OrganizationMembership.OrgStatus.ACTIVE
         ).exists():
             return HttpResponseForbidden()
+        # Set console context to this organization when visiting its page directly
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(self.org.id)
+        request.session['context_name'] = self.org.name
+        request.session.modified = True
         return super().dispatch(request, *args, **kwargs)
 
     @tracer.start_as_current_span("CONSOLE Organization Detail")
@@ -3052,6 +3233,12 @@ class OrganizationInviteAcceptView(WaffleFlagMixin, LoginRequiredMixin, View):
         if not request.user.email or invite.email.lower() != request.user.email.lower():
             return HttpResponseForbidden("This invite is not for your account.")
 
+        # Set console context to the invited organization for continuity
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(invite.org.id)
+        request.session['context_name'] = invite.org.name
+        request.session.modified = True
+
         # Create or reactivate membership
         membership, created = OrganizationMembership.objects.get_or_create(
             org=invite.org,
@@ -3094,6 +3281,12 @@ class OrganizationInviteRejectView(WaffleFlagMixin, LoginRequiredMixin, View):
         # Ensure the invite matches the logged-in user's email
         if not request.user.email or invite.email.lower() != request.user.email.lower():
             return HttpResponseForbidden("This invite is not for your account.")
+
+        # Set console context to the invite's organization for continuity
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(invite.org.id)
+        request.session['context_name'] = invite.org.name
+        request.session.modified = True
 
         if invite.accepted_at is None and invite.revoked_at is None:
             invite.revoked_at = timezone.now()
@@ -3142,6 +3335,11 @@ class OrganizationInviteRevokeOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
     @transaction.atomic
     def post(self, request, org_id: str, token: str):
         org = get_object_or_404(Organization, id=org_id)
+        # Set context to this organization
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         if not self._require_org_admin(request, org):
             return HttpResponseForbidden()
 
@@ -3164,6 +3362,11 @@ class OrganizationInviteResendOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
     @transaction.atomic
     def post(self, request, org_id: str, token: str):
         org = get_object_or_404(Organization, id=org_id)
+        # Set context to this organization
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         if not self._require_org_admin(request, org):
             return HttpResponseForbidden()
 
@@ -3214,6 +3417,11 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
     @transaction.atomic
     def post(self, request, org_id: str, user_id: int):
         org = get_object_or_404(Organization, id=org_id)
+        # Set context to this organization
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         acting_membership = self._require_org_admin(request, org)
         if not acting_membership:
             return HttpResponseForbidden()
@@ -3266,6 +3474,11 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
     @transaction.atomic
     def post(self, request, org_id: str):
         org = get_object_or_404(Organization, id=org_id)
+        # Ensure context is set to this org for the operation
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         try:
             membership = OrganizationMembership.objects.get(org=org, user=request.user)
         except OrganizationMembership.DoesNotExist:
@@ -3288,6 +3501,11 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
 
         membership.status = OrganizationMembership.OrgStatus.REMOVED
         membership.save(update_fields=["status"])
+        # After leaving, reset context back to personal
+        request.session['context_type'] = 'personal'
+        request.session['context_id'] = str(request.user.id)
+        request.session['context_name'] = request.user.get_full_name() or request.user.username
+        request.session.modified = True
         messages.success(request, f"You left {org.name}.")
         return redirect("organizations")
 
@@ -3301,6 +3519,11 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
     @transaction.atomic
     def post(self, request, org_id: str, user_id: int):
         org = get_object_or_404(Organization, id=org_id)
+        # Set context to this organization
+        request.session['context_type'] = 'organization'
+        request.session['context_id'] = str(org.id)
+        request.session['context_name'] = org.name
+        request.session.modified = True
         acting_membership = self._require_org_admin(request, org)
         if not acting_membership:
             return HttpResponseForbidden()

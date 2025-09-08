@@ -53,6 +53,7 @@ from console.views import (
     grant_credits,
     task_detail_view,
 )
+from console.context_views import SwitchContextView
 from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView
 
@@ -67,6 +68,7 @@ urlpatterns = [
     
     # console
     path("console/", ConsoleHome.as_view(), name="console-home"),
+    path("console/switch-context/", SwitchContextView.as_view(), name="switch_context"),
     path("console/api-keys/", ApiKeyListView.as_view(), name="api_keys"),
     path("console/api-keys/blank-form/", ApiKeyBlankFormView.as_view(), name="api_key_blank_form"),
     path("console/api-keys/table/", ApiKeyTableView.as_view(), name="api_keys_table"),
