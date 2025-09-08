@@ -10,7 +10,7 @@ def add_waffle_entries(apps, schema_editor):
         Flag.objects.create(
             name="multiplayer_agents",
             # "Everyone" Unknown
-            everyone=None,
+            everyone=True,
             # Explicit rollout percent 0 (no random rollout)
             percent=0,
             # Access rules per requirements
@@ -19,11 +19,11 @@ def add_waffle_entries(apps, schema_editor):
             authenticated=False,
         )
 
-    # Ensure the switch exists and is NOT active if missing
+    # Ensure the switch exists and is active by default if missing (new installs default ON)
     if not Switch.objects.filter(name="multisend_enabled").exists():
         Switch.objects.create(
             name="multisend_enabled",
-            active=False,
+            active=True,
         )
 
 
@@ -45,4 +45,3 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunPython(add_waffle_entries, noop),
     ]
-
