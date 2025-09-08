@@ -1,0 +1,20 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+  <div class="module">
+    <h2>{% trans "Grant Credits by Plan" %}</h2>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <table>
+        {{ form.as_table }}
+      </table>
+      <div class="submit-row">
+        <input type="submit" value="{% trans 'Submit' %}" class="default" />
+        <a href="{% url 'admin:api_taskcredit_changelist' %}" class="button cancel-button">{% trans 'Cancel' %}</a>
+      </div>
+    </form>
+    <p class="help">This tool grants a new TaskCredit block to all active users whose current plan matches the selected plan. Use Dry Run to preview the affected user count.</p>
+  </div>
+{% endblock %}
+
