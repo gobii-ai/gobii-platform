@@ -577,8 +577,7 @@ class BrowserUseAgentTask(models.Model):
 
                 # Use consolidated credit checking and consumption logic (owner-aware)
                 # Determine amount to consume; persist it on the task for auditability
-                from django.conf import settings as dj_settings
-                amount = self.credits_cost if self.credits_cost is not None else dj_settings.CREDITS_PER_TASK
+                amount = self.credits_cost if self.credits_cost is not None else settings.CREDITS_PER_TASK
                 result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
                 
                 if not result['success']:
