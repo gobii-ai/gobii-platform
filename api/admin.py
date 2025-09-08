@@ -1485,13 +1485,17 @@ class PersistentAgentConversationAdmin(admin.ModelAdmin):
 
 @admin.register(PersistentAgentStep)
 class PersistentAgentStepAdmin(admin.ModelAdmin):
-    list_display = ('agent_link', 'description_preview', 'created_at', 'step_type')
+    list_display = ('agent_link', 'description_preview', 'credits_cost', 'task_credit_link', 'created_at', 'step_type')
     list_filter = ('agent', 'created_at')
     search_fields = ('description', 'agent__name')
-    readonly_fields = ('id', 'created_at')
-    raw_id_fields = ('agent',)
+    readonly_fields = ('id', 'created_at', 'credits_cost', 'task_credit')
+    raw_id_fields = ('agent', 'task_credit')
     date_hierarchy = 'created_at'
     ordering = ('-created_at',)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related('agent', 'task_credit')
 
     def agent_link(self, obj):
         url = reverse("admin:api_persistentagent_change", args=[obj.agent.pk])
@@ -1516,6 +1520,13 @@ class PersistentAgentStepAdmin(admin.ModelAdmin):
         else:
             return format_html('<span style="color: gray;">General</span>')
     step_type.short_description = "Type"
+
+    @admin.display(description='Task Credit')
+    def task_credit_link(self, obj):
+        if obj.task_credit_id:
+            url = reverse("admin:api_taskcredit_change", args=[obj.task_credit_id])
+            return format_html('<a href="{}">{}</a>', url, obj.task_credit_id)
+        return "-"
 
 @admin.register(UserBilling)
 class UserBillingAdmin(admin.ModelAdmin):
