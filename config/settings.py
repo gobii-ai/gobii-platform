@@ -575,10 +575,10 @@ ALLOW_FILE_UPLOAD = env.bool("ALLOW_FILE_UPLOAD", default=False)
 # Manual whitelist limits
 # Maximum number of manual allowlist entries per agent. Configurable via env.
 MANUAL_WHITELIST_MAX_PER_AGENT = env.int("MANUAL_WHITELIST_MAX_PER_AGENT", default=100)
-# Default domain used for auto-generated agent email endpoints in SaaS mode.
-# Community/OSS deployments can override or unset this via env.
+# Default domain used for auto-generated agent email endpoints in Gobii proprietary mode.
+# Community/OSS deployments typically leave this unused.
 DEFAULT_AGENT_EMAIL_DOMAIN = env("DEFAULT_AGENT_EMAIL_DOMAIN", default="my.gobii.ai")
 
 # Whether to auto-create agent-owned email endpoints during agent creation.
-# Keep enabled by default (for SaaS). Set to "0" in OSS/local.
-ENABLE_DEFAULT_AGENT_EMAIL = env.bool("ENABLE_DEFAULT_AGENT_EMAIL", default=True)
+# Disabled by default (OSS). Enable in Gobii proprietary mode to auto-create.
+ENABLE_DEFAULT_AGENT_EMAIL = env.bool("ENABLE_DEFAULT_AGENT_EMAIL", default=False)

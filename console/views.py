@@ -913,8 +913,8 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
 
                     if email_enabled:
                         from django.conf import settings as dj_settings
-                        # Create agent-owned email endpoint only when enabled (SaaS)
-                        if getattr(dj_settings, 'ENABLE_DEFAULT_AGENT_EMAIL', True):
+                        # Create agent-owned email endpoint only when enabled (Gobii proprietary mode)
+                        if getattr(dj_settings, 'ENABLE_DEFAULT_AGENT_EMAIL', False):
                             # Generate a unique email for the agent
                             agent_email = self._generate_unique_agent_email(agent_name)
 
