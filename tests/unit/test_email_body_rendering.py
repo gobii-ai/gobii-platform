@@ -2,7 +2,7 @@ import re
 
 from django.test import TestCase, tag
 
-from api.agent.comms.outbound_delivery import _convert_body_to_html_and_plaintext
+from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 
 
 @tag("batch_email_body")
@@ -13,7 +13,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_html_stays_as_is(self):
         """HTML content should be preserved as-is."""
         body = "<p>Hello</p><p>Thanks</p>"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         self.assertEqual(html_snippet, "<p>Hello</p><p>Thanks</p>")
         # inscriptis adds some whitespace when converting HTML to text
@@ -24,7 +24,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_plaintext_converted_to_br(self):
         """Plaintext newlines should be converted to <br> tags."""
         body = "Hello\n\nThanks"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         self.assertEqual(html_snippet, "Hello<br><br>Thanks")
         self.assertEqual(plaintext.strip(), "Hello\n\nThanks")
@@ -33,7 +33,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_markdown_rendered_to_html(self):
         """Markdown content should be rendered to HTML."""
         body = "# Title\n\n- one\n- two"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         # Check that markdown was converted to HTML
         self.assertIn("<h1>Title</h1>", html_snippet)
@@ -46,7 +46,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_bold_markdown_converted(self):
         """Bold markdown should be converted to HTML."""
         body = "This is **bold** text"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         self.assertIn("<strong>bold</strong>", html_snippet)
         self.assertIn("bold", plaintext)
@@ -55,7 +55,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_link_markdown_converted(self):
         """Markdown links should be converted to HTML."""
         body = "Check out [Google](https://google.com)"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         self.assertIn('<a href="https://google.com">Google</a>', html_snippet)
         self.assertIn("Google", plaintext)
@@ -63,7 +63,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_links_preserved_in_plaintext(self):
         """URLs should be preserved in plaintext conversion."""
         body = "Check out [Google](https://google.com) and [GitHub](https://github.com)"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         # HTML should contain proper links
         self.assertIn('<a href="https://google.com">Google</a>', html_snippet)
@@ -76,7 +76,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_html_links_preserved_in_plaintext(self):
         """URLs in HTML should be preserved in plaintext conversion."""
         body = '<p>Visit <a href="https://example.com">Example</a> and <a href="https://test.org">Test Site</a></p>'
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         # HTML should be preserved as-is
         self.assertEqual(html_snippet, body)
@@ -88,7 +88,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_code_markdown_converted(self):
         """Inline code markdown should be converted to HTML."""
         body = "Use `git status` command"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         self.assertIn("<code>git status</code>", html_snippet)
         self.assertIn("git status", plaintext)
@@ -96,7 +96,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_mixed_html_not_converted(self):
         """Content with real HTML tags should not be processed as markdown."""
         body = "# Title\n\n<p>This is HTML</p>"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         # Should preserve the original content since it contains real HTML tags
         self.assertEqual(html_snippet, "# Title\n\n<p>This is HTML</p>")
@@ -106,7 +106,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_fake_html_gets_escaped(self):
         """Content with angle brackets but no real HTML tags should be escaped."""
         body = "Check if 5 < 10 and 10 > 5"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         # Should be treated as plaintext and escaped
         self.assertIn("&lt;", html_snippet)
@@ -116,7 +116,7 @@ class EmailBodyRenderingTestCase(TestCase):
     def test_html_escape_in_plaintext(self):
         """Special characters in plaintext should be escaped."""
         body = "Use <script> tag & other < > symbols"
-        html_snippet, plaintext = _convert_body_to_html_and_plaintext(body)
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
         
         self.assertIn("&lt;script&gt;", html_snippet)
         self.assertIn("&amp;", html_snippet)

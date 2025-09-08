@@ -1,8 +1,5 @@
 import logging
 import os
-import re
-import html
-from typing import Tuple
 
 from django.core.mail import get_connection
 from django.conf import settings
@@ -15,132 +12,10 @@ from opentelemetry.trace import get_current_span
 from opentelemetry import trace
 from django.template.loader import render_to_string
 
-from inscriptis import get_text  # High-performance HTML→text conversion for plaintext versions
-from inscriptis.model.config import ParserConfig
-
-import markdown  # For rendering markdown to HTML
-
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
-
-def _convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
-    """Detect whether *body* is HTML, Markdown, or plaintext and return
-    a tuple *(html_snippet, plaintext)*.
-
-    Rules:
-    1. If any HTML tag appears (e.g. ``<p>``, ``<br>``, ``<a>``), treat as HTML.
-    2. Otherwise, if common Markdown patterns are found – headings, lists, bold, links, code fences –
-       render via *markdown*.
-    3. Otherwise, treat as generic plaintext –​ escape then replace newlines with ``<br>``.
-    """
-    logger = logging.getLogger(__name__)
-    
-    # Configure inscriptis to preserve URLs in plaintext conversion with strict CSS
-    # Use strict CSS profile to avoid unwanted indentation from div elements
-    from inscriptis.css_profiles import CSS_PROFILES
-    strict_css = CSS_PROFILES['strict'].copy()
-    
-    config = ParserConfig(
-        css=strict_css,
-        display_links=True,
-        display_anchors=True
-    )
-    
-    # Log the raw input for tracing
-    body_length = len(body)
-    body_preview = body[:200] + "..." if len(body) > 200 else body
-    logger.info(
-        "Email content conversion starting. Input body length: %d characters. Preview: %r",
-        body_length,
-        body_preview
-    )
-
-    # ------------------------------------------------------------------ Detect HTML
-    # Look for actual HTML tags (not just any angle brackets)
-    html_tag_pattern = r"</?(?:p|br|div|span|a|ul|ol|li|h[1-6]|strong|em|b|i|code|pre|blockquote)\b[^>]*>"
-    html_match = re.search(html_tag_pattern, body, re.IGNORECASE)
-    
-    if html_match:
-        logger.info(
-            "Content type detected: HTML. Found HTML tag pattern: %r at position %d",
-            html_match.group(0),
-            html_match.start()
-        )
-        html_snippet = body  # already HTML snippet (agent followed instructions)
-        plaintext = get_text(html_snippet, config).strip()
-        
-        logger.info(
-            "HTML processing complete. Original HTML length: %d, extracted plaintext length: %d. "
-            "Plaintext preview: %r",
-            len(html_snippet),
-            len(plaintext),
-            plaintext[:200] + "..." if len(plaintext) > 200 else plaintext
-        )
-        return html_snippet, plaintext
-
-    # ------------------------------------------------------------------ Detect Markdown
-    markdown_patterns = [
-        (r"^\s{0,3}#", "heading"),              # Heading '# Title'
-        (r"\*\*.+?\*\*", "bold_asterisk"),     # Bold **text**
-        (r"__.+?__", "bold_underscore"),       # Bold __text__
-        (r"`{1,3}.+?`{1,3}", "code"),          # Inline/fenced code
-        (r"\[[^\]]+\]\([^)]+\)", "link"),      # Link [text](url)
-        (r"^\s*[-*+] ", "unordered_list"),     # Unordered list
-        (r"^\s*\d+\. ", "ordered_list")        # Ordered list
-    ]
-    
-    detected_patterns = []
-    for pattern, pattern_name in markdown_patterns:
-        matches = list(re.finditer(pattern, body, flags=re.MULTILINE))
-        if matches:
-            detected_patterns.append((pattern_name, len(matches)))
-            logger.info(
-                "Markdown pattern '%s' detected %d times. First match: %r at position %d",
-                pattern_name,
-                len(matches),
-                matches[0].group(0),
-                matches[0].start()
-            )
-    
-    if detected_patterns:
-        logger.info(
-            "Content type detected: Markdown. Found patterns: %s",
-            ", ".join([f"{name}({count})" for name, count in detected_patterns])
-        )
-        
-        # Convert markdown to HTML
-        html_snippet = markdown.markdown(body, extensions=["extra", "sane_lists", "smarty"])
-        plaintext = get_text(html_snippet, config).strip()
-        
-        logger.info(
-            "Markdown processing complete. Original markdown length: %d, rendered HTML length: %d, "
-            "extracted plaintext length: %d. HTML preview: %r. Plaintext preview: %r",
-            len(body),
-            len(html_snippet),
-            len(plaintext),
-            html_snippet[:200] + "..." if len(html_snippet) > 200 else html_snippet,
-            plaintext[:200] + "..." if len(plaintext) > 200 else plaintext
-        )
-        return html_snippet, plaintext
-
-    # ------------------------------------------------------------------ Plaintext (escape & <br>)
-    logger.info("Content type detected: Plain text. No HTML tags or Markdown patterns found.")
-    
-    escaped = html.escape(body)
-    html_snippet = escaped.replace("\n", "<br>")
-    plaintext = body.strip()
-    
-    logger.info(
-        "Plaintext processing complete. Original length: %d, HTML-escaped length: %d, "
-        "newlines converted to <br> tags: %d. Final HTML preview: %r",
-        len(body),
-        len(html_snippet),
-        body.count('\n'),
-        html_snippet[:200] + "..." if len(html_snippet) > 200 else html_snippet
-    )
-    
-    return html_snippet, plaintext
+from .email_content import convert_body_to_html_and_plaintext
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -387,7 +262,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             )
         subject = message.raw_payload.get("subject", "")
         body_raw = message.body
-        html_snippet, plaintext_body = _convert_body_to_html_and_plaintext(body_raw)
+        html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
 
         # Log simulated content details for parity with non-prod simulation branch
         logger.info(
@@ -445,7 +320,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         
         # For simulation, also show content conversion results
         logger.info("SIMULATION - Processing content conversion for message %s", message.id)
-        html_snippet, plaintext_body = _convert_body_to_html_and_plaintext(body_raw)
+        html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
         
         logger.info(
             "SIMULATION - Content conversion results for message %s: "
@@ -532,7 +407,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         # Detect content type and convert appropriately
         logger.info("Starting content type detection and conversion for message %s", message.id)
-        html_snippet, plaintext_body = _convert_body_to_html_and_plaintext(body_raw)
+        html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
         
         # Log the conversion results
         logger.info(
