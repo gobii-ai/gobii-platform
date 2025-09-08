@@ -137,6 +137,10 @@ jobs:
             tag: batch_token_usage
           - batch: batch_sqlite
             tag: batch_sqlite
+          - batch: pa_step_credits
+            tag: batch_pa_step_credits
+          - batch: tool_costs
+            tag: batch_tool_costs
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
