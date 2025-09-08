@@ -17,7 +17,9 @@ def get_tool_credit_cost(tool_name: str | None) -> Decimal:
     int, float, or str accepted by Decimal(); they're coerced to Decimal.
     """
     default_cost: Decimal = getattr(settings, "CREDITS_PER_TASK")
-    mapping: dict[str, Any] = getattr(settings, "TOOL_CREDIT_COSTS", {}) or {}
+    raw_mapping: dict[str, Any] = getattr(settings, "TOOL_CREDIT_COSTS", {}) or {}
+    # Normalize mapping keys to lowercase for case-insensitive lookups
+    mapping = { _normalize_tool_name(k): v for k, v in raw_mapping.items() }
 
     key = _normalize_tool_name(tool_name)
     if not key:
@@ -32,4 +34,3 @@ def get_tool_credit_cost(tool_name: str | None) -> Decimal:
             return default_cost
 
     return default_cost
-
