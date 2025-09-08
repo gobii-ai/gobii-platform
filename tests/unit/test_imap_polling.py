@@ -5,7 +5,7 @@ from email.message import EmailMessage
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from api.agent.tasks.email_polling import _poll_account_locked
 from api.models import (
@@ -72,6 +72,7 @@ class _FakeIMAP:
         return "BYE", [b"Logout"]
 
 
+@tag("batch_email")
 class ImapPollingTests(TestCase):
     @classmethod
     def setUpTestData(cls):

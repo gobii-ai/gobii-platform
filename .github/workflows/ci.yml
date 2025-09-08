@@ -43,6 +43,8 @@ jobs:
         include:
           - batch: email
             tag: batch_email
+          - batch: smtp
+            tag: smtp
           - batch: sms
             tag: batch_sms
           - batch: email_body

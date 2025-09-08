@@ -3,11 +3,12 @@ from __future__ import annotations
 import email
 from email.message import EmailMessage
 
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from api.agent.comms.imap_adapter import ImapEmailAdapter, ImapParsedContext
 
 
+@tag("batch_email")
 class ImapAdapterTests(TestCase):
     def _build_plain(self, frm: str = "Alice <alice@example.com>") -> bytes:
         m = EmailMessage()
@@ -59,4 +60,3 @@ class ImapAdapterTests(TestCase):
         self.assertTrue(hasattr(att, "name"))
         self.assertTrue(hasattr(att, "size"))
         self.assertTrue(hasattr(att, "content_type"))
-
