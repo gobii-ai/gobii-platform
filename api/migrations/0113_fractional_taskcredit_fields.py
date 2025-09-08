@@ -9,6 +9,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # Drop the generated column first to allow altering dependent column types in PostgreSQL
+        migrations.RemoveField(
+            model_name="taskcredit",
+            name="available_credits",
+        ),
         migrations.AlterField(
             model_name="taskcredit",
             name="credits",
@@ -19,7 +24,8 @@ class Migration(migrations.Migration):
             name="credits_used",
             field=models.DecimalField(max_digits=12, decimal_places=3, default=0),
         ),
-        migrations.AlterField(
+        # Re-add the generated column with the updated Decimal output field
+        migrations.AddField(
             model_name="taskcredit",
             name="available_credits",
             field=models.GeneratedField(
@@ -31,4 +37,3 @@ class Migration(migrations.Migration):
             ),
         ),
     ]
-
