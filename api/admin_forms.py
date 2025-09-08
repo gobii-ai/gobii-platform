@@ -2,6 +2,7 @@
 from django import forms
 from django.forms import ModelForm
 from .models import CommsChannel, AgentEmailAccount
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 class AgentEmailAccountForm(ModelForm):
     """Admin form for AgentEmailAccount with plaintext password inputs.
@@ -76,6 +77,7 @@ class AgentEmailAccountForm(ModelForm):
         obj = super().save(commit=False)
         smtp_password = self.cleaned_data.get("smtp_password")
         imap_password = self.cleaned_data.get("imap_password")
+        is_new = obj.pk is None
         if smtp_password:
             from .encryption import SecretsEncryption
             obj.smtp_password_encrypted = SecretsEncryption.encrypt_value(smtp_password)
@@ -84,6 +86,21 @@ class AgentEmailAccountForm(ModelForm):
             obj.imap_password_encrypted = SecretsEncryption.encrypt_value(imap_password)
         if commit:
             obj.save()
+            try:
+                # Track create vs update for analytics (best-effort)
+                user_id = getattr(getattr(obj.endpoint.owner_agent, 'user', None), 'id', None)
+                if user_id:
+                    Analytics.track_event(
+                        user_id=user_id,
+                        event=AnalyticsEvent.EMAIL_ACCOUNT_CREATED if is_new else AnalyticsEvent.EMAIL_ACCOUNT_UPDATED,
+                        source=AnalyticsSource.WEB,
+                        properties={
+                            'endpoint': obj.endpoint.address,
+                            'agent_id': str(getattr(obj.endpoint.owner_agent, 'id', '')),
+                        },
+                    )
+            except Exception:
+                pass
         return obj
 import phonenumbers
 

@@ -77,6 +77,7 @@ import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
 from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMembership
 from console.forms import AllowlistEntryForm
+from console.forms import AgentEmailAccountConsoleForm
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -2047,6 +2048,239 @@ class AgentSecretsDeleteView(LoginRequiredMixin, View):
             messages.error(request, "Failed to delete secret. Please try again.")
         
         return redirect('agent_secrets', pk=agent.pk)
+
+
+class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
+    """Simple console page to edit an agent-owned email account settings."""
+    template_name = "console/agent_email_settings.html"
+
+    def get_agent(self):
+        return get_object_or_404(
+            PersistentAgent,
+            pk=self.kwargs['pk'],
+            user=self.request.user,
+        )
+
+    def _get_email_endpoint(self, agent: PersistentAgent):
+        ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, owner_agent=agent, is_primary=True).first()
+        if not ep:
+            ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, owner_agent=agent).first()
+        return ep
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = self.get_agent()
+        endpoint = self._get_email_endpoint(agent)
+        account = getattr(endpoint, 'agentemailaccount', None) if endpoint else None
+
+        initial = {}
+        if account:
+            initial = {
+                'smtp_host': account.smtp_host,
+                'smtp_port': account.smtp_port,
+                'smtp_security': account.smtp_security,
+                'smtp_auth': account.smtp_auth,
+                'smtp_username': account.smtp_username,
+                'is_outbound_enabled': account.is_outbound_enabled,
+                'imap_host': account.imap_host,
+                'imap_port': account.imap_port,
+                'imap_security': account.imap_security,
+                'imap_username': account.imap_username,
+                'imap_folder': account.imap_folder,
+                'is_inbound_enabled': account.is_inbound_enabled,
+                'poll_interval_sec': account.poll_interval_sec,
+            }
+
+        context['agent'] = agent
+        context['endpoint'] = endpoint
+        context['account'] = account
+        context['form'] = AgentEmailAccountConsoleForm(initial=initial)
+        return context
+
+    def post(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        endpoint = self._get_email_endpoint(agent)
+        if not endpoint:
+            messages.error(request, "This agent has no email endpoint yet. Add an agent email address first.")
+            return redirect('agent_detail', pk=agent.pk)
+
+        form = AgentEmailAccountConsoleForm(request.POST)
+        action = request.POST.get('action', 'save')
+        if not form.is_valid() and action == 'save':
+            for field, errors in form.errors.items():
+                for error in errors:
+                    messages.error(request, f"{field}: {error}")
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Load or create account for save/test operations
+        from api.models import AgentEmailAccount
+        account = getattr(endpoint, 'agentemailaccount', None)
+
+        # Handle save
+        if action == 'save':
+            data = form.cleaned_data
+            created = False
+            if not account:
+                account = AgentEmailAccount(endpoint=endpoint)
+                created = True
+            # Assign simple fields
+            for f in ('smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'is_outbound_enabled',
+                      'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_folder', 'is_inbound_enabled',
+                      'poll_interval_sec'):
+                setattr(account, f, data.get(f))
+            # Passwords
+            from api.encryption import SecretsEncryption
+            if data.get('smtp_password'):
+                account.smtp_password_encrypted = SecretsEncryption.encrypt_value(data.get('smtp_password'))
+            if data.get('imap_password'):
+                account.imap_password_encrypted = SecretsEncryption.encrypt_value(data.get('imap_password'))
+            try:
+                account.full_clean()
+                account.save()
+                messages.success(request, "Email settings saved.")
+                # Analytics for create/update
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.EMAIL_ACCOUNT_CREATED if created else AnalyticsEvent.EMAIL_ACCOUNT_UPDATED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address},
+                    )
+                except Exception:
+                    pass
+            except ValidationError as e:
+                for field, errs in e.message_dict.items():
+                    for err in errs:
+                        messages.error(request, f"{field}: {err}")
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Ensure account exists before tests / poll
+        if not account:
+            messages.error(request, "Please save email settings before testing or polling.")
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Test SMTP
+        if action == 'test_smtp':
+            try:
+                import smtplib
+                if account.smtp_security == AgentEmailAccount.SmtpSecurity.SSL:
+                    client = smtplib.SMTP_SSL(account.smtp_host, int(account.smtp_port or 465), timeout=30)
+                else:
+                    client = smtplib.SMTP(account.smtp_host, int(account.smtp_port or 587), timeout=30)
+                try:
+                    client.ehlo()
+                    if account.smtp_security == AgentEmailAccount.SmtpSecurity.STARTTLS:
+                        client.starttls()
+                        client.ehlo()
+                    if account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
+                        client.login(account.smtp_username or '', account.get_smtp_password() or '')
+                    try:
+                        client.noop()
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        client.quit()
+                    except Exception:
+                        try:
+                            client.close()
+                        except Exception:
+                            pass
+                from django.utils import timezone
+                account.connection_last_ok_at = timezone.now()
+                account.connection_error = ""
+                account.save(update_fields=['connection_last_ok_at', 'connection_error'])
+                messages.success(request, "SMTP test succeeded.")
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.SMTP_TEST_PASSED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address},
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                account.connection_error = str(e)
+                account.save(update_fields=['connection_error'])
+                messages.error(request, f"SMTP test failed: {e}")
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.SMTP_TEST_FAILED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': str(e)[:500]},
+                    )
+                except Exception:
+                    pass
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Test IMAP
+        if action == 'test_imap':
+            try:
+                import imaplib
+                if account.imap_security == AgentEmailAccount.ImapSecurity.SSL:
+                    client = imaplib.IMAP4_SSL(account.imap_host, int(account.imap_port or 993), timeout=30)
+                else:
+                    client = imaplib.IMAP4(account.imap_host, int(account.imap_port or 143), timeout=30)
+                    if account.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
+                        client.starttls()
+                try:
+                    client.login(account.imap_username or '', account.get_imap_password() or '')
+                    client.select(account.imap_folder or 'INBOX', readonly=True)
+                    try:
+                        client.noop()
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        client.logout()
+                    except Exception:
+                        try:
+                            client.shutdown()
+                        except Exception:
+                            pass
+                from django.utils import timezone
+                account.connection_last_ok_at = timezone.now()
+                account.connection_error = ""
+                account.save(update_fields=['connection_last_ok_at', 'connection_error'])
+                messages.success(request, "IMAP test succeeded.")
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.IMAP_TEST_PASSED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address},
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                account.connection_error = str(e)
+                account.save(update_fields=['connection_error'])
+                messages.error(request, f"IMAP test failed: {e}")
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.IMAP_TEST_FAILED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': str(e)[:500]},
+                    )
+                except Exception:
+                    pass
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Poll now
+        if action == 'poll_now':
+            try:
+                from api.agent.tasks import poll_imap_inbox
+                poll_imap_inbox.delay(str(account.pk))
+                messages.success(request, "IMAP poll enqueued.")
+            except Exception as e:
+                messages.error(request, f"Failed to enqueue IMAP poll: {e}")
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Default: redirect back
+        return redirect('agent_email_settings', pk=agent.pk)
 
 
 class AgentSecretsAddFormView(LoginRequiredMixin, TemplateView):

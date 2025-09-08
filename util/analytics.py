@@ -97,6 +97,14 @@ class AnalyticsEvent(StrEnum):
     EMAIL_OPENED = 'Email Opened'
     EMAIL_LINK_CLICKED = 'Email Link Clicked'
 
+    # BYO Email – Account + Tests
+    EMAIL_ACCOUNT_CREATED = 'Email Account Created'
+    EMAIL_ACCOUNT_UPDATED = 'Email Account Updated'
+    SMTP_TEST_PASSED = 'SMTP Test Passed'
+    SMTP_TEST_FAILED = 'SMTP Test Failed'
+    IMAP_TEST_PASSED = 'IMAP Test Passed'
+    IMAP_TEST_FAILED = 'IMAP Test Failed'
+
     # Miscellaneous
     LANDING_PAGE_VISIT = 'Landing Page Visit'
 

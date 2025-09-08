@@ -24,7 +24,7 @@ class SmtpTransport:
     DEFAULT_TIMEOUT = 30
 
     @classmethod
-    @tracer.start_as_current_span("SMTP Send")
+    @tracer.start_as_current_span("email.smtp.send")
     def send(
         cls,
         account: AgentEmailAccount,
@@ -44,7 +44,11 @@ class SmtpTransport:
         span.set_attribute("smtp.port", int(account.smtp_port or 0))
         span.set_attribute("smtp.security", account.smtp_security)
         span.set_attribute("smtp.auth", account.smtp_auth)
-        span.set_attribute("smtp.to_count", len(list(to_addrs or [])))
+        # Attribute names aligned with plan for quick filtering
+        to_count = 1 if (to_addrs and len(list(to_addrs)) >= 1) else 0
+        cc_count = max(0, (len(list(to_addrs or [])) - 1))
+        span.set_attribute("to_count", to_count)
+        span.set_attribute("cc_count", cc_count)
 
         # Build message
         msg = EmailMessage()
@@ -93,4 +97,3 @@ class SmtpTransport:
                     client.close()
                 except Exception:
                     pass
-

@@ -228,7 +228,7 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
     now = timezone.now()
     client: imaplib.IMAP4 | None = None
     try:
-        with tracer.start_as_current_span("IMAP Poll Account") as span:
+        with tracer.start_as_current_span("email.imap.poll") as span:
             span.set_attribute("imap.host", acct.imap_host)
             span.set_attribute("imap.port", int(acct.imap_port or 0))
             span.set_attribute("imap.security", acct.imap_security)
@@ -246,7 +246,11 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
             # Search for newer UIDs from stored_uid
             base_marker = f"v:{current_validity}:{stored_uid}" if current_validity is not None else str(stored_uid)
             uids = _uid_search_new(client, base_marker)
-            span.set_attribute("imap.uids.count", len(uids))
+            # Align with plan: new_uid_count; keep prior metric name minimal
+            try:
+                span.set_attribute("new_uid_count", len(uids))
+            except Exception:
+                pass
             if not uids:
                 acct.last_polled_at = now
                 acct.connection_last_ok_at = now

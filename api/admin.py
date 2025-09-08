@@ -5,6 +5,7 @@ from django.db.models import Count  # For annotated counts
 from django.db.models.expressions import OuterRef, Exists
 
 from .admin_forms import TestSmsForm, AgentEmailAccountForm
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, ProxyHealthCheckSpec, ProxyHealthCheckResult,
@@ -1483,10 +1484,39 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             acct.connection_error = ""
             acct.save(update_fields=['connection_last_ok_at', 'connection_error'])
             self.message_user(request, "SMTP connection test succeeded.", messages.SUCCESS)
+            # Analytics: SMTP Test Passed
+            try:
+                user_id = getattr(getattr(endpoint.owner_agent, 'user', None), 'id', None)
+                if user_id:
+                    Analytics.track_event(
+                        user_id=user_id,
+                        event=AnalyticsEvent.SMTP_TEST_PASSED,
+                        source=AnalyticsSource.WEB,
+                        properties={
+                            'endpoint': endpoint.address,
+                        },
+                    )
+            except Exception:
+                pass
         except Exception as e:
             acct.connection_error = str(e)
             acct.save(update_fields=['connection_error'])
             self.message_user(request, f"SMTP connection test failed: {e}", messages.ERROR)
+            # Analytics: SMTP Test Failed
+            try:
+                user_id = getattr(getattr(endpoint.owner_agent, 'user', None), 'id', None)
+                if user_id:
+                    Analytics.track_event(
+                        user_id=user_id,
+                        event=AnalyticsEvent.SMTP_TEST_FAILED,
+                        source=AnalyticsSource.WEB,
+                        properties={
+                            'endpoint': endpoint.address,
+                            'error': str(e)[:500],
+                        },
+                    )
+            except Exception:
+                pass
 
         return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
 
@@ -1536,10 +1566,39 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             acct.connection_error = ""
             acct.save(update_fields=['connection_last_ok_at', 'connection_error'])
             self.message_user(request, "IMAP connection test succeeded.", messages.SUCCESS)
+            # Analytics: IMAP Test Passed
+            try:
+                user_id = getattr(getattr(endpoint.owner_agent, 'user', None), 'id', None)
+                if user_id:
+                    Analytics.track_event(
+                        user_id=user_id,
+                        event=AnalyticsEvent.IMAP_TEST_PASSED,
+                        source=AnalyticsSource.WEB,
+                        properties={
+                            'endpoint': endpoint.address,
+                        },
+                    )
+            except Exception:
+                pass
         except Exception as e:
             acct.connection_error = str(e)
             acct.save(update_fields=['connection_error'])
             self.message_user(request, f"IMAP connection test failed: {e}", messages.ERROR)
+            # Analytics: IMAP Test Failed
+            try:
+                user_id = getattr(getattr(endpoint.owner_agent, 'user', None), 'id', None)
+                if user_id:
+                    Analytics.track_event(
+                        user_id=user_id,
+                        event=AnalyticsEvent.IMAP_TEST_FAILED,
+                        source=AnalyticsSource.WEB,
+                        properties={
+                            'endpoint': endpoint.address,
+                            'error': str(e)[:500],
+                        },
+                    )
+            except Exception:
+                pass
 
         return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
 

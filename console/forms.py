@@ -602,6 +602,55 @@ class PersistentAgentSecretsRequestForm(forms.Form):
         return cleaned_data
 
 
+class AgentEmailAccountConsoleForm(forms.Form):
+    """Lightweight console form to edit BYO email settings.
+
+    Keeps passwords write-only; leaves existing if blank.
+    """
+
+    # SMTP
+    smtp_host = forms.CharField(required=False)
+    smtp_port = forms.IntegerField(required=False)
+    smtp_security = forms.ChoiceField(
+        choices=[('ssl', 'SSL'), ('starttls', 'STARTTLS'), ('none', 'None')], required=False, initial='starttls'
+    )
+    smtp_auth = forms.ChoiceField(
+        choices=[('none', 'None'), ('plain', 'PLAIN'), ('login', 'LOGIN')], required=False, initial='login'
+    )
+    smtp_username = forms.CharField(required=False)
+    smtp_password = forms.CharField(required=False, widget=forms.PasswordInput(render_value=False))
+    is_outbound_enabled = forms.BooleanField(required=False, initial=False)
+
+    # IMAP
+    imap_host = forms.CharField(required=False)
+    imap_port = forms.IntegerField(required=False)
+    imap_security = forms.ChoiceField(
+        choices=[('ssl', 'SSL'), ('starttls', 'STARTTLS'), ('none', 'None')], required=False, initial='ssl'
+    )
+    imap_username = forms.CharField(required=False)
+    imap_password = forms.CharField(required=False, widget=forms.PasswordInput(render_value=False))
+    imap_folder = forms.CharField(required=False, initial='INBOX')
+    is_inbound_enabled = forms.BooleanField(required=False, initial=False)
+
+    poll_interval_sec = forms.IntegerField(required=False, initial=120, min_value=30)
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('is_outbound_enabled'):
+            for f in ('smtp_host', 'smtp_security', 'smtp_auth'):
+                if not cleaned.get(f):
+                    self.add_error(f, 'Required when outbound is enabled')
+            if cleaned.get('smtp_auth') and cleaned.get('smtp_auth') != 'none':
+                if not cleaned.get('smtp_username'):
+                    self.add_error('smtp_username', 'Username required for authenticated SMTP')
+        # Minimal IMAP validation only when enabling inbound
+        if cleaned.get('is_inbound_enabled'):
+            for f in ('imap_host', 'imap_security', 'imap_username'):
+                if not cleaned.get(f):
+                    self.add_error(f, 'Required when inbound is enabled')
+        return cleaned
+
+
 class ContactRequestApprovalForm(forms.Form):
     """Form for approving/rejecting contact requests."""
     

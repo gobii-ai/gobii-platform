@@ -52,6 +52,7 @@ from console.views import (
     task_detail_view,
     grant_credits,
     task_detail_view,
+    AgentEmailSettingsView,
 )
 from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView
@@ -86,6 +87,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/welcome/", AgentWelcomeView.as_view(), name="agent_welcome"),
     path("console/agents/<uuid:pk>/enable-sms/", AgentEnableSmsView.as_view(), name="agent_enable_sms"),
     path("console/agents/<uuid:pk>/delete/", AgentDeleteView.as_view(), name="agent_delete"),
+    path("console/agents/<uuid:pk>/email/", AgentEmailSettingsView.as_view(), name="agent_email_settings"),
     # Agent secrets management
     path("console/agents/<uuid:pk>/secrets/", AgentSecretsView.as_view(), name="agent_secrets"),
     path("console/agents/<uuid:pk>/secrets/add/", AgentSecretsAddView.as_view(), name="agent_secrets_add"),
