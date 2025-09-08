@@ -522,6 +522,14 @@ STRIPE_TASK_METER_EVENT_NAME = env("STRIPE_TASK_METER_EVENT_NAME", default="task
 # Keep as Decimal to support fractional credits (e.g., 0.1).
 CREDITS_PER_TASK = Decimal(env("CREDITS_PER_TASK", default="0.1"))
 
+# Optional per‑tool credit overrides (case‑insensitive keys).
+# Example: {"search_web": Decimal("0.10"), "http_request": Decimal("0.05")}
+TOOL_CREDIT_COSTS = {
+    "update_charter": Decimal("0.01"),
+    "update_schedule": Decimal("0.01"),
+    "sqlite": Decimal("0.2"),
+}
+
 # Analytics
 SEGMENT_WRITE_KEY = env("SEGMENT_WRITE_KEY", default="")
 # Ad/Pixel IDs (empty disables)

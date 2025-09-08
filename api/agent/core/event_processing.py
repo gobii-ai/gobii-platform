@@ -40,6 +40,7 @@ from .budget import (
 )
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from tasks.services import TaskCreditService
+from util.tool_costs import get_tool_credit_cost
 from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps
 from .llm_config import get_llm_config, get_llm_config_with_failover, REFERENCE_TOKENIZER_MODEL
@@ -351,7 +352,8 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
 
     try:
         with transaction.atomic():
-            consumed = TaskCreditService.check_and_consume_credit(owner_user)
+            cost = get_tool_credit_cost(tool_name)
+            consumed = TaskCreditService.check_and_consume_credit(owner_user, amount=cost)
     except Exception as e:
         logger.error(
             "Credit consumption (in-loop) failed for agent %s (user %s): %s",
