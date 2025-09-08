@@ -64,10 +64,6 @@ class Command(BaseCommand):
 
 
 def _fmt_dec(val) -> str:
-    try:
-        if isinstance(val, Decimal):
-            return f"{val:.3f}"
-        return str(val)
-    except Exception:
-        return str(val)
-
+    if isinstance(val, Decimal):
+        return f"{val:.3f}"
+    return str(val)
