@@ -12,6 +12,7 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
 from typing import Iterable, List, Tuple, Union, Optional
 from uuid import UUID
 
@@ -296,7 +297,7 @@ def _completion_with_backoff(**kwargs):
 # --------------------------------------------------------------------------- #
 #  Credit gating utilities
 # --------------------------------------------------------------------------- #
-def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -> bool:
+def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -> bool|Decimal:
     """Ensure the agent's owner has a task credit and consume it just-in-time.
 
     Returns True if execution may proceed; False if insufficient or consumption fails.
@@ -306,7 +307,7 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         return True
 
     owner_user = agent.user
-    step = None
+    cost = None
 
     try:
         available = TaskCreditService.get_user_task_credits_available(owner_user)
@@ -393,26 +394,8 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
             agent.id,
         )
         return False
-    else:
-        # Update span with credits used
-        if span is not None:
-            try:
-                span.set_attribute("credit_check.cost_in_loop", float(cost))
-                span.set_attribute("credit_check.remaining_after_consumption", int(consumed.get('remaining', -1)))
-            except Exception:
-                pass
 
-        # step
-        if step is not None:
-            try:
-                step.update({
-                    "credits_cost": cost
-                })
-            except:
-                logger.error("Failed to update step credits_cost field mid-loop", exc_info=True)
-                pass
-
-    return True
+    return cost if cost is not None else True
 
 
 # --------------------------------------------------------------------------- #
@@ -895,7 +878,8 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     logger.info("Agent %s calling tool: %s", agent.id, tool_name)
 
                     # Ensure credit is available and consume just-in-time
-                    if not _ensure_credit_for_tool(agent, tool_name, span=tool_span):
+                    credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
+                    if not credits_consumed:
                         # Credit insufficient or consumption failed; halt processing
                         return cumulative_token_usage
 
@@ -971,7 +955,9 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                         step_kwargs = {
                             "agent": agent,
                             "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
+                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None
                         }
+
                         if token_usage:
                             step_kwargs.update({
                                 "prompt_tokens": token_usage.get("prompt_tokens"),
