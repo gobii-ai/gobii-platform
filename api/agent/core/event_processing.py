@@ -306,6 +306,8 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         return True
 
     owner_user = agent.user
+    step = None
+
     try:
         available = TaskCreditService.get_user_task_credits_available(owner_user)
     except Exception as e:
@@ -391,6 +393,24 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
             agent.id,
         )
         return False
+    else:
+        # Update span with credits used
+        if span is not None:
+            try:
+                span.set_attribute("credit_check.cost_in_loop", float(cost))
+                span.set_attribute("credit_check.remaining_after_consumption", int(consumed.get('remaining', -1)))
+            except Exception:
+                pass
+
+        # step
+        if step is not None:
+            try:
+                step.update({
+                    "credits_cost": cost
+                })
+            except:
+                logger.error("Failed to update step credits_cost field mid-loop", exc_info=True)
+                pass
 
     return True
 
