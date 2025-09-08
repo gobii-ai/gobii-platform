@@ -912,23 +912,26 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                         user_contact = user_primary_sms.phone_number
 
                     if email_enabled:
-                        # Generate a unique email for the agent
-                        agent_email = self._generate_unique_agent_email(agent_name)
+                        from django.conf import settings as dj_settings
+                        # Create agent-owned email endpoint only when enabled (SaaS)
+                        if getattr(dj_settings, 'ENABLE_DEFAULT_AGENT_EMAIL', True):
+                            # Generate a unique email for the agent
+                            agent_email = self._generate_unique_agent_email(agent_name)
 
-                        # Create the agent's OWN primary email endpoint (for receiving)
-                        agent_comms_endpoint = PersistentAgentCommsEndpoint.objects.create(
-                            owner_agent=persistent_agent,
-                            channel=CommsChannel.EMAIL,
-                            address=agent_email,
-                            is_primary=preferred_contact_method == "email",
-                        )
-                        PersistentAgentEmailEndpoint.objects.create(
-                            endpoint=agent_comms_endpoint,
-                            display_name=agent_name,
-                            verified=True,  # System-generated, so considered verified
-                        )
+                            # Create the agent's OWN primary email endpoint (for receiving)
+                            agent_comms_endpoint = PersistentAgentCommsEndpoint.objects.create(
+                                owner_agent=persistent_agent,
+                                channel=CommsChannel.EMAIL,
+                                address=agent_email,
+                                is_primary=preferred_contact_method == "email",
+                            )
+                            PersistentAgentEmailEndpoint.objects.create(
+                                endpoint=agent_comms_endpoint,
+                                display_name=agent_name,
+                                verified=True,  # System-generated, so considered verified
+                            )
 
-                        # Now, get or create the EXTERNAL endpoint for the user's contact address
+                        # Always create the EXTERNAL endpoint for the user's contact address
                         user_email_comms_endpoint, created = PersistentAgentCommsEndpoint.objects.get_or_create(
                             channel=CommsChannel.EMAIL,
                             address__iexact=user_contact_email,
@@ -965,7 +968,12 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                     if user_email_comms_endpoint:
                         _ensure_participant(conversation, user_email_comms_endpoint, PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL)
 
-                    _ensure_participant(conversation, agent_comms_endpoint, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
+                    # Add agent participant if an agent-owned endpoint exists
+                    try:
+                        if 'agent_comms_endpoint' in locals() and agent_comms_endpoint is not None:
+                            _ensure_participant(conversation, agent_comms_endpoint, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
+                    except Exception:
+                        pass
 
                     # Create the initial message from user to agent
                     PersistentAgentMessage.objects.create(
@@ -1044,7 +1052,8 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
         base_username = agent_name.lower().strip()
         base_username = re.sub(r'\s+', '.', base_username)  # Replace spaces with dots
         base_username = re.sub(r'[^\w.]', '', base_username)  # Remove non-alphanumeric chars except dots
-        domain = "my.gobii.ai"
+        from django.conf import settings as dj_settings
+        domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'my.gobii.ai')
 
         # First attempt
         email_address = f"{base_username}@{domain}"
@@ -2072,6 +2081,14 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
         agent = self.get_agent()
         endpoint = self._get_email_endpoint(agent)
         account = getattr(endpoint, 'agentemailaccount', None) if endpoint else None
+        from django.conf import settings as dj_settings
+        default_domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'my.gobii.ai')
+        is_default_endpoint = False
+        if endpoint and endpoint.address and default_domain:
+            try:
+                is_default_endpoint = endpoint.address.lower().endswith('@' + default_domain.lower())
+            except Exception:
+                is_default_endpoint = False
 
         initial = {}
         if account:
@@ -2094,6 +2111,8 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
         context['agent'] = agent
         context['endpoint'] = endpoint
         context['account'] = account
+        context['is_default_endpoint'] = is_default_endpoint
+        context['default_domain'] = default_domain
         context['form'] = AgentEmailAccountConsoleForm(initial=initial)
         return context
 
@@ -2144,6 +2163,15 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
             if not account:
                 account = AgentEmailAccount(endpoint=endpoint)
                 created = True
+            # Update endpoint address to match user-entered value, if provided
+            new_address = (request.POST.get('endpoint_address') or '').strip()
+            if new_address and new_address != endpoint.address:
+                try:
+                    endpoint.address = new_address
+                    endpoint.save(update_fields=['address'])
+                except Exception as e:
+                    messages.error(request, f"Failed to update agent email address: {e}")
+                    return redirect('agent_email_settings', pk=agent.pk)
             # Assign simple fields
             for f in ('smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'is_outbound_enabled',
                       'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_folder', 'is_inbound_enabled',

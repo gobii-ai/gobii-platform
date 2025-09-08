@@ -13,12 +13,15 @@
         </a>
       </div>
       <div class="text-right text-sm text-gray-600">
-        {% if endpoint %}
+        {% if endpoint and account %}
           <div>Endpoint: <span class="font-mono">{{ endpoint.address }}</span></div>
-          {% if account %}
-            <div>Last OK: {{ account.connection_last_ok_at|default:"—" }}</div>
-            <div class="text-red-600">{{ account.connection_error }}</div>
-          {% endif %}
+          <div>Last OK: {{ account.connection_last_ok_at|default:"—" }}</div>
+          <div class="text-red-600">{{ account.connection_error }}</div>
+        {% elif endpoint and not is_default_endpoint %}
+          <div>Endpoint: <span class="font-mono">{{ endpoint.address }}</span></div>
+          <div class="text-gray-500">Custom address set, configure SMTP/IMAP below.</div>
+        {% elif endpoint and is_default_endpoint %}
+          <div class="text-gray-700">Delivery: Default (Postmark)</div>
         {% else %}
           <div class="text-gray-700">No custom email configured yet.</div>
         {% endif %}
@@ -31,6 +34,13 @@
     {% if endpoint %}
     <form method="post" class="p-6 space-y-6">
       {% csrf_token %}
+      <div class="grid grid-cols-1 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Agent Email Address</label>
+          <input type="email" name="endpoint_address" value="{{ endpoint.address }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
+          <p class="text-xs text-gray-500 mt-1">This should match the email account you configure below.</p>
+        </div>
+      </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- SMTP -->
         <div class="space-y-4">

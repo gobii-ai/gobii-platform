@@ -61,7 +61,7 @@
             <input id="agent-email" name="email" type="text" value="{{ primary_email.address }}"
                    class="py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none"
                    disabled>
-            <p class="mt-2 text-xs text-gray-500">The agent's primary email address for communication. This cannot be changed.</p>
+            <p class="mt-2 text-xs text-gray-500">The agent's primary email address for communication.</p>
             <div class="mt-2">
               <a href="{% url 'agent_email_settings' agent.id %}"
                  class="text-sm text-blue-600 hover:text-blue-800">Manage Email Settings</a>
@@ -72,6 +72,18 @@
                  class="text-sm text-blue-600 hover:text-blue-800">Enable SMS</a>
             </div>
             {% endif %}
+          </div>
+          {% endif %}
+          {% if not primary_email %}
+          <div class="sm:col-span-3">
+            <label class="inline-block text-sm font-medium text-gray-800 mt-2.5">
+              Primary Email
+            </label>
+          </div>
+          <div class="sm:col-span-9">
+            <div class="py-2 px-3 text-sm text-gray-600 bg-gray-50 border border-dashed border-gray-300 rounded">
+              Not configured. <a href="{% url 'agent_email_settings' agent.id %}" class="text-blue-600 hover:text-blue-800">Set up email</a>
+            </div>
           </div>
           {% endif %}
 
