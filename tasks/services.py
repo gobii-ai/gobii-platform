@@ -167,7 +167,7 @@ class TaskCreditService:
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Consume Credit")
-    def consume_credit(user, additional_task: bool = False, amount: Decimal | None = None) -> "TaskCredit" | None:
+    def consume_credit(user, additional_task: bool = False, amount: Decimal | None = None):
         """
         Consumes a task credit for a user. If the user has no available credits, a ValidationError is raised. Note: if
         additional_task is True, it will create a new TaskCredit with 1 credit used immediately, regardless of existing credits.
@@ -184,6 +184,9 @@ class TaskCreditService:
         -------
         TaskCredit
             The TaskCredit object representing the consumed credit.
+
+        None
+            if no credit was consumed (should not happen, raises ValidationError instead)
 
         Raises:
         -------
