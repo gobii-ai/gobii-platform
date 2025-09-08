@@ -524,7 +524,7 @@ async def _run_agent(
                 llm_params["model"] = "claude-sonnet-4-20250514"
                 llm = ChatAnthropic(**llm_params)
             else:  # openai
-                llm_params["model"] = "gpt-5"
+                llm_params["model"] = "gpt-5-mini"
                 llm_params["temperature"] = 0
                 llm = ChatOpenAI(**llm_params)
 
