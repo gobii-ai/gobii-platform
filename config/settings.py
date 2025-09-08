@@ -580,5 +580,8 @@ MANUAL_WHITELIST_MAX_PER_AGENT = env.int("MANUAL_WHITELIST_MAX_PER_AGENT", defau
 DEFAULT_AGENT_EMAIL_DOMAIN = env("DEFAULT_AGENT_EMAIL_DOMAIN", default="my.gobii.ai")
 
 # Whether to auto-create agent-owned email endpoints during agent creation.
-# Disabled by default (OSS). Enable in Gobii proprietary mode to auto-create.
-ENABLE_DEFAULT_AGENT_EMAIL = env.bool("ENABLE_DEFAULT_AGENT_EMAIL", default=False)
+# Defaults follow Gobii proprietary mode: enabled when proprietary, disabled in OSS.
+# Can be overridden explicitly via env if needed.
+ENABLE_DEFAULT_AGENT_EMAIL = env.bool(
+    "ENABLE_DEFAULT_AGENT_EMAIL", default=GOBII_PROPRIETARY_MODE
+)
