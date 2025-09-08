@@ -527,7 +527,7 @@ CREDITS_PER_TASK = Decimal(env("CREDITS_PER_TASK", default="0.1"))
 TOOL_CREDIT_COSTS = {
     "update_charter": Decimal("0.01"),
     "update_schedule": Decimal("0.01"),
-    "sqlite": Decimal("0.2"),
+    "sqlite_query": Decimal("0.2"),
 }
 
 # Analytics
