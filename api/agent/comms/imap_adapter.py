@@ -113,13 +113,16 @@ def _collect_attachments(msg: email.message.EmailMessage) -> List[Any]:
         ctype = (part.get_content_type() or "").lower()
         dispo = (part.get_content_disposition() or "").lower()
 
-        # Treat both attachment and inline as attachments for Phase 2
+        # Collect attachments. Skip common inline images to reduce storage.
         if dispo not in ("attachment", "inline"):
             continue
 
         try:
             raw = part.get_payload(decode=True)
             if raw is None:
+                continue
+            # Skip inline images (cid) – strongly recommended default
+            if dispo == "inline" and ctype.startswith("image/"):
                 continue
             if max_bytes and len(raw) > int(max_bytes):
                 logger.warning("IMAP attachment exceeds max size; skipping (size=%d, limit=%d)", len(raw), max_bytes)
@@ -216,4 +219,3 @@ class ImapEmailAdapter:
             raw_payload=raw_payload,
             msg_channel=CommsChannel.EMAIL,
         )
-

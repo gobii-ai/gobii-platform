@@ -13,7 +13,8 @@ import imaplib
 import logging
 import random
 from datetime import timedelta
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Tuple, Optional
+import ssl
 
 from celery import shared_task
 from django.utils import timezone
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 MIN_POLL_INTERVAL_SEC = 30
 MAX_ENQUEUES_PER_RUN = 200
 BATCH_SIZE = 100
+MAX_MESSAGES_PER_ACCOUNT = 500
 IMAP_TIMEOUT_SEC = 60
 
 
@@ -64,13 +66,13 @@ def _parse_uid_list(raw: Iterable[bytes]) -> List[str]:
     return uids
 
 
-def _fetch_message_bytes(client: imaplib.IMAP4, uid: str) -> bytes | None:
+def _fetch_message_bytes(client: imaplib.IMAP4, uid: str) -> Optional[bytes]:
     # Fetch message body using BODY.PEEK[] to avoid setting \Seen
     typ, data = client.uid("FETCH", uid, "(BODY.PEEK[])")
     if typ != "OK" or not data:
         return None
     # Response may be a list of tuples and bytes; return the largest bytes payload
-    best: bytes | None = None
+    best: Optional[bytes] = None
     for item in data:
         if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
             payload = bytes(item[1])
@@ -82,8 +84,8 @@ def _fetch_message_bytes(client: imaplib.IMAP4, uid: str) -> bytes | None:
     return best
 
 
-def _update_success(acct: AgentEmailAccount, now, last_uid: str) -> None:
-    acct.last_seen_uid = str(last_uid)
+def _update_success(acct: AgentEmailAccount, now, last_uid: str, uidvalidity: Optional[str]) -> None:
+    acct.last_seen_uid = f"v:{uidvalidity}:{last_uid}" if uidvalidity else str(last_uid)
     acct.last_polled_at = now
     acct.connection_last_ok_at = now
     acct.connection_error = ""
@@ -116,11 +118,12 @@ def _connect_imap(acct: AgentEmailAccount) -> imaplib.IMAP4:
     port = int(acct.imap_port or (993 if acct.imap_security == AgentEmailAccount.ImapSecurity.SSL else 143))
 
     if acct.imap_security == AgentEmailAccount.ImapSecurity.SSL:
-        client = imaplib.IMAP4_SSL(host, port)
+        client = imaplib.IMAP4_SSL(host, port, timeout=IMAP_TIMEOUT_SEC)
     else:
-        client = imaplib.IMAP4(host, port)
+        client = imaplib.IMAP4(host, port, timeout=IMAP_TIMEOUT_SEC)
         if acct.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
-            client.starttls()
+            ctx = ssl.create_default_context()
+            client.starttls(ssl_context=ctx)
     # Login
     client.login(acct.imap_username or "", acct.get_imap_password() or "")
     # Select folder
@@ -167,12 +170,20 @@ def _ingest_uid(client: imaplib.IMAP4, acct: AgentEmailAccount, uid: str) -> boo
 
 
 def _uid_search_new(client: imaplib.IMAP4, last_seen: str | None) -> List[str]:
-    # Compute search range
+    # Compute search range from last_seen which may be composite "v:<validity>:<uid>"
     start = 0
-    try:
-        start = int(last_seen or 0)
-    except Exception:
-        start = 0
+    if last_seen:
+        try:
+            if last_seen.startswith("v:"):
+                parts = last_seen.split(":", 2)
+                if len(parts) == 3:
+                    start = int(parts[2])
+                else:
+                    start = 0
+            else:
+                start = int(last_seen)
+        except Exception:
+            start = 0
 
     # UID SEARCH for newer UIDs
     query = f"UID {start + 1}:*" if start > 0 else "ALL"
@@ -188,6 +199,31 @@ def _uid_search_new(client: imaplib.IMAP4, last_seen: str | None) -> List[str]:
     return uids
 
 
+def _get_uidvalidity(client: imaplib.IMAP4) -> Optional[str]:
+    try:
+        typ, data = client.response("UIDVALIDITY")
+        if typ == "OK" and data and isinstance(data, list) and data[0]:
+            val = data[0]
+            if isinstance(val, bytes):
+                return val.decode("utf-8", errors="ignore").strip()
+            return str(val).strip()
+    except Exception:
+        pass
+    return None
+
+
+def _parse_last_seen(last_seen: Optional[str]) -> Tuple[Optional[str], int]:
+    if not last_seen:
+        return None, 0
+    try:
+        if last_seen.startswith("v:"):
+            _, v, uid = last_seen.split(":", 2)
+            return v, int(uid)
+        return None, int(last_seen)
+    except Exception:
+        return None, 0
+
+
 def _poll_account_locked(acct: AgentEmailAccount) -> None:
     now = timezone.now()
     client: imaplib.IMAP4 | None = None
@@ -200,7 +236,16 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
 
             client = _connect_imap(acct)
 
-            uids = _uid_search_new(client, acct.last_seen_uid or "")
+            # Handle UIDVALIDITY; reset if changed
+            current_validity = _get_uidvalidity(client)
+            stored_validity, stored_uid = _parse_last_seen(acct.last_seen_uid)
+            if stored_validity and current_validity and stored_validity != current_validity:
+                logger.info("UIDVALIDITY changed for %s: %s -> %s; resetting last_seen_uid", acct.endpoint.address, stored_validity, current_validity)
+                stored_uid = 0
+
+            # Search for newer UIDs from stored_uid
+            base_marker = f"v:{current_validity}:{stored_uid}" if current_validity is not None else str(stored_uid)
+            uids = _uid_search_new(client, base_marker)
             span.set_attribute("imap.uids.count", len(uids))
             if not uids:
                 acct.last_polled_at = now
@@ -210,16 +255,18 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
                 return
 
             # Process in batches
-            processed_highest = None
-            for i in range(0, len(uids), BATCH_SIZE):
-                batch = uids[i : i + BATCH_SIZE]
+            # Enforce per-account cap to avoid long catch-ups in single run
+            capped_uids = uids[:MAX_MESSAGES_PER_ACCOUNT]
+            processed_highest: Optional[str] = None
+            for i in range(0, len(capped_uids), BATCH_SIZE):
+                batch = capped_uids[i : i + BATCH_SIZE]
                 for uid in batch:
                     ok = _ingest_uid(client, acct, uid)
-                    # Track highest UID we have attempted regardless of result to avoid reprocessing
-                    processed_highest = uid
+                    if ok:
+                        processed_highest = uid
 
             if processed_highest is not None:
-                _update_success(acct, timezone.now(), str(processed_highest))
+                _update_success(acct, timezone.now(), str(processed_highest), current_validity)
     except Exception as e:
         logger.error("IMAP poll error for %s: %s", getattr(acct.endpoint, "address", None), e, exc_info=True)
         _update_error_backoff(acct, e)
@@ -285,4 +332,3 @@ def poll_imap_inboxes(self) -> None:
             poll_imap_inbox.delay(account_id)
         except Exception:
             logger.warning("Failed to enqueue poll task for %s", account_id, exc_info=True)
-
