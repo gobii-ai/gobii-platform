@@ -209,8 +209,8 @@ class TaskCreditService:
 
                     credit = TaskCredit.objects.create(
                         user_id=user.id,
-                        credits=1,
-                        credits_used=1,  # Consume the single additional-task credit immediately
+                        credits=plan_amount,
+                        credits_used=plan_amount,  # Consume the single additional-task credit immediately
                         expiration_date=end,
                         granted_date=start,
                         additional_task=True,

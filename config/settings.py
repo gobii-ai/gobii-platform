@@ -520,7 +520,7 @@ STRIPE_TASK_METER_EVENT_NAME = env("STRIPE_TASK_METER_EVENT_NAME", default="task
 # Credits configuration
 # How many credits a single task consumes from plan credits.
 # Keep as Decimal to support fractional credits (e.g., 0.1).
-CREDITS_PER_TASK = Decimal(env("CREDITS_PER_TASK", default="1"))
+CREDITS_PER_TASK = Decimal(env("CREDITS_PER_TASK", default="0.1"))
 
 # Analytics
 SEGMENT_WRITE_KEY = env("SEGMENT_WRITE_KEY", default="")
