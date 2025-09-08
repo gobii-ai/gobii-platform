@@ -2161,6 +2161,137 @@ class PersistentAgentEmailEndpoint(models.Model):
         return f"EmailEndpoint<{self.endpoint.address}>"
 
 
+class AgentEmailAccount(models.Model):
+    """Per-agent email account for BYO SMTP/IMAP.
+
+    One-to-one with an agent-owned email endpoint. SMTP used for outbound in
+    Phase 1; IMAP config stored for Phase 2.
+    """
+
+    class SmtpSecurity(models.TextChoices):
+        SSL = "ssl", "SSL"
+        STARTTLS = "starttls", "STARTTLS"
+        NONE = "none", "None"
+
+    class AuthMode(models.TextChoices):
+        NONE = "none", "None"
+        PLAIN = "plain", "PLAIN"
+        LOGIN = "login", "LOGIN"
+
+    class ImapSecurity(models.TextChoices):
+        SSL = "ssl", "SSL"
+        STARTTLS = "starttls", "STARTTLS"
+        NONE = "none", "None"
+
+    endpoint = models.OneToOneField(
+        PersistentAgentCommsEndpoint,
+        on_delete=models.CASCADE,
+        related_name="agentemailaccount",
+        primary_key=True,
+    )
+
+    # SMTP (outbound)
+    smtp_host = models.CharField(max_length=255, blank=True)
+    smtp_port = models.PositiveIntegerField(null=True, blank=True)
+    smtp_security = models.CharField(
+        max_length=16, choices=SmtpSecurity.choices, default=SmtpSecurity.STARTTLS
+    )
+    smtp_auth = models.CharField(
+        max_length=16, choices=AuthMode.choices, default=AuthMode.LOGIN
+    )
+    smtp_username = models.CharField(max_length=255, blank=True)
+    smtp_password_encrypted = models.BinaryField(null=True, blank=True)
+    is_outbound_enabled = models.BooleanField(default=False, db_index=True)
+
+    # IMAP (inbound) — Phase 2
+    imap_host = models.CharField(max_length=255, blank=True)
+    imap_port = models.PositiveIntegerField(null=True, blank=True)
+    imap_security = models.CharField(
+        max_length=16, choices=ImapSecurity.choices, default=ImapSecurity.SSL
+    )
+    imap_username = models.CharField(max_length=255, blank=True)
+    imap_password_encrypted = models.BinaryField(null=True, blank=True)
+    imap_folder = models.CharField(max_length=128, default="INBOX")
+    is_inbound_enabled = models.BooleanField(default=False)
+
+    poll_interval_sec = models.PositiveIntegerField(default=120)
+    last_polled_at = models.DateTimeField(null=True, blank=True)
+    last_seen_uid = models.CharField(max_length=64, blank=True)
+    backoff_until = models.DateTimeField(null=True, blank=True)
+
+    # Health
+    connection_last_ok_at = models.DateTimeField(null=True, blank=True)
+    connection_error = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["is_outbound_enabled"], name="agent_email_outbound_idx"),
+            models.Index(fields=["endpoint"], name="agent_email_endpoint_idx"),
+        ]
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        owner = getattr(self.endpoint, "owner_agent", None)
+        return f"AgentEmailAccount<{self.endpoint.address}> for {getattr(owner, 'name', 'unknown')}"
+
+    # Convenience accessors
+    def get_smtp_password(self) -> str:
+        from .encryption import SecretsEncryption
+        try:
+            return SecretsEncryption.decrypt_value(self.smtp_password_encrypted) if self.smtp_password_encrypted else ""
+        except Exception:
+            return ""
+
+    def set_smtp_password(self, value: str) -> None:
+        from .encryption import SecretsEncryption
+        self.smtp_password_encrypted = SecretsEncryption.encrypt_value(value)
+
+    def get_imap_password(self) -> str:
+        from .encryption import SecretsEncryption
+        try:
+            return SecretsEncryption.decrypt_value(self.imap_password_encrypted) if self.imap_password_encrypted else ""
+        except Exception:
+            return ""
+
+    def set_imap_password(self, value: str) -> None:
+        from .encryption import SecretsEncryption
+        self.imap_password_encrypted = SecretsEncryption.encrypt_value(value)
+
+    def clean(self):
+        super().clean()
+        # Endpoint must be agent-owned email
+        if self.endpoint is None:
+            raise ValidationError({"endpoint": "Endpoint is required."})
+        if self.endpoint.channel != CommsChannel.EMAIL:
+            raise ValidationError({"endpoint": "AgentEmailAccount must be attached to an email endpoint."})
+        if self.endpoint.owner_agent_id is None:
+            raise ValidationError({"endpoint": "Only agent-owned endpoints may have SMTP/IMAP accounts."})
+
+        # If enabling outbound, ensure required SMTP fields are present
+        if self.is_outbound_enabled:
+            missing: list[str] = []
+            for field in ("smtp_host", "smtp_port", "smtp_security", "smtp_auth"):
+                if not getattr(self, field):
+                    missing.append(field)
+            if missing:
+                raise ValidationError({f: "Required when outbound is enabled" for f in missing})
+
+            if self.smtp_auth != self.AuthMode.NONE:
+                if not self.smtp_username:
+                    raise ValidationError({"smtp_username": "Username required for authenticated SMTP"})
+                if not self.smtp_password_encrypted:
+                    raise ValidationError({"smtp_password_encrypted": "Password required for authenticated SMTP"})
+
+            # Gate: require a successful connection test before enabling
+            if not self.connection_last_ok_at:
+                raise ValidationError({
+                    "is_outbound_enabled": "Run Test SMTP and ensure success before enabling outbound."
+                })
+
+
 class PersistentAgentSmsEndpoint(models.Model):
     """SMS-specific metadata for an endpoint."""
 

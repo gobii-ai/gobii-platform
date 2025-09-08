@@ -7,7 +7,7 @@ from django.utils import timezone
 from anymail.message import AnymailMessage
 from anymail.exceptions import AnymailAPIError
 
-from api.models import PersistentAgentMessage, OutboundMessageAttempt, DeliveryStatus, CommsChannel
+from api.models import PersistentAgentMessage, OutboundMessageAttempt, DeliveryStatus, CommsChannel, AgentEmailAccount
 from opentelemetry.trace import get_current_span
 from opentelemetry import trace
 from django.template.loader import render_to_string
@@ -16,6 +16,7 @@ from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 from .email_content import convert_body_to_html_and_plaintext
+from .smtp_transport import SmtpTransport
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -238,7 +239,125 @@ def deliver_agent_email(message: PersistentAgentMessage):
         )
         return
 
-    # Check environment and token once up front
+    # First: per-endpoint SMTP override
+    acct = None
+    try:
+        # Use a direct DB check to avoid stale related-object caches
+        acct = (
+            AgentEmailAccount.objects.select_related("endpoint")
+            .filter(endpoint=message.from_endpoint, is_outbound_enabled=True)
+            .first()
+        )
+    except Exception:
+        acct = None
+
+    if acct is not None:
+        logger.info(
+            "Using per-endpoint SMTP for message %s from %s",
+            message.id,
+            message.from_endpoint.address,
+        )
+        # Mark sending and create attempt for SMTP
+        message.latest_status = DeliveryStatus.SENDING
+        message.save(update_fields=["latest_status"])
+
+        attempt = OutboundMessageAttempt.objects.create(
+            message=message,
+            provider="smtp",
+            status=DeliveryStatus.SENDING,
+        )
+
+        try:
+            from_address = message.from_endpoint.address
+            to_address = message.to_endpoint.address if message.to_endpoint else ""
+            subject = message.raw_payload.get("subject", "")
+            body_raw = message.body
+
+            # content conversion
+            html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
+            html_body = render_to_string(
+                "emails/persistent_agent_email.html",
+                {"body": html_snippet},
+            )
+
+            # Collect all recipients (To + CC)
+            recipient_list = [to_address] if to_address else []
+            if message.cc_endpoints.exists():
+                recipient_list.extend(list(message.cc_endpoints.values_list("address", flat=True)))
+
+            with tracer.start_as_current_span("SMTP Transport Send") as smtp_span:
+                smtp_span.set_attribute("from", from_address)
+                smtp_span.set_attribute("to_count", 1)
+                try:
+                    cc_count = message.cc_endpoints.count()
+                except Exception:
+                    cc_count = 0
+                smtp_span.set_attribute("cc_count", cc_count)
+                smtp_span.set_attribute("recipient_total", len(recipient_list))
+                provider_id = SmtpTransport.send(
+                    account=acct,
+                    from_addr=from_address,
+                    to_addrs=recipient_list,
+                    subject=subject,
+                    plaintext_body=plaintext_body,
+                    html_body=html_body,
+                    attempt_id=str(attempt.id),
+                )
+
+            now = timezone.now()
+            attempt.status = DeliveryStatus.SENT
+            attempt.provider_message_id = provider_id or ""
+            attempt.sent_at = now
+            attempt.save(update_fields=["status", "provider_message_id", "sent_at"])
+
+            message.latest_status = DeliveryStatus.SENT
+            message.latest_sent_at = now
+            message.latest_error_message = ""
+            message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
+
+            if span is not None and getattr(span, "is_recording", lambda: False)():
+                span.add_event(
+                    'Email - SMTP Delivery',
+                    {
+                        'message_id': str(message.id),
+                        'from_address': from_address,
+                        'to_address': to_address,
+                    },
+                )
+
+            Analytics.track_event(
+                user_id=message.owner_agent.user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_SENT,
+                source=AnalyticsSource.AGENT,
+                properties={
+                    'agent_id': str(message.owner_agent_id),
+                    'message_id': str(message.id),
+                    'from_address': from_address,
+                    'to_address': to_address,
+                    'subject': subject,
+                    'provider': 'smtp',
+                },
+            )
+            return
+
+        except Exception as e:
+            logger.exception(
+                "SMTP error sending message %s from %r to %r",
+                message.id,
+                getattr(message.from_endpoint, 'address', None),
+                getattr(message.to_endpoint, 'address', None),
+            )
+            error_str = str(e)
+            attempt.status = DeliveryStatus.FAILED
+            attempt.error_message = error_str
+            attempt.save(update_fields=["status", "error_message"])
+
+            message.latest_status = DeliveryStatus.FAILED
+            message.latest_error_message = error_str
+            message.save(update_fields=["latest_status", "latest_error_message"])
+            return
+
+    # Check environment and token once up front (Postmark or simulation)
     postmark_token = os.getenv("POSTMARK_SERVER_TOKEN")
     release_env = getattr(settings, "GOBII_RELEASE_ENV", os.getenv("GOBII_RELEASE_ENV", "local"))
     is_non_prod = release_env != "prod"

@@ -4,13 +4,14 @@ from django.contrib.sites.models import Site
 from django.db.models import Count  # For annotated counts
 from django.db.models.expressions import OuterRef, Exists
 
-from .admin_forms import TestSmsForm
+from .admin_forms import TestSmsForm, AgentEmailAccountForm
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
     PersistentAgentStep, CommsChannel, UserBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
+    AgentEmailAccount,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -1352,10 +1353,43 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
 @admin.register(PersistentAgentCommsEndpoint)
 class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
-    list_display = ('address', 'channel', 'owner_agent_name', 'is_primary', 'message_count')
+    list_display = ('address', 'channel', 'owner_agent_name', 'is_primary', 'message_count', 'test_smtp_button')
     list_filter = ('channel', 'is_primary', 'owner_agent')
     search_fields = ('address', 'owner_agent__name', 'owner_agent__user__email')
     raw_id_fields = ('owner_agent',)
+    readonly_fields = ('test_smtp_button',)
+
+    class AgentEmailAccountInline(admin.StackedInline):
+        model = AgentEmailAccount
+        form = AgentEmailAccountForm
+        extra = 0
+        can_delete = True
+        verbose_name = "Agent Email Account"
+        verbose_name_plural = "Agent Email Account"
+        fields = (
+            # SMTP
+            'smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'smtp_password', 'is_outbound_enabled',
+            # IMAP
+            'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_password', 'imap_folder', 'is_inbound_enabled', 'poll_interval_sec',
+            # Health
+            'connection_last_ok_at', 'connection_error',
+        )
+        readonly_fields = ('connection_last_ok_at', 'connection_error')
+
+        def has_add_permission(self, request, obj):
+            # Allow create only for email endpoints owned by an agent
+            if not obj:
+                return False
+            return obj.channel == CommsChannel.EMAIL and obj.owner_agent_id is not None
+
+    inlines = [AgentEmailAccountInline]
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path('<path:object_id>/test-smtp/', self.admin_site.admin_view(self.test_smtp_view), name='api_endpoint_test_smtp'),
+        ]
+        return custom + urls
 
     def owner_agent_name(self, obj):
         if obj.owner_agent:
@@ -1371,6 +1405,71 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
         total = sent_count + received_count
         return f"{total} ({sent_count} sent, {received_count} received)"
     message_count.short_description = "Messages"
+
+    @admin.display(description='Test SMTP')
+    def test_smtp_button(self, obj):
+        if obj.channel == CommsChannel.EMAIL and obj.owner_agent_id:
+            url = reverse('admin:api_endpoint_test_smtp', args=[obj.pk])
+            return format_html('<a class="button" href="{}">Test SMTP</a>', url)
+        return '—'
+
+    def test_smtp_view(self, request, object_id):
+        try:
+            endpoint = PersistentAgentCommsEndpoint.objects.select_related('owner_agent').get(pk=object_id)
+        except PersistentAgentCommsEndpoint.DoesNotExist:
+            self.message_user(request, "Endpoint not found", messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_persistentagentcommsendpoint_changelist"))
+
+        if endpoint.channel != CommsChannel.EMAIL or not endpoint.owner_agent_id:
+            self.message_user(request, "Test SMTP is only available for agent-owned email endpoints.", messages.ERROR)
+            return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
+
+        acct = getattr(endpoint, 'agentemailaccount', None)
+        if not acct:
+            self.message_user(request, "No Agent Email Account configured for this endpoint.", messages.ERROR)
+            return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
+
+        # Attempt connection
+        try:
+            import smtplib
+            # Choose client
+            if acct.smtp_security == AgentEmailAccount.SmtpSecurity.SSL:
+                client = smtplib.SMTP_SSL(acct.smtp_host, int(acct.smtp_port or 465), timeout=30)
+            else:
+                client = smtplib.SMTP(acct.smtp_host, int(acct.smtp_port or 587), timeout=30)
+            try:
+                client.ehlo()
+                if acct.smtp_security == AgentEmailAccount.SmtpSecurity.STARTTLS:
+                    client.starttls()
+                    client.ehlo()
+                if acct.smtp_auth != AgentEmailAccount.AuthMode.NONE:
+                    client.login(acct.smtp_username or '', acct.get_smtp_password() or '')
+                # Try NOOP
+                try:
+                    client.noop()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    client.quit()
+                except Exception:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+
+            # Success
+            from django.utils import timezone
+            acct.connection_last_ok_at = timezone.now()
+            acct.connection_error = ""
+            acct.save(update_fields=['connection_last_ok_at', 'connection_error'])
+            self.message_user(request, "SMTP connection test succeeded.", messages.SUCCESS)
+        except Exception as e:
+            acct.connection_error = str(e)
+            acct.save(update_fields=['connection_error'])
+            self.message_user(request, f"SMTP connection test failed: {e}", messages.ERROR)
+
+        return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
 
 
 @admin.register(PersistentAgentMessage) 
