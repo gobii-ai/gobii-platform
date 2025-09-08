@@ -1353,7 +1353,10 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
 @admin.register(PersistentAgentCommsEndpoint)
 class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
-    list_display = ('address', 'channel', 'owner_agent_name', 'is_primary', 'message_count', 'test_smtp_button')
+    list_display = (
+        'address', 'channel', 'owner_agent_name', 'is_primary', 'message_count',
+        'test_smtp_button', 'test_imap_button', 'poll_imap_now_button'
+    )
     list_filter = ('channel', 'is_primary', 'owner_agent')
     search_fields = ('address', 'owner_agent__name', 'owner_agent__user__email')
     raw_id_fields = ('owner_agent',)
@@ -1388,6 +1391,8 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
         urls = super().get_urls()
         custom = [
             path('<path:object_id>/test-smtp/', self.admin_site.admin_view(self.test_smtp_view), name='api_endpoint_test_smtp'),
+            path('<path:object_id>/test-imap/', self.admin_site.admin_view(self.test_imap_view), name='api_endpoint_test_imap'),
+            path('<path:object_id>/poll-imap-now/', self.admin_site.admin_view(self.poll_imap_now_view), name='api_endpoint_poll_imap_now'),
         ]
         return custom + urls
 
@@ -1411,6 +1416,20 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
         if obj.channel == CommsChannel.EMAIL and obj.owner_agent_id:
             url = reverse('admin:api_endpoint_test_smtp', args=[obj.pk])
             return format_html('<a class="button" href="{}">Test SMTP</a>', url)
+        return '—'
+
+    @admin.display(description='Test IMAP')
+    def test_imap_button(self, obj):
+        if obj.channel == CommsChannel.EMAIL and obj.owner_agent_id:
+            url = reverse('admin:api_endpoint_test_imap', args=[obj.pk])
+            return format_html('<a class="button" href="{}">Test IMAP</a>', url)
+        return '—'
+
+    @admin.display(description='Poll IMAP Now')
+    def poll_imap_now_button(self, obj):
+        if obj.channel == CommsChannel.EMAIL and obj.owner_agent_id:
+            url = reverse('admin:api_endpoint_poll_imap_now', args=[obj.pk])
+            return format_html('<a class="button" href="{}">Poll Now</a>', url)
         return '—'
 
     def test_smtp_view(self, request, object_id):
@@ -1468,6 +1487,80 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             acct.connection_error = str(e)
             acct.save(update_fields=['connection_error'])
             self.message_user(request, f"SMTP connection test failed: {e}", messages.ERROR)
+
+        return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
+
+    def test_imap_view(self, request, object_id):
+        try:
+            endpoint = PersistentAgentCommsEndpoint.objects.select_related('owner_agent').get(pk=object_id)
+        except PersistentAgentCommsEndpoint.DoesNotExist:
+            self.message_user(request, "Endpoint not found", messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_persistentagentcommsendpoint_changelist"))
+
+        if endpoint.channel != CommsChannel.EMAIL or not endpoint.owner_agent_id:
+            self.message_user(request, "Test IMAP is only available for agent-owned email endpoints.", messages.ERROR)
+            return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
+
+        acct = getattr(endpoint, 'agentemailaccount', None)
+        if not acct:
+            self.message_user(request, "No Agent Email Account configured for this endpoint.", messages.ERROR)
+            return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
+
+        # Attempt IMAP connection
+        try:
+            import imaplib
+            from django.utils import timezone
+            if acct.imap_security == AgentEmailAccount.ImapSecurity.SSL:
+                client = imaplib.IMAP4_SSL(acct.imap_host, int(acct.imap_port or 993), timeout=30)
+            else:
+                client = imaplib.IMAP4(acct.imap_host, int(acct.imap_port or 143), timeout=30)
+                if acct.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
+                    client.starttls()
+            try:
+                client.login(acct.imap_username or '', acct.get_imap_password() or '')
+                client.select(acct.imap_folder or 'INBOX', readonly=True)
+                try:
+                    client.noop()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    client.logout()
+                except Exception:
+                    try:
+                        client.shutdown()
+                    except Exception:
+                        pass
+
+            acct.connection_last_ok_at = timezone.now()
+            acct.connection_error = ""
+            acct.save(update_fields=['connection_last_ok_at', 'connection_error'])
+            self.message_user(request, "IMAP connection test succeeded.", messages.SUCCESS)
+        except Exception as e:
+            acct.connection_error = str(e)
+            acct.save(update_fields=['connection_error'])
+            self.message_user(request, f"IMAP connection test failed: {e}", messages.ERROR)
+
+        return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
+
+    def poll_imap_now_view(self, request, object_id):
+        try:
+            endpoint = PersistentAgentCommsEndpoint.objects.select_related('owner_agent').get(pk=object_id)
+        except PersistentAgentCommsEndpoint.DoesNotExist:
+            self.message_user(request, "Endpoint not found", messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_persistentagentcommsendpoint_changelist"))
+
+        acct = getattr(endpoint, 'agentemailaccount', None)
+        if not acct:
+            self.message_user(request, "No Agent Email Account configured for this endpoint.", messages.ERROR)
+            return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
+
+        try:
+            from api.agent.tasks import poll_imap_inbox
+            poll_imap_inbox.delay(str(acct.pk))
+            self.message_user(request, "IMAP poll enqueued.", messages.SUCCESS)
+        except Exception as e:
+            self.message_user(request, f"Failed to enqueue IMAP poll: {e}", messages.ERROR)
 
         return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
 

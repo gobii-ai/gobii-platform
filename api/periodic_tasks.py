@@ -47,6 +47,13 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    # IMAP poll dispatcher – runs every minute
+    beat_schedule["imap-poll-dispatcher"] = {
+        "task": "api.agent.tasks.poll_imap_inboxes",
+        "schedule": crontab(minute="*"),
+        "args": [],
+    }
+
 def clean_up_old_decodo_schedules():
     """Clean up old per-block schedule entries from Redis Beat."""
     logger.info("Starting cleanup of old Decodo IP block sync schedules")
