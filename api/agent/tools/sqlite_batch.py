@@ -65,14 +65,11 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     if not db_path:
         return {"status": "error", "message": "SQLite DB path unavailable"}
 
-    start_time = time.monotonic()
-
     results: List[Dict[str, Any]] = []
     total_changes = 0
     any_truncated = False
     succeeded = 0
     failed = 0
-    transaction_result = "none"
     warnings: List[str] = []
 
     # Log a preview of the batch for observability (truncate SQL text)
@@ -143,29 +140,32 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     extra = cur.fetchmany(1)
                     truncated = len(extra) > 0
                     any_truncated = any_truncated or truncated
-                    elapsed = int((time.monotonic() - t0) * 1000)
                     res = {
                         "ok": True,
                         "rows": rows,
                         "schema": columns,
                         "changes": 0,
                         "last_insert_rowid": None,
-                        "time_ms": elapsed,
                     }
                     results.append(res)
                     succeeded += 1
                 else:
-                    #for inserts/updates/deletes
+                    # for inserts/updates/deletes
                     affected = cur.rowcount if cur.rowcount is not None else 0
+                    # Best-effort last insert id for INSERT statements
+                    last_id = None
+                    try:
+                        if sql.lstrip().upper().startswith("INSERT"):
+                            last_id = cur.lastrowid or cur.execute("SELECT last_insert_rowid();").fetchone()[0]
+                    except Exception:
+                        last_id = cur.lastrowid
                     total_changes += max(0, affected)
-                    elapsed = int((time.monotonic() - t0) * 1000)
                     res = {
                         "ok": True,
                         "rows": [],
                         "schema": [],
                         "changes": max(0, affected),
-                        "last_insert_rowid": cur.lastrowid,
-                        "time_ms": elapsed,
+                        "last_insert_rowid": last_id,
                     }
                     results.append(res)
                     succeeded += 1
@@ -186,7 +186,6 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 # Rollback strategy
                 if mode == "atomic":
                     rollback_all_if_needed()
-                    transaction_result = "rolled_back"
                     error_occurred = True
                     # Mark remaining ops as skipped due to rollback
                     for j in range(idx + 1, len(ops)):
@@ -206,7 +205,6 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
         if not error_occurred and mode == "atomic":
             commit_if_needed_for_mode()
-            transaction_result = "committed"
 
         db_size_mb = _get_db_size_mb(db_path)
         if db_size_mb > 50:
