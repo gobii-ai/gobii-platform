@@ -38,7 +38,7 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
         write_only=True,  # Never return secrets in responses
         help_text="Domain-specific secrets for the task. REQUIRED FORMAT: {'https://example.com': {'x_api_key': 'value', 'x_username': 'user'}}. Each domain can have multiple secrets. Secret keys will be available as placeholders in the prompt for the specified domains."
     )
-    credits_cost = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=0.000001, required=False, allow_null=True)
+    credits_cost = serializers.DecimalField(max_digits=12, decimal_places=3, min_value="0.001", required=False, allow_null=True)
 
     class Meta:
         model = BrowserUseAgentTask
