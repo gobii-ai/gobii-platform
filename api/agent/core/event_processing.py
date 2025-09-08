@@ -53,6 +53,7 @@ from ..tools.spawn_web_task import execute_spawn_web_task, get_spawn_web_task_to
 from ..tools.schedule_updater import execute_update_schedule, get_update_schedule_tool
 from ..tools.charter_updater import execute_update_charter, get_update_charter_tool
 from ..tools.sqlite_query import execute_sqlite_query, get_sqlite_query_tool, get_sqlite_schema_prompt, set_sqlite_db_path, reset_sqlite_db_path, agent_sqlite_db
+from ..tools.sqlite_batch import execute_sqlite_batch, get_sqlite_batch_tool
 from ..tools.http_request import execute_http_request, get_http_request_tool
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
 from ..tools.request_contact_permission import execute_request_contact_permission, get_request_contact_permission_tool
@@ -906,6 +907,8 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                         result = execute_spawn_web_task(agent, tool_params)
                     elif tool_name == "sqlite_query":
                         result = execute_sqlite_query(agent, tool_params)
+                    elif tool_name == "sqlite_batch":
+                        result = execute_sqlite_batch(agent, tool_params)
                     elif tool_name == "send_email":
                         result = execute_send_email(agent, tool_params)
                     elif tool_name == "send_sms":
@@ -1496,6 +1499,8 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "It is a good idea to use the sqlite db to keep a working set of any structured data related to your task, but always be sure to limit the data you store so the db stays under 50MB. "
         "This sqlite db is your memory, planning system, and a place to store any structure data you need to in order to do your work. "
         "Remember, sqlite is extremely powerful. Make use of that power to get your job done. "
+        "If you have two or more SQL operations to run, prefer the sqlite_batch tool to execute them in one call. "
+        "Use mode=atomic when operations depend on each other (all-or-nothing); use mode=per_statement to continue past individual errors when operations are independent. "
         "Be very mindful to keep the db efficient and the total size no greater than 50MB of data. "
 
         "You can use search_tools and enable_tool to search for additional tools that may be available to help you do your work. "
@@ -1805,6 +1810,7 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_update_schedule_tool(),
         get_update_charter_tool(),
         get_sqlite_query_tool(),
+        get_sqlite_batch_tool(),
         get_http_request_tool(),
         get_secure_credentials_request_tool(),
         # MCP management tools

@@ -135,6 +135,8 @@ jobs:
             tag: batch_allowlist_direction
           - batch: token_usage
             tag: batch_token_usage
+          - batch: batch_sqlite
+            tag: batch_sqlite
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
