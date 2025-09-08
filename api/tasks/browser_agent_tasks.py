@@ -3,7 +3,6 @@ import logging
 import asyncio
 import json
 import hashlib
-import mimetypes
 import tempfile
 import shutil
 import random
@@ -525,7 +524,7 @@ async def _run_agent(
                 llm_params["model"] = "claude-sonnet-4-20250514"
                 llm = ChatAnthropic(**llm_params)
             else:  # openai
-                llm_params["model"] = "gpt-4.1"
+                llm_params["model"] = "gpt-5"
                 llm_params["temperature"] = 0
                 llm = ChatOpenAI(**llm_params)
 
