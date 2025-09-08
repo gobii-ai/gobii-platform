@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.contrib.sites.models import Site
@@ -181,7 +183,8 @@ class TaskCreditAdmin(admin.ModelAdmin):
                     up = get_user_plan(user)
                     if up and up.get("id") == plan:
                         matched_users.append(user)
-                except Exception:
+                except Exception as e:
+                    logging.warning("Failed to get plan for user %s: %s", user.id, e)
                     continue
 
             # Optionally filter to users currently out of credits
