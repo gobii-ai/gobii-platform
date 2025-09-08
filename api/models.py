@@ -23,7 +23,6 @@ from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames, PlanNamesChoices
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
-# (Waffle flags removed for multi-send; no feature flag imports needed here)
 from email.utils import parseaddr
 
 from tasks.services import TaskCreditService

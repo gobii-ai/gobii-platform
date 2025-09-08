@@ -23,13 +23,7 @@ User = get_user_model()
 @tag("batch_email_allowlist")
 class ManualAllowlistEmailTests(TestCase):
     def setUp(self):
-        # Enable feature-gated whitelist logic for tests
-        self._p_flag = patch("api.models.flag_is_active", return_value=True)
-        self._p_switch = patch("api.models.switch_is_active", return_value=True)
-        self._p_flag.start()
-        self._p_switch.start()
-        self.addCleanup(self._p_flag.stop)
-        self.addCleanup(self._p_switch.stop)
+        # No feature flags; behavior is always-on now
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="owner1", email="owner1@example.com", password="pw"
@@ -91,13 +85,7 @@ class ManualAllowlistEmailTests(TestCase):
 @tag("batch_email_allowlist")
 class OrgDefaultAllowlistEmailTests(TestCase):
     def setUp(self):
-        # Enable feature-gated whitelist logic for tests
-        self._p_flag = patch("api.models.flag_is_active", return_value=True)
-        self._p_switch = patch("api.models.switch_is_active", return_value=True)
-        self._p_flag.start()
-        self._p_switch.start()
-        self.addCleanup(self._p_flag.stop)
-        self.addCleanup(self._p_switch.stop)
+        # No feature flags; behavior is always-on now
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="owner2", email="owner2@example.com", password="pw"
@@ -169,13 +157,7 @@ class OrgDefaultAllowlistEmailTests(TestCase):
 @tag("batch_email_allowlist")
 class ManualAllowlistSMSTests(TestCase):
     def setUp(self):
-        # Enable feature-gated whitelist logic for tests
-        self._p_flag = patch("api.models.flag_is_active", return_value=True)
-        self._p_switch = patch("api.models.switch_is_active", return_value=True)
-        self._p_flag.start()
-        self._p_switch.start()
-        self.addCleanup(self._p_flag.stop)
-        self.addCleanup(self._p_switch.stop)
+        # No feature flags; behavior is always-on now
         self.owner = User.objects.create_user(
             username="owner3", email="owner3@example.com", password="pw"
         )

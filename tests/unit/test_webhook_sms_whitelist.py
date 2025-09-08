@@ -48,9 +48,8 @@ class SmsWebhookWhitelistTests(TestCase):
         )
 
     @tag("batch_sms")
-    @patch("api.models.switch_is_active", return_value=True)
     @patch("api.webhooks.ingest_inbound_message")
-    def test_manual_allowlist_sender_allowed(self, mock_ingest, _flag):
+    def test_manual_allowlist_sender_allowed(self, mock_ingest):
         # Switch agent policy to MANUAL and add sender to allowlist
         self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
         self.agent.save(update_fields=["whitelist_policy"])
@@ -64,9 +63,8 @@ class SmsWebhookWhitelistTests(TestCase):
         mock_ingest.assert_called_once()
 
     @tag("batch_sms")
-    @patch("api.models.flag_is_active", return_value=True)
     @patch("api.webhooks.ingest_inbound_message")
-    def test_manual_allowlist_sender_rejected(self, mock_ingest, _flag):
+    def test_manual_allowlist_sender_rejected(self, mock_ingest):
         self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
         self.agent.save(update_fields=["whitelist_policy"])
         req = self._req("+19998887777", self.to_ep.address)
@@ -74,9 +72,8 @@ class SmsWebhookWhitelistTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_not_called()
 
-    @patch("api.models.flag_is_active", return_value=True)
     @patch("api.webhooks.ingest_inbound_message")
-    def test_default_policy_user_owned_sender(self, mock_ingest, _flag):
+    def test_default_policy_user_owned_sender(self, mock_ingest):
         # Verified owner number allowed
         UserPhoneNumber.objects.create(user=self.owner, phone_number="+15554443333", is_verified=True)
         req = self._req("+15554443333", self.to_ep.address)
@@ -84,9 +81,8 @@ class SmsWebhookWhitelistTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_called_once()
 
-    @patch("api.models.switch_is_active", return_value=True)
     @patch("api.webhooks.ingest_inbound_message")
-    def test_default_policy_org_owned_sender(self, mock_ingest, _flag):
+    def test_default_policy_org_owned_sender(self, mock_ingest):
         # Make agent org-owned and add an active member with a verified phone
         org = Organization.objects.create(name="Acme", slug="acme", created_by=self.owner)
         self.agent.organization = org

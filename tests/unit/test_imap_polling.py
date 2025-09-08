@@ -116,9 +116,8 @@ class ImapPollingTests(TestCase):
 
     @patch('api.agent.tasks.email_polling.ingest_inbound_message')
     @patch('api.agent.tasks.process_agent_events_task.delay')
-    @patch('api.models.switch_is_active', return_value=True)
     @patch('imaplib.IMAP4_SSL', new=_FakeIMAP)
-    def test_poll_account_ingests_and_updates_uid(self, _switch_mock_flag, _mock_events_delay, mock_ingest):
+    def test_poll_account_ingests_and_updates_uid(self, _mock_events_delay, mock_ingest):
         acct = self._setup_endpoint_and_account()
         # Whitelist the sender
         CommsAllowlistEntry.objects.create(
@@ -139,9 +138,8 @@ class ImapPollingTests(TestCase):
         # No DB persistence assertion here since ingest is mocked
 
     @patch('api.agent.tasks.process_agent_events_task.delay')
-    @patch('api.models.switch_is_active', return_value=True)
     @patch('imaplib.IMAP4_SSL', new=_FakeIMAP)
-    def test_poll_account_skips_non_whitelisted_but_marks_seen(self, _mock_events_delay, _switch_mock_flag):
+    def test_poll_account_skips_non_whitelisted_but_marks_seen(self, _mock_events_delay):
         acct = self._setup_endpoint_and_account()
         # No allowlist created; default policy is MANUAL (block)
         _poll_account_locked(acct)
