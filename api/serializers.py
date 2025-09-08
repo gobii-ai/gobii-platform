@@ -38,10 +38,11 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
         write_only=True,  # Never return secrets in responses
         help_text="Domain-specific secrets for the task. REQUIRED FORMAT: {'https://example.com': {'x_api_key': 'value', 'x_username': 'user'}}. Each domain can have multiple secrets. Secret keys will be available as placeholders in the prompt for the specified domains."
     )
+    credits_cost = serializers.DecimalField(max_digits=12, decimal_places=3, min_value="0.001", required=False, allow_null=True)
 
     class Meta:
         model = BrowserUseAgentTask
-        fields = ['id', 'agent', 'agent_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at', 'error_message', 'wait', 'secrets']
+        fields = ['id', 'agent', 'agent_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at', 'error_message', 'wait', 'secrets', 'credits_cost']
         read_only_fields = ('id', 'agent_id', 'status', 'created_at', 'updated_at', 'error_message')
         # 'prompt' and 'output_schema' are writable by not being in read_only_fields
         ref_name = "TaskDetail" # Optional: for explicit component naming
@@ -137,6 +138,6 @@ class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BrowserUseAgentTask
-        fields = ['id', 'agent_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at']
+        fields = ['id', 'agent_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at', 'credits_cost']
         read_only_fields = fields
         ref_name = "TaskList" # Optional: for explicit component naming

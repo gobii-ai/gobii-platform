@@ -180,8 +180,9 @@ class TaskCredit(models.Model):
         blank=True,
         help_text="Exactly one of user or organization must be set."
     )
-    credits = models.PositiveIntegerField()
-    credits_used = models.PositiveIntegerField(default=0)
+    # Support fractional credits by using DecimalField
+    credits = models.DecimalField(max_digits=12, decimal_places=3)
+    credits_used = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     granted_date = models.DateTimeField()
     expiration_date = models.DateTimeField()
     stripe_invoice_id = models.CharField(max_length=128, null=True, blank=True)
@@ -198,8 +199,8 @@ class TaskCredit(models.Model):
 
     available_credits = models.GeneratedField(
         expression=models.F('credits') - models.F('credits_used'),
-        output_field=models.IntegerField(),
-        db_persist=True,  # Set to True for stored generated columns
+        output_field=models.DecimalField(max_digits=12, decimal_places=3),
+        db_persist=True,  # Stored generated column
     )
 
     grant_month = models.GeneratedField(
@@ -258,7 +259,7 @@ class TaskCredit(models.Model):
         ]
 
     @property
-    def remaining(self) -> int:
+    def remaining(self):
         return (self.credits or 0) - (self.credits_used or 0)
 
 class BrowserUseAgent(models.Model):
@@ -472,6 +473,14 @@ class BrowserUseAgentTask(models.Model):
         blank=True,
         help_text="Total tokens used (prompt + completion) for this step's LLM call",
     )
+    # Credits charged for this task (for audit). If not provided, defaults to configured per‑task cost.
+    credits_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Credits charged for this task; defaults to configured per‑task cost.",
+    )
     cached_tokens = models.IntegerField(
         null=True,
         blank=True,
@@ -567,14 +576,19 @@ class BrowserUseAgentTask(models.Model):
                         owner = pa.organization
 
                 # Use consolidated credit checking and consumption logic (owner-aware)
-                result = TaskCreditService.check_and_consume_credit_for_owner(owner)
+                # Determine amount to consume; persist it on the task for auditability
+                amount = self.credits_cost if self.credits_cost is not None else settings.CREDITS_PER_TASK
+                result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
                 
                 if not result['success']:
                     raise ValidationError({"quota": result['error_message']})
                 
                 # Associate the consumed credit with this task
                 self.task_credit = result['credit']
-                
+                # Persist the actual credits charged for this task
+                if self.credits_cost is None:
+                    self.credits_cost = amount
+
                 super().save(*args, **kwargs)
         else:
             super().save(*args, **kwargs)
@@ -2385,6 +2399,15 @@ class PersistentAgentStep(models.Model):
         help_text="The persistent agent that executed this step",
     )
 
+    # Credit used for this step
+    task_credit = models.ForeignKey(
+        "TaskCredit",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="agent_steps",
+    )
+
     # Free-form narrative or data for non-tool steps
     description = models.TextField(
         blank=True,
@@ -2408,6 +2431,14 @@ class PersistentAgentStep(models.Model):
         null=True,
         blank=True,
         help_text="Total tokens used (prompt + completion) for this step's LLM call"
+    )
+    # Credits charged for this step (for audit). If not provided, defaults to configured per‑task cost.
+    credits_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Credits charged for this step; defaults to configured per‑task cost.",
     )
     cached_tokens = models.IntegerField(
         null=True,
@@ -2439,6 +2470,40 @@ class PersistentAgentStep(models.Model):
     def __str__(self):
         preview = (self.description or "").replace("\n", " ")[:60]
         return f"Step {preview}..."
+
+    def save(self, *args, **kwargs):
+        # On creation, optionally consume credits for chargeable steps only.
+        if self._state.adding:
+            from django.core.exceptions import ValidationError
+            from django.conf import settings as dj_settings
+            # Determine owner: organization if agent is org-owned; otherwise the agent's user
+            owner = None
+            if self.agent and getattr(self.agent, 'organization', None):
+                owner = self.agent.organization
+            elif self.agent:
+                owner = self.agent.user
+
+            # Heuristic: only charge credits for LLM/tool compute steps – indicated by either
+            # an explicit credits_cost override or presence of token/model usage fields.
+            chargeable = (
+                self.credits_cost is not None
+                or self.llm_model is not None
+                or self.prompt_tokens is not None
+                or self.total_tokens is not None
+            )
+
+            if owner is not None and chargeable:
+                amount = self.credits_cost if self.credits_cost is not None else dj_settings.CREDITS_PER_TASK
+                result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
+
+                if not result.get('success'):
+                    raise ValidationError({"quota": result.get('error_message')})
+
+                self.task_credit = result.get('credit')
+                if self.credits_cost is None:
+                    self.credits_cost = amount
+
+        return super().save(*args, **kwargs)
 
 
 class PersistentAgentToolCall(models.Model):

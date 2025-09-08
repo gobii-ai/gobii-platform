@@ -874,7 +874,7 @@ class BrowserUseAgentTaskQuotaTests(TestCase):
         """Task creation succeeds with subscription even without credits."""
         sub = MagicMock()
         with patch("api.models.get_active_subscription", return_value=sub), \
-             patch("api.models.TaskCreditService.consume_credit") as mock_consume, \
+             patch("api.models.TaskCreditService.check_and_consume_credit_for_owner") as mock_consume_owner, \
              patch("util.subscription_helper.report_task_usage") as mock_report:
 
             from django.utils import timezone
@@ -892,7 +892,11 @@ class BrowserUseAgentTaskQuotaTests(TestCase):
                     grant_type=GrantTypeChoices.PROMO
                 )
 
-            mock_consume.side_effect = _create_credit
+            def _consume_owner(owner, amount=None):
+                credit = _create_credit(owner, additional_task=False)
+                return {"success": True, "credit": credit, "error_message": None}
+
+            mock_consume_owner.side_effect = _consume_owner
 
             task = BrowserUseAgentTask.objects.create(
                 agent=self.agent,
@@ -900,7 +904,7 @@ class BrowserUseAgentTaskQuotaTests(TestCase):
                 prompt="Test",
             )
             self.assertIsNotNone(task.task_credit)
-            mock_consume.assert_called_once_with(self.user)
+            mock_consume_owner.assert_called_once()
             mock_report.assert_not_called()
 
 
