@@ -75,14 +75,13 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     # Log a preview of the batch for observability (truncate SQL text)
     try:
         preview_ops = [
-            {
-                "sql": (str(op.get("sql", "")).strip()[:160] + ("..." if len(str(op.get("sql", "")).strip()) > 160 else "")),
-                "tag": op.get("tag"),
-            }
-            for op in ops[:10]
+            (sql.strip()[:160] + ("..." if len(sql.strip()) > 160 else ""))
+            for sql in ops[:10]
         ]
-        logger.info("Agent %s executing sqlite_batch: %s ops, mode=%s, preview=%s",
-                    agent.id, len(ops), mode, json.dumps(preview_ops))
+        logger.info(
+            "Agent %s executing sqlite_batch: %s ops, mode=%s, preview=%s",
+            agent.id, len(ops), mode, json.dumps(preview_ops)
+        )
     except Exception:
         logger.info("Agent %s executing sqlite_batch: %s ops, mode=%s", agent.id, len(ops), mode)
 
@@ -199,8 +198,8 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     # Per-statement rollback and continue/stop
                     try:
                         conn.rollback()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Failed to rollback transaction in atomic mode: %s", e)
                     # Continue to next op in per_statement mode
 
         if not error_occurred and mode == "atomic":
