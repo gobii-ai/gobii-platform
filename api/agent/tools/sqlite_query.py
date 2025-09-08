@@ -115,7 +115,7 @@ def get_sqlite_query_tool() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "sqlite_query",
-            "description": "Executes an arbitrary SQL query (including DDL) against the agent's private SQLite memory. Returns query results for SELECT statements.",
+            "description": "Executes a single SQL statement (including DDL) against the agent's private SQLite memory. Returns rows for SELECT statements. For multiple operations, prefer the sqlite_batch tool to run them in one call.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -317,4 +317,4 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
                             pass
 
             # Always reset context var so it doesn't leak to other tasks
-            reset_sqlite_db_path(token) 
+            reset_sqlite_db_path(token)
