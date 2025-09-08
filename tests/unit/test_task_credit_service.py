@@ -91,7 +91,7 @@ class TaskCreditServiceConsumeCreditTests(TestCase):
         user = User.objects.create(username="user5")
         TaskCredit = MagicMock()
         mock_get_model.return_value = TaskCredit
-        credit = MagicMock(credits_used=0)
+        credit = MagicMock(credits_used=0, credits=1)
         select = TaskCredit.objects.select_for_update.return_value
         filt = select.filter.return_value
         ordered = filt.order_by.return_value

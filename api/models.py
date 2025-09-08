@@ -2473,7 +2473,7 @@ class PersistentAgentStep(models.Model):
         return f"Step {preview}..."
 
     def save(self, *args, **kwargs):
-        # On creation, consume appropriate credits for the owning user/org, mirroring BrowserUseAgentTask
+        # On creation, optionally consume credits for chargeable steps only.
         if self._state.adding:
             from django.core.exceptions import ValidationError
             from django.conf import settings as dj_settings
@@ -2484,8 +2484,16 @@ class PersistentAgentStep(models.Model):
             elif self.agent:
                 owner = self.agent.user
 
-            # Only attempt credit consumption when we have a valid owner (agents should always have one)
-            if owner is not None:
+            # Heuristic: only charge credits for LLM/tool compute steps – indicated by either
+            # an explicit credits_cost override or presence of token/model usage fields.
+            chargeable = (
+                self.credits_cost is not None
+                or self.llm_model is not None
+                or self.prompt_tokens is not None
+                or self.total_tokens is not None
+            )
+
+            if owner is not None and chargeable:
                 amount = self.credits_cost if self.credits_cost is not None else dj_settings.CREDITS_PER_TASK
                 result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
 

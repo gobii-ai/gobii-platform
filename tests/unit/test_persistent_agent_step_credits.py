@@ -36,6 +36,7 @@ class PersistentAgentStepCreditsTests(TestCase):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description="Test step",
+            llm_model="gpt-4",
         )
         step.refresh_from_db()
 
@@ -57,6 +58,7 @@ class PersistentAgentStepCreditsTests(TestCase):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description="Fractional step",
+            llm_model="gpt-4",
         )
         step.refresh_from_db()
         credit.refresh_from_db()
@@ -84,12 +86,14 @@ class PersistentAgentStepCreditsTests(TestCase):
             created_by=self.user,
         )
         # Create an org-owned agent
+        # Create a separate browser agent for the org-owned persistent agent
+        org_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="BA-Org")
         org_agent = PersistentAgent.objects.create(
             user=self.user,
             organization=org,
             name="Org Agent",
             charter="help org",
-            browser_use_agent=self.browser_agent,
+            browser_use_agent=org_browser_agent,
         )
         # Grant org a credit block
         org_credit = TaskCredit.objects.create(
@@ -104,6 +108,7 @@ class PersistentAgentStepCreditsTests(TestCase):
         step = PersistentAgentStep.objects.create(
             agent=org_agent,
             description="Org step",
+            llm_model="gpt-4",
         )
         step.refresh_from_db()
         org_credit.refresh_from_db()
