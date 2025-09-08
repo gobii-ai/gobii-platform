@@ -1,6 +1,7 @@
 {% extends "console_page.html" %}
 {% block console_content %}
 <div class="space-y-6 pb-6">
+  <!-- Heading panel (standalone) -->
   <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
     <div class="px-6 py-4 border-b border-gray-200/70 flex items-center justify-between">
       <div>
@@ -23,7 +24,10 @@
         {% endif %}
       </div>
     </div>
+  </div>
 
+  <!-- Main content panel (separate card) -->
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
     {% if endpoint %}
     <form method="post" class="p-6 space-y-6">
       {% csrf_token %}
