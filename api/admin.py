@@ -189,19 +189,32 @@ class TaskCreditAdmin(admin.ModelAdmin):
 
             # Optionally filter to users currently out of credits
             if only_zero:
+                from django.db.models import Sum, Q, Value
+                from django.db.models.functions import Coalesce
+
                 now = timezone.now()
-                from django.db.models import Sum
-                filtered = []
-                for user in matched_users:
-                    total = TaskCredit.objects.filter(
-                        user=user,
-                        granted_date__lte=now,
-                        expiration_date__gte=now,
-                        voided=False,
-                    ).aggregate(s=Sum('available_credits'))['s'] or 0
-                    if total <= 0:
-                        filtered.append(user)
-                matched_users = filtered
+                user_ids = [user.id for user in matched_users]
+
+                users_with_zero_credits_ids = set(
+                    User.objects.filter(id__in=user_ids)
+                    .annotate(
+                        available_credits_sum=Coalesce(
+                            Sum(
+                                "task_credits__available_credits",
+                                filter=Q(
+                                    task_credits__granted_date__lte=now,
+                                    task_credits__expiration_date__gte=now,
+                                    task_credits__voided=False,
+                                ),
+                            ),
+                            Value(0),
+                        )
+                    )
+                    .filter(available_credits_sum__lte=0)
+                    .values_list('id', flat=True)
+                )
+
+                matched_users = [user for user in matched_users if user.id in users_with_zero_credits_ids]
 
             # Dry-run CSV export
             if dry_run and export_csv:
@@ -297,19 +310,32 @@ class TaskCreditAdmin(admin.ModelAdmin):
             users = list(User.objects.filter(id__in=ids, is_active=True))
 
             if only_zero:
+                from django.db.models import Sum, Q, Value
+                from django.db.models.functions import Coalesce
+
                 now = timezone.now()
-                from django.db.models import Sum
-                filtered = []
-                for user in users:
-                    total = TaskCredit.objects.filter(
-                        user=user,
-                        granted_date__lte=now,
-                        expiration_date__gte=now,
-                        voided=False,
-                    ).aggregate(s=Sum('available_credits'))['s'] or 0
-                    if total <= 0:
-                        filtered.append(user)
-                users = filtered
+                user_ids = [user.id for user in users]
+
+                users_with_zero_credits_ids = set(
+                    User.objects.filter(id__in=user_ids)
+                    .annotate(
+                        available_credits_sum=Coalesce(
+                            Sum(
+                                "task_credits__available_credits",
+                                filter=Q(
+                                    task_credits__granted_date__lte=now,
+                                    task_credits__expiration_date__gte=now,
+                                    task_credits__voided=False,
+                                ),
+                            ),
+                            Value(0),
+                        )
+                    )
+                    .filter(available_credits_sum__lte=0)
+                    .values_list('id', flat=True)
+                )
+
+                users = [user for user in users if user.id in users_with_zero_credits_ids]
 
             # Dry-run CSV export
             if dry_run and export_csv:
