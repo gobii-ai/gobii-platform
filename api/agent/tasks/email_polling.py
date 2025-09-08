@@ -243,11 +243,18 @@ def _uid_search_new(client: imaplib.IMAP4, last_seen: str | None) -> List[str]:
             start = 0
 
     # UID SEARCH for newer UIDs
-    query = f"UID {start + 1}:*" if start > 0 else "ALL"
+    # Use the UID search criteria explicitly to ensure numeric range is interpreted as UIDs,
+    # not message sequence numbers. Parentheses are accepted and common across servers.
+    query = f"(UID {start + 1}:*)" if start > 0 else "(UID 1:*)"
     typ, data = client.uid("SEARCH", None, query)
     if typ != "OK":
         return []
     uids = _parse_uid_list(data)
+    # Best-effort debug to help diagnose repeated processing in production
+    try:
+        logger.debug("IMAP UID SEARCH %s returned %d UIDs (start=%d)", query, len(uids), start)
+    except Exception:
+        pass
     # Ascending order for processing
     try:
         uids = sorted(uids, key=lambda s: int(s))
@@ -342,7 +349,7 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
             pass
 
 
-@shared_task(bind=True, name="api.agent.tasks.poll_imap_inbox")
+@shared_task(bind=True, name="api.agent.tasks.poll_imap_inbox", expires=600, ignore_result=True)
 def poll_imap_inbox(self, account_id: str) -> None:
     """Poll a single IMAP inbox for the given account ID (endpoint PK)."""
     # Acquire distributed lock
@@ -368,7 +375,7 @@ def poll_imap_inbox(self, account_id: str) -> None:
                 pass
 
 
-@shared_task(bind=True, name="api.agent.tasks.poll_imap_inboxes")
+@shared_task(bind=True, name="api.agent.tasks.poll_imap_inboxes", expires=90, ignore_result=True)
 def poll_imap_inboxes(self) -> None:
     """Dispatcher: find due inbound-enabled accounts and enqueue per-account tasks."""
     now = timezone.now()
@@ -390,6 +397,7 @@ def poll_imap_inboxes(self) -> None:
     random.shuffle(due_ids)
     for account_id in due_ids:
         try:
+            # Enqueue; task has an expires set in its decorator and will age off if unprocessed
             poll_imap_inbox.delay(account_id)
         except Exception:
             logger.warning("Failed to enqueue poll task for %s", account_id, exc_info=True)
