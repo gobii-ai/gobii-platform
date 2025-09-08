@@ -1,0 +1,10 @@
+{% load waffle_tags %}
+
+<!-- Debug: Check if organizations flag is active -->
+<div class="hidden">
+  {% flag "organizations" %}
+    <div id="debug-org-flag-active">Organizations flag is ACTIVE</div>
+  {% else %}
+    <div id="debug-org-flag-inactive">Organizations flag is INACTIVE</div>
+  {% endflag %}
+</div>

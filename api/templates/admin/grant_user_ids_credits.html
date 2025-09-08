@@ -9,7 +9,7 @@
 
 {% block content %}
   <div class="module">
-    <h2>{% trans "Grant Credits by Plan" %}</h2>
+    <h2>{% trans "Grant Credits to User IDs" %}</h2>
     <form method="post" novalidate>
       {% csrf_token %}
       <table>
@@ -20,6 +20,6 @@
         <a href="{% url 'admin:api_taskcredit_changelist' %}" class="button cancel-button">{% trans 'Cancel' %}</a>
       </div>
     </form>
-    <p class="help">This tool grants a new TaskCredit block to all active users whose current plan matches the selected plan. Use Dry Run to preview the affected user count.</p>
+    <p class="help">Paste user IDs separated by commas or new lines. Use Dry Run to preview the affected user count. Enable "Only if out of credits" to restrict grants to users with 0 available credits currently.</p>
   </div>
 {% endblock %}
