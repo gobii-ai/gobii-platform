@@ -1216,56 +1216,50 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
         context['primary_email'] = primary_email
         context['primary_sms'] = primary_sms
         
-        # Add allowlist configuration if multiplayer_agents flag is active
-        from waffle import flag_is_active
+        # Always include allowlist configuration (flag removed)
         from api.models import CommsAllowlistEntry
-        from constants.feature_flags import MULTIPLAYER_AGENTS
-        
-        if flag_is_active(self.request, MULTIPLAYER_AGENTS):
-            context['show_allowlist'] = True
-            context['whitelist_policy'] = agent.whitelist_policy
-            context['allowlist_entries'] = CommsAllowlistEntry.objects.filter(
-                agent=agent
-            ).order_by('channel', 'address')
-            context['pending_invites'] = AgentAllowlistInvite.objects.filter(
-                agent=agent,
-                status=AgentAllowlistInvite.InviteStatus.PENDING
-            ).order_by('channel', 'address')
-            
-            # Count active allowlist entries AND pending invitations for display
-            active_count = CommsAllowlistEntry.objects.filter(
-                agent=agent,
-                is_active=True
-            ).count()
-            pending_count = AgentAllowlistInvite.objects.filter(
-                agent=agent,
-                status=AgentAllowlistInvite.InviteStatus.PENDING
-            ).count()
-            context['active_allowlist_count'] = active_count + pending_count
-            
-            # Add pending contact requests count
-            from api.models import CommsAllowlistRequest
-            pending_contact_requests = CommsAllowlistRequest.objects.filter(
-                agent=agent,
-                status=CommsAllowlistRequest.RequestStatus.PENDING
-            ).count()
-            context['pending_contact_requests'] = pending_contact_requests
-            
-            # Add owner information for display
-            context['owner_email'] = agent.user.email
-            
-            # Check if owner has verified phone for SMS display
-            try:
-                from api.models import UserPhoneNumber
-                owner_phone = UserPhoneNumber.objects.filter(
-                    user=agent.user, 
-                    is_verified=True
-                ).first()
-                context['owner_phone'] = owner_phone.phone_number if owner_phone else None
-            except:
-                context['owner_phone'] = None
-        else:
-            context['show_allowlist'] = False
+        context['show_allowlist'] = True
+        context['whitelist_policy'] = agent.whitelist_policy
+        context['allowlist_entries'] = CommsAllowlistEntry.objects.filter(
+            agent=agent
+        ).order_by('channel', 'address')
+        context['pending_invites'] = AgentAllowlistInvite.objects.filter(
+            agent=agent,
+            status=AgentAllowlistInvite.InviteStatus.PENDING
+        ).order_by('channel', 'address')
+
+        # Count active allowlist entries AND pending invitations for display
+        active_count = CommsAllowlistEntry.objects.filter(
+            agent=agent,
+            is_active=True
+        ).count()
+        pending_count = AgentAllowlistInvite.objects.filter(
+            agent=agent,
+            status=AgentAllowlistInvite.InviteStatus.PENDING
+        ).count()
+        context['active_allowlist_count'] = active_count + pending_count
+
+        # Add pending contact requests count
+        from api.models import CommsAllowlistRequest
+        pending_contact_requests = CommsAllowlistRequest.objects.filter(
+            agent=agent,
+            status=CommsAllowlistRequest.RequestStatus.PENDING
+        ).count()
+        context['pending_contact_requests'] = pending_contact_requests
+
+        # Add owner information for display
+        context['owner_email'] = agent.user.email
+
+        # Check if owner has verified phone for SMS display
+        try:
+            from api.models import UserPhoneNumber
+            owner_phone = UserPhoneNumber.objects.filter(
+                user=agent.user, 
+                is_verified=True
+            ).first()
+            context['owner_phone'] = owner_phone.phone_number if owner_phone else None
+        except:
+            context['owner_phone'] = None
 
         return context
 
@@ -1533,13 +1527,8 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
         # active state based on whether the "is_active" field was submitted.
         new_is_active = 'is_active' in request.POST
         
-        # Handle whitelist policy update if multiplayer_agents flag is active
-        from waffle import flag_is_active
-        from constants.feature_flags import MULTIPLAYER_AGENTS
-        
-        new_whitelist_policy = None
-        if flag_is_active(request, MULTIPLAYER_AGENTS):
-            new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
+        # Handle whitelist policy update (flag removed)
+        new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
 
         if not new_name:
             messages.error(request, "Agent name cannot be empty.")
@@ -1626,11 +1615,8 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
         return redirect('agent_detail', pk=agent.pk)
 
 
-from constants.feature_flags import MULTIPLAYER_AGENTS
-
-class AgentAllowlistView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class AgentAllowlistView(LoginRequiredMixin, TemplateView):
     """Manage manual allowlist and policy for an agent."""
-    waffle_flag = MULTIPLAYER_AGENTS
     template_name = "console/agent_allowlist.html"
 
     def _get_agent(self):

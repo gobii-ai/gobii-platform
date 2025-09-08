@@ -9,7 +9,6 @@ import logging
 from typing import Dict, Any
 
 from ...models import (
-    switch_is_active,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,

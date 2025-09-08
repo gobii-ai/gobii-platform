@@ -15,6 +15,10 @@ import random
 from datetime import timedelta
 from typing import Iterable, List, Tuple, Optional
 import ssl
+from email import policy
+from email.parser import BytesParser
+from email.header import decode_header, make_header
+from email.utils import parseaddr
 
 from celery import shared_task
 from django.utils import timezone
@@ -84,6 +88,49 @@ def _fetch_message_bytes(client: imaplib.IMAP4, uid: str) -> Optional[bytes]:
     return best
 
 
+def _extract_sender_from_header_bytes(hdr_bytes: bytes) -> Optional[str]:
+    try:
+        # Parse as headers-only; BytesParser can handle partial messages
+        msg = BytesParser(policy=policy.default).parsebytes(hdr_bytes)
+        raw_from = msg.get("From")
+        if not raw_from:
+            return None
+        try:
+            decoded = str(make_header(decode_header(raw_from)))
+        except Exception:
+            decoded = raw_from
+        return (parseaddr(decoded)[1] or decoded).strip()
+    except Exception:
+        return None
+
+
+def _fetch_sender_address(client: imaplib.IMAP4, uid: str) -> Optional[str]:
+    """Fetch just the sender address via header-only fetch to avoid full body download.
+
+    Falls back to attempting to parse From from a BODY[] response if server
+    returns that structure (e.g., in mocks).
+    """
+    try:
+        typ, data = client.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM)])")
+        if typ == "OK" and data:
+            for item in data:
+                if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
+                    addr = _extract_sender_from_header_bytes(bytes(item[1]))
+                    if addr:
+                        return addr
+        # Fallback: some mocks return BODY[] even for header fetch; try to parse
+        if data:
+            for item in data:
+                if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
+                    addr = _extract_sender_from_header_bytes(bytes(item[1]))
+                    if addr:
+                        return addr
+    except Exception:
+        # Ignore and fallback to full fetch path
+        pass
+    return None
+
+
 def _update_success(acct: AgentEmailAccount, now, last_uid: str, uidvalidity: Optional[str]) -> None:
     acct.last_seen_uid = f"v:{uidvalidity}:{last_uid}" if uidvalidity else str(last_uid)
     acct.last_polled_at = now
@@ -141,12 +188,22 @@ def _ingest_uid(client: imaplib.IMAP4, acct: AgentEmailAccount, uid: str) -> boo
     on the next poll.
     """
     try:
+        endpoint = acct.endpoint  # type: ignore[assignment]
+        agent = getattr(endpoint, "owner_agent", None)
+
+        # Optimize: check whitelist via header-only fetch to avoid downloading body
+        if agent is not None:
+            sender = _fetch_sender_address(client, uid)
+            if sender and not agent.is_sender_whitelisted(CommsChannel.EMAIL, sender):
+                logger.info(
+                    "IMAP message from %s is not whitelisted for agent %s; skipping",
+                    sender, getattr(agent, "id", None),
+                )
+                return True
+
         raw = _fetch_message_bytes(client, uid)
         if not raw:
             return True  # nothing to do, treat as processed
-
-        endpoint = acct.endpoint  # type: ignore[assignment]
-        agent = getattr(endpoint, "owner_agent", None)
 
         parsed = ImapEmailAdapter.parse_bytes(
             raw,

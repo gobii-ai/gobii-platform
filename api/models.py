@@ -23,8 +23,7 @@ from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames, PlanNamesChoices
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
-from waffle import flag_is_active, switch_is_active
-from constants.feature_flags import MULTIPLAYER_AGENTS, MULTISEND_ENABLED
+# (Waffle flags removed for multi-send; no feature flag imports needed here)
 from email.utils import parseaddr
 
 from tasks.services import TaskCreditService
@@ -1219,10 +1218,6 @@ class PersistentAgent(models.Model):
             logger.info("Whitelist check - Unsupported channel '%s'; defaulting to False", channel_val)
             return False
 
-        # Feature flag gate: if disabled, fall back to legacy owner-only checks
-        if not switch_is_active(MULTISEND_ENABLED):
-            return self._legacy_owner_only(channel_val, addr)
-
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
             return self._is_in_manual_allowlist(channel_val, addr, direction="inbound")
 
@@ -1243,10 +1238,6 @@ class PersistentAgent(models.Model):
             if self.organization_id is not None:
                 # Org-owned agents can only use email (group SMS not yet supported)
                 return False
-
-        # Feature flag gate: if disabled, fall back to legacy owner-only checks
-        if not switch_is_active(MULTISEND_ENABLED):
-            return self._legacy_owner_only(channel_val, addr)
 
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
             return self._is_in_manual_allowlist(channel_val, addr, direction="outbound")
