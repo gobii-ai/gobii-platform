@@ -19,7 +19,7 @@
             <div class="text-red-600">{{ account.connection_error }}</div>
           {% endif %}
         {% else %}
-          <div class="text-red-600">No email endpoint found for this agent.</div>
+          <div class="text-gray-700">No custom email configured yet.</div>
         {% endif %}
       </div>
     </div>
@@ -134,8 +134,23 @@
         </button>
       </div>
     </form>
+    {% else %}
+    <form method="post" class="p-6 space-y-4">
+      {% csrf_token %}
+      <p class="text-sm text-gray-700">Your agent can already send and receive email using our default delivery (Postmark). To customize delivery with your own SMTP/IMAP, first set an agent email address.</p>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Agent Email Address</label>
+        <input type="email" name="address" placeholder="agent@example.com" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
+        <p class="text-xs text-gray-500 mt-1">This becomes your agent’s From/To address when using custom SMTP/IMAP.</p>
+      </div>
+      <div class="flex items-center gap-2 pt-2">
+        <button type="submit" name="action" value="create_endpoint" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">
+          Create Email Endpoint
+        </button>
+        <a href="{% url 'agent_detail' agent.id %}" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">Cancel</a>
+      </div>
+    </form>
     {% endif %}
   </div>
 </div>
 {% endblock %}
-

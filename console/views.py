@@ -2101,8 +2101,29 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
         agent = self.get_agent()
         endpoint = self._get_email_endpoint(agent)
         if not endpoint:
-            messages.error(request, "This agent has no email endpoint yet. Add an agent email address first.")
-            return redirect('agent_detail', pk=agent.pk)
+            # Allow creating endpoint directly from this page
+            action = request.POST.get('action')
+            if action == 'create_endpoint':
+                address = (request.POST.get('address') or '').strip()
+                if not address or '@' not in address:
+                    messages.error(request, "Please provide a valid email address (e.g., agent@example.com).")
+                    return redirect('agent_email_settings', pk=agent.pk)
+                from api.models import PersistentAgentCommsEndpoint, CommsChannel
+                try:
+                    ep = PersistentAgentCommsEndpoint.objects.create(
+                        owner_agent=agent,
+                        channel=CommsChannel.EMAIL,
+                        address=address,
+                        is_primary=True,
+                    )
+                    messages.success(request, "Agent email endpoint created.")
+                    return redirect('agent_email_settings', pk=agent.pk)
+                except Exception as e:
+                    messages.error(request, f"Failed to create email endpoint: {e}")
+                    return redirect('agent_email_settings', pk=agent.pk)
+            else:
+                messages.error(request, "This agent has no email endpoint yet. Provide an email address to create one.")
+                return redirect('agent_email_settings', pk=agent.pk)
 
         form = AgentEmailAccountConsoleForm(request.POST)
         action = request.POST.get('action', 'save')

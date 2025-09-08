@@ -62,6 +62,10 @@
                    class="py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none"
                    disabled>
             <p class="mt-2 text-xs text-gray-500">The agent's primary email address for communication. This cannot be changed.</p>
+            <div class="mt-2">
+              <a href="{% url 'agent_email_settings' agent.id %}"
+                 class="text-sm text-blue-600 hover:text-blue-800">Manage Email Settings</a>
+            </div>
             {% if not primary_sms %}
             <div class="mt-2">
               <a href="{% url 'agent_enable_sms' agent.id %}"
@@ -286,6 +290,14 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1721 9z"/>
             </svg>
             Manage Secrets
+          </a>
+          <a href="{% url 'agent_email_settings' agent.id %}"
+             class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v2m0 16v2m10-10h-2M4 12H2m15.364 6.364l-1.414-1.414M6.05 6.05L4.636 4.636m12.728 0l-1.414 1.414M6.05 17.95l-1.414 1.414" />
+            </svg>
+            Manage Email
           </a>
           <button type="submit" 
                   class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
