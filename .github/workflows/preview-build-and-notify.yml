@@ -1,80 +1,40 @@
 name: Preview Image + Notify
 
-
 on:
-  push:
-    branches: [ci_improvements]
-#on:
-#  workflow_run:
-#    workflows: ["CI"]
-#    types: ["completed"]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 concurrency:
-  group: preview-image-${{ github.event.workflow_run.pull_requests[0].number || github.run_id }}
+  # Use PR number from the triggering CI run
+  group: preview-image-${{ github.event.workflow_run.pull_requests[0].number }}
   cancel-in-progress: true
 
 permissions:
   contents: read
   packages: write
-  pull-requests: read
 
 jobs:
-  guard:
-    name: Guard author and context
-    runs-on: ubuntu-latest
-    outputs:
-      allowed: ${{ steps.eval.outputs.allowed }}
-      pr_number: ${{ steps.eval.outputs.pr_number }}
-      head_sha: ${{ steps.eval.outputs.head_sha }}
-      pr_url: ${{ steps.eval.outputs.pr_url }}
-      author_association: ${{ steps.eval.outputs.author_association }}
-    steps:
-      - name: Evaluate gating
-        id: eval
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const event = context.payload.workflow_run;
-            const pr = (event.pull_requests && event.pull_requests[0]) || null;
-            const out = { allowed: false };
-            if (!pr) {
-              core.info('No PR associated with workflow_run.');
-            } else if (event.event !== 'pull_request') {
-              core.info('Upstream event is not pull_request.');
-            } else if (event.conclusion !== 'success') {
-              core.info('Upstream CI did not conclude successfully.');
-            } else {
-              const [owner, repo] = event.repository.full_name.split('/');
-              const pr_number = pr.number;
-              const prRes = await github.rest.pulls.get({ owner, repo, pull_number: pr_number });
-              const assoc = prRes.data.author_association;
-              const isFork = prRes.data.head.repo.fork;
-              const allowedAssocs = ['OWNER', 'MEMBER', 'COLLABORATOR'];
-              if (!isFork && allowedAssocs.includes(assoc)) {
-                out.allowed = true;
-              } else {
-                core.info(`Blocked preview: assoc=${assoc}, fork=${isFork}`);
-              }
-              out.author_association = assoc;
-              out.pr_number = String(pr_number);
-              out.head_sha = event.head_sha;
-              out.pr_url = pr.html_url || `https://github.com/${owner}/${repo}/pull/${pr_number}`;
-            }
-            for (const [k, v] of Object.entries(out)) {
-              core.setOutput(k, String(v));
-            }
   build-and-dispatch:
     name: Build image and notify infra
     runs-on: ubuntu-latest
-    needs: [guard]
-    # Only run when guard allows (CI success + PR + trusted author + not fork)
-    if: ${{ needs.guard.outputs.allowed == 'true' }}
+    # Only run when CI succeeded, for PR-triggered runs, and for trusted authors
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'pull_request' &&
+          (
+            github.event.workflow_run.pull_requests[0].author_association == 'OWNER' ||
+            github.event.workflow_run.pull_requests[0].author_association == 'MEMBER' ||
+            github.event.workflow_run.pull_requests[0].author_association == 'COLLABORATOR' ||
+            github.event.workflow_run.pull_requests[0].head.repo.full_name == github.repository
+          )
+      }}
     steps:
       - name: Checkout PR head commit
         uses: actions/checkout@v4
         with:
           # Ensure we build from the exact PR head commit, not the merge commit
-          ref: ${{ needs.guard.outputs.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -94,8 +54,8 @@ jobs:
           file: ./docker/Dockerfile
           push: true
           tags: |
-            ghcr.io/gobii-ai/gobii-platform:sha-${{ needs.guard.outputs.head_sha }}
-            ghcr.io/gobii-ai/gobii-platform:pr-${{ needs.guard.outputs.pr_number }}
+            ghcr.io/gobii-ai/gobii-platform:sha-${{ github.event.workflow_run.head_sha }}
+            ghcr.io/gobii-ai/gobii-platform:pr-${{ github.event.workflow_run.pull_requests[0].number }}
           # Keep it single-arch for speed
           platforms: linux/amd64
           provenance: false
@@ -122,8 +82,8 @@ jobs:
             {
               "owner": "${{ github.repository_owner }}",
               "repo": "${{ github.event.repository.name }}",
-              "pr_number": ${{ needs.guard.outputs.pr_number }},
-              "head_sha": "${{ needs.guard.outputs.head_sha }}",
-              "image_tag": "sha-${{ needs.guard.outputs.head_sha }}",
-              "html_url": "${{ needs.guard.outputs.pr_url }}"
+              "pr_number": ${{ github.event.workflow_run.pull_requests[0].number }},
+              "head_sha": "${{ github.event.workflow_run.head_sha }}",
+              "image_tag": "sha-${{ github.event.workflow_run.head_sha }}",
+              "html_url": "https://github.com/${{ github.repository }}/pull/${{ github.event.workflow_run.pull_requests[0].number }}"
             }
