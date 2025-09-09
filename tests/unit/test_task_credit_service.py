@@ -106,7 +106,13 @@ class TaskCreditServiceConsumeCreditTests(TestCase):
         self.assertIs(result, credit)
         credit.save.assert_called_once()
         credit.refresh_from_db.assert_called_once()
-        mock_report.assert_called_once_with(user)
+        # Stripe usage now reports the fractional quantity consumed
+        from django.conf import settings
+        mock_report.assert_called_once()
+        args, kwargs = mock_report.call_args
+        self.assertIs(args[0], user)
+        qty = kwargs.get('quantity', args[1] if len(args) > 1 else None)
+        self.assertEqual(qty, settings.CREDITS_PER_TASK)
         mock_handle.assert_called_once_with(user)
 
     @patch("tasks.services.apps.get_model")
@@ -131,7 +137,13 @@ class TaskCreditServiceConsumeCreditTests(TestCase):
 
         TaskCredit.objects.create.assert_called_once()
         self.assertIs(result, credit)
-        mock_report.assert_called_once_with(user)
+        # Stripe usage now reports the fractional quantity consumed even for additional tasks
+        from django.conf import settings
+        mock_report.assert_called_once()
+        args, kwargs = mock_report.call_args
+        self.assertIs(args[0], user)
+        qty = kwargs.get('quantity', args[1] if len(args) > 1 else None)
+        self.assertEqual(qty, settings.CREDITS_PER_TASK)
         mock_handle.assert_called_once_with(user)
 
 
