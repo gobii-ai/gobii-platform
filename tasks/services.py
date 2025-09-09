@@ -260,7 +260,7 @@ class TaskCreditService:
                         last_credit = credit
 
             # Report usage for both regular and additional-task paths
-            report_task_usage_to_stripe(user)
+            report_task_usage_to_stripe(user, quantity=plan_amount)
 
             # Handle notification of task credit usage when thresholds are crossed
             TaskCreditService.handle_task_threshold(user)
