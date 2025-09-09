@@ -631,6 +631,7 @@ class AgentEmailAccountConsoleForm(forms.Form):
     imap_password = forms.CharField(required=False, widget=forms.PasswordInput(render_value=False))
     imap_folder = forms.CharField(required=False, initial='INBOX')
     is_inbound_enabled = forms.BooleanField(required=False, initial=False)
+    imap_idle_enabled = forms.BooleanField(required=False, initial=False)
 
     poll_interval_sec = forms.IntegerField(required=False, initial=120, min_value=30)
 

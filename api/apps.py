@@ -13,3 +13,11 @@ class ApiConfig(AppConfig):
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to import webhooks: {e}")
+
+        # Import idle notifications to wire Redis notify on IMAP account changes
+        try:
+            from . import idle_notifications  # noqa: F401  # pragma: no cover
+        except Exception as e:  # pragma: no cover - optional dependency
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to import idle_notifications: {e}")

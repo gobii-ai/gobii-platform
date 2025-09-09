@@ -2203,6 +2203,8 @@ class AgentEmailAccount(models.Model):
     imap_password_encrypted = models.BinaryField(null=True, blank=True)
     imap_folder = models.CharField(max_length=128, default="INBOX")
     is_inbound_enabled = models.BooleanField(default=False)
+    # Optional per-account toggle to enable IDLE watchers for lower latency (keeps polling as source of truth)
+    imap_idle_enabled = models.BooleanField(default=False)
 
     poll_interval_sec = models.PositiveIntegerField(default=120)
     last_polled_at = models.DateTimeField(null=True, blank=True)

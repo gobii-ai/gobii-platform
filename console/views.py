@@ -2091,6 +2091,7 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                 'imap_username': account.imap_username,
                 'imap_folder': account.imap_folder,
                 'is_inbound_enabled': account.is_inbound_enabled,
+                'imap_idle_enabled': account.imap_idle_enabled,
                 'poll_interval_sec': account.poll_interval_sec,
             }
 
@@ -2160,7 +2161,7 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                     return redirect('agent_email_settings', pk=agent.pk)
             # Assign simple fields
             for f in ('smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'is_outbound_enabled',
-                      'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_folder', 'is_inbound_enabled',
+                      'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_folder', 'is_inbound_enabled', 'imap_idle_enabled',
                       'poll_interval_sec'):
                 setattr(account, f, data.get(f))
             # Passwords

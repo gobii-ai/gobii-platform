@@ -1374,7 +1374,7 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             # SMTP
             'smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'smtp_password', 'is_outbound_enabled',
             # IMAP
-            'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_password', 'imap_folder', 'is_inbound_enabled', 'poll_interval_sec',
+            'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_password', 'imap_folder', 'is_inbound_enabled', 'imap_idle_enabled', 'poll_interval_sec',
             # Health
             'connection_last_ok_at', 'connection_error',
         )

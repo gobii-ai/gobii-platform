@@ -129,6 +129,13 @@
                 <span class="ml-2 text-sm text-gray-700">Enable Inbound via IMAP</span>
               </label>
             </div>
+            <div class="col-span-1 md:col-span-2">
+              <label class="inline-flex items-center"> 
+                <input type="checkbox" name="imap_idle_enabled" {% if form.initial.imap_idle_enabled %}checked{% endif %} class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                <span class="ml-2 text-sm text-gray-700">Enable IMAP IDLE (low-latency triggers)</span>
+              </label>
+              <p class="text-xs text-gray-500 mt-1">Keeps a lightweight connection open to trigger immediate polls when new mail arrives. Polling remains as the source of truth.</p>
+            </div>
           </div>
         </div>
       </div>

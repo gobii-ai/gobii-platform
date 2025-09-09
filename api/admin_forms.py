@@ -46,6 +46,7 @@ class AgentEmailAccountForm(ModelForm):
             "imap_username",
             "imap_folder",
             "is_inbound_enabled",
+            "imap_idle_enabled",
             "poll_interval_sec",
         ]
 

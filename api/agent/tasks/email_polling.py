@@ -175,7 +175,8 @@ def _connect_imap(acct: AgentEmailAccount) -> imaplib.IMAP4:
     client.login(acct.imap_username or "", acct.get_imap_password() or "")
     # Select folder
     folder = acct.imap_folder or "INBOX"
-    typ, _ = client.select(folder, readonly=True)
+    # Select folder in read-write mode to allow marking messages as read
+    typ, _ = client.select(folder, readonly=False)
     if typ != "OK":
         raise RuntimeError(f"Failed to select folder {folder}")
     return client
@@ -220,6 +221,12 @@ def _ingest_uid(client: imaplib.IMAP4, acct: AgentEmailAccount, uid: str) -> boo
             return True
 
         ingest_inbound_message(CommsChannel.EMAIL, parsed)
+        # Mark message as read (\Seen) after successful ingestion
+        try:
+            client.uid("STORE", uid, "+FLAGS", r"(\Seen)")
+        except Exception:
+            # Non-fatal; continue
+            pass
         return True
     except Exception as e:
         logger.error("Error ingesting UID %s for %s: %s", uid, acct.endpoint.address, e, exc_info=True)
@@ -245,10 +252,25 @@ def _uid_search_new(client: imaplib.IMAP4, last_seen: str | None) -> List[str]:
     # UID SEARCH for newer UIDs
     # Use the UID search criteria explicitly to ensure numeric range is interpreted as UIDs,
     # not message sequence numbers. Parentheses are accepted and common across servers.
-    query = f"(UID {start + 1}:*)" if start > 0 else "(UID 1:*)"
+    # Only unread messages are considered. Combine UNSEEN with UID range, with a fallback
+    query = f"(UNSEEN UID {start + 1}:*)" if start > 0 else "(UNSEEN UID 1:*)"
     typ, data = client.uid("SEARCH", None, query)
     if typ != "OK":
-        return []
+        # Fallback: search UNSEEN and filter client-side by UID range
+        typ2, data2 = client.uid("SEARCH", None, "UNSEEN")
+        if typ2 != "OK" or not data2:
+            return []
+        uids = _parse_uid_list(data2)
+        try:
+            min_uid = start + 1 if start > 0 else 1
+            uids = [u for u in uids if int(u) >= min_uid]
+        except Exception:
+            pass
+        try:
+            uids = sorted(uids, key=lambda s: int(s))
+        except Exception:
+            pass
+        return uids
     uids = _parse_uid_list(data)
     # Best-effort debug to help diagnose repeated processing in production
     try:
@@ -261,6 +283,23 @@ def _uid_search_new(client: imaplib.IMAP4, last_seen: str | None) -> List[str]:
     except Exception:
         pass
     return uids
+
+
+def _highest_uid(client: imaplib.IMAP4) -> Optional[str]:
+    """Return the highest UID in the selected folder, or None if empty."""
+    try:
+        typ, data = client.uid("SEARCH", None, "(UID 1:*)")
+        if typ != "OK" or not data:
+            return None
+        uids = _parse_uid_list(data)
+        if not uids:
+            return None
+        try:
+            return str(max(int(u) for u in uids))
+        except Exception:
+            return uids[-1]
+    except Exception:
+        return None
 
 
 def _get_uidvalidity(client: imaplib.IMAP4) -> Optional[str]:
@@ -307,7 +346,14 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
                 logger.info("UIDVALIDITY changed for %s: %s -> %s; resetting last_seen_uid", acct.endpoint.address, stored_validity, current_validity)
                 stored_uid = 0
 
-            # Search for newer UIDs from stored_uid
+            # Initialize baseline on first run: skip historical mail entirely.
+            if not acct.last_seen_uid:
+                latest = _highest_uid(client)
+                if latest is not None:
+                    _update_success(acct, timezone.now(), str(latest), current_validity)
+                    return
+
+            # Search for newer, unread UIDs from stored_uid
             base_marker = f"v:{current_validity}:{stored_uid}" if current_validity is not None else str(stored_uid)
             uids = _uid_search_new(client, base_marker)
             # Align with plan: new_uid_count; keep prior metric name minimal

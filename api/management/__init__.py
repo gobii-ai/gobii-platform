@@ -1,1 +1,2 @@
-# Empty file to make this a Python package
+"""Management package for custom Django commands in the api app."""
+
