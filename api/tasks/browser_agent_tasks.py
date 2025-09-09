@@ -498,7 +498,7 @@ async def _run_agent(
                 user_data_dir=temp_profile_dir,
                 timeout=30_000,
                 no_viewport=True,
-                accept_downloads=allow_downloads,
+                accept_downloads=accept_downloads,
                 auto_download_pdfs=True,
                 proxy=proxy_settings,
             )
