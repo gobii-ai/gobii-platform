@@ -50,9 +50,9 @@ class SqliteBatchToolTests(TestCase):
     def test_atomic_commit_and_select(self):
         with self._with_temp_db() as (db_path, token, tmp):
             ops = [
-                "CREATE TABLE t(a INTEGER);",
-                "INSERT INTO t(a) VALUES (1),(2);",
-                "SELECT a FROM t ORDER BY a;",
+                "CREATE TABLE t(a INTEGER)",
+                "INSERT INTO t(a) VALUES (1),(2)",
+                "SELECT a FROM t ORDER BY a",
             ]
             out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
             self.assertEqual(out.get("status"), "ok")
@@ -66,9 +66,9 @@ class SqliteBatchToolTests(TestCase):
     def test_atomic_rollback_on_error(self):
         with self._with_temp_db() as (db_path, token, tmp):
             ops = [
-                "CREATE TABLE t(a INTEGER PRIMARY KEY);",
-                "INSERT INTO t(a) VALUES (1);",
-                "INSERT INTO t(a) VALUES (1);",  # duplicate -> constraint violation
+                "CREATE TABLE t(a INTEGER PRIMARY KEY)",
+                "INSERT INTO t(a) VALUES (1)",
+                "INSERT INTO t(a) VALUES (1)",  # duplicate -> constraint violation
             ]
             out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
             self.assertEqual(out.get("status"), "error")
@@ -86,11 +86,11 @@ class SqliteBatchToolTests(TestCase):
     def test_per_statement_continues_on_error(self):
         with self._with_temp_db() as (db_path, token, tmp):
             ops = [
-                "CREATE TABLE t(a INTEGER PRIMARY KEY);",
-                "INSERT INTO t(a) VALUES (1);",
-                "INSERT INTO t(a) VALUES (1);",  # duplicate -> error but should continue
-                "INSERT INTO t(a) VALUES (2);",
-                "SELECT COUNT(*) as c FROM t;",
+                "CREATE TABLE t(a INTEGER PRIMARY KEY)",
+                "INSERT INTO t(a) VALUES (1)",
+                "INSERT INTO t(a) VALUES (1)",  # duplicate -> error but should continue
+                "INSERT INTO t(a) VALUES (2)",
+                "SELECT COUNT(*) as c FROM t",
             ]
             out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "per_statement"})
             self.assertEqual(out.get("status"), "error")  # at least one op failed
@@ -112,10 +112,10 @@ class SqliteBatchToolTests(TestCase):
     def test_select_truncation_flag(self):
         with self._with_temp_db() as (db_path, token, tmp):
             # Create and fill with >1000 rows to trigger truncation flag
-            ops = ["CREATE TABLE t(a INTEGER);"] + [
-                f"INSERT INTO t(a) VALUES ({i});" for i in range(1001)
+            ops = ["CREATE TABLE t(a INTEGER)"] + [
+                f"INSERT INTO t(a) VALUES ({i})" for i in range(1001)
             ] + [
-                "SELECT a FROM t ORDER BY a;",
+                "SELECT a FROM t ORDER BY a",
             ]
             out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
             results = out.get("results", [])

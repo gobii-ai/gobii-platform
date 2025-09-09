@@ -8,6 +8,7 @@ per-operation results, and resilient error handling.
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 from typing import Any, Dict, List, Optional
@@ -85,6 +86,35 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     except Exception:
         logger.info("Agent %s executing sqlite_batch: %s ops, mode=%s", agent.id, len(ops), mode)
 
+    # Helper: best-effort SQL sanitation to mitigate common errors without attempting a full SQL parse
+    def _sanitize_sql(sql: str) -> str:
+        s = sql
+        # Normalise typographic quotes
+        s = s.replace("“", '"').replace("”", '"')
+        # Replace fancy apostrophes with doubled single quotes for SQL string literals
+        s = s.replace("’", "''")
+        # Convert backslash-escaped single quotes to standard doubled quotes for SQLite
+        s = s.replace("\\'", "''")
+
+        return s
+
+    def _is_transaction_control(sql: str) -> bool:
+        return bool(re.match(r"^\s*(BEGIN|COMMIT|ROLLBACK)\b", sql, re.IGNORECASE))
+
+    def _has_multiple_statements(sql: str) -> bool:
+        """Heuristic: flag multiple statements if there is a semicolon outside quotes."""
+        in_single = False
+        in_double = False
+        for i, ch in enumerate(sql):
+            if ch == "'" and not in_double:
+                in_single = not in_single
+            elif ch == '"' and not in_single:
+                in_double = not in_double
+            elif ch == ";" and not in_single and not in_double:
+                if sql[i + 1:].strip():
+                    return True
+        return False
+
     # connect with busy timeout (seconds)
     conn: Optional[sqlite3.Connection] = None
     try:
@@ -114,6 +144,36 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
         begin_if_needed_for_mode()
 
+        # Helper to handle preflight validation errors consistently
+        def _handle_preflight_error(code: str, message: str, at_sql: str, at_index: int) -> bool:
+            nonlocal failed, error_occurred
+            results.append({
+                "ok": False,
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "at_sql": at_sql,
+                    "at_index": at_index,
+                },
+            })
+            failed += 1
+            if mode == "atomic":
+                rollback_all_if_needed()
+                error_occurred = True
+                # Mark remaining ops as skipped due to rollback
+                for j in range(at_index + 1, len(ops)):
+                    results.append({
+                        "ok": False,
+                        "error": {
+                            "code": code,
+                            "message": "Batch rolled back due to prior error",
+                            "at_index": j,
+                        },
+                    })
+                    failed += 1
+                return True  # signal to break the main loop
+            return False  # signal to continue to next operation
+
         for idx, sql in enumerate(ops):
             if not isinstance(sql, str) or not sql.strip():
                 results.append({
@@ -129,7 +189,33 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
             t0 = time.monotonic()
             try:
-                cur.execute(sql)
+                # Preflight checks and best-effort sanitisation
+                sql_sanitized = _sanitize_sql(sql)
+                if _is_transaction_control(sql_sanitized):
+                    should_break = _handle_preflight_error(
+                        "transaction_control_disallowed",
+                        "Remove explicit BEGIN/COMMIT/ROLLBACK. The tool manages transactions automatically in atomic mode.",
+                        sql,
+                        idx,
+                    )
+                    if should_break:
+                        break
+                    else:
+                        continue
+
+                if _has_multiple_statements(sql_sanitized):
+                    should_break = _handle_preflight_error(
+                        "multiple_statements",
+                        "Provide exactly one SQL statement per operation. Split statements into separate items in the operations array.",
+                        sql,
+                        idx,
+                    )
+                    if should_break:
+                        break
+                    else:
+                        continue
+
+                cur.execute(sql_sanitized)
                 # SELECT-like: cursor.description present
                 if cur.description is not None:
                     columns = [c[0] for c in cur.description]
@@ -214,6 +300,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             "status": status,
             "results": results,
             "db_size_mb": round(db_size_mb, 2),
+            "warnings": warnings,
         }
     except Exception as outer:
         return {"status": "error", "message": f"SQLite batch failed: {outer}"}
@@ -233,6 +320,10 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "Execute multiple SQLite operations in one call. Use this whenever you have two or more SQL statements. "
+                "Rules: (1) Provide exactly ONE SQL statement per entry in 'operations' (no semicolon-separated bundles). "
+                "(2) Do NOT include BEGIN/COMMIT/ROLLBACK; the tool manages transactions for mode=atomic. "
+                "(3) Escape single quotes inside values by doubling them (e.g., 'What''s new'). Avoid backslash escaping. "
+                "(4) Prefer 'INSERT OR IGNORE' or 'INSERT ... ON CONFLICT(col) DO UPDATE ...' to avoid UNIQUE violations. "
                 "Choose mode=atomic for dependent ops (all-or-nothing) or per_statement to continue past individual errors."
             ),
             "parameters": {
