@@ -3,9 +3,6 @@ from __future__ import annotations
 from django.test import TestCase, Client, tag
 from django.contrib.auth import get_user_model
 from django.urls import reverse
-from waffle.testutils import override_flag
-
-from constants.feature_flags import MULTIPLAYER_AGENTS
 from api.models import (
     PersistentAgent,
     BrowserUseAgent,
@@ -36,12 +33,10 @@ class AgentAllowlistViewTests(TestCase):
         return reverse("agent_allowlist", kwargs={"pk": self.agent.pk})
 
     @tag("batch_console_allowlist")
-    def test_flag_off_returns_404(self):
+    def test_allowlist_view_accessible_without_flag(self):
         resp = self.client.get(self._url())
-        # WaffleFlagMixin should hide the view when flag is off
-        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.status_code, 200)
 
-    @override_flag(MULTIPLAYER_AGENTS, active=True)
     @tag("batch_console_allowlist")
     def test_owner_access_and_add_delete_cycle_htmx(self):
         # GET should succeed
@@ -85,7 +80,6 @@ class AgentAllowlistViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(CommsAllowlistEntry.objects.filter(agent=self.agent).count(), 0)
 
-    @override_flag(MULTIPLAYER_AGENTS, active=True)
     @tag("batch_console_allowlist")
     def test_policy_change_updates_model(self):
         # Change to MANUAL and back to DEFAULT
@@ -99,7 +93,6 @@ class AgentAllowlistViewTests(TestCase):
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.whitelist_policy, PersistentAgent.WhitelistPolicy.DEFAULT)
 
-    @override_flag(MULTIPLAYER_AGENTS, active=True)
     @tag("batch_console_allowlist")
     def test_org_admin_access_allowed_member_forbidden(self):
         # Make agent org-owned

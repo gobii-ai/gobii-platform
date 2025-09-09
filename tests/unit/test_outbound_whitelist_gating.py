@@ -48,9 +48,8 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
         )
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")  # Mock where it's imported in email_sender
-    @patch("api.models.switch_is_active", return_value=True)
     @tag("batch_outbound_email")
-    def test_email_execute_respects_manual_allowlist(self, _switch, mock_deliver_email, mock_close_old_connections):
+    def test_email_execute_respects_manual_allowlist(self, mock_deliver_email, mock_close_old_connections):
         # Switch agent to manual and allow only a specific recipient
         self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
         self.agent.save(update_fields=["whitelist_policy"])
@@ -75,10 +74,9 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
         self.assertIn("not allowed", blocked.get("message", ""))
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")  # Mock where it's imported in email_sender  
-    @patch("api.models.switch_is_active", return_value=False)
     @tag("batch_outbound_email")
-    def test_email_execute_legacy_owner_only_when_switch_off(self, _switch, mock_deliver_email, mock_close_old_connections):
-        # Only owner email permitted when switch is off
+    def test_email_execute_default_owner_only_user_owned(self, mock_deliver_email, mock_close_old_connections):
+        # Default policy: user-owned agents may send only to owner by default
         ok = execute_send_email(self.agent, {
             "to_address": self.user.email,
             "subject": "s",
@@ -94,8 +92,7 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
         self.assertEqual(blocked.get("status"), "error")
     # NOTE: Temporarily disabling SMS tests until SMS sending is re-enabled in multi-player mode
     @patch("api.agent.tools.sms_sender.deliver_agent_sms")  # Mock where it's imported in sms_sender
-    @patch("api.models.switch_is_active", return_value=True)
-    def test_sms_execute_respects_default_and_manual(self, _switch, mock_deliver_sms, mock_close_old_connections):
+    def test_sms_execute_respects_default_and_manual(self, mock_deliver_sms, mock_close_old_connections):
         return
         # Mock successful delivery
         mock_deliver_sms.return_value = None  # deliver_agent_sms doesn't return anything

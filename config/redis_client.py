@@ -51,6 +51,7 @@ class _FakeRedis:
         self._kv: Dict[str, Any] = {}
         self._hash: Dict[str, Dict[str, Any]] = {}
         self._ttl: Dict[str, int] = {}
+        self._lists: Dict[str, list] = {}
 
     # Minimal API used by our code
     def ping(self):
@@ -129,6 +130,27 @@ class _FakeRedis:
 
     def pipeline(self):
         return _FakePipeline(self)
+
+    # Minimal queue/list ops for local/test notification flows
+    def rpush(self, key: str, value: Any) -> int:
+        lst = self._lists.setdefault(key, [])
+        lst.append(value)
+        return len(lst)
+
+    def blpop(self, keys, timeout: int = 0):
+        # Support single key or list of keys
+        if isinstance(keys, (list, tuple)):
+            for k in keys:
+                lst = self._lists.get(k, [])
+                if lst:
+                    return (k, lst.pop(0))
+        else:
+            k = keys
+            lst = self._lists.get(k, [])
+            if lst:
+                return (k, lst.pop(0))
+        # No blocking behavior in fake; just return None
+        return None
 
 
 @lru_cache(maxsize=1)

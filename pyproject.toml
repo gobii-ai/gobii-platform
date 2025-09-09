@@ -117,6 +117,8 @@ dependencies = [
   # Url matching
   "urlextract==1.9.0",
   "fastmcp>=2.11.3",
+  # IMAP IDLE helper for simple, reliable IDLE sessions
+  "imapclient~=2.3",
 ]
 
 [build-system]

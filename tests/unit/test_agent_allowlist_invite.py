@@ -237,11 +237,8 @@ class OwnerAlwaysAllowedTests(TestCase):
             is_primary=True
         )
         
-    @patch('api.models.flag_is_active')
-    def test_owner_email_always_allowed_manual_policy(self, mock_flag):
+    def test_owner_email_always_allowed_manual_policy(self):
         """Test that owner's email is always allowed even with manual policy."""
-        mock_flag.return_value = True
-        
         # Owner email should be allowed without explicit allowlist entry
         self.assertTrue(
             self.agent.is_sender_whitelisted(CommsChannel.EMAIL, "owner@example.com")
@@ -255,23 +252,15 @@ class OwnerAlwaysAllowedTests(TestCase):
             self.agent.is_sender_whitelisted(CommsChannel.EMAIL, "other@example.com")
         )
         
-    @patch('api.models.flag_is_active')
-    @patch('api.models.switch_is_active')
-    def test_owner_phone_always_allowed_manual_policy(self, mock_switch, mock_flag):
+    def test_owner_phone_always_allowed_manual_policy(self):
         """Test that owner's verified phone is always allowed even with manual policy."""
-        mock_flag.return_value = True
-        mock_switch.return_value = True
-        
         # Owner phone should be allowed without explicit allowlist entry
         self.assertTrue(
             self.agent.is_sender_whitelisted(CommsChannel.SMS, "+15555551234")
         )
 
-    @patch('api.models.switch_is_active')
-    def test_manual_allowlist_entry_works_alongside_owner(self, mock_flag):
+    def test_manual_allowlist_entry_works_alongside_owner(self):
         """Test that manual allowlist entries work alongside owner permissions."""
-        mock_flag.return_value = True
-        
         # Add someone else to allowlist
         CommsAllowlistEntry.objects.create(
             agent=self.agent,

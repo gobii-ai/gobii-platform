@@ -39,8 +39,6 @@ class AllowlistModelValidationTests(TestCase):
         )
 
     @patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=1)
-    @patch("api.models.flag_is_active", return_value=True)
-    @patch("api.models.switch_is_active", return_value=True)
     def test_cap_enforced_via_clean(self, *_):
         CommsAllowlistEntry.objects.create(
             agent=self.agent, channel=CommsChannel.EMAIL, address="first@example.com", is_active=True
@@ -85,95 +83,88 @@ class WhitelistPolicyAndFlagsTests(TestCase):
             browser_use_agent=self.browser,
         )
 
-    def test_legacy_owner_only_when_flags_off(self):
-        # is_sender_whitelisted uses flag_is_active; is_recipient_whitelisted uses switch_is_active
-        with patch("api.models.flag_is_active", return_value=False), \
-             patch("api.models.switch_is_active", return_value=False):
-            # Only owner email allowed for EMAIL
-            self.assertTrue(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, self.owner.email))
-            self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, self.owner.email))
-            self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
-            self.assertFalse(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
+    def test_default_owner_only_user_owned(self):
+        # Only owner email allowed for EMAIL by default
+        self.assertTrue(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, self.owner.email))
+        self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, self.owner.email))
+        self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
+        self.assertFalse(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
 
-            # Only verified number allowed for SMS
-            UserPhoneNumber.objects.create(user=self.owner, phone_number="+15551234567", is_verified=True)
-            self.assertTrue(self.agent_user_owned.is_sender_whitelisted(CommsChannel.SMS, "+15551234567"))
-            self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.SMS, "+15551234567"))
-            self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.SMS, "+19999999999"))
-            self.assertFalse(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.SMS, "+19999999999"))
+        # Only verified number allowed for SMS
+        UserPhoneNumber.objects.create(user=self.owner, phone_number="+15551234567", is_verified=True)
+        self.assertTrue(self.agent_user_owned.is_sender_whitelisted(CommsChannel.SMS, "+15551234567"))
+        self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.SMS, "+15551234567"))
+        self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.SMS, "+19999999999"))
+        self.assertFalse(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.SMS, "+19999999999"))
 
-            # Unsupported channel returns False
-            self.assertFalse(self.agent_user_owned.is_sender_whitelisted("slack", "u"))
-            self.assertFalse(self.agent_user_owned.is_recipient_whitelisted("slack", "u"))
+        # Unsupported channel returns False
+        self.assertFalse(self.agent_user_owned.is_sender_whitelisted("slack", "u"))
+        self.assertFalse(self.agent_user_owned.is_recipient_whitelisted("slack", "u"))
 
-    def test_default_policy_user_owned_with_flags_on(self):
-        with patch("api.models.flag_is_active", return_value=True), \
-             patch("api.models.switch_is_active", return_value=True):
-            org_owner = self.owner
-            org = Organization.objects.create(name="Acme", slug="acme", created_by=org_owner)
-            member = User.objects.create_user(username="mem", email="mem@example.com", password="pw")
-            OrganizationMembership.objects.create(
-                org=org,
-                user=member,
-                role=OrganizationMembership.OrgRole.MEMBER,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-            )
+    def test_default_policy_user_owned(self):
+        org_owner = self.owner
+        org = Organization.objects.create(name="Acme", slug="acme", created_by=org_owner)
+        member = User.objects.create_user(username="mem", email="mem@example.com", password="pw")
+        OrganizationMembership.objects.create(
+            org=org,
+            user=member,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
 
-            # NEW: don't reuse self.browser; it's already bound to another PersistentAgent
-            org_browser = BrowserUseAgent.objects.create(user=org_owner, name="Org BA")
+        # NEW: don't reuse self.browser; it's already bound to another PersistentAgent
+        org_browser = BrowserUseAgent.objects.create(user=org_owner, name="Org BA")
 
-            agent = PersistentAgent.objects.create(
-                user=org_owner,
-                organization=org,
-                name="OrgA",
-                charter="c",
-                browser_use_agent=org_browser,  # <= use a fresh browser
-            )
+        agent = PersistentAgent.objects.create(
+            user=org_owner,
+            organization=org,
+            name="OrgA",
+            charter="c",
+            browser_use_agent=org_browser,  # <= use a fresh browser
+        )
 
-            # EMAIL: owner only
-            self.assertTrue(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, self.owner.email))
-            self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, self.owner.email))
-            self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, "x@example.com"))
-            self.assertFalse(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, "x@example.com"))
+        # EMAIL: owner only
+        self.assertTrue(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, self.owner.email))
+        self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, self.owner.email))
+        self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, "x@example.com"))
+        self.assertFalse(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, "x@example.com"))
 
-            # SMS: owner's verified only
-            UserPhoneNumber.objects.create(user=self.owner, phone_number="+15552223333", is_verified=True)
-            self.assertTrue(self.agent_user_owned.is_sender_whitelisted(CommsChannel.SMS, "+15552223333"))
-            self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.SMS, "+15552223333"))
-            self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.SMS, "+19998887777"))
-            self.assertFalse(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.SMS, "+19998887777"))
+        # SMS: owner's verified only
+        UserPhoneNumber.objects.create(user=self.owner, phone_number="+15552223333", is_verified=True)
+        self.assertTrue(self.agent_user_owned.is_sender_whitelisted(CommsChannel.SMS, "+15552223333"))
+        self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.SMS, "+15552223333"))
+        self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.SMS, "+19998887777"))
+        self.assertFalse(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.SMS, "+19998887777"))
 
-    def test_default_policy_org_owned_with_flags_on(self):
-        with patch("api.models.flag_is_active", return_value=True), \
-                patch("api.models.switch_is_active", return_value=True):
-            # Setup org and membership
-            org_owner = self.owner
-            org = Organization.objects.create(name="Acme", slug="acme", created_by=org_owner)
-            member = User.objects.create_user(username="mem", email="mem@example.com", password="pw")
-            OrganizationMembership.objects.create(
-                org=org,
-                user=member,
-                role=OrganizationMembership.OrgRole.MEMBER,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-            )
+    def test_default_policy_org_owned(self):
+        # Setup org and membership
+        org_owner = self.owner
+        org = Organization.objects.create(name="Acme", slug="acme", created_by=org_owner)
+        member = User.objects.create_user(username="mem", email="mem@example.com", password="pw")
+        OrganizationMembership.objects.create(
+            org=org,
+            user=member,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
 
-            # Use a fresh BrowserUseAgent (don't reuse self.browser)
-            org_browser = BrowserUseAgent.objects.create(user=org_owner, name="Org BA")
+        # Use a fresh BrowserUseAgent (don't reuse self.browser)
+        org_browser = BrowserUseAgent.objects.create(user=org_owner, name="Org BA")
 
-            # Agent owned by org
-            agent = PersistentAgent.objects.create(
-                user=org_owner,
-                organization=org,
-                name="OrgA",
-                charter="c",
-                browser_use_agent=org_browser,
-            )
+        # Agent owned by org
+        agent = PersistentAgent.objects.create(
+            user=org_owner,
+            organization=org,
+            name="OrgA",
+            charter="c",
+            browser_use_agent=org_browser,
+        )
 
-            # EMAIL: only org members
-            self.assertTrue(agent.is_sender_whitelisted(CommsChannel.EMAIL, member.email))
-            self.assertTrue(agent.is_recipient_whitelisted(CommsChannel.EMAIL, member.email))
-            self.assertFalse(agent.is_sender_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
-            self.assertFalse(agent.is_recipient_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
+        # EMAIL: only org members
+        self.assertTrue(agent.is_sender_whitelisted(CommsChannel.EMAIL, member.email))
+        self.assertTrue(agent.is_recipient_whitelisted(CommsChannel.EMAIL, member.email))
+        self.assertFalse(agent.is_sender_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
+        self.assertFalse(agent.is_recipient_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
 
             # SMS: only verified numbers of org members
             # NOTE: Temporarily disabled until we add multi player SMS support

@@ -1,8 +1,6 @@
 from django.test import TestCase, Client, tag
 from django.contrib.auth import get_user_model
 from django.urls import reverse
-from waffle.testutils import override_flag
-from constants.feature_flags import PERSISTENT_AGENTS
 
 
 @tag("batch_console_agents")
@@ -18,7 +16,6 @@ class ConsoleViewsTest(TestCase):
         self.client = Client()
         self.client.login(email='test@example.com', password='testpass123')
 
-    @override_flag(PERSISTENT_AGENTS, active=True)
     @tag("batch_console_agents")
     def test_delete_persistent_agent_also_deletes_browser_agent(self):
         """Test that deleting a persistent agent also deletes its browser agent."""

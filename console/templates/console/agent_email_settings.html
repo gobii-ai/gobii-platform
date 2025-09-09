@@ -1,0 +1,177 @@
+{% extends "console_page.html" %}
+{% block console_content %}
+<div class="space-y-6 pb-6">
+  <!-- Heading panel (standalone) -->
+  <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-200/70 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold text-gray-800">Agent Email Settings</h1>
+        <p class="text-sm text-gray-500 mt-1">Configure SMTP/IMAP for {{ agent.name }}</p>
+        <a href="{% url 'agent_detail' agent.id %}" class="text-sm text-blue-600 hover:text-blue-800 mt-3 inline-flex items-center gap-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          Back to Agent
+        </a>
+      </div>
+      <div class="text-right text-sm text-gray-600">
+        {% if endpoint and account %}
+          <div>Endpoint: <span class="font-mono">{{ endpoint.address }}</span></div>
+          <div>Last OK: {{ account.connection_last_ok_at|default:"—" }}</div>
+          <div class="text-red-600">{{ account.connection_error }}</div>
+        {% elif endpoint and not is_default_endpoint %}
+          <div>Endpoint: <span class="font-mono">{{ endpoint.address }}</span></div>
+          <div class="text-gray-500">Custom address set, configure SMTP/IMAP below.</div>
+        {% elif endpoint and is_default_endpoint %}
+          <div class="text-gray-700">Delivery: Default (Postmark)</div>
+        {% else %}
+          <div class="text-gray-700">No custom email configured yet.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Main content panel (separate card) -->
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+    {% if endpoint %}
+    <form method="post" class="p-6 space-y-6">
+      {% csrf_token %}
+      <div class="grid grid-cols-1 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Agent Email Address</label>
+          <input type="email" name="endpoint_address" value="{{ endpoint.address }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
+          <p class="text-xs text-gray-500 mt-1">This should match the email account you configure below.</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- SMTP -->
+        <div class="space-y-4">
+          <h2 class="text-lg font-semibold text-gray-800">SMTP (Outbound)</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Host</label>
+              <input type="text" name="smtp_host" value="{{ form.initial.smtp_host }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Port</label>
+              <input type="number" name="smtp_port" value="{{ form.initial.smtp_port }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Security</label>
+              <select name="smtp_security" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                <option value="starttls" {% if form.initial.smtp_security == 'starttls' %}selected{% endif %}>STARTTLS</option>
+                <option value="ssl" {% if form.initial.smtp_security == 'ssl' %}selected{% endif %}>SSL</option>
+                <option value="none" {% if form.initial.smtp_security == 'none' %}selected{% endif %}>None</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Auth Mode</label>
+              <select name="smtp_auth" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                <option value="login" {% if form.initial.smtp_auth == 'login' %}selected{% endif %}>LOGIN</option>
+                <option value="plain" {% if form.initial.smtp_auth == 'plain' %}selected{% endif %}>PLAIN</option>
+                <option value="none" {% if form.initial.smtp_auth == 'none' %}selected{% endif %}>None</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Username</label>
+              <input type="text" name="smtp_username" value="{{ form.initial.smtp_username }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Password</label>
+              <input type="password" name="smtp_password" placeholder="••••••••" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div class="col-span-1 md:col-span-2">
+              <label class="inline-flex items-center"> 
+                <input type="checkbox" name="is_outbound_enabled" {% if form.initial.is_outbound_enabled %}checked{% endif %} class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                <span class="ml-2 text-sm text-gray-700">Enable Outbound via SMTP</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- IMAP -->
+        <div class="space-y-4">
+          <h2 class="text-lg font-semibold text-gray-800">IMAP (Inbound)</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Host</label>
+              <input type="text" name="imap_host" value="{{ form.initial.imap_host }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Port</label>
+              <input type="number" name="imap_port" value="{{ form.initial.imap_port }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Security</label>
+              <select name="imap_security" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                <option value="ssl" {% if form.initial.imap_security == 'ssl' %}selected{% endif %}>SSL</option>
+                <option value="starttls" {% if form.initial.imap_security == 'starttls' %}selected{% endif %}>STARTTLS</option>
+                <option value="none" {% if form.initial.imap_security == 'none' %}selected{% endif %}>None</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Username</label>
+              <input type="text" name="imap_username" value="{{ form.initial.imap_username }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Password</label>
+              <input type="password" name="imap_password" placeholder="••••••••" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Folder</label>
+              <input type="text" name="imap_folder" value="{{ form.initial.imap_folder|default:'INBOX' }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Poll Interval (sec)</label>
+              <input type="number" name="poll_interval_sec" value="{{ form.initial.poll_interval_sec|default:120 }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div class="col-span-1 md:col-span-2">
+              <label class="inline-flex items-center"> 
+                <input type="checkbox" name="is_inbound_enabled" {% if form.initial.is_inbound_enabled %}checked{% endif %} class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                <span class="ml-2 text-sm text-gray-700">Enable Inbound via IMAP</span>
+              </label>
+            </div>
+            <div class="col-span-1 md:col-span-2">
+              <label class="inline-flex items-center"> 
+                <input type="checkbox" name="imap_idle_enabled" {% if form.initial.imap_idle_enabled %}checked{% endif %} class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                <span class="ml-2 text-sm text-gray-700">Enable IMAP IDLE (low-latency triggers)</span>
+              </label>
+              <p class="text-xs text-gray-500 mt-1">Keeps a lightweight connection open to trigger immediate polls when new mail arrives. Polling remains as the source of truth.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 pt-2">
+        <button type="submit" name="action" value="save" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">
+          Save
+        </button>
+        <button type="submit" name="action" value="test_smtp" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+          Test SMTP
+        </button>
+        <button type="submit" name="action" value="test_imap" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+          Test IMAP
+        </button>
+        <button type="submit" name="action" value="poll_now" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+          Poll Now
+        </button>
+      </div>
+    </form>
+    {% else %}
+    <form method="post" class="p-6 space-y-4">
+      {% csrf_token %}
+      <p class="text-sm text-gray-700">Your agent can already send and receive email using our default delivery (Postmark). To customize delivery with your own SMTP/IMAP, first set an agent email address.</p>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Agent Email Address</label>
+        <input type="email" name="address" placeholder="agent@example.com" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
+        <p class="text-xs text-gray-500 mt-1">This becomes your agent’s From/To address when using custom SMTP/IMAP.</p>
+      </div>
+      <div class="flex items-center gap-2 pt-2">
+        <button type="submit" name="action" value="create_endpoint" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">
+          Create Email Endpoint
+        </button>
+        <a href="{% url 'agent_detail' agent.id %}" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">Cancel</a>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

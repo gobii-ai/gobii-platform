@@ -77,6 +77,7 @@ import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
 from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMembership
 from console.forms import AllowlistEntryForm
+from console.forms import AgentEmailAccountConsoleForm
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -911,23 +912,26 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                         user_contact = user_primary_sms.phone_number
 
                     if email_enabled:
-                        # Generate a unique email for the agent
-                        agent_email = self._generate_unique_agent_email(agent_name)
+                        from django.conf import settings as dj_settings
+                        # Create agent-owned email endpoint only when enabled (Gobii proprietary mode)
+                        if getattr(dj_settings, 'ENABLE_DEFAULT_AGENT_EMAIL', False):
+                            # Generate a unique email for the agent
+                            agent_email = self._generate_unique_agent_email(agent_name)
 
-                        # Create the agent's OWN primary email endpoint (for receiving)
-                        agent_comms_endpoint = PersistentAgentCommsEndpoint.objects.create(
-                            owner_agent=persistent_agent,
-                            channel=CommsChannel.EMAIL,
-                            address=agent_email,
-                            is_primary=preferred_contact_method == "email",
-                        )
-                        PersistentAgentEmailEndpoint.objects.create(
-                            endpoint=agent_comms_endpoint,
-                            display_name=agent_name,
-                            verified=True,  # System-generated, so considered verified
-                        )
+                            # Create the agent's OWN primary email endpoint (for receiving)
+                            agent_comms_endpoint = PersistentAgentCommsEndpoint.objects.create(
+                                owner_agent=persistent_agent,
+                                channel=CommsChannel.EMAIL,
+                                address=agent_email,
+                                is_primary=preferred_contact_method == "email",
+                            )
+                            PersistentAgentEmailEndpoint.objects.create(
+                                endpoint=agent_comms_endpoint,
+                                display_name=agent_name,
+                                verified=True,  # System-generated, so considered verified
+                            )
 
-                        # Now, get or create the EXTERNAL endpoint for the user's contact address
+                        # Always create the EXTERNAL endpoint for the user's contact address
                         user_email_comms_endpoint, created = PersistentAgentCommsEndpoint.objects.get_or_create(
                             channel=CommsChannel.EMAIL,
                             address__iexact=user_contact_email,
@@ -964,7 +968,12 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                     if user_email_comms_endpoint:
                         _ensure_participant(conversation, user_email_comms_endpoint, PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL)
 
-                    _ensure_participant(conversation, agent_comms_endpoint, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
+                    # Add agent participant if an agent-owned endpoint exists
+                    try:
+                        if 'agent_comms_endpoint' in locals() and agent_comms_endpoint is not None:
+                            _ensure_participant(conversation, agent_comms_endpoint, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
+                    except Exception:
+                        pass
 
                     # Create the initial message from user to agent
                     PersistentAgentMessage.objects.create(
@@ -1043,7 +1052,8 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
         base_username = agent_name.lower().strip()
         base_username = re.sub(r'\s+', '.', base_username)  # Replace spaces with dots
         base_username = re.sub(r'[^\w.]', '', base_username)  # Remove non-alphanumeric chars except dots
-        domain = "my.gobii.ai"
+        from django.conf import settings as dj_settings
+        domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'my.gobii.ai')
 
         # First attempt
         email_address = f"{base_username}@{domain}"
@@ -1206,56 +1216,50 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
         context['primary_email'] = primary_email
         context['primary_sms'] = primary_sms
         
-        # Add allowlist configuration if multiplayer_agents flag is active
-        from waffle import flag_is_active
+        # Always include allowlist configuration (flag removed)
         from api.models import CommsAllowlistEntry
-        from constants.feature_flags import MULTIPLAYER_AGENTS
-        
-        if flag_is_active(self.request, MULTIPLAYER_AGENTS):
-            context['show_allowlist'] = True
-            context['whitelist_policy'] = agent.whitelist_policy
-            context['allowlist_entries'] = CommsAllowlistEntry.objects.filter(
-                agent=agent
-            ).order_by('channel', 'address')
-            context['pending_invites'] = AgentAllowlistInvite.objects.filter(
-                agent=agent,
-                status=AgentAllowlistInvite.InviteStatus.PENDING
-            ).order_by('channel', 'address')
-            
-            # Count active allowlist entries AND pending invitations for display
-            active_count = CommsAllowlistEntry.objects.filter(
-                agent=agent,
-                is_active=True
-            ).count()
-            pending_count = AgentAllowlistInvite.objects.filter(
-                agent=agent,
-                status=AgentAllowlistInvite.InviteStatus.PENDING
-            ).count()
-            context['active_allowlist_count'] = active_count + pending_count
-            
-            # Add pending contact requests count
-            from api.models import CommsAllowlistRequest
-            pending_contact_requests = CommsAllowlistRequest.objects.filter(
-                agent=agent,
-                status=CommsAllowlistRequest.RequestStatus.PENDING
-            ).count()
-            context['pending_contact_requests'] = pending_contact_requests
-            
-            # Add owner information for display
-            context['owner_email'] = agent.user.email
-            
-            # Check if owner has verified phone for SMS display
-            try:
-                from api.models import UserPhoneNumber
-                owner_phone = UserPhoneNumber.objects.filter(
-                    user=agent.user, 
-                    is_verified=True
-                ).first()
-                context['owner_phone'] = owner_phone.phone_number if owner_phone else None
-            except:
-                context['owner_phone'] = None
-        else:
-            context['show_allowlist'] = False
+        context['show_allowlist'] = True
+        context['whitelist_policy'] = agent.whitelist_policy
+        context['allowlist_entries'] = CommsAllowlistEntry.objects.filter(
+            agent=agent
+        ).order_by('channel', 'address')
+        context['pending_invites'] = AgentAllowlistInvite.objects.filter(
+            agent=agent,
+            status=AgentAllowlistInvite.InviteStatus.PENDING
+        ).order_by('channel', 'address')
+
+        # Count active allowlist entries AND pending invitations for display
+        active_count = CommsAllowlistEntry.objects.filter(
+            agent=agent,
+            is_active=True
+        ).count()
+        pending_count = AgentAllowlistInvite.objects.filter(
+            agent=agent,
+            status=AgentAllowlistInvite.InviteStatus.PENDING
+        ).count()
+        context['active_allowlist_count'] = active_count + pending_count
+
+        # Add pending contact requests count
+        from api.models import CommsAllowlistRequest
+        pending_contact_requests = CommsAllowlistRequest.objects.filter(
+            agent=agent,
+            status=CommsAllowlistRequest.RequestStatus.PENDING
+        ).count()
+        context['pending_contact_requests'] = pending_contact_requests
+
+        # Add owner information for display
+        context['owner_email'] = agent.user.email
+
+        # Check if owner has verified phone for SMS display
+        try:
+            from api.models import UserPhoneNumber
+            owner_phone = UserPhoneNumber.objects.filter(
+                user=agent.user, 
+                is_verified=True
+            ).first()
+            context['owner_phone'] = owner_phone.phone_number if owner_phone else None
+        except:
+            context['owner_phone'] = None
 
         return context
 
@@ -1523,13 +1527,8 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
         # active state based on whether the "is_active" field was submitted.
         new_is_active = 'is_active' in request.POST
         
-        # Handle whitelist policy update if multiplayer_agents flag is active
-        from waffle import flag_is_active
-        from constants.feature_flags import MULTIPLAYER_AGENTS
-        
-        new_whitelist_policy = None
-        if flag_is_active(request, MULTIPLAYER_AGENTS):
-            new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
+        # Handle whitelist policy update (flag removed)
+        new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
 
         if not new_name:
             messages.error(request, "Agent name cannot be empty.")
@@ -1616,11 +1615,8 @@ class AgentDetailView(LoginRequiredMixin, DetailView):
         return redirect('agent_detail', pk=agent.pk)
 
 
-from constants.feature_flags import MULTIPLAYER_AGENTS
-
-class AgentAllowlistView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
+class AgentAllowlistView(LoginRequiredMixin, TemplateView):
     """Manage manual allowlist and policy for an agent."""
-    waffle_flag = MULTIPLAYER_AGENTS
     template_name = "console/agent_allowlist.html"
 
     def _get_agent(self):
@@ -2047,6 +2043,280 @@ class AgentSecretsDeleteView(LoginRequiredMixin, View):
             messages.error(request, "Failed to delete secret. Please try again.")
         
         return redirect('agent_secrets', pk=agent.pk)
+
+
+class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
+    """Simple console page to edit an agent-owned email account settings."""
+    template_name = "console/agent_email_settings.html"
+
+    def get_agent(self):
+        return get_object_or_404(
+            PersistentAgent,
+            pk=self.kwargs['pk'],
+            user=self.request.user,
+        )
+
+    def _get_email_endpoint(self, agent: PersistentAgent):
+        ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, owner_agent=agent, is_primary=True).first()
+        if not ep:
+            ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, owner_agent=agent).first()
+        return ep
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = self.get_agent()
+        endpoint = self._get_email_endpoint(agent)
+        account = getattr(endpoint, 'agentemailaccount', None) if endpoint else None
+        from django.conf import settings as dj_settings
+        default_domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'my.gobii.ai')
+        is_default_endpoint = False
+        if endpoint and endpoint.address and default_domain:
+            try:
+                is_default_endpoint = endpoint.address.lower().endswith('@' + default_domain.lower())
+            except Exception:
+                is_default_endpoint = False
+
+        initial = {}
+        if account:
+            initial = {
+                'smtp_host': account.smtp_host,
+                'smtp_port': account.smtp_port,
+                'smtp_security': account.smtp_security,
+                'smtp_auth': account.smtp_auth,
+                'smtp_username': account.smtp_username,
+                'is_outbound_enabled': account.is_outbound_enabled,
+                'imap_host': account.imap_host,
+                'imap_port': account.imap_port,
+                'imap_security': account.imap_security,
+                'imap_username': account.imap_username,
+                'imap_folder': account.imap_folder,
+                'is_inbound_enabled': account.is_inbound_enabled,
+                'imap_idle_enabled': account.imap_idle_enabled,
+                'poll_interval_sec': account.poll_interval_sec,
+            }
+
+        context['agent'] = agent
+        context['endpoint'] = endpoint
+        context['account'] = account
+        context['is_default_endpoint'] = is_default_endpoint
+        context['default_domain'] = default_domain
+        context['form'] = AgentEmailAccountConsoleForm(initial=initial)
+        return context
+
+    def post(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        endpoint = self._get_email_endpoint(agent)
+        if not endpoint:
+            # Allow creating endpoint directly from this page
+            action = request.POST.get('action')
+            if action == 'create_endpoint':
+                address = (request.POST.get('address') or '').strip()
+                if not address or '@' not in address:
+                    messages.error(request, "Please provide a valid email address (e.g., agent@example.com).")
+                    return redirect('agent_email_settings', pk=agent.pk)
+                from api.models import PersistentAgentCommsEndpoint, CommsChannel
+                try:
+                    ep = PersistentAgentCommsEndpoint.objects.create(
+                        owner_agent=agent,
+                        channel=CommsChannel.EMAIL,
+                        address=address,
+                        is_primary=True,
+                    )
+                    messages.success(request, "Agent email endpoint created.")
+                    return redirect('agent_email_settings', pk=agent.pk)
+                except Exception as e:
+                    messages.error(request, f"Failed to create email endpoint: {e}")
+                    return redirect('agent_email_settings', pk=agent.pk)
+            else:
+                messages.error(request, "This agent has no email endpoint yet. Provide an email address to create one.")
+                return redirect('agent_email_settings', pk=agent.pk)
+
+        form = AgentEmailAccountConsoleForm(request.POST)
+        action = request.POST.get('action', 'save')
+        if not form.is_valid() and action == 'save':
+            for field, errors in form.errors.items():
+                for error in errors:
+                    messages.error(request, f"{field}: {error}")
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Load or create account for save/test operations
+        from api.models import AgentEmailAccount
+        account = getattr(endpoint, 'agentemailaccount', None)
+
+        # Handle save
+        if action == 'save':
+            data = form.cleaned_data
+            created = False
+            if not account:
+                account = AgentEmailAccount(endpoint=endpoint)
+                created = True
+            # Update endpoint address to match user-entered value, if provided
+            new_address = (request.POST.get('endpoint_address') or '').strip()
+            if new_address and new_address != endpoint.address:
+                try:
+                    endpoint.address = new_address
+                    endpoint.save(update_fields=['address'])
+                except Exception as e:
+                    messages.error(request, f"Failed to update agent email address: {e}")
+                    return redirect('agent_email_settings', pk=agent.pk)
+            # Assign simple fields
+            for f in ('smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'is_outbound_enabled',
+                      'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_folder', 'is_inbound_enabled', 'imap_idle_enabled',
+                      'poll_interval_sec'):
+                setattr(account, f, data.get(f))
+            # Passwords
+            from api.encryption import SecretsEncryption
+            if data.get('smtp_password'):
+                account.smtp_password_encrypted = SecretsEncryption.encrypt_value(data.get('smtp_password'))
+            if data.get('imap_password'):
+                account.imap_password_encrypted = SecretsEncryption.encrypt_value(data.get('imap_password'))
+            try:
+                account.full_clean()
+                account.save()
+                messages.success(request, "Email settings saved.")
+                # Analytics for create/update
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.EMAIL_ACCOUNT_CREATED if created else AnalyticsEvent.EMAIL_ACCOUNT_UPDATED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address},
+                    )
+                except Exception:
+                    pass
+            except ValidationError as e:
+                for field, errs in e.message_dict.items():
+                    for err in errs:
+                        messages.error(request, f"{field}: {err}")
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Ensure account exists before tests / poll
+        if not account:
+            messages.error(request, "Please save email settings before testing or polling.")
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Test SMTP
+        if action == 'test_smtp':
+            try:
+                import smtplib
+                if account.smtp_security == AgentEmailAccount.SmtpSecurity.SSL:
+                    client = smtplib.SMTP_SSL(account.smtp_host, int(account.smtp_port or 465), timeout=30)
+                else:
+                    client = smtplib.SMTP(account.smtp_host, int(account.smtp_port or 587), timeout=30)
+                try:
+                    client.ehlo()
+                    if account.smtp_security == AgentEmailAccount.SmtpSecurity.STARTTLS:
+                        client.starttls()
+                        client.ehlo()
+                    if account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
+                        client.login(account.smtp_username or '', account.get_smtp_password() or '')
+                    try:
+                        client.noop()
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        client.quit()
+                    except Exception:
+                        try:
+                            client.close()
+                        except Exception:
+                            pass
+                from django.utils import timezone
+                account.connection_last_ok_at = timezone.now()
+                account.connection_error = ""
+                account.save(update_fields=['connection_last_ok_at', 'connection_error'])
+                messages.success(request, "SMTP test succeeded.")
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.SMTP_TEST_PASSED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address},
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                account.connection_error = str(e)
+                account.save(update_fields=['connection_error'])
+                messages.error(request, f"SMTP test failed: {e}")
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.SMTP_TEST_FAILED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': str(e)[:500]},
+                    )
+                except Exception:
+                    pass
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Test IMAP
+        if action == 'test_imap':
+            try:
+                import imaplib
+                if account.imap_security == AgentEmailAccount.ImapSecurity.SSL:
+                    client = imaplib.IMAP4_SSL(account.imap_host, int(account.imap_port or 993), timeout=30)
+                else:
+                    client = imaplib.IMAP4(account.imap_host, int(account.imap_port or 143), timeout=30)
+                    if account.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
+                        client.starttls()
+                try:
+                    client.login(account.imap_username or '', account.get_imap_password() or '')
+                    client.select(account.imap_folder or 'INBOX', readonly=True)
+                    try:
+                        client.noop()
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        client.logout()
+                    except Exception:
+                        try:
+                            client.shutdown()
+                        except Exception:
+                            pass
+                from django.utils import timezone
+                account.connection_last_ok_at = timezone.now()
+                account.connection_error = ""
+                account.save(update_fields=['connection_last_ok_at', 'connection_error'])
+                messages.success(request, "IMAP test succeeded.")
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.IMAP_TEST_PASSED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address},
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                account.connection_error = str(e)
+                account.save(update_fields=['connection_error'])
+                messages.error(request, f"IMAP test failed: {e}")
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.IMAP_TEST_FAILED,
+                        source=AnalyticsSource.WEB,
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': str(e)[:500]},
+                    )
+                except Exception:
+                    pass
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Poll now
+        if action == 'poll_now':
+            try:
+                from api.agent.tasks import poll_imap_inbox
+                poll_imap_inbox.delay(str(account.pk))
+                messages.success(request, "IMAP poll enqueued.")
+            except Exception as e:
+                messages.error(request, f"Failed to enqueue IMAP poll: {e}")
+            return redirect('agent_email_settings', pk=agent.pk)
+
+        # Default: redirect back
+        return redirect('agent_email_settings', pk=agent.pk)
 
 
 class AgentSecretsAddFormView(LoginRequiredMixin, TemplateView):

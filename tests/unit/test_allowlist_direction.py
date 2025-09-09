@@ -21,13 +21,7 @@ class AllowlistDirectionTests(TestCase):
     
     def setUp(self):
         """Set up test data."""
-        # Enable feature flags
-        self._p_flag = patch("api.models.flag_is_active", return_value=True)
-        self._p_switch = patch("api.models.switch_is_active", return_value=True)
-        self._p_flag.start()
-        self._p_switch.start()
-        self.addCleanup(self._p_flag.stop)
-        self.addCleanup(self._p_switch.stop)
+        # No feature flags; behavior is always-on now
         
         # Create test user and agent
         self.owner = User.objects.create_user(

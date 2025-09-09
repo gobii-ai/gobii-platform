@@ -38,3 +38,9 @@ from .maintenance_tasks import (
 
 # Soft-expiration task (global sweeper)
 from .soft_expiration_task import soft_expire_inactive_agents_task
+
+# Ensure persistent-agent task modules (IMAP polling, event processing) are imported
+# so Celery autodiscovery picks them up when it imports api.tasks.
+# Without this, tasks under `api.agent.tasks.*` may not register on the worker
+# unless some other code imports them first (e.g., console views).
+import api.agent.tasks  # noqa: F401

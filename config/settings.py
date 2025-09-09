@@ -27,6 +27,31 @@ if env_file.exists():
 # will not be overridden.
 os.environ.setdefault("GOBII_RELEASE_ENV", "local")
 
+# Smart local defaults: make developer experience "just work" on laptops
+# When not running inside Docker/Compose and release env is local, fill in
+# sensible defaults for DB/Redis/Celery and dev keys. Compose and prod provide
+# explicit values so these setdefault calls won't override them.
+IN_DOCKER = os.path.exists("/.dockerenv") or env.bool("IN_DOCKER", default=False)
+RELEASE_ENV = os.getenv("GOBII_RELEASE_ENV", "local")
+
+if RELEASE_ENV == "local" and not IN_DOCKER:
+    # Core toggles and keys (non-secret dev defaults)
+    os.environ.setdefault("DEBUG", "1")
+    os.environ.setdefault("DJANGO_SECRET_KEY", "dev-insecure")
+    os.environ.setdefault("GOBII_ENCRYPTION_KEY", "dev-insecure")
+
+    # Postgres (local compose defaults)
+    os.environ.setdefault("POSTGRES_HOST", "localhost")
+    os.environ.setdefault("POSTGRES_PORT", "5432")
+    os.environ.setdefault("POSTGRES_DB", "gobii")
+    os.environ.setdefault("POSTGRES_USER", "postgres")
+    os.environ.setdefault("POSTGRES_PASSWORD", "postgres")
+
+    # Redis + Celery
+    os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+    os.environ.setdefault("CELERY_BROKER_URL", os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+    os.environ.setdefault("CELERY_RESULT_BACKEND", os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+
 # Community vs Proprietary build toggle
 # - Community Edition (default): minimal external deps, no Turnstile, no email verification
 # - Proprietary/Prod: enable Turnstile, real email delivery, and email verification
@@ -552,6 +577,20 @@ OTEL_EXPORTER_OTLP_LOG_ENDPOINT = env("OTEL_EXPORTER_OTLP_LOG_ENDPOINT", default
 
 # Postmark Inbound Webhook Token - this is a token we create, and add to header on email open/click webhooks in Postmark
 # Infuriatingly, Postmark does not allow you to set it as a header for inbound delivery webhooks, so we have to use a query
+
+# ────────── IMAP IDLE Runner ──────────
+# Global enable for the management-command based IDLE watcher.
+IMAP_IDLE_ENABLED = env.bool("IMAP_IDLE_ENABLED", default=False)
+# Max local watchers per runner process; scale horizontally with multiple runners.
+IMAP_IDLE_MAX_CONNECTIONS = env.int("IMAP_IDLE_MAX_CONNECTIONS", default=200)
+# How often to rescan the DB for accounts to watch (seconds)
+IMAP_IDLE_SCAN_INTERVAL_SEC = env.int("IMAP_IDLE_SCAN_INTERVAL_SEC", default=30)
+# Re-issue IDLE at this interval to avoid server timeouts (seconds; ~25 minutes default)
+IMAP_IDLE_REISSUE_SEC = env.int("IMAP_IDLE_REISSUE_SEC", default=1500)
+# Debounce window to avoid enqueuing duplicate polls on bursty IDLE events (seconds)
+IMAP_IDLE_DEBOUNCE_SEC = env.int("IMAP_IDLE_DEBOUNCE_SEC", default=10)
+# Cross-runner lease TTL (seconds). Watchers refresh this periodically to ensure single watcher per account.
+IMAP_IDLE_LEASE_TTL_SEC = env.int("IMAP_IDLE_LEASE_TTL_SEC", default=60)
 # parameter on that one
 POSTMARK_INCOMING_WEBHOOK_TOKEN = env("POSTMARK_INCOMING_WEBHOOK_TOKEN", default="dummy-postmark-incoming-token")
 
@@ -589,3 +628,13 @@ ALLOW_FILE_UPLOAD = env.bool("ALLOW_FILE_UPLOAD", default=False)
 # Manual whitelist limits
 # Maximum number of manual allowlist entries per agent. Configurable via env.
 MANUAL_WHITELIST_MAX_PER_AGENT = env.int("MANUAL_WHITELIST_MAX_PER_AGENT", default=100)
+# Default domain used for auto-generated agent email endpoints in Gobii proprietary mode.
+# Community/OSS deployments typically leave this unused.
+DEFAULT_AGENT_EMAIL_DOMAIN = env("DEFAULT_AGENT_EMAIL_DOMAIN", default="my.gobii.ai")
+
+# Whether to auto-create agent-owned email endpoints during agent creation.
+# Defaults follow Gobii proprietary mode: enabled when proprietary, disabled in OSS.
+# Can be overridden explicitly via env if needed.
+ENABLE_DEFAULT_AGENT_EMAIL = env.bool(
+    "ENABLE_DEFAULT_AGENT_EMAIL", default=GOBII_PROPRIETARY_MODE
+)

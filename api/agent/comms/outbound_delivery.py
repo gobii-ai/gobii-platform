@@ -1,8 +1,5 @@
 import logging
 import os
-import re
-import html
-from typing import Tuple
 
 from django.core.mail import get_connection
 from django.conf import settings
@@ -10,137 +7,16 @@ from django.utils import timezone
 from anymail.message import AnymailMessage
 from anymail.exceptions import AnymailAPIError
 
-from api.models import PersistentAgentMessage, OutboundMessageAttempt, DeliveryStatus, CommsChannel
+from api.models import PersistentAgentMessage, OutboundMessageAttempt, DeliveryStatus, CommsChannel, AgentEmailAccount
 from opentelemetry.trace import get_current_span
 from opentelemetry import trace
 from django.template.loader import render_to_string
 
-from inscriptis import get_text  # High-performance HTML→text conversion for plaintext versions
-from inscriptis.model.config import ParserConfig
-
-import markdown  # For rendering markdown to HTML
-
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
-
-def _convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
-    """Detect whether *body* is HTML, Markdown, or plaintext and return
-    a tuple *(html_snippet, plaintext)*.
-
-    Rules:
-    1. If any HTML tag appears (e.g. ``<p>``, ``<br>``, ``<a>``), treat as HTML.
-    2. Otherwise, if common Markdown patterns are found – headings, lists, bold, links, code fences –
-       render via *markdown*.
-    3. Otherwise, treat as generic plaintext –​ escape then replace newlines with ``<br>``.
-    """
-    logger = logging.getLogger(__name__)
-    
-    # Configure inscriptis to preserve URLs in plaintext conversion with strict CSS
-    # Use strict CSS profile to avoid unwanted indentation from div elements
-    from inscriptis.css_profiles import CSS_PROFILES
-    strict_css = CSS_PROFILES['strict'].copy()
-    
-    config = ParserConfig(
-        css=strict_css,
-        display_links=True,
-        display_anchors=True
-    )
-    
-    # Log the raw input for tracing
-    body_length = len(body)
-    body_preview = body[:200] + "..." if len(body) > 200 else body
-    logger.info(
-        "Email content conversion starting. Input body length: %d characters. Preview: %r",
-        body_length,
-        body_preview
-    )
-
-    # ------------------------------------------------------------------ Detect HTML
-    # Look for actual HTML tags (not just any angle brackets)
-    html_tag_pattern = r"</?(?:p|br|div|span|a|ul|ol|li|h[1-6]|strong|em|b|i|code|pre|blockquote)\b[^>]*>"
-    html_match = re.search(html_tag_pattern, body, re.IGNORECASE)
-    
-    if html_match:
-        logger.info(
-            "Content type detected: HTML. Found HTML tag pattern: %r at position %d",
-            html_match.group(0),
-            html_match.start()
-        )
-        html_snippet = body  # already HTML snippet (agent followed instructions)
-        plaintext = get_text(html_snippet, config).strip()
-        
-        logger.info(
-            "HTML processing complete. Original HTML length: %d, extracted plaintext length: %d. "
-            "Plaintext preview: %r",
-            len(html_snippet),
-            len(plaintext),
-            plaintext[:200] + "..." if len(plaintext) > 200 else plaintext
-        )
-        return html_snippet, plaintext
-
-    # ------------------------------------------------------------------ Detect Markdown
-    markdown_patterns = [
-        (r"^\s{0,3}#", "heading"),              # Heading '# Title'
-        (r"\*\*.+?\*\*", "bold_asterisk"),     # Bold **text**
-        (r"__.+?__", "bold_underscore"),       # Bold __text__
-        (r"`{1,3}.+?`{1,3}", "code"),          # Inline/fenced code
-        (r"\[[^\]]+\]\([^)]+\)", "link"),      # Link [text](url)
-        (r"^\s*[-*+] ", "unordered_list"),     # Unordered list
-        (r"^\s*\d+\. ", "ordered_list")        # Ordered list
-    ]
-    
-    detected_patterns = []
-    for pattern, pattern_name in markdown_patterns:
-        matches = list(re.finditer(pattern, body, flags=re.MULTILINE))
-        if matches:
-            detected_patterns.append((pattern_name, len(matches)))
-            logger.info(
-                "Markdown pattern '%s' detected %d times. First match: %r at position %d",
-                pattern_name,
-                len(matches),
-                matches[0].group(0),
-                matches[0].start()
-            )
-    
-    if detected_patterns:
-        logger.info(
-            "Content type detected: Markdown. Found patterns: %s",
-            ", ".join([f"{name}({count})" for name, count in detected_patterns])
-        )
-        
-        # Convert markdown to HTML
-        html_snippet = markdown.markdown(body, extensions=["extra", "sane_lists", "smarty"])
-        plaintext = get_text(html_snippet, config).strip()
-        
-        logger.info(
-            "Markdown processing complete. Original markdown length: %d, rendered HTML length: %d, "
-            "extracted plaintext length: %d. HTML preview: %r. Plaintext preview: %r",
-            len(body),
-            len(html_snippet),
-            len(plaintext),
-            html_snippet[:200] + "..." if len(html_snippet) > 200 else html_snippet,
-            plaintext[:200] + "..." if len(plaintext) > 200 else plaintext
-        )
-        return html_snippet, plaintext
-
-    # ------------------------------------------------------------------ Plaintext (escape & <br>)
-    logger.info("Content type detected: Plain text. No HTML tags or Markdown patterns found.")
-    
-    escaped = html.escape(body)
-    html_snippet = escaped.replace("\n", "<br>")
-    plaintext = body.strip()
-    
-    logger.info(
-        "Plaintext processing complete. Original length: %d, HTML-escaped length: %d, "
-        "newlines converted to <br> tags: %d. Final HTML preview: %r",
-        len(body),
-        len(html_snippet),
-        body.count('\n'),
-        html_snippet[:200] + "..." if len(html_snippet) > 200 else html_snippet
-    )
-    
-    return html_snippet, plaintext
+from .email_content import convert_body_to_html_and_plaintext
+from .smtp_transport import SmtpTransport
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -363,7 +239,125 @@ def deliver_agent_email(message: PersistentAgentMessage):
         )
         return
 
-    # Check environment and token once up front
+    # First: per-endpoint SMTP override
+    acct = None
+    try:
+        # Use a direct DB check to avoid stale related-object caches
+        acct = (
+            AgentEmailAccount.objects.select_related("endpoint")
+            .filter(endpoint=message.from_endpoint, is_outbound_enabled=True)
+            .first()
+        )
+    except Exception:
+        acct = None
+
+    if acct is not None:
+        logger.info(
+            "Using per-endpoint SMTP for message %s from %s",
+            message.id,
+            message.from_endpoint.address,
+        )
+        # Mark sending and create attempt for SMTP
+        message.latest_status = DeliveryStatus.SENDING
+        message.save(update_fields=["latest_status"])
+
+        attempt = OutboundMessageAttempt.objects.create(
+            message=message,
+            provider="smtp",
+            status=DeliveryStatus.SENDING,
+        )
+
+        try:
+            from_address = message.from_endpoint.address
+            to_address = message.to_endpoint.address if message.to_endpoint else ""
+            subject = message.raw_payload.get("subject", "")
+            body_raw = message.body
+
+            # content conversion
+            html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
+            html_body = render_to_string(
+                "emails/persistent_agent_email.html",
+                {"body": html_snippet},
+            )
+
+            # Collect all recipients (To + CC)
+            recipient_list = [to_address] if to_address else []
+            if message.cc_endpoints.exists():
+                recipient_list.extend(list(message.cc_endpoints.values_list("address", flat=True)))
+
+            with tracer.start_as_current_span("SMTP Transport Send") as smtp_span:
+                smtp_span.set_attribute("from", from_address)
+                smtp_span.set_attribute("to_count", 1)
+                try:
+                    cc_count = message.cc_endpoints.count()
+                except Exception:
+                    cc_count = 0
+                smtp_span.set_attribute("cc_count", cc_count)
+                smtp_span.set_attribute("recipient_total", len(recipient_list))
+                provider_id = SmtpTransport.send(
+                    account=acct,
+                    from_addr=from_address,
+                    to_addrs=recipient_list,
+                    subject=subject,
+                    plaintext_body=plaintext_body,
+                    html_body=html_body,
+                    attempt_id=str(attempt.id),
+                )
+
+            now = timezone.now()
+            attempt.status = DeliveryStatus.SENT
+            attempt.provider_message_id = provider_id or ""
+            attempt.sent_at = now
+            attempt.save(update_fields=["status", "provider_message_id", "sent_at"])
+
+            message.latest_status = DeliveryStatus.SENT
+            message.latest_sent_at = now
+            message.latest_error_message = ""
+            message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
+
+            if span is not None and getattr(span, "is_recording", lambda: False)():
+                span.add_event(
+                    'Email - SMTP Delivery',
+                    {
+                        'message_id': str(message.id),
+                        'from_address': from_address,
+                        'to_address': to_address,
+                    },
+                )
+
+            Analytics.track_event(
+                user_id=message.owner_agent.user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_SENT,
+                source=AnalyticsSource.AGENT,
+                properties={
+                    'agent_id': str(message.owner_agent_id),
+                    'message_id': str(message.id),
+                    'from_address': from_address,
+                    'to_address': to_address,
+                    'subject': subject,
+                    'provider': 'smtp',
+                },
+            )
+            return
+
+        except Exception as e:
+            logger.exception(
+                "SMTP error sending message %s from %r to %r",
+                message.id,
+                getattr(message.from_endpoint, 'address', None),
+                getattr(message.to_endpoint, 'address', None),
+            )
+            error_str = str(e)
+            attempt.status = DeliveryStatus.FAILED
+            attempt.error_message = error_str
+            attempt.save(update_fields=["status", "error_message"])
+
+            message.latest_status = DeliveryStatus.FAILED
+            message.latest_error_message = error_str
+            message.save(update_fields=["latest_status", "latest_error_message"])
+            return
+
+    # Check environment and token once up front (Postmark or simulation)
     postmark_token = os.getenv("POSTMARK_SERVER_TOKEN")
     release_env = getattr(settings, "GOBII_RELEASE_ENV", os.getenv("GOBII_RELEASE_ENV", "local"))
     is_non_prod = release_env != "prod"
@@ -387,7 +381,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             )
         subject = message.raw_payload.get("subject", "")
         body_raw = message.body
-        html_snippet, plaintext_body = _convert_body_to_html_and_plaintext(body_raw)
+        html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
 
         # Log simulated content details for parity with non-prod simulation branch
         logger.info(
@@ -445,7 +439,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         
         # For simulation, also show content conversion results
         logger.info("SIMULATION - Processing content conversion for message %s", message.id)
-        html_snippet, plaintext_body = _convert_body_to_html_and_plaintext(body_raw)
+        html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
         
         logger.info(
             "SIMULATION - Content conversion results for message %s: "
@@ -532,7 +526,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         # Detect content type and convert appropriately
         logger.info("Starting content type detection and conversion for message %s", message.id)
-        html_snippet, plaintext_body = _convert_body_to_html_and_plaintext(body_raw)
+        html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
         
         # Log the conversion results
         logger.info(

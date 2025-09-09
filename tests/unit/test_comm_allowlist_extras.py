@@ -23,11 +23,7 @@ User = get_user_model()
 @tag("batch_allowlist_rules")
 class ManualEmailDisplayNameAndCaseTests(TestCase):
     def setUp(self):
-        # Enable feature-gated whitelist logic for tests
-        self._p_flag = patch("api.models.flag_is_active", return_value=True)
-        self._p_switch = patch("api.models.switch_is_active", return_value=True)
-        self._p_flag.start(); self._p_switch.start()
-        self.addCleanup(self._p_flag.stop); self.addCleanup(self._p_switch.stop)
+        # No feature flags; behavior is always-on now
 
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(

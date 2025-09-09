@@ -265,7 +265,7 @@ class EmailDeliveryTests(TestCase):
     @override_settings(GOBII_RELEASE_ENV="prod")
     @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
     @patch('api.agent.comms.outbound_delivery.AnymailMessage')
-    @patch('api.agent.comms.outbound_delivery.get_text')
+    @patch('api.agent.comms.email_content.get_text')
     def test_production_email_delivery_uses_inscriptis(self, mock_get_text, mock_anymail):
         """Test that inscriptis conversion is used in production email delivery."""
         # Setup mock email message

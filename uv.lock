@@ -966,6 +966,7 @@ dependencies = [
     { name = "fastmcp" },
     { name = "google-cloud-storage" },
     { name = "gunicorn" },
+    { name = "imapclient" },
     { name = "inscriptis" },
     { name = "json-schema-to-pydantic" },
     { name = "litellm" },
@@ -1080,6 +1081,7 @@ requires-dist = [
     { name = "fastmcp", specifier = ">=2.11.3" },
     { name = "google-cloud-storage", specifier = "~=3.1.0" },
     { name = "gunicorn", specifier = "==23.0.0" },
+    { name = "imapclient", specifier = "~=2.3" },
     { name = "inscriptis", specifier = "==2.6.0" },
     { name = "json-schema-to-pydantic", specifier = "~=0.2.5" },
     { name = "litellm", specifier = "~=1.73.7" },
@@ -1522,6 +1524,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f1/70/7703c29685631f5a7590aa73f1f1d3fa9a380e654b86af429e0934a32f7d/idna-3.10.tar.gz", hash = "sha256:12f65c9b470abda6dc35cf8e63cc574b1c52b11df2c86030af0ac09b01b13ea9", size = 190490, upload-time = "2024-09-15T18:07:39.745Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/76/c6/c88e154df9c4e1a2a66ccf0005a88dfb2650c1dffb6f5ce603dfbd452ce3/idna-3.10-py3-none-any.whl", hash = "sha256:946d195a0d259cbba61165e88e65941f16e9b36ea6ddb97f00452bae8b1287d3", size = 70442, upload-time = "2024-09-15T18:07:37.964Z" },
+]
+
+[[package]]
+name = "imapclient"
+version = "2.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/19/d8/a4a0337d5e39a0569d89793d5053d7535eefd9b8756df4e10dc114caf3c2/IMAPClient-2.3.1.zip", hash = "sha256:26ea995664fae3a88b878ebce2aff7402931697b86658b7882043ddb01b0e6ba", size = 213347, upload-time = "2022-07-09T02:34:43.148Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/9c/b2890e73bc9eee53fe63218e3f3cb774a6beefdb7b5c47928a81cc3b3c13/IMAPClient-2.3.1-py2.py3-none-any.whl", hash = "sha256:057f28025d2987c63e065afb0e4370b0b850b539b0e1494cea0427e88130108c", size = 181263, upload-time = "2022-07-09T02:34:39.986Z" },
 ]
 
 [[package]]
