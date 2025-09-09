@@ -14,11 +14,7 @@ class Migration(migrations.Migration):
                 "SET last_interaction_at = COALESCE(last_interaction_at, created_at) "
                 "WHERE last_interaction_at IS NULL;"
             ),
-            reverse_sql=(
-                "UPDATE api_persistentagent "
-                "SET last_interaction_at = NULL "
-                "WHERE last_interaction_at = created_at;"
-            ),
+            reverse_sql=migrations.RunSQL.noop,
         )
     ]
 
