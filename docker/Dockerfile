@@ -36,6 +36,17 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # ────────────────────────────────────────────────
 FROM deps AS builder
 
+"""
+Ensure the build runs in a non-local, in-container context so Django does not
+flip to DEBUG mode via the convenience defaults in settings.py. When DEBUG is
+True, staticfiles uses CompressedStaticFilesStorage (no manifest), which causes
+runtime 500s with Manifest lookups. Setting these envs guarantees
+CompressedManifestStaticFilesStorage during collectstatic.
+"""
+ENV IN_DOCKER=1 \
+    GOBII_RELEASE_ENV=build \
+    DEBUG=0
+
 COPY . .
 
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -44,6 +55,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 ENV USE_EPHEMERAL_XVFB=true
 
 RUN DJANGO_SECRET_KEY=dummy-build-key \
+    DEBUG=0 \
+    GOBII_RELEASE_ENV=build \
     POSTGRES_DB=dummy-db \
     POSTGRES_USER=dummy-user \
     POSTGRES_PASSWORD=dummy-pw \
