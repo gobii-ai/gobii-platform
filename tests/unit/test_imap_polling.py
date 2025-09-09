@@ -119,6 +119,10 @@ class ImapPollingTests(TestCase):
     @patch('imaplib.IMAP4_SSL', new=_FakeIMAP)
     def test_poll_account_ingests_and_updates_uid(self, _mock_events_delay, mock_ingest):
         acct = self._setup_endpoint_and_account()
+        # Set a baseline last_seen_uid to simulate a subsequent poll rather than
+        # the very first run, which intentionally baselines without ingestion.
+        acct.last_seen_uid = "1"
+        acct.save(update_fields=["last_seen_uid"])
         # Whitelist the sender
         CommsAllowlistEntry.objects.create(
             agent=self.agent,
