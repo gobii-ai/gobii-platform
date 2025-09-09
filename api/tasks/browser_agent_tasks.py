@@ -491,20 +491,31 @@ async def _run_agent(
             else:
                 logger.info("Starting stealth browser without proxy")
 
+            accept_downloads = persistent_agent_id is not None and settings.ALLOW_FILE_DOWNLOAD
             profile = BrowserProfile(
                 stealth=True,
                 headless=settings.BROWSER_HEADLESS,
                 user_data_dir=temp_profile_dir,
                 timeout=30_000,
                 no_viewport=True,
-                accept_downloads=False,
-                auto_download_pdfs=False,
-                proxy=proxy_settings
+                accept_downloads=allow_downloads,
+                auto_download_pdfs=True,
+                proxy=proxy_settings,
             )
 
             browser_session = BrowserSession(
                 browser_profile=profile,
             )
+
+            # Register a download listener to persist files to the agent filespace
+            try:
+                if accept_downloads:
+                    from ..agent.browser_actions import register_download_listener
+                    register_download_listener(browser_session, persistent_agent_id)
+                    logger.debug("Registered FileDownloadedEvent listener for task %s", task_id)
+            except Exception:
+                logger.warning("Failed to register download listener for task %s", task_id, exc_info=True)
+
             await browser_session.start()
 
             llm_params = {"api_key": llm_api_key, "temperature": 0}
@@ -1066,11 +1077,14 @@ def _process_browser_use_task_core(
             # Register custom actions
             try:
                 from ..agent.browser_actions import (
-                    register_web_search_action,
+                    register_web_search_action
                 )
                 actions = ['web_search']
                 register_web_search_action(controller)
-                #TODO: Add upload action registration here
+                if persistent_agent_id is not None and settings.ALLOW_FILE_UPLOAD:
+                    from ..agent.browser_actions import register_upload_actions
+                    register_upload_actions(controller, persistent_agent_id)
+                    actions.append('upload_file')
 
                 logger.debug(f"Registered custom action(s) {",".join(actions)} for task %s", task_obj.id)
             except Exception as exc:
