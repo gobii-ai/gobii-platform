@@ -1,0 +1,28 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+  {{ block.super }}
+  {{ form.media }}
+  <script src="{% url 'admin:jsi18n' %}"></script>
+  <script src="{% static 'admin/js/core.js' %}"></script>
+  <script src="{% static 'admin/js/calendar.js' %}"></script>
+  <script src="{% static 'admin/js/admin/DateTimeShortcuts.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+  <div class="module">
+    <h2>{% trans "Grant Credits to User IDs" %}</h2>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <table>
+        {{ form.as_table }}
+      </table>
+      <div class="submit-row">
+        <input type="submit" value="{% trans 'Submit' %}" class="default" />
+        <a href="{% url 'admin:api_taskcredit_changelist' %}" class="button cancel-button">{% trans 'Cancel' %}</a>
+      </div>
+    </form>
+    <p class="help">Paste user IDs separated by commas or new lines. Use Dry Run to preview the affected user count. Enable "Only if out of credits" to restrict grants to users with 0 available credits currently.</p>
+  </div>
+{% endblock %}

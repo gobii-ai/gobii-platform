@@ -1,0 +1,16 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  <li>
+    <a href="{% url 'admin:api_taskcredit_grant_by_plan' %}" class="addlink">
+      {% trans "Grant Credits by Plan" %}
+    </a>
+  </li>
+  <li>
+    <a href="{% url 'admin:api_taskcredit_grant_by_user_ids' %}" class="addlink">
+      {% trans "Grant Credits to User IDs" %}
+    </a>
+  </li>
+{% endblock %}

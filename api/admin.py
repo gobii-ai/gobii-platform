@@ -1,10 +1,12 @@
+import logging
+
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.contrib.sites.models import Site
 from django.db.models import Count  # For annotated counts
 from django.db.models.expressions import OuterRef, Exists
 
-from .admin_forms import TestSmsForm
+from .admin_forms import TestSmsForm, GrantPlanCreditsForm, GrantCreditsByUserIdsForm
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, ProxyHealthCheckSpec, ProxyHealthCheckResult,
@@ -110,6 +112,7 @@ class TaskCreditAdmin(admin.ModelAdmin):
 
     # UX: allow quick navigation via calendar drill-down
     date_hierarchy = "granted_date"
+    change_list_template = "admin/taskcredit_change_list.html"
     
     @admin.display(description='Owner')
     def owner_display(self, obj):
@@ -118,6 +121,275 @@ class TaskCreditAdmin(admin.ModelAdmin):
         if obj.user_id:
             return f"User: {obj.user.email} ({obj.user_id})"
         return "-"
+
+    # ---------------- Custom admin view: Grant by Plan -----------------
+    def get_urls(self):
+        from django.urls import path
+        urls = super().get_urls()
+        custom = [
+            path(
+                'grant-by-plan/',
+                self.admin_site.admin_view(self.grant_by_plan_view),
+                name='api_taskcredit_grant_by_plan',
+            ),
+            path(
+                'grant-by-user-ids/',
+                self.admin_site.admin_view(self.grant_by_user_ids_view),
+                name='api_taskcredit_grant_by_user_ids',
+            ),
+        ]
+        return custom + urls
+
+    def grant_by_plan_view(self, request):
+        from django.template.response import TemplateResponse
+        from django.contrib import messages
+        from django.db import transaction
+        from django.utils import timezone
+        from django.apps import apps
+        from constants.plans import PlanNamesChoices
+
+        if not request.user.has_perm("api.add_taskcredit"):
+            messages.error(request, "You do not have permission to grant task credits.")
+            return HttpResponseRedirect(reverse("admin:api_taskcredit_changelist"))
+
+        form = GrantPlanCreditsForm(request.POST or None)
+        context = dict(self.admin_site.each_context(request))
+        context.update({
+            "opts": self.model._meta,
+            "title": "Grant Credits by Plan",
+            "form": form,
+        })
+
+        if request.method == "POST" and form.is_valid():
+            plan = form.cleaned_data["plan"]
+            credits = form.cleaned_data["credits"]
+            grant_type = form.cleaned_data["grant_type"]
+            grant_date = form.cleaned_data["grant_date"]
+            expiration_date = form.cleaned_data["expiration_date"]
+            dry_run = form.cleaned_data["dry_run"]
+            only_zero = form.cleaned_data["only_if_out_of_credits"]
+            export_csv = form.cleaned_data["export_csv"]
+
+            # Resolve model lazily to avoid import cycles
+            TaskCredit = apps.get_model("api", "TaskCredit")
+            User = get_user_model()
+            from util.subscription_helper import get_user_plan
+            from constants.grant_types import GrantTypeChoices
+
+            # Iterate active users and match plan
+            matched_users = []
+            for user in User.objects.filter(is_active=True).iterator():
+                try:
+                    up = get_user_plan(user)
+                    if up and up.get("id") == plan:
+                        matched_users.append(user)
+                except Exception as e:
+                    logging.warning("Failed to get plan for user %s: %s", user.id, e)
+                    continue
+
+            # Optionally filter to users currently out of credits
+            if only_zero:
+                from django.db.models import Sum, Q, Value
+                from django.db.models.functions import Coalesce
+
+                now = timezone.now()
+                user_ids = [user.id for user in matched_users]
+
+                users_with_zero_credits_ids = set(
+                    User.objects.filter(id__in=user_ids)
+                    .annotate(
+                        available_credits_sum=Coalesce(
+                            Sum(
+                                "task_credits__available_credits",
+                                filter=Q(
+                                    task_credits__granted_date__lte=now,
+                                    task_credits__expiration_date__gte=now,
+                                    task_credits__voided=False,
+                                ),
+                            ),
+                            Value(0),
+                        )
+                    )
+                    .filter(available_credits_sum__lte=0)
+                    .values_list('id', flat=True)
+                )
+
+                matched_users = [user for user in matched_users if user.id in users_with_zero_credits_ids]
+
+            # Dry-run CSV export
+            if dry_run and export_csv:
+                import csv
+                from django.http import HttpResponse
+                from django.db.models import Sum
+                from util.subscription_helper import get_user_plan
+                now = timezone.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"grant_by_plan_dry_run_{plan}_{now}.csv"
+                response = HttpResponse(content_type='text/csv')
+                response['Content-Disposition'] = f'attachment; filename="{filename}"'
+                writer = csv.writer(response)
+                writer.writerow(["user_id", "email", "plan_id", "available_credits"])
+                for user in matched_users:
+                    total = TaskCredit.objects.filter(
+                        user=user,
+                        granted_date__lte=timezone.now(),
+                        expiration_date__gte=timezone.now(),
+                        voided=False,
+                    ).aggregate(s=Sum('available_credits'))['s'] or 0
+                    up = None
+                    try:
+                        up = get_user_plan(user)
+                    except Exception:
+                        up = None
+                    plan_id = (up.get('id') if isinstance(up, dict) else None) or ''
+                    writer.writerow([str(user.id), user.email or '', plan_id, total])
+                return response
+
+            created = 0
+            if not dry_run:
+                with transaction.atomic():
+                    for user in matched_users:
+                        TaskCredit.objects.create(
+                            user=user,
+                            credits=credits,
+                            credits_used=0,
+                            granted_date=grant_date,
+                            expiration_date=expiration_date,
+                            plan=PlanNamesChoices(plan),
+                            grant_type=grant_type,
+                            additional_task=False,
+                            voided=False,
+                        )
+                        created += 1
+                messages.success(request, f"Granted {credits} credits to {created} users on plan '{plan}'.")
+            else:
+                messages.info(request, f"Dry-run: would grant {credits} credits to {len(matched_users)} users on plan '{plan}'.")
+
+            return HttpResponseRedirect(reverse("admin:api_taskcredit_changelist"))
+
+        return TemplateResponse(request, "admin/grant_plan_credits.html", context)
+
+    def grant_by_user_ids_view(self, request):
+        from django.template.response import TemplateResponse
+        from django.contrib import messages
+        from django.db import transaction
+        from django.utils import timezone
+        from django.apps import apps
+
+        if not request.user.has_perm("api.add_taskcredit"):
+            messages.error(request, "You do not have permission to grant task credits.")
+            return HttpResponseRedirect(reverse("admin:api_taskcredit_changelist"))
+
+        form = GrantCreditsByUserIdsForm(request.POST or None)
+        context = dict(self.admin_site.each_context(request))
+        context.update({
+            "opts": self.model._meta,
+            "title": "Grant Credits to User IDs",
+            "form": form,
+        })
+
+        if request.method == "POST" and form.is_valid():
+            raw = form.cleaned_data['user_ids']
+            credits = form.cleaned_data['credits']
+            selected_plan = form.cleaned_data['plan']
+            grant_type = form.cleaned_data['grant_type']
+            grant_date = form.cleaned_data['grant_date']
+            expiration_date = form.cleaned_data['expiration_date']
+            dry_run = form.cleaned_data['dry_run']
+            only_zero = form.cleaned_data['only_if_out_of_credits']
+            export_csv = form.cleaned_data['export_csv']
+
+            # Parse IDs by commas or newlines
+            import re
+            ids = [s for s in re.split(r"[\s,]+", raw.strip()) if s]
+
+            TaskCredit = apps.get_model("api", "TaskCredit")
+            User = get_user_model()
+            from constants.plans import PlanNamesChoices
+
+            # ids are integers; invalid tokens are ignored by the filter
+            users = list(User.objects.filter(id__in=ids, is_active=True))
+
+            if only_zero:
+                from django.db.models import Sum, Q, Value
+                from django.db.models.functions import Coalesce
+
+                now = timezone.now()
+                user_ids = [user.id for user in users]
+
+                users_with_zero_credits_ids = set(
+                    User.objects.filter(id__in=user_ids)
+                    .annotate(
+                        available_credits_sum=Coalesce(
+                            Sum(
+                                "task_credits__available_credits",
+                                filter=Q(
+                                    task_credits__granted_date__lte=now,
+                                    task_credits__expiration_date__gte=now,
+                                    task_credits__voided=False,
+                                ),
+                            ),
+                            Value(0),
+                        )
+                    )
+                    .filter(available_credits_sum__lte=0)
+                    .values_list('id', flat=True)
+                )
+
+                users = [user for user in users if user.id in users_with_zero_credits_ids]
+
+            # Dry-run CSV export
+            if dry_run and export_csv:
+                import csv
+                from django.http import HttpResponse
+                from django.db.models import Sum
+                from util.subscription_helper import get_user_plan
+                now = timezone.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"grant_by_user_ids_dry_run_{now}.csv"
+                response = HttpResponse(content_type='text/csv')
+                response['Content-Disposition'] = f'attachment; filename="{filename}"'
+                writer = csv.writer(response)
+                writer.writerow(["user_id", "email", "plan_id", "available_credits"])
+                for user in users:
+                    total = TaskCredit.objects.filter(
+                        user=user,
+                        granted_date__lte=timezone.now(),
+                        expiration_date__gte=timezone.now(),
+                        voided=False,
+                    ).aggregate(s=Sum('available_credits'))['s'] or 0
+                    up = None
+                    try:
+                        up = get_user_plan(user)
+                    except Exception:
+                        up = None
+                    plan_id = (up.get('id') if isinstance(up, dict) else None) or ''
+                    writer.writerow([str(user.id), user.email or '', plan_id, total])
+                return response
+
+            created = 0
+            if not dry_run:
+                with transaction.atomic():
+                    for user in users:
+                        # Use the selected plan for the TaskCredit record
+                        plan_choice = PlanNamesChoices(selected_plan)
+                        TaskCredit.objects.create(
+                            user=user,
+                            credits=credits,
+                            credits_used=0,
+                            granted_date=grant_date,
+                            expiration_date=expiration_date,
+                            plan=plan_choice,
+                            grant_type=grant_type,
+                            additional_task=False,
+                            voided=False,
+                        )
+                        created += 1
+                messages.success(request, f"Granted {credits} credits to {created} users.")
+            else:
+                messages.info(request, f"Dry-run: would grant {credits} credits to {len(users)} users.")
+
+            return HttpResponseRedirect(reverse("admin:api_taskcredit_changelist"))
+
+        return TemplateResponse(request, "admin/grant_user_ids_credits.html", context)
 
 
 # Minimal admin for Organization to enable autocomplete/search
