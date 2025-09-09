@@ -328,12 +328,22 @@ def _watch_account(
             logger.info("Watcher %s connected and idling on %s", account_id, folder)
 
             start = time.time()
-            while not stop.is_set():
+            # Enter IDLE mode and stay there, checking for responses repeatedly
+            try:
+                client.idle()
+            except Exception as e:
+                raise e
+
+            while not stop.is_set() and (time.time() - start) < idle_reissue_sec:
                 # Refresh lease and verify ownership
                 try:
                     cur = redis.get(lease_key)
                     if cur != lease_val:
                         logger.info("Watcher %s lost lease; exiting", account_id)
+                        try:
+                            client.idle_done()
+                        except Exception:
+                            pass
                         try:
                             client.logout()
                         except Exception:
@@ -341,61 +351,47 @@ def _watch_account(
                         return
                     redis.expire(lease_key, lease_ttl)
                 except Exception:
-                    # Non-fatal; try to proceed
                     pass
 
-                # Re-issue IDLE periodically
-                elapsed = time.time() - start
-                if elapsed >= idle_reissue_sec:
-                    try:
-                        client.idle_done()
-                    except Exception:
-                        pass
-                    start = time.time()
-
-                # Enter IDLE and wait for events with a short timeout to allow heartbeats
-                client.idle()
+                # Wait for responses while idling
                 try:
-                    responses = client.idle_check(timeout=5)
+                    responses = client.idle_check(timeout=30)
                 except Exception:
                     responses = []
-                finally:
-                    try:
-                        client.idle_done()
-                    except Exception:
-                        pass
 
-                if stop.is_set():
-                    break
-
-                # Parse events – look for EXISTS or RECENT
+                # Parse events – look for EXISTS or RECENT in any tuple part
                 triggered = False
                 for resp in responses or []:
-                    # Typical forms: (b'EXISTS', 123), (b'RECENT', 1)
                     try:
-                        if len(resp) >= 2:
-                            typ = str(resp[0]).upper()
-                            if "EXISTS" in typ or "RECENT" in typ:
+                        parts = resp if isinstance(resp, (list, tuple)) else [resp]
+                        for p in parts:
+                            s = p.decode().upper() if isinstance(p, (bytes, bytearray)) else str(p).upper()
+                            if s in ("EXISTS", "RECENT"):
                                 triggered = True
                                 break
+                        if triggered:
+                            break
                     except Exception:
                         continue
 
                 if triggered:
-                    # Debounce
+                    logger.info("Watcher %s: IDLE event received; enqueue poll", account_id)
                     trig_key = f"imap-trigger:{account_id}"
                     try:
                         ok = redis.set(trig_key, "1", nx=True, ex=debounce_sec)
                     except Exception:
-                        ok = True  # best-effort: proceed
+                        ok = True
                     if ok:
                         try:
                             poll_imap_inbox.delay(account_id)
                         except Exception as e:
                             logger.warning("Failed to enqueue poll for %s: %s", account_id, e)
 
-                # Small sleep to avoid hot loop when idle_check returns empty
-                _sleep_until(stop, 1)
+            # Leave IDLE before reissuing or exiting
+            try:
+                client.idle_done()
+            except Exception:
+                pass
 
             try:
                 client.logout()
