@@ -267,14 +267,17 @@ class TestTokenBasedTierSelection(TestCase):
             "OPENROUTER_API_KEY": "openrouter-key",
         }, clear=True):
             configs = get_llm_config_with_failover(token_count=15000)
-            # Medium range has 3 tiers with available providers
-            self.assertEqual(len(configs), 3)
+            # Medium range now includes Google in tier 1; expect providers from tier 1 and tier 2
+            self.assertGreaterEqual(len(configs), 3)
             
-            # First provider should be from tier 1 (45% GLM, 45% GPT-OSS-120B, 10% GPT-5) 
-            # Since only OPENROUTER_API_KEY is available, should get openrouter_glm from tier 1
+            # First provider should be from tier 1; with Google and OpenRouter available,
+            # it should be either openrouter_glm or google depending on weighted order
             provider1, model1, _ = configs[0]
-            self.assertEqual(provider1, "openrouter_glm")
-            self.assertEqual(model1, "openrouter/z-ai/glm-4.5")
+            self.assertIn(provider1, ["openrouter_glm", "google"]) 
+            if provider1 == "openrouter_glm":
+                self.assertEqual(model1, "openrouter/z-ai/glm-4.5")
+            else:
+                self.assertEqual(model1, "vertex_ai/gemini-2.5-pro")
             
             # Tier 2 has weighted split, tier 3 would be GPT-5 but not available
             providers = [config[0] for config in configs]
@@ -282,10 +285,10 @@ class TestTokenBasedTierSelection(TestCase):
             
             self.assertIn("openrouter_glm", providers)
             self.assertIn("anthropic", providers)
-            # Note: Google is no longer in the medium token tier configuration
+            # Google is now included in the medium token tier configuration (tier 1)
             self.assertIn("openrouter/z-ai/glm-4.5", models)
             self.assertIn("anthropic/claude-sonnet-4-20250514", models)
-            # Note: Google model is no longer in the medium token tier configuration
+            # Google model may be present from tier 1 depending on weighted order
 
     def test_token_based_failover_large_range(self):
         """Token-based failover works for large token range."""
@@ -294,14 +297,13 @@ class TestTokenBasedTierSelection(TestCase):
             "GOOGLE_API_KEY": "google-key",
         }, clear=True):
             configs = get_llm_config_with_failover(token_count=25000)
-            self.assertEqual(len(configs), 1)
+            # Large tier now includes Google in tier 1; expect at least Google and Anthropic in failover list
+            self.assertGreaterEqual(len(configs), 2)
             
-            # Since tier 1 providers aren't available, should go to tier 2 (GPT-5 - not available)
-            # then tier 3 (Anthropic - available), tier 4 (Fireworks - not available)
-            # Only Anthropic is available from the large config tiers
+            # With Google available in tier 1, first provider should be Google
             provider1, model1, _ = configs[0]
-            self.assertEqual(provider1, "anthropic")
-            self.assertEqual(model1, "anthropic/claude-sonnet-4-20250514")
+            self.assertEqual(provider1, "google")
+            self.assertEqual(model1, "vertex_ai/gemini-2.5-pro")
 
     def test_token_based_failover_missing_providers(self):
         """Token-based failover gracefully handles missing API keys."""
