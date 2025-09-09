@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from tasks.services import TaskCreditService
+
 """Service helpers for inbound communication messages."""
 
 from dataclasses import dataclass
@@ -22,6 +24,7 @@ from ...models import (
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     CommsChannel,
+    PersistentAgent
 )
 
 from .adapters import ParsedMessage
@@ -153,6 +156,25 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
                 parsed.recipient,
                 channel_val,
             )
+
+        # Get the creator of the agent, and see if if they have enough credits. If not, we will message them that they
+        # need to top up their account.
+        persistent_agent = PersistentAgent.objects.filter(id=agent_id).first()
+
+        if not persistent_agent:
+            logging.warning(
+                "No persistent agent found for ID %s. Message may not be processed correctly.",
+                agent_id,
+            )
+        elif not TaskCreditService.has_available_tasks(persistent_agent.user):
+            # TODO
+
+        # TODO: check organization credits when we roll out organizations
+        # elif persistent_agent.organization and persistent_agent
+
+
+
+
 
         message = PersistentAgentMessage.objects.create(
             is_outbound=False,
