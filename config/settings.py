@@ -545,14 +545,15 @@ STRIPE_TASK_METER_EVENT_NAME = env("STRIPE_TASK_METER_EVENT_NAME", default="task
 # Credits configuration
 # How many credits a single task consumes from plan credits.
 # Keep as Decimal to support fractional credits (e.g., 0.1).
-CREDITS_PER_TASK = Decimal(env("CREDITS_PER_TASK", default="0.1"))
+CREDITS_PER_TASK = Decimal(env("CREDITS_PER_TASK", default="0.4"))
 
 # Optional per‑tool credit overrides (case‑insensitive keys).
 # Example: {"search_web": Decimal("0.10"), "http_request": Decimal("0.05")}
 TOOL_CREDIT_COSTS = {
-    "update_charter": Decimal("0.01"),
-    "update_schedule": Decimal("0.01"),
-    "sqlite_query": Decimal("0.2"),
+    "update_charter": Decimal("0.04"),
+    "update_schedule": Decimal("0.04"),
+    "sqlite_query": Decimal("0.8"),
+    "sqlite_batch": Decimal("0.8"),
 }
 
 # Analytics
