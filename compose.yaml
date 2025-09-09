@@ -75,6 +75,8 @@ services:
     depends_on:
       precheck-llm-keys:
         condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -83,7 +85,7 @@ services:
         condition: service_started
     restart: unless-stopped
     command: >-
-      bash -lc "python manage.py migrate --noinput && python manage.py create_initial_superuser && gunicorn config.wsgi:application --bind 0.0.0.0:8000"
+      bash -lc "gunicorn config.wsgi:application --bind 0.0.0.0:8000"
 
   flower:
     image: mher/flower:2.0
@@ -129,6 +131,8 @@ services:
     depends_on:
       precheck-llm-keys:
         condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -144,8 +148,8 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile
-    command: >
-      celery -A config beat --loglevel=info --scheduler=redbeat.RedBeatScheduler
+    command: >-
+      bash -lc "python manage.py sync_schedules && celery -A config beat --loglevel=info --scheduler=redbeat.RedBeatScheduler"
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
       GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
@@ -167,12 +171,83 @@ services:
     depends_on:
       precheck-llm-keys:
         condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
     shm_size: 2gb
+
+  # --------------------------------------------------------------------- #
+  #  IMAP IDLE watchers (keeps IMAP IDLE connections and enqueues polls)
+  # --------------------------------------------------------------------- #
+  imap-idlers:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    command: >-
+      bash -lc "python manage.py run_imap_idlers"
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
+      GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-gobii}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      IMAP_IDLE_ENABLED: "true"
+      XDG_DATA_HOME: /tmp/.chrome
+      XDG_CONFIG_HOME: /tmp/.chrome
+      XDG_CACHE_HOME: /tmp/.chrome
+    depends_on:
+      precheck-llm-keys:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Run DB migrations once, then exit. Other services wait on this.
+  migrate:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    command: bash -lc "python manage.py migrate --noinput"
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
+      GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-gobii}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379/0
+      XDG_DATA_HOME: /tmp/.chrome
+      XDG_CONFIG_HOME: /tmp/.chrome
+      XDG_CACHE_HOME: /tmp/.chrome
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      HOME: /tmp
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.128.0
