@@ -62,6 +62,25 @@ class TaskCreditService:
         return entitled - used
 
     @staticmethod
+    @tracer.start_as_current_span("TaskCreditService Has Available Tasks")
+    def has_available_tasks(user, task_credits: list | None = None) -> bool:
+        """
+        Determines if a user has any available task credits.
+
+        Parameters:
+        ----------
+        user : User
+            The user whose task credit availability is to be checked.
+
+        Returns:
+        -------
+        bool
+            True if the user has available task credits, False otherwise.
+        """
+        available = TaskCreditService.calculate_available_tasks(user, task_credits)
+        return available > 0 or available == TASKS_UNLIMITED
+
+    @staticmethod
     @tracer.start_as_current_span("TaskCreditService Grant Subscription Credits")
     def grant_subscription_credits(user, credit_override=None, plan=None, invoice_id="", grant_date=None, expiration_date=None) -> int:
         """
@@ -368,7 +387,6 @@ class TaskCreditService:
 
         return pct
 
-
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Get Task Credits In Current Range")
     def get_current_task_credit(user):
@@ -615,7 +633,6 @@ class TaskCreditService:
             pct = 100.0
 
         return pct
-
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Get User Additional Tasks Used")
