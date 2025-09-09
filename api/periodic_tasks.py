@@ -54,6 +54,13 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    # Daily rollup of fractional task usage into Stripe meter events
+    beat_schedule["meter-usage-rollup-daily"] = {
+        "task": "gobii_platform.api.tasks.rollup_and_meter_usage",
+        "schedule": crontab(hour=4, minute=10),  # 04:10 UTC daily
+        "args": [],
+    }
+
 def clean_up_old_decodo_schedules():
     """Clean up old per-block schedule entries from Redis Beat."""
     logger.info("Starting cleanup of old Decodo IP block sync schedules")
