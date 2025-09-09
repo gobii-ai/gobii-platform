@@ -84,10 +84,9 @@ class TaskCreditServiceGrantSubscriptionCreditsTests(TestCase):
 @tag("batch_task_credits")
 class TaskCreditServiceConsumeCreditTests(TestCase):
     @patch("tasks.services.TaskCreditService.handle_task_threshold")
-    @patch("tasks.services.report_task_usage_to_stripe")
     @patch("tasks.services.apps.get_model")
     @tag("batch_task_credits")
-    def test_consume_credit_without_additional_task(self, mock_get_model, mock_report, mock_handle):
+    def test_consume_credit_without_additional_task(self, mock_get_model, mock_handle):
         user = User.objects.create(username="user5")
         TaskCredit = MagicMock()
         mock_get_model.return_value = TaskCredit
@@ -106,21 +105,15 @@ class TaskCreditServiceConsumeCreditTests(TestCase):
         self.assertIs(result, credit)
         credit.save.assert_called_once()
         credit.refresh_from_db.assert_called_once()
-        # Stripe usage now reports the fractional quantity consumed
-        from django.conf import settings
-        mock_report.assert_called_once()
-        args, kwargs = mock_report.call_args
-        self.assertIs(args[0], user)
-        qty = kwargs.get('quantity', args[1] if len(args) > 1 else None)
-        self.assertEqual(qty, settings.CREDITS_PER_TASK)
+        # No immediate Stripe usage reporting; handled by rollup task
+        # (assertion intentionally removed)
         mock_handle.assert_called_once_with(user)
 
     @patch("tasks.services.apps.get_model")
     @patch("tasks.services.get_user_plan")
     @patch("tasks.services.BillingService.get_current_billing_period_for_user")
-    @patch("tasks.services.report_task_usage_to_stripe")
     @patch("tasks.services.TaskCreditService.handle_task_threshold")
-    def test_consume_credit_with_additional_task(self, mock_handle, mock_report, mock_period, mock_plan, mock_get_model):
+    def test_consume_credit_with_additional_task(self, mock_handle, mock_period, mock_plan, mock_get_model):
         user = User.objects.create(username="user6")
         TaskCredit = MagicMock()
         mock_get_model.return_value = TaskCredit
@@ -137,13 +130,7 @@ class TaskCreditServiceConsumeCreditTests(TestCase):
 
         TaskCredit.objects.create.assert_called_once()
         self.assertIs(result, credit)
-        # Stripe usage now reports the fractional quantity consumed even for additional tasks
-        from django.conf import settings
-        mock_report.assert_called_once()
-        args, kwargs = mock_report.call_args
-        self.assertIs(args[0], user)
-        qty = kwargs.get('quantity', args[1] if len(args) > 1 else None)
-        self.assertEqual(qty, settings.CREDITS_PER_TASK)
+        # No immediate Stripe usage reporting; handled by rollup task
         mock_handle.assert_called_once_with(user)
 
 
