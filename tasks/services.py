@@ -259,8 +259,7 @@ class TaskCreditService:
                         remaining -= consume_now
                         last_credit = credit
 
-            # Report usage for both regular and additional-task paths
-            report_task_usage_to_stripe(user)
+            # Stripe metering handled by periodic rollup task; no per-task usage reporting
 
             # Handle notification of task credit usage when thresholds are crossed
             TaskCreditService.handle_task_threshold(user)

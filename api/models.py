@@ -503,6 +503,9 @@ class BrowserUseAgentTask(models.Model):
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    # Billing rollup flag: has this task been included in a Stripe meter rollup?
+    metered = models.BooleanField(default=False, db_index=True, help_text="Marked true once included in Stripe metering rollup.")
+
     objects = BrowserUseAgentTaskQuerySet.as_manager()
 
     class Meta:
@@ -2581,6 +2584,9 @@ class PersistentAgentStep(models.Model):
         blank=True,
         help_text="LLM provider used for this step (e.g., 'anthropic', 'openai')"
     )
+
+    # Billing rollup flag: has this step been included in a Stripe meter rollup?
+    metered = models.BooleanField(default=False, db_index=True, help_text="Marked true once included in Stripe metering rollup.")
 
     class Meta:
         ordering = ["-created_at"]
