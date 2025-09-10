@@ -254,7 +254,7 @@ def get_user_agent_limit(user) -> int:
 
         return plan["agent_limit"]
 
-def report_task_usage_to_stripe(user, quantity=settings.CREDITS_PER_TASK, meter_id=settings.STRIPE_TASK_METER_ID):
+def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIPE_TASK_METER_ID):
     """
     Reports usage to Stripe by creating a UsageRecord.
 
