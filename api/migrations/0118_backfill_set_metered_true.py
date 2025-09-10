@@ -1,6 +1,4 @@
 from django.db import migrations
-from django.utils import timezone
-
 
 def mark_existing_as_metered(apps, schema_editor):
     BrowserUseAgentTask = apps.get_model('api', 'BrowserUseAgentTask')
