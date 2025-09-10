@@ -44,7 +44,7 @@ class BillingRollupTaskTests(TestCase):
         # Total = 1.3 -> rounded (half-up) = 1
         processed = rollup_and_meter_usage_task()
 
-        self.assertGreaterEqual(processed, 1)
+        self.assertEqual(processed, 1)
         mock_report.assert_called_once()
         args, kwargs = mock_report.call_args
         qty = kwargs.get("quantity", args[1] if len(args) > 1 else None)
