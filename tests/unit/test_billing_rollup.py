@@ -101,7 +101,7 @@ class BillingRollupTaskTests(TestCase):
 
         # No Stripe call, but rows should be marked metered at period end
         mock_report.assert_not_called()
-        self.assertGreaterEqual(BrowserUseAgentTask.objects.filter(user=self.user, metered=True).count(), 1)
+        self.assertEqual(BrowserUseAgentTask.objects.filter(user=self.user, metered=True).count(), 1)
         self.assertTrue(PersistentAgentStep.objects.filter(agent=self.pa, metered=True).exists())
 
     @patch("api.tasks.billing_rollup.report_task_usage_to_stripe")
