@@ -1,6 +1,7 @@
 from unittest.mock import patch, MagicMock
+import os
 
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.contrib.auth import get_user_model
 
 from api.models import (
@@ -77,6 +78,8 @@ class TestSmtpSelection(TestCase):
         self.assertTrue(any(a.provider == "smtp" for a in attempts))
         self.assertEqual(msg.latest_status, DeliveryStatus.SENT)
 
+    @override_settings(GOBII_RELEASE_ENV="test")
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": ""}, clear=False)
     def test_selection_simulates_when_no_account(self):
         msg = PersistentAgentMessage.objects.create(
             owner_agent=self.agent,
@@ -94,4 +97,3 @@ class TestSmtpSelection(TestCase):
         # In tests, SIMULATE_EMAIL_DELIVERY=True -> simulation path
         self.assertTrue(any(a.provider == "postmark_simulation" for a in attempts))
         self.assertEqual(msg.latest_status, DeliveryStatus.DELIVERED)
-
