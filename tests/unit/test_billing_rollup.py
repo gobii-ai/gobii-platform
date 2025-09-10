@@ -12,7 +12,7 @@ from api.tasks.billing_rollup import rollup_and_meter_usage_task
 User = get_user_model()
 
 
-@tag("billing_rollup")
+@tag("batch_billing_rollup")
 class BillingRollupTaskTests(TestCase):
     def setUp(self):
         self.user = User.objects.create(username="meter_user", email="meter@example.com")
