@@ -243,7 +243,7 @@ def llm_summarise_comms(
 
     try:
         model, params = get_summarization_llm_config()
-        response = litellm.completion(model=model, messages=prompt, safety_identifier=safety_identifier, **params)
+        response = litellm.completion(model=model, messages=prompt, safety_identifier=str(safety_identifier), **params)
         return response.choices[0].message.content.strip()
     except Exception:
         # Log and fall back to deterministic fallback so callers are not

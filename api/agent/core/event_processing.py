@@ -212,7 +212,7 @@ def _completion_with_failover(
                         model=model,
                         messages=messages,
                         tools=tools,
-                        safety_identifier=safety_identifier,
+                        safety_identifier=str(safety_identifier),
                         **params,
                     )
                 else:
@@ -221,7 +221,7 @@ def _completion_with_failover(
                         messages=messages,
                         tools=tools,
                         tool_choice="auto",
-                        safety_identifier=safety_identifier,
+                        safety_identifier=str(safety_identifier),
                         **params,
                     )
                 
