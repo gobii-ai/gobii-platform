@@ -1128,6 +1128,7 @@ class PersistentAgent(models.Model):
     last_interaction_at = models.DateTimeField(
         null=True,
         blank=True,
+        default=timezone.now,
         help_text="Timestamp of the last user interaction (reply, edit, etc.)."
     )
     schedule_snapshot = models.CharField(
