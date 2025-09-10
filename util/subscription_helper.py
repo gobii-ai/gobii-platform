@@ -679,18 +679,28 @@ def has_unlimited_agents(user) -> bool:
 
 def get_user_max_contacts_per_agent(user) -> int:
     """
-    Gets the maximum number of contacts allowed per agent based on the user's plan.
-    
-    Parameters:
-        user (User): The user for whom the contact limit is being retrieved.
-    
-    Returns:
-        int: The maximum number of contacts allowed per agent for the user's plan.
+    Returns the per‑agent contact cap for a user.
+
+    Priority:
+    1) If the user's UserQuota.max_agent_contacts is set (> 0), use it.
+    2) Otherwise, fall back to the plan's max_contacts_per_agent (with sane defaults).
     """
+    # Check for per-user override on quota
+    try:
+        from api.models import UserQuota
+        quota = UserQuota.objects.filter(user=user).first()
+        if quota and quota.max_agent_contacts is not None and quota.max_agent_contacts > 0:
+            return int(quota.max_agent_contacts)
+    except Exception as e:
+        logger.error("get_user_max_contacts_per_agent: quota lookup failed for user %s: %s", getattr(user, 'id', 'n/a'), e)
+
+    # Fallback to plan default
     plan = get_user_plan(user)
-    
     if not plan:
-        logger.warning(f"get_user_max_contacts_per_agent {user.id}: No plan found, defaulting to free plan")
+        logger.warning(
+            "get_user_max_contacts_per_agent %s: No plan found, defaulting to free plan",
+            getattr(user, 'id', 'n/a')
+        )
         return PLAN_CONFIG[PlanNames.FREE].get("max_contacts_per_agent", 3)
-    
-    return plan.get("max_contacts_per_agent", 3)  # Default to 3 if not specified
+
+    return plan.get("max_contacts_per_agent", 3)
