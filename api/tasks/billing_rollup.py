@@ -41,6 +41,7 @@ def rollup_and_meter_usage_task(self) -> int:
     Returns the number of users for whom a rollup was attempted.
     """
     User = get_user_model()
+    logger.info("Rollup metering: task start")
 
     # Identify candidate users with unmetered usage
     task_users = (
@@ -57,7 +58,9 @@ def rollup_and_meter_usage_task(self) -> int:
     )
 
     user_ids = set(task_users) | set(step_users)
+    logger.info("Rollup metering: candidate users=%s", len(user_ids))
     if not user_ids:
+        logger.info("Rollup metering: no candidates; nothing to do")
         return 0
 
     processed_users = 0
@@ -133,4 +136,5 @@ def rollup_and_meter_usage_task(self) -> int:
         except Exception:
             logger.exception("Failed rollup metering for user %s", user.id)
 
+    logger.info("Rollup metering: finished processed_users=%s", processed_users)
     return processed_users

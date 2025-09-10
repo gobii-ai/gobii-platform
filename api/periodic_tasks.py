@@ -57,7 +57,7 @@ def add_dynamic_schedules():
     # Daily rollup of fractional task usage into Stripe meter events
     beat_schedule["meter-usage-rollup-daily"] = {
         "task": "gobii_platform.api.tasks.rollup_and_meter_usage",
-        "schedule": crontab(hour=4, minute=10),  # 04:10 UTC daily
+        "schedule": crontab(hour="*", minute=11),  # 11 minutes after every hour
         "args": [],
     }
 
