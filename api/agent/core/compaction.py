@@ -49,7 +49,8 @@ __all__ = ["ensure_comms_compacted", "RAW_MSG_LIMIT", "ensure_steps_compacted", 
 def ensure_comms_compacted(
     *,
     agent: PersistentAgent,
-    summarise_fn: Callable[[str, Sequence[PersistentAgentMessage]], str] | None = None,
+    summarise_fn: Callable[[str, Sequence[PersistentAgentMessage], str], str] | None = None,
+    safety_identifier: str | None = None,
 ) -> None:
     """Ensure the agent's communication history is compacted up to date.
 
@@ -66,6 +67,10 @@ def ensure_comms_compacted(
         Optional callable used to turn (previous_summary, new_messages) into a
         **new** summary string.  Defaults to a fallback implementation for
         testing and error resilience.
+
+    safety_identifier:
+        Optional safety identifier to help identify the caller in logs/traces.
+        Recommended by OpenAI and others; only option for backwards compatibility
     """
 
     # Import inside function to avoid potential circular-import issues and to
@@ -121,7 +126,7 @@ def ensure_comms_compacted(
     try:
         with tracer.start_as_current_span("COMPACT Summarise") as summarise_span:
             summarise_span.set_attribute("messages.count", len(raw_messages))
-            new_summary = summarise_fn(previous_summary, raw_messages)
+            new_summary = summarise_fn(previous_summary, raw_messages, safety_identifier)
     except Exception:  # pragma: no cover – downstream will handle retry logic
         logger = logging.getLogger(__name__)
         logger.exception("summarise_fn failed; skipping compaction for agent %s", agent.id)
@@ -173,6 +178,7 @@ def ensure_comms_compacted(
 def _default_summarise(
     previous: str,
     messages: Sequence[PersistentAgentMessage],
+    safety_identifier: str | None = None,
 ) -> str:
     """Fallback summariser for testing and error cases.
 
@@ -184,6 +190,8 @@ def _default_summarise(
         previous
         + ("\n" if previous else "")
         + f"[SUMMARY PLACEHOLDER for {len(messages)} messages]"
+        + ("\n")
+        + (f"[Called for {safety_identifier}]" if safety_identifier else "")
     )
 
 # --------------------------------------------------------------------------- #
@@ -193,6 +201,7 @@ def _default_summarise(
 def llm_summarise_comms(
     previous: str,
     messages: Sequence[PersistentAgentMessage],
+    safety_identifier: str | None = None,
 ) -> str:
     """Summarise *previous* + *messages* via an LLM (LiteLLM).
 
@@ -234,7 +243,7 @@ def llm_summarise_comms(
 
     try:
         model, params = get_summarization_llm_config()
-        response = litellm.completion(model=model, messages=prompt, **params)
+        response = litellm.completion(model=model, messages=prompt, safety_identifier=safety_identifier, **params)
         return response.choices[0].message.content.strip()
     except Exception:
         # Log and fall back to deterministic fallback so callers are not
