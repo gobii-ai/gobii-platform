@@ -423,7 +423,11 @@ def llm_summarise_steps(previous: str, steps: Sequence[StepData], safety_identif
 
     try:
         model, params = get_summarization_llm_config()
-        resp = litellm.completion(model=model, messages=prompt, safety_identifier=safety_identifier, **params)
+
+        if model.startswith("openai"):
+            params["safety_identifier"] = safety_identifier or ""
+
+        resp = litellm.completion(model=model, messages=prompt, **params)
         return resp.choices[0].message.content.strip()
     except Exception:
         logger.exception("LiteLLM step summarisation failed – falling back to fallback summariser")

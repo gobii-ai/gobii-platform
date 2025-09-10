@@ -243,7 +243,14 @@ def llm_summarise_comms(
 
     try:
         model, params = get_summarization_llm_config()
-        response = litellm.completion(model=model, messages=prompt, safety_identifier=str(safety_identifier), **params)
+
+        if model.startswith("openai"):
+            # GPT-4.1 is currently the only model supporting the `safety_identifier`
+            # parameter, which is recommended by OpenAI for traceability.
+            if safety_identifier:
+                params["safety_identifier"] = safety_identifier
+
+        response = litellm.completion(model=model, messages=prompt, **params)
         return response.choices[0].message.content.strip()
     except Exception:
         # Log and fall back to deterministic fallback so callers are not
