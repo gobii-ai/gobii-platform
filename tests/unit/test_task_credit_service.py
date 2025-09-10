@@ -6,6 +6,9 @@ from unittest.mock import MagicMock, patch
 
 from tasks.services import TaskCreditService
 from util.constants.task_constants import TASKS_UNLIMITED
+from decimal import Decimal
+from django.utils import timezone
+from api.models import TaskCredit, UsageThresholdSent
 
 
 User = get_user_model()
@@ -218,3 +221,35 @@ class TaskCreditServiceHandleThresholdTests(TestCase):
              patch.object(TaskCreditService, "get_user_total_tasks_used", return_value=95):
             TaskCreditService.handle_task_threshold(user)
         mock_publish.assert_called_once()
+
+
+@tag("batch_task_credits")
+class TaskCreditServiceExhaustionThresholdTests(TestCase):
+    def test_emits_100_on_failed_fractional_consumption(self):
+        # User with nearly-exhausted plan credits and fractional per-task costs
+        user = User.objects.create(username="user_threshold")
+
+        now = timezone.now()
+        # Voiding initial FREE credits created by user initialization to isolate this test
+        from constants.plans import PlanNamesChoices
+        TaskCredit.objects.filter(user=user, plan=PlanNamesChoices.FREE).update(voided=True)
+        # Plan credits: 100 total, 99.9 used → 0.1 remaining (less than 0.4 min cost)
+        TaskCredit.objects.create(
+            user=user,
+            credits=Decimal("100.0"),
+            credits_used=Decimal("99.9"),
+            granted_date=now - timezone.timedelta(days=1),
+            expiration_date=now + timezone.timedelta(days=1),
+            plan=PlanNamesChoices.STARTUP,
+            additional_task=False,
+        )
+
+        # Attempt to consume 0.4 credits should fail, and emit 100% threshold
+        result = TaskCreditService.check_and_consume_credit(user, amount=Decimal("0.4"))
+        self.assertFalse(result["success"])  # Confirm failure
+
+        period_ym = timezone.now().strftime("%Y%m")
+        exists = UsageThresholdSent.objects.filter(
+            user=user, period_ym=period_ym, threshold=100
+        ).exists()
+        self.assertTrue(exists, "Expected 100% threshold event to be recorded on exhaustion")

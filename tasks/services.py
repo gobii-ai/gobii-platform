@@ -877,6 +877,54 @@ class TaskCreditService:
 
             # --- 3. Out of credits ---
             span.add_event("Insufficient credits – quota exceeded")
+
+            # If the consume failed and the user cannot use additional tasks,
+            # emit the 100% threshold now when remaining plan credits are below
+            # the minimum cost of any task (fractional usage exhaustion).
+            try:
+                # Use the actual amount requested for this attempt (or default per‑task cost)
+                required = amount if amount is not None else settings.CREDITS_PER_TASK
+
+                # Remaining plan credits (exclude additional-task blocks)
+                TaskCredit = apps.get_model("api", "TaskCredit")
+                now_ts = timezone.now()
+                from django.db.models import Sum
+                plan_remaining = (
+                    TaskCredit.objects
+                    .filter(
+                        user=user,
+                        expiration_date__gt=now_ts,
+                        voided=False,
+                        additional_task=False,
+                    )
+                    .aggregate(rem=Sum(F("credits") - F("credits_used")))
+                    .get("rem")
+                    or Decimal("0")
+                )
+
+                # If they can't use additional tasks and don't have enough to run
+                # even the cheapest task, record 100% threshold.
+                from util.subscription_helper import allow_and_has_extra_tasks
+                can_use_addl = subscription is not None and bool(allow_and_has_extra_tasks(user))
+                if (plan_remaining < required) and not can_use_addl:
+                    period_ym = now_ts.strftime("%Y%m")
+                    UsageThresholdSent = apps.get_model("api", "UsageThresholdSent")
+                    entitled = TaskCreditService.get_tasks_entitled(user)
+                    used = TaskCreditService.get_user_total_tasks_used(user)
+
+                    _, created = UsageThresholdSent.objects.get_or_create(
+                        user=user,
+                        period_ym=period_ym,
+                        threshold=100,
+                        defaults={"plan_limit": entitled},
+                    )
+                    if created:
+                        # Publish with pct=100 explicitly
+                        Analytics.publish_threshold_event(user.id, 100, 100, period_ym, used, entitled)
+            except Exception:
+                # Never fail the quota response due to analytics side-effects
+                logger.exception("Failed emitting 100%% threshold on exhaustion")
+
             return {
                 "success": False,
                 "credit": None,
