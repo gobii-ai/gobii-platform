@@ -1559,27 +1559,42 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         base_prompt += "\n\nYOU ARE RUNNING OUT OF STEPS TO GET YOUR WORK DONE. MAKE SURE TO UPDATE YOUR SCHEDULE/CONTACT THE USER IF RELEVANT SO YOU CAN PICK UP YOUR WORK WHERE YOU LEFT OFF LATER"
     
     if event_window.is_first_run:
-        # On first run, we want to contact the *user*, so we use the preferred contact endpoint
-        # that they configured. This might be different from the agent's own primary
-        # inbound endpoint.
-        contact_endpoint = agent.preferred_contact_endpoint
-        if contact_endpoint:
-            channel = contact_endpoint.channel
-            address = contact_endpoint.address
-            welcome_instruction = (
-                "This is your first time running. The user has sent you an initial message describing what they want you to do. "
-                "Your first action MUST be to respond to their message and send a welcome reply to the user. "
-                f"The user's preferred communication channel is {channel} at {address}. "
-                "Your welcome message should include (but not necesarily in this order --be authentic and creative): "
-                "1. Introduce yourself warmly and authentically using your first name. Sometimes you can use your last name, or just an initial."
-                "2. Acknowledge their request and briefly summarize what you understand they want you to do (refer to it as your assignment/job/whatever, keep it very user friendly). "
-                "3. If you know your charter at this ponit, set your charter using the 'update_charter' tool based on their request - this will be your working charter that you can evolve over time. BE DETAILED. "
-                "4. Inform the user they can contact you at any time to give new instructions, ask questions, or just chat. Hint or let them know that they can just reply to this message with anything they want. e.g. 'You can reply to this email now, or contact me at any time.' "
-                "This is your opportunity to decide what your personality and writing style will be --it could be anything-- you'll generally adapt this based on the user's initial request and what you know about them. THIS IS YOUR CHANCE to create a new and exciting personality. "
-                "Immediately after sending your welcome message, call search_tools for the first time to find the best tools to efficiently and accurately complete your task with the most timely information. Then call enable_tool to enable the relevant tools. Remember you can search and enable more tools in the future as well as your job evolves. "
-                "Use phrasing like 'I'm your new agent' vs just 'I'm an agent' or 'I'm an assistant'."
+        # Only include the "first run / welcome" block if we have NOT
+        # already contacted the user during this processing window.
+        # This prevents the agent from repeatedly re-running onboarding
+        # instructions within the same loop after a welcome email is sent.
+        try:
+            already_contacted = (
+                PersistentAgentMessage.objects.filter(
+                    owner_agent=agent,
+                    is_outbound=True,
+                    timestamp__gt=event_window.cut_off,
+                ).exists()
             )
-            return welcome_instruction + "\n\n" + base_prompt
+        except Exception:
+            # Defensive default: if the check fails, assume we have not contacted yet
+            already_contacted = False
+
+        if not already_contacted:
+            # On true first contact, guide the agent to send a welcome message
+            contact_endpoint = agent.preferred_contact_endpoint
+            if contact_endpoint:
+                channel = contact_endpoint.channel
+                address = contact_endpoint.address
+                welcome_instruction = (
+                    "This is your first time running. The user has sent you an initial message describing what they want you to do. "
+                    "Your first action MUST be to respond to their message and send a welcome reply to the user. "
+                    f"The user's preferred communication channel is {channel} at {address}. "
+                    "Your welcome message should include (but not necesarily in this order --be authentic and creative): "
+                    "1. Introduce yourself warmly and authentically using your first name. Sometimes you can use your last name, or just an initial."
+                    "2. Acknowledge their request and briefly summarize what you understand they want you to do (refer to it as your assignment/job/whatever, keep it very user friendly). "
+                    "3. If you know your charter at this ponit, set your charter using the 'update_charter' tool based on their request - this will be your working charter that you can evolve over time. BE DETAILED. "
+                    "4. Inform the user they can contact you at any time to give new instructions, ask questions, or just chat. Hint or let them know that they can just reply to this message with anything they want. e.g. 'You can reply to this email now, or contact me at any time.' "
+                    "This is your opportunity to decide what your personality and writing style will be --it could be anything-- you'll generally adapt this based on the user's initial request and what you know about them. THIS IS YOUR CHANCE to create a new and exciting personality. "
+                    "Immediately after sending your welcome message, call search_tools for the first time to find the best tools to efficiently and accurately complete your task with the most timely information. Then call enable_tool to enable the relevant tools. Remember you can search and enable more tools in the future as well as your job evolves. "
+                    "Use phrasing like 'I'm your new agent' vs just 'I'm an agent' or 'I'm an assistant'."
+                )
+                return welcome_instruction + "\n\n" + base_prompt
 
     return base_prompt
 
