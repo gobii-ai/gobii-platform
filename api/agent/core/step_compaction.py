@@ -427,4 +427,4 @@ def llm_summarise_steps(previous: str, steps: Sequence[StepData], safety_identif
         return resp.choices[0].message.content.strip()
     except Exception:
         logger.exception("LiteLLM step summarisation failed – falling back to fallback summariser")
-        return _default_summarise(previous, steps) 
+        return _default_summarise(previous, steps, safety_identifier)
