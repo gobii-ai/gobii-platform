@@ -425,7 +425,8 @@ def llm_summarise_steps(previous: str, steps: Sequence[StepData], safety_identif
         model, params = get_summarization_llm_config()
 
         if model.startswith("openai"):
-            params["safety_identifier"] = safety_identifier or ""
+            if safety_identifier:
+                params["safety_identifier"] = safety_identifier
 
         resp = litellm.completion(model=model, messages=prompt, **params)
         return resp.choices[0].message.content.strip()
