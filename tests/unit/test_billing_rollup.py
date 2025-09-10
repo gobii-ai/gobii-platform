@@ -51,7 +51,7 @@ class BillingRollupTaskTests(TestCase):
         self.assertEqual(qty, 1)
 
         # Verify rows are marked metered
-        self.assertTrue(BrowserUseAgentTask.objects.filter(user=self.user, metered=True).count() >= 2)
+        self.assertEqual(BrowserUseAgentTask.objects.filter(user=self.user, metered=True).count(), 2)
         self.assertTrue(PersistentAgentStep.objects.filter(agent=self.pa, metered=True).exists())
 
     @patch("api.tasks.billing_rollup.report_task_usage_to_stripe")
