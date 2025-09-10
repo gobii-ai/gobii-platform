@@ -64,11 +64,9 @@ def rollup_and_meter_usage_task(self) -> int:
         return 0
 
     processed_users = 0
-    for uid in user_ids:
-        user = User.objects.filter(id=uid).first()
-        if not user:
-            continue
 
+    users = User.objects.filter(id__in=user_ids)
+    for user in users:
         # Only non-free (active subscription) users are billed
         sub = get_active_subscription(user)
         if not sub:
@@ -99,14 +97,19 @@ def rollup_and_meter_usage_task(self) -> int:
         # Round to nearest whole integer using half-up semantics
         rounded = int(Decimal(total).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
 
+        # Evaluate the querysets to get a fixed list of IDs
+        buat_ids = list(buat_qs.values_list('id', flat=True))
+        step_ids = list(step_qs.values_list('id', flat=True))
+
         try:
             if rounded > 0:
                 # Report a single meter event per user
                 report_task_usage_to_stripe(user, quantity=rounded)
 
                 # Mark all included rows as metered when we successfully bill a non-zero quantity
-                updated_tasks = buat_qs.update(metered=True)
-                updated_steps = step_qs.update(metered=True)
+                updated_tasks = BrowserUseAgentTask.objects.filter(id__in=buat_ids).update(metered=True)
+                updated_steps = PersistentAgentStep.objects.filter(id__in=step_ids).update(metered=True)
+
                 logger.info(
                     "Rollup metering user=%s total=%s rounded=%s updated_tasks=%s updated_steps=%s",
                     user.id, str(total), rounded, updated_tasks, updated_steps,
