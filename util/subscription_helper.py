@@ -325,7 +325,7 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
             logger.error(f"report_usage_to_stripe: Error reporting usage for user {user.id}: {str(e)}")
             raise
 
-def report_task_usage(subscription: Subscription, quantity=settings.CREDITS_PER_TASK):
+def report_task_usage(subscription: Subscription, quantity: int = 1):
     """
     Report task usage to Stripe for a given subscription.
 
