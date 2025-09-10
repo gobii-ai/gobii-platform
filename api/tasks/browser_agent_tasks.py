@@ -3,7 +3,6 @@ import logging
 import asyncio
 import json
 import hashlib
-import mimetypes
 import tempfile
 import shutil
 import random
@@ -12,6 +11,7 @@ import time
 from typing import Any, Awaitable, Callable, List, Dict, Tuple, Optional
 import tarfile
 import zstandard as zstd
+from browser_use.browser.profile import ProxySettings
 from django.core.files.storage import default_storage
 from django.core.files import File
 
@@ -23,7 +23,14 @@ from django.db.utils import OperationalError
 
 from observability import traced, trace
 from ..agent.core.budget import AgentBudgetManager
-from ..models import BrowserUseAgentTask, BrowserUseAgentTaskStep, ProxyServer
+from ..agent.files.filespace_service import get_or_create_default_filespace
+from ..models import (
+    BrowserUseAgentTask,
+    BrowserUseAgentTaskStep,
+    ProxyServer,
+    AgentFileSpaceAccess,
+    AgentFsNode, PersistentAgent,
+)
 from util import EphemeralXvfb, should_use_ephemeral_xvfb
 
 tracer = trace.get_tracer('gobii.utils')
@@ -38,7 +45,6 @@ os.environ["ANONYMIZED_TELEMETRY"] = "false"
 
 try:
     from browser_use import BrowserSession, BrowserProfile, Agent as BUAgent, Controller  # safe: telemetry is already off
-    from patchright import async_api as patchright
     from browser_use.llm import ChatGoogle, ChatOpenAI, ChatAnthropic  # safe: telemetry is already off
     from json_schema_to_pydantic import create_model
     from opentelemetry import baggage
@@ -46,7 +52,7 @@ try:
     LIBS_AVAILABLE = True
     IMPORT_ERROR = None
 except ImportError as e:  # e.g. when running manage.py commands
-    BrowserSession = BrowserProfile = BUAgent = ChatGoogle = ChatOpenAI = ChatAnthropic = Controller = create_model = patchright = baggage = None  # type: ignore
+    BrowserSession = BrowserProfile = BUAgent = ChatGoogle = ChatOpenAI = ChatAnthropic = Controller = create_model = baggage = None  # type: ignore
     LIBS_AVAILABLE = False
     IMPORT_ERROR = str(e)
 
@@ -90,7 +96,7 @@ CHROME_PROFILE_PRUNE_DIRS = [
     "Safe Browsing",
 ]
 
-CHROME_PROFILE_PRUNE_FILES = ["BrowserMetrics-spare.pma"]
+CHROME_PROFILE_PRUNE_FILES = ["BrowserMetrics-spare.pma", "SingletonCookie", "SingletonLock", "SingletonSocket"]
 
 # Reset profile if bigger than this after pruning (in bytes)
 CHROME_PROFILE_MAX_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
@@ -198,6 +204,44 @@ PROVIDER_PRIORITY: List[List[Any]] = getattr(
 )
 
 DEFAULT_GOOGLE_MODEL = getattr(settings, "GOOGLE_LLM_MODEL", "gemini-2.5-pro")
+
+# --------------------------------------------------------------------------- #
+#  Filespace helpers (available_file_paths)
+# --------------------------------------------------------------------------- #
+def build_available_file_paths(persistent_agent_id: Optional[str]) -> list[str]:
+    """Return all file paths available to the agent for upload.
+
+    - Selects the agent's default filespace (or most recent access) via AgentFileSpaceAccess
+    - Returns non-deleted file node paths ordered by path
+    """
+    paths: list[str] = []
+    if not persistent_agent_id:
+        return paths
+    try:
+        agent = PersistentAgent.objects.get(id=persistent_agent_id)
+        filespace = get_or_create_default_filespace(agent)
+
+        qs = (
+            AgentFsNode.objects
+            .filter(
+                filespace_id=filespace.id,
+                is_deleted=False,
+                node_type=AgentFsNode.NodeType.FILE,
+            )
+            .only("path")
+            .order_by("path")
+        )
+
+        for node in qs.iterator():
+            if node.path:
+                paths.append(node.path)
+    except Exception as e:
+        logger.exception(
+            "Failed to build available_file_paths for agent %s",
+            persistent_agent_id,
+            e
+        )
+    return paths
 
 # --------------------------------------------------------------------------- #
 #  Proxy helpers
@@ -475,18 +519,15 @@ async def _run_agent(
                 xvfb_manager = EphemeralXvfb()
                 xvfb_manager.start()
 
-            playwright = await patchright.async_playwright().start()
-            kwargs = {"headless": settings.BROWSER_HEADLESS, "timeout": 30_000}
-
-            proxy_kwargs = None
+            proxy_settings = None
             if proxy_server:
-                proxy_kwargs = {
-                    "server": f"{proxy_server.proxy_type.lower()}://{proxy_server.host}:{proxy_server.port}"
-                }
+                proxy_settings = ProxySettings(
+                    server=f"{proxy_server.proxy_type.lower()}://{proxy_server.host}:{proxy_server.port}"
+                )
                 if proxy_server.username:
-                    proxy_kwargs["username"] = proxy_server.username
+                    proxy_settings.username = proxy_server.username
                 if proxy_server.password:
-                    proxy_kwargs["password"] = proxy_server.password
+                    proxy_settings.password = proxy_server.password
                 logger.info(
                     "Starting stealth browser with proxy: %s:%s",
                     proxy_server.host,
@@ -495,25 +536,40 @@ async def _run_agent(
             else:
                 logger.info("Starting stealth browser without proxy")
 
+            allow_uploads = persistent_agent_id is not None and settings.ALLOW_FILE_UPLOAD
+            available_file_paths: list[str] = []
+            if allow_uploads:
+                try:
+                    available_file_paths = await asyncio.to_thread(build_available_file_paths, persistent_agent_id)
+                except Exception:
+                    logger.warning("Failed to build available_file_paths in thread for agent %s", persistent_agent_id, exc_info=True)
+
+            accept_downloads = persistent_agent_id is not None and settings.ALLOW_FILE_DOWNLOAD
             profile = BrowserProfile(
-                stealth=True,           # Since you're using patchright
-                channel="chrome",
+                stealth=True,
                 headless=settings.BROWSER_HEADLESS,
                 user_data_dir=temp_profile_dir,
                 timeout=30_000,
                 no_viewport=True,
-                proxy=proxy_kwargs,
-                accept_downloads=False
+                accept_downloads=accept_downloads,
+                auto_download_pdfs=True,
+                proxy=proxy_settings,
+                custom_context={'available_file_paths': available_file_paths},
             )
-
-            launch_kwargs = profile.kwargs_for_launch_persistent_context().model_dump(mode='json')
-
-            browser_ctx = await playwright.chromium.launch_persistent_context(**launch_kwargs)
 
             browser_session = BrowserSession(
-                browser_context=browser_ctx,
-                **kwargs,
+                browser_profile=profile,
             )
+
+            # Register a download listener to persist files to the agent filespace
+            try:
+                if accept_downloads:
+                    from ..agent.browser_actions import register_download_listener
+                    register_download_listener(browser_session, persistent_agent_id)
+                    logger.debug("Registered FileDownloadedEvent listener for task %s", task_id)
+            except Exception:
+                logger.warning("Failed to register download listener for task %s", task_id, exc_info=True)
+
             await browser_session.start()
 
             llm_params = {"api_key": llm_api_key, "temperature": 0}
@@ -533,8 +589,7 @@ async def _run_agent(
                 llm_params["model"] = "claude-sonnet-4-20250514"
                 llm = ChatAnthropic(**llm_params)
             else:  # openai
-                llm_params["model"] = "gpt-4.1"
-                llm_params["temperature"] = 0
+                llm_params["model"] = "gpt-5-mini"
                 llm = ChatOpenAI(**llm_params)
 
             # Get current time with timezone for context
@@ -649,12 +704,6 @@ async def _run_agent(
         finally:
             await _safe_aclose(browser_session, "stop")
             await _safe_aclose(browser_session, "kill")
-
-            if playwright is not None:
-                try:
-                    await playwright.stop()
-                except Exception:  # noqa: BLE001
-                    logger.debug("playwright.stop failed during cleanup", exc_info=True)
 
             # --------------------------------------------------------------
             #  Browser profile save (if applicable)
@@ -1082,11 +1131,14 @@ def _process_browser_use_task_core(
             # Register custom actions
             try:
                 from ..agent.browser_actions import (
-                    register_web_search_action,
+                    register_web_search_action
                 )
                 actions = ['web_search']
                 register_web_search_action(controller)
-                #TODO: Add upload action registration here
+                if persistent_agent_id is not None and settings.ALLOW_FILE_UPLOAD:
+                    from ..agent.browser_actions import register_upload_actions
+                    register_upload_actions(controller, persistent_agent_id)
+                    actions.append('upload_file')
 
                 logger.debug(f"Registered custom action(s) {",".join(actions)} for task %s", task_obj.id)
             except Exception as exc:
