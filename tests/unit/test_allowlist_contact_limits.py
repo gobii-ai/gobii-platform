@@ -41,6 +41,42 @@ class ContactLimitEnforcementTests(TestCase):
             browser_use_agent=self.browser_agent,
             whitelist_policy=PersistentAgent.WhitelistPolicy.MANUAL
         )
+
+    @patch('util.subscription_helper.get_user_plan')
+    def test_user_quota_override_takes_precedence(self, mock_get_user_plan):
+        """When UserQuota.max_agent_contacts is set, it overrides plan limits."""
+        # Plan would normally allow 20 contacts, but override to 1
+        mock_get_user_plan.return_value = PLAN_CONFIG['startup']
+        from api.models import UserQuota
+        quota, _ = UserQuota.objects.get_or_create(user=self.user)
+        quota.max_agent_contacts = 1
+        quota.save(update_fields=["max_agent_contacts"]) 
+
+        # Verify helper returns override
+        limit = get_user_max_contacts_per_agent(self.user)
+        self.assertEqual(limit, 1)
+
+        # Add 1 contact – should pass
+        entry1 = CommsAllowlistEntry(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="only@example.com",
+            is_active=True
+        )
+        entry1.full_clean()
+        entry1.save()
+
+        # Second contact should fail due to override limit=1
+        entry2 = CommsAllowlistEntry(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="too-many@example.com",
+            is_active=True
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            entry2.full_clean()
+        self.assertIn("Maximum 1 contacts", str(ctx.exception))
+
     
     @patch('util.subscription_helper.get_user_plan')
     def test_free_plan_limit_3_contacts(self, mock_get_user_plan):
@@ -406,3 +442,22 @@ class ContactLimitContextProcessorTests(TestCase):
         
         context = account_info(request)
         self.assertEqual(context['account']['usage']['max_contacts_per_agent'], 20)
+
+    @patch('util.subscription_helper.get_user_plan')
+    def test_context_uses_user_quota_override(self, mock_get_user_plan):
+        """Test that context reflects per-user override when set."""
+        mock_get_user_plan.return_value = PLAN_CONFIG['startup']
+        from pages.context_processors import account_info
+        from django.test import RequestFactory
+        from api.models import UserQuota
+
+        quota, _ = UserQuota.objects.get_or_create(user=self.user)
+        quota.max_agent_contacts = 7
+        quota.save(update_fields=["max_agent_contacts"]) 
+
+        factory = RequestFactory()
+        request = factory.get('/')
+        request.user = self.user
+
+        context = account_info(request)
+        self.assertEqual(context['account']['usage']['max_contacts_per_agent'], 7)

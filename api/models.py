@@ -155,6 +155,9 @@ class UserQuota(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="quota"
     )
     agent_limit = models.PositiveIntegerField(default=5)
+    # Optional per-user override for max contacts per agent; when null or <= 0, plan default applies
+    max_agent_contacts = models.PositiveIntegerField(null=True, blank=True, default=None,
+                                                    help_text="If set (>0), overrides plan max contacts per agent for this user")
 
     def __str__(self):
         return f"Quota for {self.user.email}"
