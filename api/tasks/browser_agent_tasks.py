@@ -23,7 +23,14 @@ from django.db.utils import OperationalError
 
 from observability import traced, trace
 from ..agent.core.budget import AgentBudgetManager
-from ..models import BrowserUseAgentTask, BrowserUseAgentTaskStep, ProxyServer
+from ..agent.files.filespace_service import get_or_create_default_filespace
+from ..models import (
+    BrowserUseAgentTask,
+    BrowserUseAgentTaskStep,
+    ProxyServer,
+    AgentFileSpaceAccess,
+    AgentFsNode, PersistentAgent,
+)
 from util import EphemeralXvfb, should_use_ephemeral_xvfb
 
 tracer = trace.get_tracer('gobii.utils')
@@ -197,6 +204,44 @@ PROVIDER_PRIORITY: List[List[Any]] = getattr(
 )
 
 DEFAULT_GOOGLE_MODEL = getattr(settings, "GOOGLE_LLM_MODEL", "gemini-2.5-pro")
+
+# --------------------------------------------------------------------------- #
+#  Filespace helpers (available_file_paths)
+# --------------------------------------------------------------------------- #
+def build_available_file_paths(persistent_agent_id: Optional[str]) -> list[str]:
+    """Return all file paths available to the agent for upload.
+
+    - Selects the agent's default filespace (or most recent access) via AgentFileSpaceAccess
+    - Returns non-deleted file node paths ordered by path
+    """
+    paths: list[str] = []
+    if not persistent_agent_id:
+        return paths
+    try:
+        agent = PersistentAgent.objects.get(id=persistent_agent_id)
+        filespace = get_or_create_default_filespace(agent)
+
+        qs = (
+            AgentFsNode.objects
+            .filter(
+                filespace_id=filespace.id,
+                is_deleted=False,
+                node_type=AgentFsNode.NodeType.FILE,
+            )
+            .only("path")
+            .order_by("path")
+        )
+
+        for node in qs.iterator():
+            if node.path:
+                paths.append(node.path)
+    except Exception as e:
+        logger.exception(
+            "Failed to build available_file_paths for agent %s",
+            persistent_agent_id,
+            e
+        )
+    return paths
 
 # --------------------------------------------------------------------------- #
 #  Proxy helpers
@@ -491,6 +536,14 @@ async def _run_agent(
             else:
                 logger.info("Starting stealth browser without proxy")
 
+            allow_uploads = persistent_agent_id is not None and settings.ALLOW_FILE_UPLOAD
+            available_file_paths: list[str] = []
+            if allow_uploads:
+                try:
+                    available_file_paths = await asyncio.to_thread(build_available_file_paths, persistent_agent_id)
+                except Exception:
+                    logger.warning("Failed to build available_file_paths in thread for agent %s", persistent_agent_id, exc_info=True)
+
             accept_downloads = persistent_agent_id is not None and settings.ALLOW_FILE_DOWNLOAD
             profile = BrowserProfile(
                 stealth=True,
@@ -501,6 +554,7 @@ async def _run_agent(
                 accept_downloads=accept_downloads,
                 auto_download_pdfs=True,
                 proxy=proxy_settings,
+                custom_context={'available_file_paths': available_file_paths},
             )
 
             browser_session = BrowserSession(
