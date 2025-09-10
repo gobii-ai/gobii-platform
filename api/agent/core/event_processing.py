@@ -205,6 +205,10 @@ def _completion_with_failover(
                     llm_span.set_attribute("persistent_agent.id", str(agent_id))
                 llm_span.set_attribute("llm.model", model)
                 llm_span.set_attribute("llm.provider", provider)
+
+                # If the provider starts with "openai", add safety_identifier to params
+                if provider.startswith("openai") and safety_identifier:
+                    params["safety_identifier"] = str(safety_identifier)
                 
                 # Fireworks doesn't support tool_choice parameter
                 if provider == "fireworks_qwen3_235b_a22b":
@@ -212,7 +216,6 @@ def _completion_with_failover(
                         model=model,
                         messages=messages,
                         tools=tools,
-                        safety_identifier=str(safety_identifier),
                         **params,
                     )
                 else:
