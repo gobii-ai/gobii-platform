@@ -141,7 +141,8 @@ StepData = Union[ToolCallStep, CronTriggerStep, SystemStep, GenericStep]
 def ensure_steps_compacted(
     *,
     agent: PersistentAgent,
-    summarise_fn: Callable[[str, Sequence[StepData]], str] | None = None,
+    summarise_fn: Callable[[str, Sequence[StepData], str], str] | None = None,
+    safety_identifier: str | None = None,
 ) -> None:
     """Ensure the agent's *step* history is compacted up-to-date.
 
@@ -209,7 +210,7 @@ def ensure_steps_compacted(
     try:
         with tracer.start_as_current_span("COMPACT Step Summarise") as summarise_span:
             summarise_span.set_attribute("steps.count", len(raw_steps_struct))
-            new_summary = summarise_fn(previous_summary, raw_steps_struct)
+            new_summary = summarise_fn(previous_summary, raw_steps_struct, safety_identifier)
     except Exception:  # pragma: no cover – downstream can retry
         logger.exception("step summarise_fn failed; skipping compaction for agent %s", agent.id)
         return
@@ -368,7 +369,7 @@ def _convert_step(step: PersistentAgentStep, result_map: dict[str, str]) -> Step
 #  Default summariser (placeholder)                                           #
 # --------------------------------------------------------------------------- #
 
-def _default_summarise(previous: str, steps: Sequence[StepData]) -> str:  # noqa: D401 Simple verb
+def _default_summarise(previous: str, steps: Sequence[StepData], safety_identifier: str | None = None) -> str:  # noqa: D401 Simple verb
     """Fallback summariser for testing and error cases.
 
     Groups recent steps by type and appends bullet-point lines under an
@@ -382,6 +383,7 @@ def _default_summarise(previous: str, steps: Sequence[StepData]) -> str:  # noqa
         recent_lines.append("• " + s.to_summary_str())
 
     joined = "\n".join(recent_lines)
+    joined = joined + "\n" + ("Safety ID: " + safety_identifier if safety_identifier else "")
     return previous + ("\n" if previous else "") + joined 
 
 
@@ -389,7 +391,7 @@ def _default_summarise(previous: str, steps: Sequence[StepData]) -> str:  # noqa
 #  Optional LiteLLM-powered summariser                                         
 # --------------------------------------------------------------------------- #
 
-def llm_summarise_steps(previous: str, steps: Sequence[StepData]) -> str:
+def llm_summarise_steps(previous: str, steps: Sequence[StepData], safety_identifier: str | None = None) -> str:
     """Summarise *previous* + *steps* via LiteLLM.
 
     This is the primary summarisation function used in production.  Unit-tests
@@ -421,8 +423,8 @@ def llm_summarise_steps(previous: str, steps: Sequence[StepData]) -> str:
 
     try:
         model, params = get_summarization_llm_config()
-        resp = litellm.completion(model=model, messages=prompt, **params)
+        resp = litellm.completion(model=model, messages=prompt, safety_identifier=safety_identifier, **params)
         return resp.choices[0].message.content.strip()
     except Exception:
         logger.exception("LiteLLM step summarisation failed – falling back to fallback summariser")
-        return _default_summarise(previous, steps) 
+        return _default_summarise(previous, steps, safety_identifier)

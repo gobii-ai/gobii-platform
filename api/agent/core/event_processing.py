@@ -169,7 +169,8 @@ def _completion_with_failover(
     messages: List[dict], 
     tools: List[dict], 
     failover_configs: List[Tuple[str, str, dict]],
-    agent_id: str = None
+    agent_id: str = None,
+    safety_identifier: str = None,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
@@ -179,6 +180,7 @@ def _completion_with_failover(
         tools: Available tools for the LLM
         failover_configs: Pre-selected list of provider configurations
         agent_id: Optional agent ID for logging
+        safety_identifier: Optional user ID for safety filtering
         
     Returns:
         Tuple of (LiteLLM completion response, token usage dict)
@@ -210,6 +212,7 @@ def _completion_with_failover(
                         model=model,
                         messages=messages,
                         tools=tools,
+                        safety_identifier=str(safety_identifier),
                         **params,
                     )
                 else:
@@ -218,6 +221,7 @@ def _completion_with_failover(
                         messages=messages,
                         tools=tools,
                         tool_choice="auto",
+                        safety_identifier=str(safety_identifier),
                         **params,
                     )
                 
@@ -288,8 +292,10 @@ def _completion_with_backoff(**kwargs):
     """
     Legacy wrapper around litellm.completion with exponential backoff.
     
-    This is kept for backward compatibility but _completion_with_failover
+    This is kept for backward compatibility, but _completion_with_failover
     is preferred for new code as it provides better fault tolerance.
+
+    NOTE: As of 9/9/2025, this seems unused. If use is reinstated, ensure safety_identifier is an argument
     """
     return litellm.completion(**kwargs)
 
@@ -829,6 +835,7 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     tools=tools,
                     failover_configs=failover_configs,
                     agent_id=str(agent.id),
+                    safety_identifier=agent.user.id if agent.user else None
                 )
                 
                 # Accumulate token usage
@@ -1049,8 +1056,17 @@ def _build_prompt_context(agent: PersistentAgent, event_window: EventWindow, cur
     """
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
-    ensure_steps_compacted(agent=agent, summarise_fn=llm_summarise_steps)
-    ensure_comms_compacted(agent=agent, summarise_fn=llm_summarise_comms)
+    safety_id = agent.user.id if agent.user else None
+    ensure_steps_compacted(
+        agent=agent,
+        summarise_fn=llm_summarise_steps,
+        safety_identifier=safety_id,
+    )
+    ensure_comms_compacted(
+        agent=agent,
+        summarise_fn=llm_summarise_comms,
+        safety_identifier=safety_id,
+    )
 
     # Get the model being used for accurate token counting
     # Note: We use the reference model here to decide the tier, then the primary

@@ -400,6 +400,7 @@ Return the relevant tools as a JSON array:"""
                         {"role": "user", "content": user_prompt}
                     ],
                     response_format={"type": "json_object"},
+                    safety_identifier=str(agent.user.id if agent.user else ""),
                     **params
                 )
                 

@@ -260,7 +260,7 @@ class StepCompactionTests(TestCase):
         # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
         from api.agent.core.step_compaction import MAX_TOOL_RESULT_CHARS
 
-        def custom_summarise(previous, steps):
+        def custom_summarise(previous, steps, safety_identifier):
             return f"CUSTOM: {len(steps)} steps processed"
 
         # Create enough steps to trigger compaction
@@ -268,7 +268,7 @@ class StepCompactionTests(TestCase):
             ts = self.agent.created_at + timedelta(seconds=i + 1)
             self._make_tool_call_step(ts, f"tool_{i}")
 
-        ensure_steps_compacted(agent=self.agent, summarise_fn=custom_summarise)
+        ensure_steps_compacted(agent=self.agent, summarise_fn=custom_summarise, safety_identifier="123")
 
         snapshot = PersistentAgentStepSnapshot.objects.first()
         self.assertIsNotNone(snapshot)
