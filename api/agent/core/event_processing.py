@@ -1056,15 +1056,16 @@ def _build_prompt_context(agent: PersistentAgent, event_window: EventWindow, cur
     """
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
+    safety_id = agent.user.id if agent.user else None
     ensure_steps_compacted(
         agent=agent,
         summarise_fn=llm_summarise_steps,
-        safety_identifier=(agent.user.id if agent.user else None),
+        safety_identifier=safety_id,
     )
     ensure_comms_compacted(
         agent=agent,
         summarise_fn=llm_summarise_comms,
-        safety_identifier=(agent.user.id if agent.user else None),
+        safety_identifier=safety_id,
     )
 
     # Get the model being used for accurate token counting
