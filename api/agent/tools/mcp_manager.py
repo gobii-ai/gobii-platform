@@ -400,7 +400,7 @@ Return the relevant tools as a JSON array:"""
                         {"role": "user", "content": user_prompt}
                     ],
                     response_format={"type": "json_object"},
-                    safety_identifier=getattr(agent.user, "id", None) if agent.user else None,
+                    safety_identifier=agent.user.id if agent.user else None,
                     **params
                 )
                 
