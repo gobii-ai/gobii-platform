@@ -246,7 +246,7 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
                                         if owner_email:
                                             recipients.add(owner_email)
                                     except Exception:
-                                        pass
+                                        logging.warning(f"Failed to add owner's email to recipients for agent {agent_obj.id}", exc_info=True)
 
                                     send_mail(
                                         subject,
