@@ -548,11 +548,11 @@ class AgentSecretsRequestViewTests(TestCase):
         
         result = execute_secure_credentials_request(self.agent, params)
         
-        # Should be partial success
+        # Partial success: one new and one re-request created; one invalid failed
         self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["created_count"], 1)  # Only new_key created
+        self.assertEqual(result["created_count"], 2)
         self.assertIn("errors", result)
-        self.assertEqual(len(result["errors"]), 2)  # Two failures
+        self.assertEqual(len(result["errors"]), 1)
         
         # Verify only the successful one was created
         created = PersistentAgentSecret.objects.filter(
