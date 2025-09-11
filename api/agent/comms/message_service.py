@@ -214,13 +214,13 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
 
             try:
                 if channel_val == CommsChannel.EMAIL:
-                    from api.models import PersistentAgent, CommsChannel as CC
+                    from api.models import PersistentAgent
                     from tasks.services import TaskCreditService
 
                     agent_obj = PersistentAgent.objects.filter(id=owner_id).select_related("user").first()
                     if agent_obj and agent_obj.user_id:
                         # Ensure the sender is in the agent's allow list before replying
-                        if agent_obj.is_sender_whitelisted(CC.EMAIL, parsed.sender):
+                        if agent_obj.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):
                             available = TaskCreditService.calculate_available_tasks(agent_obj.user)
                             if available != TASKS_UNLIMITED and available <= 0:
                                 # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
