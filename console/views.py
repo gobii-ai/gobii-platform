@@ -2669,14 +2669,40 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
     """View for displaying and approving contact requests from agents."""
     template_name = "console/agent_contact_requests.html"
     
+    def _resolve_agent_or_issue(self):
+        """Return (agent, issue) where issue is one of: None, 'invalid', 'wrong_account'."""
+        pk = self.kwargs['pk']
+        current_span = trace.get_current_span()
+        agent = PersistentAgent.objects.filter(pk=pk).select_related('user').first()
+
+        if not agent:
+            if current_span:
+                current_span.set_attribute("approval.issue", "invalid")
+            logger.info("Agent contact-requests invalid agent id", extra={"agent_id": str(pk)})
+            return None, 'invalid'
+
+        if agent.user != self.request.user:
+            if current_span:
+                current_span.set_attribute("approval.issue", "wrong_account")
+            logger.info("Agent contact-requests wrong account", extra={"agent_id": str(pk), "user_id": self.request.user.id})
+            return None, 'wrong_account'
+            
+        return agent, None
+
+    @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get")
+    def get(self, request, *args, **kwargs):
+        agent, issue = self._resolve_agent_or_issue()
+        if issue:
+            return self._issue_response(request, action='view', issue=issue)
+        return super().get(request, *args, **kwargs)
+
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get_object")
     def get_object(self):
-        """Get the agent or raise 404."""
-        return get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
+        agent, issue = self._resolve_agent_or_issue()
+        if issue:
+            # Should have been handled in get/post, but keep safety net
+            raise Http404("Agent not available")
+        return agent
     
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get_context_data")
     def get_context_data(self, **kwargs):
@@ -2719,8 +2745,11 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
     
     def post(self, request, *args, **kwargs):
         """Handle approval/rejection of contact requests."""
-        agent = self.get_object()
-        
+        agent, issue = self._resolve_agent_or_issue()
+        if issue:
+            return self._issue_response(request, action='update', issue=issue)
+
+        # Safety: agent is present beyond this point
         # Get pending requests
         from api.models import CommsAllowlistRequest, PersistentAgentStep, PersistentAgentSystemStep
         pending_requests = CommsAllowlistRequest.objects.filter(
@@ -2896,19 +2925,61 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         context['form'] = form
         return self.render_to_response(context)
 
+    def _issue_response(self, request, action: str, issue: str, extra: dict | None = None):
+        ctx = {
+            'issue': issue,
+            'context_type': 'agent_allowlist',
+            'action': action,
+        }
+        if extra:
+            ctx.update(extra)
+        return render(request, "console/approval_link_issue.html", ctx, status=200)
+
 
 class AgentContactRequestsThanksView(LoginRequiredMixin, TemplateView):
     """Thank you page after approving contact requests."""
     template_name = "console/agent_contact_requests_thanks.html"
     
+    def _resolve_agent_or_issue(self):
+        pk = self.kwargs['pk']
+        current_span = trace.get_current_span()
+        exists = PersistentAgent.objects.filter(pk=pk).exists()
+        if not exists:
+            if current_span:
+                current_span.set_attribute("approval.issue", "invalid")
+            logger.info("Agent contact-requests-thanks invalid agent id", extra={"agent_id": str(pk)})
+            return None, 'invalid'
+        agent = PersistentAgent.objects.filter(pk=pk, user=self.request.user).first()
+        if not agent:
+            if current_span:
+                current_span.set_attribute("approval.issue", "wrong_account")
+            logger.info("Agent contact-requests-thanks wrong account", extra={"agent_id": str(pk), "user_id": self.request.user.id})
+            return None, 'wrong_account'
+        return agent, None
+
+    @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get")
+    def get(self, request, *args, **kwargs):
+        agent, issue = self._resolve_agent_or_issue()
+        if issue:
+            return self._issue_response(request, action='view', issue=issue)
+        return super().get(request, *args, **kwargs)
+
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_object")
     def get_object(self):
-        """Get the agent or raise 404."""
-        return get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
+        agent, issue = self._resolve_agent_or_issue()
+        if issue:
+            raise Http404("Agent not available")
+        return agent
+
+    def _issue_response(self, request, action: str, issue: str, extra: dict | None = None):
+        ctx = {
+            'issue': issue,
+            'context_type': 'agent_allowlist',
+            'action': action,
+        }
+        if extra:
+            ctx.update(extra)
+        return render(request, "console/approval_link_issue.html", ctx, status=200)
     
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_context_data")
     def get_context_data(self, **kwargs):
@@ -3346,25 +3417,74 @@ class OrganizationDetailView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):
         )
 
 
-class OrganizationInviteAcceptView(WaffleFlagMixin, LoginRequiredMixin, View):
-    """Accept an organization invite by token and join the org."""
+class OrganizationInviteValidationMixin:
+    """Shared validation helpers for organization invite accept/reject flows."""
 
-    waffle_flag = ORGANIZATIONS
+    def _resolve_invite_or_issue(self, request, token: str):
+        """
+        Returns (invite, issue, extra_ctx).
+        - invite: OrganizationInvite or None
+        - issue: one of None | 'invalid' | 'expired' | 'wrong_account'
+        - extra_ctx: dict with optional org/invited_email/invited_by
+        """
+        invite = (
+            OrganizationInvite.objects.select_related("org", "invited_by")
+            .filter(token=token)
+            .first()
+        )
+        current_span = trace.get_current_span()
+        if not invite:
+            logger.info("Organization invite token not found", extra={"token": token})
+            if current_span:
+                current_span.set_attribute("invite.issue", "invalid_token")
+            return None, "invalid", {}
 
-    def _accept(self, request, token: str):
-        invite = get_object_or_404(OrganizationInvite, token=token)
-        # Basic validity checks
+        # Expired or finalized
         if (
             invite.accepted_at is not None
             or invite.revoked_at is not None
             or invite.expires_at < timezone.now()
         ):
-            messages.error(request, "This invitation is no longer valid.")
-            return redirect("organizations")
+            logger.info(
+                "Organization invite expired or not valid",
+                extra={"org_id": str(invite.org_id), "token": token},
+            )
+            if current_span:
+                current_span.set_attribute("invite.issue", "expired_or_finalized")
+            return invite, "expired", {
+                "org": invite.org,
+                "invited_email": invite.email,
+                "invited_by": invite.invited_by,
+            }
 
-        # Ensure the invite matches the logged-in user's email
+        # Wrong account/session
         if not request.user.email or invite.email.lower() != request.user.email.lower():
-            return HttpResponseForbidden("This invite is not for your account.")
+            logger.info(
+                "Organization invite wrong account/session",
+                extra={"expected_email": invite.email, "actual_email": request.user.email},
+            )
+            if current_span:
+                current_span.set_attribute("invite.issue", "wrong_account")
+            return invite, "wrong_account", {
+                "org": invite.org,
+                "invited_email": invite.email,
+                "invited_by": invite.invited_by,
+            }
+
+        return invite, None, {}
+
+
+class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlagMixin, LoginRequiredMixin, View):
+    """Accept an organization invite by token and join the org."""
+
+    waffle_flag = ORGANIZATIONS
+
+    def _accept(self, request, token: str):
+        invite, issue, extra = self._resolve_invite_or_issue(request, token)
+        if issue:
+            ctx = {"issue": issue, "context_type": "organization_invite", "action": "accept"}
+            ctx.update(extra)
+            return render(request, "console/approval_link_issue.html", ctx, status=200)
 
         # Create or reactivate membership
         membership, created = OrganizationMembership.objects.get_or_create(
@@ -3398,23 +3518,32 @@ class OrganizationInviteAcceptView(WaffleFlagMixin, LoginRequiredMixin, View):
         return self._accept(request, token)
 
 
-class OrganizationInviteRejectView(WaffleFlagMixin, LoginRequiredMixin, View):
+class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlagMixin, LoginRequiredMixin, View):
     """Reject an organization invite by token."""
 
     waffle_flag = ORGANIZATIONS
 
     def _reject(self, request, token: str):
-        invite = get_object_or_404(OrganizationInvite, token=token)
-        # Ensure the invite matches the logged-in user's email
-        if not request.user.email or invite.email.lower() != request.user.email.lower():
-            return HttpResponseForbidden("This invite is not for your account.")
+        invite, issue, extra = self._resolve_invite_or_issue(request, token)
+        if issue:
+            ctx = {"issue": issue, "context_type": "organization_invite", "action": "reject"}
+            ctx.update(extra)
+            return render(request, "console/approval_link_issue.html", ctx, status=200)
 
         if invite.accepted_at is None and invite.revoked_at is None:
             invite.revoked_at = timezone.now()
             invite.save(update_fields=["revoked_at"])
             messages.info(request, "Invitation declined.")
         else:
-            messages.error(request, "This invitation is no longer valid.")
+            # Should not hit due to resolver, but keep safety
+            return render(request, "console/approval_link_issue.html", {
+                "issue": "expired",
+                "context_type": "organization_invite",
+                "action": "reject",
+                "org": invite.org,
+                "invited_email": invite.email,
+                "invited_by": invite.invited_by,
+            }, status=200)
         return redirect("organizations")
 
     @tracer.start_as_current_span("CONSOLE Organization Invite Reject")
