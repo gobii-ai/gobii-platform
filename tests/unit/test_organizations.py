@@ -353,7 +353,7 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         url = reverse("org_invite_accept", kwargs={"token": invite.token})
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("wrong account", resp.content.decode().lower())
+        self.assertIn("not associated", resp.content.decode().lower())
 
     def test_accept_expired_invite_shows_friendly_page_and_no_membership_created(self):
         expired_invite = self._create_invite(
