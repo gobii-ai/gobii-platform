@@ -2673,18 +2673,20 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         """Return (agent, issue) where issue is one of: None, 'invalid', 'wrong_account'."""
         pk = self.kwargs['pk']
         current_span = trace.get_current_span()
-        exists = PersistentAgent.objects.filter(pk=pk).exists()
-        if not exists:
+        agent = PersistentAgent.objects.filter(pk=pk).select_related('user').first()
+
+        if not agent:
             if current_span:
                 current_span.set_attribute("approval.issue", "invalid")
             logger.info("Agent contact-requests invalid agent id", extra={"agent_id": str(pk)})
             return None, 'invalid'
-        agent = PersistentAgent.objects.filter(pk=pk, user=self.request.user).first()
-        if not agent:
+
+        if agent.user != self.request.user:
             if current_span:
                 current_span.set_attribute("approval.issue", "wrong_account")
             logger.info("Agent contact-requests wrong account", extra={"agent_id": str(pk), "user_id": self.request.user.id})
             return None, 'wrong_account'
+            
         return agent, None
 
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get")
