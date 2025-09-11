@@ -54,7 +54,7 @@ from ..tools.search_web import execute_search_web, get_search_web_tool
 from ..tools.spawn_web_task import execute_spawn_web_task, get_spawn_web_task_tool
 from ..tools.schedule_updater import execute_update_schedule, get_update_schedule_tool
 from ..tools.charter_updater import execute_update_charter, get_update_charter_tool
-from ..tools.sqlite_query import execute_sqlite_query, get_sqlite_query_tool, get_sqlite_schema_prompt, set_sqlite_db_path, reset_sqlite_db_path, agent_sqlite_db
+from ..tools.sqlite_state import get_sqlite_schema_prompt, agent_sqlite_db
 from ..tools.sqlite_batch import execute_sqlite_batch, get_sqlite_batch_tool
 from ..tools.http_request import execute_http_request, get_http_request_tool
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
@@ -920,8 +920,6 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     if tool_name == "spawn_web_task":
                         # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
                         result = execute_spawn_web_task(agent, tool_params)
-                    elif tool_name == "sqlite_query":
-                        result = execute_sqlite_query(agent, tool_params)
                     elif tool_name == "sqlite_batch":
                         result = execute_sqlite_batch(agent, tool_params)
                     elif tool_name == "send_email":
@@ -1520,12 +1518,14 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "IF YOU NEED CREDENTIALS/API KEYS/ETC FOR THIS TASK AND DO NOT ALREADY HAVE THEM, USE THE 'secure_credentials_request' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE CREDENTIALS. "
         "You typically will want the domain to be broad enough to support all required auth domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. BE VERY THOUGHTFUL ABOUT THIS. "
 
-        "You may run any query, including creating or changing tables and db structure using the sqlite_query tool. "
+        "Use the sqlite_batch tool for ALL SQL, including creating or changing tables and querying data. "
         "It is a good idea to use the sqlite db any time you need to do any discrete math or logic. Sql is an entire programming language, remember that. "
         "It is a good idea to use the sqlite db to keep a working set of any structured data related to your task, but always be sure to limit the data you store so the db stays under 50MB. "
         "This sqlite db is your memory, planning system, and a place to store any structure data you need to in order to do your work. "
         "Remember, sqlite is extremely powerful. Make use of that power to get your job done. "
-        "If you have two or more SQL operations to run, prefer the sqlite_batch tool to execute them in one call. "
+        "Provide exactly ONE SQL statement per item in 'operations' (no semicolon-chaining). For a single statement, pass a single-item operations array. "
+        "Do NOT include BEGIN/COMMIT/ROLLBACK; the tool manages transactions. Escape single quotes by doubling them. "
+        "If you have two or more SQL operations to run, use the sqlite_batch tool in one call. "
         "Use mode=atomic when operations depend on each other (all-or-nothing); use mode=per_statement to continue past individual errors when operations are independent. "
         "Be very mindful to keep the db efficient and the total size no greater than 50MB of data. "
 
@@ -1856,7 +1856,6 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_spawn_web_task_tool(),
         get_update_schedule_tool(),
         get_update_charter_tool(),
-        get_sqlite_query_tool(),
         get_sqlite_batch_tool(),
         get_http_request_tool(),
         get_secure_credentials_request_tool(),
