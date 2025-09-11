@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+
 """Service helpers for inbound communication messages."""
 
 from dataclasses import dataclass
@@ -253,6 +255,18 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
                                         list(recipients),
                                         html_message=html_body,
                                         fail_silently=True,
+                                    )
+
+                                    Analytics.track_event(
+                                        user_id=str(agent_obj.user.id),
+                                        event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS,
+                                        source=AnalyticsSource.EMAIL,
+                                        properties={
+                                            "agent_id": str(agent_obj.id),
+                                            "agent_name": agent_obj.name,
+                                            "channel": channel_val,
+                                            "sender": parsed.sender,
+                                        },
                                     )
                                 except Exception:
                                     # Do not block on email failures
