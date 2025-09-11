@@ -1699,6 +1699,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     for s in steps:
         try:
             tc = s.tool_call
+
+            # Exclude send_email and send_sms tool calls entirely from prompt history,
+            # since they are listed in the agent comms part of the context
+            if tc.tool_name in ("send_email", "send_sms"):
+                continue
+
             components = {
                 "meta": f"[{s.created_at.isoformat()}] Tool {tc.tool_name} called.",
                 "params": json.dumps(tc.tool_params)
