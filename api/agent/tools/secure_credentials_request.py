@@ -89,15 +89,32 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
             
             if existing:
                 if existing.requested:
-                    # Already requested, skip
+                    # Already requested, skip creating another
                     logger.info(
                         "Credential %s for domain %s already requested for agent %s",
                         key, domain_pattern, agent.id
                     )
+                    # Treat as created for user feedback
+                    created_credentials.append({
+                        "name": existing.name,
+                        "key": existing.key,
+                        "domain_pattern": existing.domain_pattern,
+                    })
                     continue
                 else:
-                    # Exists but not requested - user already provided it
-                    errors.append(f"Credential '{key}' for domain '{domain_pattern}' already exists")
+                    # Exists but not requested - convert to a new request (refresh)
+                    logger.info(
+                        "Re-requesting existing credential %s for domain %s for agent %s",
+                        key, domain_pattern, agent.id
+                    )
+                    existing.requested = True
+                    existing.encrypted_value = b''
+                    existing.save(update_fields=["requested", "encrypted_value", "updated_at"])
+                    created_credentials.append({
+                        "name": existing.name,
+                        "key": existing.key,
+                        "domain_pattern": existing.domain_pattern,
+                    })
                     continue
             
             # Create the credential request
