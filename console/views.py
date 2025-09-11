@@ -1771,30 +1771,28 @@ class AgentSecretsView(LoginRequiredMixin, TemplateView):
         agent = self.get_object()
         context['agent'] = agent
         
-        # Get secrets from the new model, grouped by domain
+        # Get secrets from the new model, split by requested/fulfilled
         from api.models import PersistentAgentSecret
-        agent_secrets = PersistentAgentSecret.objects.filter(agent=agent).order_by('domain_pattern', 'name')
+        fulfilled_qs = PersistentAgentSecret.objects.filter(agent=agent, requested=False).order_by('domain_pattern', 'name')
+        requested_qs = PersistentAgentSecret.objects.filter(agent=agent, requested=True).order_by('domain_pattern', 'name')
 
-        # Group secrets by domain for display
+        # Group fulfilled secrets by domain for display
         secrets = {}
-        for secret in agent_secrets:
+        for secret in fulfilled_qs:
             if secret.domain_pattern not in secrets:
                 secrets[secret.domain_pattern] = {}
-            # Store the secret information with name, description, and generated key
             secrets[secret.domain_pattern][secret.name] = {
                 'id': secret.id,
                 'name': secret.name,
                 'description': secret.description,
-                'key': secret.key,  # Generated key for reference
+                'key': secret.key,
                 'created_at': secret.created_at,
                 'updated_at': secret.updated_at
             }
-        
         context['secrets'] = secrets
         context['has_secrets'] = bool(secrets)
-
-        # Count total secrets
-        total_secrets = agent_secrets.count()
+        context['requested_secrets'] = requested_qs
+        context['has_requested_secrets'] = requested_qs.exists()
 
         return context
 
@@ -2485,11 +2483,46 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
         return context
 
     def post(self, request, *args, **kwargs):
-        """Handle form submission to provide secret values."""
+        """Handle saving values or removing requested secrets."""
         agent = self.get_object()
+        action = (request.POST.get('action') or '').strip().lower()
 
-        # Get requested secrets
         from api.models import PersistentAgentSecret
+
+        # Bulk remove requested secrets
+        if request.resolver_match.url_name == 'agent_requested_secrets_remove' or action == 'remove_selected':
+            try:
+                ids = request.POST.getlist('secret_ids')
+                if not ids:
+                    messages.info(request, "No requests selected for removal.")
+                    return redirect('agent_secrets_request', pk=agent.pk)
+                with transaction.atomic():
+                    qs = PersistentAgentSecret.objects.filter(agent=agent, requested=True, id__in=ids)
+                    deleted_count = qs.count()
+                    qs.delete()
+                messages.success(request, f"Removed {deleted_count} requested credential(s).")
+            except Exception as e:
+                logger.error(f"Failed to bulk remove requested secrets for agent {agent.id}: {e}")
+                messages.error(request, "Failed to remove selected requests.")
+            return redirect('agent_secrets_request', pk=agent.pk)
+
+        # Single remove via per-row action
+        if request.resolver_match.url_name == 'agent_requested_secret_remove':
+            secret_id = self.kwargs.get('secret_id')
+            try:
+                with transaction.atomic():
+                    secret = PersistentAgentSecret.objects.get(agent=agent, id=secret_id, requested=True)
+                    name = secret.name
+                    secret.delete()
+                messages.success(request, f"Removed request for '{name}'.")
+            except PersistentAgentSecret.DoesNotExist:
+                messages.error(request, "Requested secret not found.")
+            except Exception as e:
+                logger.error(f"Failed to remove requested secret {secret_id} for agent {agent.id}: {e}")
+                messages.error(request, "Failed to remove request.")
+            return redirect('agent_secrets_request', pk=agent.pk)
+
+        # Default: save provided values (partial allowed)
         requested_secrets = PersistentAgentSecret.objects.filter(
             agent=agent,
             requested=True
@@ -2501,20 +2534,16 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
             try:
                 with transaction.atomic():
                     updated_count = 0
-
-                    # Update each secret with its value
                     for secret in requested_secrets:
                         field_name = f'secret_{secret.id}'
                         value = form.cleaned_data.get(field_name)
-
                         if value:
                             secret.set_value(value)
-                            secret.requested = False  # Mark as no longer requested
+                            secret.requested = False
                             secret.save()
                             updated_count += 1
 
                     if updated_count > 0:
-                        # Create an agent step to record that credentials were provided
                         from api.models import PersistentAgentStep, PersistentAgentSystemStep
                         step = PersistentAgentStep.objects.create(
                             agent=agent,
@@ -2525,11 +2554,8 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
                             code=PersistentAgentSystemStep.Code.CREDENTIALS_PROVIDED,
                             notes=f"Secrets provided: {updated_count}"
                         )
-
-                        # Trigger agent event processing to resume agent with new credentials
                         from api.agent.tasks.process_events import process_agent_events_task
                         transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
-
                         Analytics.track_event(
                             user_id=self.request.user.id,
                             event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_PROVIDED,
@@ -2540,19 +2566,37 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
                                 'secrets_provided': updated_count,
                             },
                         )
-
                         return redirect('agent_secrets_request_thanks', pk=agent.pk)
                     else:
-                        messages.warning(request, "No secret values were provided.")
-
+                        messages.info(request, "No changes detected. Enter values to save or remove requests you no longer need.")
             except Exception as e:
                 logger.error(f"Failed to update requested secrets for agent {agent.id}: {str(e)}")
                 messages.error(request, "Failed to save secrets. Please try again.")
 
-        # If form is invalid or update failed, redisplay form
         context = self.get_context_data(**kwargs)
         context['form'] = form
         return self.render_to_response(context)
+
+
+class AgentSecretRerequestView(LoginRequiredMixin, View):
+    """Mark a fulfilled secret as requested again and clear its stored value."""
+    def post(self, request, *args, **kwargs):
+        agent = get_object_or_404(PersistentAgent, pk=self.kwargs['pk'], user=request.user)
+        secret_id = self.kwargs.get('secret_id')
+        from api.models import PersistentAgentSecret
+        try:
+            with transaction.atomic():
+                secret = PersistentAgentSecret.objects.get(agent=agent, pk=secret_id)
+                secret.requested = True
+                secret.encrypted_value = b''
+                secret.save(update_fields=['requested', 'encrypted_value', 'updated_at'])
+            messages.success(request, f"Re-requested '{secret.name}'. A new value is now required.")
+        except PersistentAgentSecret.DoesNotExist:
+            messages.error(request, "Secret not found.")
+        except Exception as e:
+            logger.error(f"Failed to re-request secret {secret_id} for agent {agent.id}: {e}")
+            messages.error(request, "Failed to re-request secret.")
+        return redirect('agent_secrets', pk=agent.pk)
 
 
 class AgentSecretsRequestThanksView(LoginRequiredMixin, TemplateView):

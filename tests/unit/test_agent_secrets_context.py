@@ -294,7 +294,7 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertEqual(auth_token_secret.domain_pattern, "*.auth.example.com")
     
     def test_duplicate_request_skipped(self):
-        """Test that requesting an already-requested credential is skipped."""
+        """Requesting an already-requested credential does not duplicate and reports success."""
         # Create an existing requested credential
         existing = PersistentAgentSecret.objects.create(
             agent=self.agent,
@@ -318,11 +318,9 @@ class SecureCredentialsRequestToolTests(TestCase):
         }
         
         result = execute_secure_credentials_request(self.agent, params)
-        
-        # When all credentials are already requested, it returns error status
-        # because nothing was created
-        self.assertEqual(result["status"], "error")
-        self.assertIn("Failed to create any credential requests", result["message"])
+        # Treated as already present; we still communicate success without creating duplicates
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["created_count"], 1)
         
         # Verify only one secret exists
         secrets = PersistentAgentSecret.objects.filter(
@@ -333,8 +331,8 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertEqual(secrets.count(), 1)
         self.assertTrue(secrets.first().requested)
     
-    def test_cannot_request_already_fulfilled_secret(self):
-        """Test that requesting a fulfilled credential returns an error."""
+    def test_re_request_already_fulfilled_secret(self):
+        """Requesting a fulfilled credential converts it to requested again (refresh)."""
         # Create a fulfilled secret
         fulfilled = PersistentAgentSecret.objects.create(
             agent=self.agent,
@@ -358,15 +356,80 @@ class SecureCredentialsRequestToolTests(TestCase):
         }
         
         result = execute_secure_credentials_request(self.agent, params)
-        
-        # When trying to request an already fulfilled secret, it returns error
-        self.assertEqual(result["status"], "error")
-        self.assertIn("already exists", result["message"])
-        
-        # Original secret should remain unchanged
+        # Now treated as ok (converted to requested)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["created_count"], 1)
+        self.assertIn("credential request(s)", result["message"].lower())
+
         fulfilled.refresh_from_db()
-        self.assertFalse(fulfilled.requested)
-        self.assertEqual(fulfilled.encrypted_value, b"encrypted_value_here")
+        self.assertTrue(fulfilled.requested)
+        self.assertEqual(fulfilled.encrypted_value, b"")
+
+        # It should not appear in context while requested
+        context_block = _get_secrets_block(self.agent)
+        self.assertEqual(context_block, "No secrets configured.")
+
+        # Simulate fulfilling again and ensure it appears
+        fulfilled.set_value("new-value")
+        fulfilled.requested = False
+        fulfilled.save()
+        context_block2 = _get_secrets_block(self.agent)
+        self.assertIn("api_key", context_block2)
+
+
+from django.urls import reverse
+from django.test import Client
+
+
+@tag("batch_agent_secrets_ctx")
+class AgentSecretsRequestViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="test2@example.com",
+            email="test2@example.com",
+            password="password"
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="BrowserAgent2"
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            browser_use_agent=self.browser_agent,
+            name="Agent2"
+        )
+        self.client = Client()
+        assert self.client.login(username="test2@example.com", password="password")
+
+    def test_partial_request_save_updates_only_provided(self):
+        # Two requested secrets
+        s1 = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Username",
+            key="username",
+            requested=True,
+            encrypted_value=b""
+        )
+        s2 = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Password",
+            key="password",
+            requested=True,
+            encrypted_value=b""
+        )
+
+        url = reverse('agent_secrets_request', kwargs={"pk": self.agent.id})
+        # Provide only username
+        resp = self.client.post(url, data={f"secret_{s1.id}": "alice"})
+        self.assertIn(resp.status_code, (302, 200))
+
+        s1.refresh_from_db()
+        s2.refresh_from_db()
+        self.assertFalse(s1.requested)
+        self.assertTrue(s2.requested)
+
     
     def test_missing_required_fields(self):
         """Test that missing required fields in credentials causes error."""

@@ -145,6 +145,8 @@ jobs:
             tag: batch_tool_costs
           - batch: billing_rollup
             tag: batch_billing_rollup
+          - batch: agent_secrets_ctx
+            tag: batch_agent_secrets_ctx
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
