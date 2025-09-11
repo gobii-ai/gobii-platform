@@ -352,9 +352,10 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         self.client.force_login(self.other_user)
         url = reverse("org_invite_accept", kwargs={"token": invite.token})
         resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("wrong account", resp.content.decode().lower())
 
-    def test_accept_expired_invite_redirects_and_no_membership_created(self):
+    def test_accept_expired_invite_shows_friendly_page_and_no_membership_created(self):
         expired_invite = self._create_invite(
             self.other_user.email,
             OrganizationMembership.OrgRole.MEMBER,
@@ -365,7 +366,8 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         self.client.force_login(self.other_user)
         url = reverse("org_invite_accept", kwargs={"token": expired_invite.token})
         resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("expired", resp.content.decode().lower())
         self.assertFalse(
             OrganizationMembership.objects.filter(org=self.org, user=self.other_user).exists()
         )
@@ -382,3 +384,10 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
                 org=self.org, user=self.invitee, role=OrganizationMembership.OrgRole.MEMBER, status=OrganizationMembership.OrgStatus.ACTIVE
             ).exists()
         )
+
+    def test_accept_invalid_token_shows_friendly_page(self):
+        self.client.force_login(self.invitee)
+        url = reverse("org_invite_accept", kwargs={"token": "nonexistent-token"})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("invalid", resp.content.decode().lower())
