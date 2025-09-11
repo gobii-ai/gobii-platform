@@ -192,7 +192,7 @@ PROVIDER_CONFIG: Dict[str, Dict[str, str]] = {
 # Tier 1: 80% OpenAI GPT-4.1, 20% Anthropic. Tier 2: Google. Tier 3: 50% Fireworks, 50% OpenRouter. Tier 4: Anthropic.
 # We only advance to the next tier if all providers in the current tier fail.
 DEFAULT_PROVIDER_TIERS: List[List[Tuple[str, float]]] = [
-    [("openai", 0.8), ("anthropic", 0.2)],     # Tier 1: 80% OpenAI GPT-4.1, 20% Anthropic (load balanced)
+    [("fireworks", 1.0)],     # Tier 1: 80% OpenAI GPT-4.1, 20% Anthropic (load balanced)
     [("google", 1.0)],     # Tier 2: 100% Google (Gemini 2.5 Pro)
     [("fireworks", 0.5), ("openrouter", 0.5)],     # Tier 3: 50% Fireworks Qwen3-235B, 50% OpenRouter GLM-4.5 (combined old tiers 1&2)
     [("anthropic", 1.0)],  # Tier 4: 100% Anthropic (rarely used)
@@ -582,7 +582,7 @@ async def _run_agent(
                 llm_params["base_url"] = "https://openrouter.ai/api/v1"
                 llm = ChatOpenAI(**llm_params)
             elif provider == "fireworks":
-                llm_params["model"] = "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
+                llm_params["model"] = "accounts/gobii/deployedModels/glm-4p5v-ouav25nr"
                 llm_params["base_url"] = "https://api.fireworks.ai/inference/v1"
                 llm = ChatOpenAI(**llm_params)
             elif provider == "anthropic":
