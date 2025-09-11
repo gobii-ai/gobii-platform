@@ -581,7 +581,7 @@ class PersistentAgentSecretsRequestForm(forms.Form):
                 }),
                 label=secret.name,
                 help_text=secret.description if secret.description else f'Secret key: {secret.key}',
-                required=True
+                required=False
             )
     
     def clean(self):
