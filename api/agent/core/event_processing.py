@@ -224,7 +224,6 @@ def _completion_with_failover(
                         messages=messages,
                         tools=tools,
                         tool_choice="auto",
-                        safety_identifier=str(safety_identifier),
                         **params,
                     )
                 
