@@ -618,6 +618,15 @@ SMS_MAX_BODY_LENGTH = env.int("SMS_MAX_BODY_LENGTH", default=1450)  # Max length
 # SMS Parsing
 EMAIL_STRIP_REPLIES = env.bool("EMAIL_STRIP_REPLIES", default=False)
 
+# ────────── Pipedream MCP (Remote) ──────────
+# These are optional; when set, Gobii will enable the Pipedream MCP server.
+PIPEDREAM_CLIENT_ID = env("PIPEDREAM_CLIENT_ID", default="")
+PIPEDREAM_CLIENT_SECRET = env("PIPEDREAM_CLIENT_SECRET", default="")
+PIPEDREAM_PROJECT_ID = env("PIPEDREAM_PROJECT_ID", default="")
+PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default="development")
+# Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,greenhouse")
+PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,greenhouse")
+
 # File Handling
 
 # Maximum file size (in bytes) for downloads and inbound attachments

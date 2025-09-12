@@ -12,6 +12,9 @@ import os
 import fnmatch
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+
+import requests
 
 import litellm
 from fastmcp import Client
@@ -36,6 +39,8 @@ class MCPServer:
     args: Optional[List[str]] = None
     url: Optional[str] = None
     env: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None
+    prefetch_apps: Optional[List[str]] = None
     enabled: bool = True
 
 
@@ -77,7 +82,28 @@ class MCPToolManager:
             },
             enabled=True
         ),
-        # Future servers can be added here
+        # Pipedream remote MCP server (HTTP/SSE)
+        MCPServer(
+            name="pipedream",
+            display_name="Pipedream",
+            description="Access 2,800+ API integrations with per-user OAuth via Pipedream Connect",
+            url="https://remote.mcp.pipedream.net",
+            # Use env to pass required config; we validate on init.
+            env={
+                "PIPEDREAM_CLIENT_ID": os.getenv("PIPEDREAM_CLIENT_ID", ""),
+                "PIPEDREAM_CLIENT_SECRET": os.getenv("PIPEDREAM_CLIENT_SECRET", ""),
+                "PIPEDREAM_PROJECT_ID": os.getenv("PIPEDREAM_PROJECT_ID", ""),
+                "PIPEDREAM_ENVIRONMENT": os.getenv("PIPEDREAM_ENVIRONMENT", "development"),
+                # Optional comma-separated app slugs to prefetch tool catalogs for
+                "PIPEDREAM_PREFETCH_APPS": os.getenv("PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse"),
+            },
+            headers={
+                "x-pd-app-discovery": "false",
+                "x-pd-tool-mode": "full-config",
+            },
+            enabled=True,
+
+        ),
     ]
     
     # Default MCP tools that should be enabled for all agents
@@ -98,6 +124,9 @@ class MCPToolManager:
         self._tools_cache: Dict[str, List[MCPToolInfo]] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._initialized = False
+        # Cached Pipedream token and expiry
+        self._pd_access_token: Optional[str] = None
+        self._pd_token_expiry: Optional[datetime] = None
         
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
         """Ensure we have an event loop for async operations."""
@@ -129,9 +158,25 @@ class MCPToolManager:
                 continue
                 
             # Check for required environment variables
-            if server.env and server.env.get("API_TOKEN") == "":
+            # For stdio-based servers that commonly use an API_TOKEN env
+            # (e.g., Bright Data) preserve generic check to maintain tests.
+            if server.command and server.env and server.env.get("API_TOKEN") == "":
                 logger.warning(f"MCP server '{server.name}' missing API_TOKEN, skipping")
                 continue
+            if server.name == "pipedream":
+                # Require client credentials and project info
+                env = server.env or {}
+                required = [
+                    env.get("PIPEDREAM_CLIENT_ID"),
+                    env.get("PIPEDREAM_CLIENT_SECRET"),
+                    env.get("PIPEDREAM_PROJECT_ID"),
+                    env.get("PIPEDREAM_ENVIRONMENT"),
+                ]
+                if not all(required):
+                    logger.warning(
+                        "MCP server 'pipedream' missing required env (PIPEDREAM_CLIENT_ID/SECRET/PROJECT_ID/ENVIRONMENT), skipping"
+                    )
+                    continue
                 
             try:
                 self._register_server(server)
@@ -149,7 +194,31 @@ class MCPToolManager:
         if server.url:
             # For HTTP/SSE servers
             from fastmcp.client.transports import StreamableHttpTransport
-            transport = StreamableHttpTransport(url=server.url)
+            headers: Dict[str, str] = dict(server.headers or {})
+
+            # Special handling for Pipedream: acquire token and set required headers
+            if server.name == "pipedream":
+                env = server.env or {}
+                token = self._get_pipedream_access_token(env)
+                if not token:
+                    raise RuntimeError("Pipedream access token acquisition failed")
+
+                # Base headers for Pipedream remote MCP
+                headers.update({
+                    "Authorization": f"Bearer {token}",
+                    "x-pd-project-id": env.get("PIPEDREAM_PROJECT_ID", ""),
+                    "x-pd-environment": env.get("PIPEDREAM_ENVIRONMENT", "development"),
+                    # External user id is set per-call (agent.id); keep a discovery default for list_tools
+                    "x-pd-external-user-id": env.get("PIPEDREAM_DISCOVERY_USER", "gobii-discovery"),
+                    # Enable broad discovery so the catalog at least includes the discovery tool
+                    "x-pd-app-discovery": "true",
+                    # Full config exposes discovery and sub-agent capabilities
+                    "x-pd-tool-mode": "full-config",
+                    # Provide a stable conversation id for discovery/listing
+                    "x-pd-conversation-id": env.get("PIPEDREAM_DISCOVERY_CONVERSATION", "discovery"),
+                })
+
+            transport = StreamableHttpTransport(url=server.url, headers=headers)
         elif server.command:
             # For stdio servers like npx
             from fastmcp.client.transports import StdioTransport
@@ -177,29 +246,48 @@ class MCPToolManager:
         tools = []
         blacklisted_count = 0
         async with client:
+            # Always fetch the base tool list first
             mcp_tools = await client.list_tools()
-            
-            for tool in mcp_tools:
-                full_name = f"mcp_{server.name}_{tool.name}"
-                
-                # Check if tool is blacklisted
-                if self._is_tool_blacklisted(full_name):
-                    blacklisted_count += 1
-                    logger.info(f"Skipping blacklisted tool: {full_name}")
-                    continue
-                
-                tool_info = MCPToolInfo(
+            tools.extend(self._convert_tools(server, mcp_tools, blacklisted_count))
+
+            # For Pipedream, optionally prefetch select app catalogs to expose app-specific tools
+            if server.name == "pipedream":
+                env = server.env or {}
+                prefetch = [s.strip() for s in (env.get("PIPEDREAM_PREFETCH_APPS", "").split(",")) if s.strip()]
+                for app_slug in prefetch:
+                    try:
+                        # Mutate header for app slug and refetch tools
+                        if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
+                            client.transport.headers["x-pd-app-slug"] = app_slug
+                        app_tools = await client.list_tools()
+                        tools.extend(self._convert_tools(server, app_tools, blacklisted_count))
+                    except Exception as e:
+                        logger.warning(f"Pipedream prefetch for app '{app_slug}' failed: {e}")
+        
+        if blacklisted_count > 0:
+            logger.info(f"Filtered out {blacklisted_count} blacklisted tools from server '{server.name}'")
+        
+        return tools
+
+    def _convert_tools(self, server: MCPServer, mcp_tools: List[MCPTool], blacklisted_count_ref: int) -> List[MCPToolInfo]:
+        """Helper to convert MCP tool records to MCPToolInfo list with blacklist applied."""
+        tools: List[MCPToolInfo] = []
+        blacklisted_count = 0
+        for tool in mcp_tools:
+            full_name = f"mcp_{server.name}_{tool.name}"
+            if self._is_tool_blacklisted(full_name):
+                blacklisted_count += 1
+                continue
+            tools.append(
+                MCPToolInfo(
                     full_name=full_name,
                     server_name=server.name,
                     tool_name=tool.name,
                     description=tool.description or f"{tool.name} from {server.display_name}",
                     parameters=tool.inputSchema or {"type": "object", "properties": {}}
                 )
-                tools.append(tool_info)
-        
-        if blacklisted_count > 0:
-            logger.info(f"Filtered out {blacklisted_count} blacklisted tools from server '{server.name}'")
-        
+            )
+        # Increment caller's count via return value aggregation
         return tools
     
     def get_all_available_tools(self) -> List[MCPToolInfo]:
@@ -281,6 +369,21 @@ class MCPToolManager:
             }
         
         client = self._clients[server_name]
+
+        # Inject per-agent headers for Pipedream before execution
+        if server_name == "pipedream":
+            try:
+                # Ensure token is fresh (in case long-lived process)
+                server = next(s for s in self.AVAILABLE_SERVERS if s.name == "pipedream")
+                token = self._get_pipedream_access_token(server.env or {})
+                if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
+                    client.transport.headers.update({
+                        "Authorization": f"Bearer {token}",
+                        "x-pd-external-user-id": str(agent.id),  # per-user isolation uses agent_id
+                        "x-pd-conversation-id": str(agent.id),    # keep state per agent conversation
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to refresh Pipedream headers: {e}")
         
         try:
             loop = self._ensure_event_loop()
@@ -303,10 +406,26 @@ class MCPToolManager:
                         content = block.text
                         break
             
-            return {
-                "status": "success",
-                "result": content or "Tool executed successfully"
-            }
+            # Detect Pipedream Connect Link responses and surface clearly to the agent/user
+            if server_name == "pipedream":
+                connect_url = None
+                if isinstance(content, dict):
+                    # Heuristics: look for a URL containing the Connect Link path
+                    for v in content.values():
+                        if isinstance(v, str) and "pipedream.com/_static/connect.html" in v:
+                            connect_url = v
+                            break
+                elif isinstance(content, str) and "pipedream.com/_static/connect.html" in content:
+                    connect_url = content
+
+                if connect_url:
+                    return {
+                        "status": "action_required",
+                        "result": f"Authorization required. Please connect your account via: {connect_url}",
+                        "connect_url": connect_url,
+                    }
+
+            return {"status": "success", "result": content or "Tool executed successfully"}
             
         except Exception as e:
             logger.error(f"Failed to execute MCP tool {tool_name}: {e}")
@@ -327,6 +446,40 @@ class MCPToolManager:
         if self._loop and not self._loop.is_closed():
             self._loop.close()
         self._initialized = False
+
+    def _get_pipedream_access_token(self, env: Dict[str, str]) -> Optional[str]:
+        """Acquire or refresh the Pipedream OAuth access token (cached)."""
+        try:
+            # Reuse cached token if valid for at least 2 minutes
+            if self._pd_access_token and self._pd_token_expiry and datetime.utcnow() < (self._pd_token_expiry - timedelta(minutes=2)):
+                return self._pd_access_token
+
+            client_id = env.get("PIPEDREAM_CLIENT_ID", "")
+            client_secret = env.get("PIPEDREAM_CLIENT_SECRET", "")
+            if not client_id or not client_secret:
+                return None
+
+            resp = requests.post(
+                "https://api.pipedream.com/v1/oauth/token",
+                json={
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            access_token = data.get("access_token")
+            expires_in = int(data.get("expires_in", 3600))
+            if not access_token:
+                return None
+            self._pd_access_token = access_token
+            self._pd_token_expiry = datetime.utcnow() + timedelta(seconds=expires_in)
+            return access_token
+        except Exception as e:
+            logger.error(f"Failed to obtain Pipedream access token: {e}")
+            return None
 
 
 # Global manager instance
