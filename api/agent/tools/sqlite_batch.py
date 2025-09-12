@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from ...models import PersistentAgent
 
 # Reuse the context variable set by agent_sqlite_db
-from .sqlite_query import _sqlite_db_path_var  # type: ignore
+from .sqlite_state import _sqlite_db_path_var  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -319,12 +319,13 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Execute multiple SQLite operations in one call. Use this whenever you have two or more SQL statements. "
-                "Rules: (1) Provide exactly ONE SQL statement per entry in 'operations' (no semicolon-separated bundles). "
-                "(2) Do NOT include BEGIN/COMMIT/ROLLBACK; the tool manages transactions for mode=atomic. "
-                "(3) Escape single quotes inside values by doubling them (e.g., 'What''s new'). Avoid backslash escaping. "
-                "(4) Prefer 'INSERT OR IGNORE' or 'INSERT ... ON CONFLICT(col) DO UPDATE ...' to avoid UNIQUE violations. "
-                "Choose mode=atomic for dependent ops (all-or-nothing) or per_statement to continue past individual errors."
+                "Execute one or more SQLite operations in order, including DDL and queries. "
+                "Provide exactly ONE SQL statement per item in 'operations' (no semicolon-chaining). "
+                "Do NOT include BEGIN/COMMIT/ROLLBACK; the tool manages transactions for mode='atomic'. "
+                "Escape single quotes by doubling them (e.g., 'What''s new'); avoid backslash escaping. "
+                "Prefer 'INSERT OR IGNORE' or 'INSERT ... ON CONFLICT(col) DO UPDATE ...' to avoid UNIQUE violations. "
+                "Use mode='atomic' for dependent ops (all-or-nothing) or 'per_statement' to continue past individual errors. "
+                "For a single query, pass a single-item 'operations' array."
             ),
             "parameters": {
                 "type": "object",
