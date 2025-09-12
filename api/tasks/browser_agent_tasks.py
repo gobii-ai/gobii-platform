@@ -239,9 +239,7 @@ def _resolve_browser_provider_priority_from_db():
                     continue
                 has_admin_key = bool(provider.api_key_encrypted)
                 has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
-                if not (has_admin_key or has_env_key):
-                    continue
-                # Resolve effective API key (admin or env)
+                # Resolve effective API key
                 api_key = None
                 if has_admin_key:
                     try:
@@ -251,6 +249,11 @@ def _resolve_browser_provider_priority_from_db():
                         api_key = None
                 if api_key is None and has_env_key:
                     api_key = os.getenv(provider.env_var_name)
+                # Allow OPENAI_COMPAT without a real key by sending a dummy key when base_url is set
+                if not api_key and provider.browser_backend == 'OPENAI_COMPAT' and endpoint.browser_base_url:
+                    api_key = 'sk-noauth'
+                if not api_key:
+                    continue
                 entries.append({
                     'provider_key': provider.key,
                     'endpoint_key': endpoint.key,
@@ -985,25 +988,25 @@ def _execute_agent_with_failover(
     """
     provider_priority = provider_priority or PROVIDER_PRIORITY
 
-    # Normalize legacy flat list or unweighted configs into a weighted structure.
-    if provider_priority:
+    # If provider_priority is DB-shaped (tiers -> list of dict entries), skip legacy normalization
+    is_db_shaped = bool(
+        provider_priority
+        and isinstance(provider_priority[0], (list, tuple))
+        and provider_priority[0]
+        and isinstance(provider_priority[0][0], dict)
+    )
+
+    if not is_db_shaped and provider_priority:
+        # Normalize legacy flat list or unweighted configs into a weighted structure.
         is_legacy_flat_list = not any(isinstance(item, (list, tuple)) for item in provider_priority)
         if is_legacy_flat_list:
             provider_priority = [provider_priority]  # type: ignore[list-item]
 
-        is_new_format = (
-            provider_priority
-            and isinstance(provider_priority[0], (list, tuple))
-            and provider_priority[0]
-            and isinstance(provider_priority[0][0], (list, tuple))
-        )
-
-        if not is_new_format:
-            new_priority = []
-            for tier in provider_priority:
-                new_tier = [(provider, 1.0) for provider in tier]  # type: ignore[union-attr]
-                new_priority.append(new_tier)
-            provider_priority = new_priority
+        new_priority = []
+        for tier in provider_priority:
+            new_tier = [(provider, 1.0) for provider in tier]  # type: ignore[union-attr]
+            new_priority.append(new_tier)
+        provider_priority = new_priority
 
     last_exc: Optional[Exception] = None
 
@@ -1261,9 +1264,16 @@ def _process_browser_use_task_core(
                 logger.warning("Failed to register custom actions for task %s: %s", task_obj.id, str(exc))
 
             with traced("Execute Agent") as agent_span:
-                # Resolve provider priority from DB if enabled, else use defaults
+                # Resolve provider priority from DB only (no legacy fallback)
                 db_priority = _resolve_browser_provider_priority_from_db()
-                provider_priority = db_priority if db_priority else PROVIDER_PRIORITY
+                if not db_priority:
+                    err = "No DB-configured browser-use tiers/endpoints available"
+                    logger.error(err)
+                    task_obj.status = BrowserUseAgentTask.StatusChoices.FAILED
+                    task_obj.error_message = err
+                    task_obj.save(update_fields=["status", "error_message"])
+                    return
+                provider_priority = db_priority
 
                 raw_result, token_usage = _execute_agent_with_failover(
                     task_input=task_obj.prompt,
