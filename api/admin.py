@@ -2198,6 +2198,120 @@ class SmsNumberAdmin(admin.ModelAdmin):
 class LinkShortenerAdmin(admin.ModelAdmin):
     list_display = ("code", "shortened", "url", "hits", "created_at")
     readonly_fields = ("hits", "shortened", "created_at", "updated_at")
+
+    @admin.display(description="Short URL")
+    def shortened(self, obj):
+        try:
+            return obj.get_absolute_url()
+        except Exception:
+            return f"/{obj.code}"
+
+
+# --------------------------------------------------------------------------- #
+#  LLM Provider + Endpoint Admin (DB-configurable LLM routing)
+# --------------------------------------------------------------------------- #
+from .models import (
+    LLMProvider,
+    PersistentModelEndpoint,
+    PersistentTokenRange,
+    PersistentLLMTier,
+    PersistentTierEndpoint,
+    BrowserModelEndpoint,
+    BrowserLLMPolicy,
+    BrowserLLMTier,
+    BrowserTierEndpoint,
+)
+
+
+from .admin_forms import LLMProviderForm
+
+
+@admin.register(LLMProvider)
+class LLMProviderAdmin(admin.ModelAdmin):
+    form = LLMProviderForm
+    list_display = ("display_name", "key", "enabled", "_key_source", "browser_backend")
+    list_filter = ("enabled", "browser_backend")
+    search_fields = ("display_name", "key", "env_var_name")
+    readonly_fields = ("_key_source",)
+
+    def get_readonly_fields(self, request, obj=None):
+        # Only show Key Source after the object exists
+        if obj is None:
+            return tuple()
+        return super().get_readonly_fields(request, obj)
+
+    def get_fieldsets(self, request, obj=None):
+        base = [
+            (None, {"fields": ("display_name", "key", "enabled")}),
+            ("Credentials", {"fields": ("api_key", "clear_api_key", "env_var_name")}),
+            ("Provider Options", {"fields": ("browser_backend", "supports_safety_identifier")}),
+            ("Vertex (Google)", {"fields": ("vertex_project", "vertex_location")}),
+        ]
+        if obj is not None:
+            # Append Key Source in credentials when editing existing provider
+            base[1][1]["fields"] = ("api_key", "clear_api_key", "env_var_name", "_key_source")
+        return base
+
+    def _key_source(self, obj):
+        if obj.api_key_encrypted:
+            return "Admin"
+        if obj.env_var_name:
+            import os
+            return "Env" if os.getenv(obj.env_var_name) else "Missing"
+        return "Missing"
+    _key_source.short_description = "Key Source"
+
+
+@admin.register(PersistentModelEndpoint)
+class PersistentModelEndpointAdmin(admin.ModelAdmin):
+    list_display = ("key", "provider", "litellm_model", "api_base", "enabled", "supports_tool_choice")
+    list_filter = ("enabled", "provider")
+    search_fields = ("key", "litellm_model")
+    fields = ("key", "provider", "enabled", "litellm_model", "api_base", "temperature_override", "supports_tool_choice")
+
+
+class PersistentTierEndpointInline(admin.TabularInline):
+    model = PersistentTierEndpoint
+    extra = 0
+
+
+@admin.register(PersistentLLMTier)
+class PersistentLLMTierAdmin(admin.ModelAdmin):
+    list_display = ("token_range", "order", "description")
+    list_filter = ("token_range",)
+    inlines = [PersistentTierEndpointInline]
+
+
+@admin.register(PersistentTokenRange)
+class PersistentTokenRangeAdmin(admin.ModelAdmin):
+    list_display = ("name", "min_tokens", "max_tokens")
+    ordering = ("min_tokens",)
+
+
+@admin.register(BrowserModelEndpoint)
+class BrowserModelEndpointAdmin(admin.ModelAdmin):
+    list_display = ("key", "provider", "browser_model", "browser_base_url", "enabled")
+    list_filter = ("enabled", "provider")
+    search_fields = ("key", "browser_model", "browser_base_url")
+
+
+class BrowserTierEndpointInline(admin.TabularInline):
+    model = BrowserTierEndpoint
+    extra = 0
+
+
+@admin.register(BrowserLLMTier)
+class BrowserLLMTierAdmin(admin.ModelAdmin):
+    list_display = ("policy", "order", "description")
+    list_filter = ("policy",)
+    inlines = [BrowserTierEndpointInline]
+
+
+@admin.register(BrowserLLMPolicy)
+class BrowserLLMPolicyAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
     search_fields = ("code", "url")
 
     @admin.display(description="Short URL")

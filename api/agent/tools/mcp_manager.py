@@ -392,7 +392,9 @@ Return the relevant tools as a JSON array:"""
         for i, (provider, model, params) in enumerate(failover_configs):
             try:
                 logger.info(f"Searching MCP tools with provider {i+1}/{len(failover_configs)}: {provider}")
-                
+                # Remove internal-only hints (not accepted by litellm)
+                params = {k: v for k, v in params.items() if k != 'supports_tool_choice'}
+
                 response = litellm.completion(
                     model=model,
                     messages=[

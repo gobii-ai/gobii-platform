@@ -23,6 +23,7 @@ from api.agent.tools.mcp_tools import (
     get_search_tools_tool,
     get_enable_tool_tool,
 )
+from tests.utils.llm_seed import seed_persistent_basic
 
 
 def create_test_browser_agent(user):
@@ -332,6 +333,8 @@ class MCPToolFunctionsTests(TestCase):
             charter="Test",
             browser_use_agent=self.browser_agent
         )
+        # Ensure persistent LLM config exists for DB-only selection
+        seed_persistent_basic(include_openrouter=False)
         
     @patch('api.agent.tools.mcp_manager.litellm.completion')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')

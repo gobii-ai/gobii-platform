@@ -794,6 +794,214 @@ class ProxyServer(models.Model):
         return bool(self.username and self.password)
 
 
+# --------------------------------------------------------------------------- #
+#  LLM Provider + Endpoint Config (DB-managed load balancing/failover)
+# --------------------------------------------------------------------------- #
+
+class LLMProvider(models.Model):
+    """Vendor-level provider configuration and credentials.
+
+    Credentials may come from an encrypted admin-set value or an environment
+    variable (env_var_name). At runtime, the effective key is chosen as
+    admin-set if present, otherwise from env.
+    """
+
+    class BrowserBackend(models.TextChoices):
+        OPENAI = "OPENAI", "OpenAI"
+        ANTHROPIC = "ANTHROPIC", "Anthropic"
+        GOOGLE = "GOOGLE", "Google"
+        OPENAI_COMPAT = "OPENAI_COMPAT", "OpenAI-Compatible"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=64, unique=True, help_text="Provider key, e.g., 'openai', 'anthropic'")
+    display_name = models.CharField(max_length=128)
+    enabled = models.BooleanField(default=True)
+
+    # Credentials
+    api_key_encrypted = models.BinaryField(null=True, blank=True, help_text="AES-256-GCM encrypted API key (optional)")
+    env_var_name = models.CharField(max_length=128, blank=True, help_text="Environment variable fallback for API key")
+
+    # Provider-wide options
+    supports_safety_identifier = models.BooleanField(default=False)
+    browser_backend = models.CharField(
+        max_length=16,
+        choices=BrowserBackend.choices,
+        default=BrowserBackend.OPENAI,
+        help_text="Browser client backend to use for this provider"
+    )
+
+    # Google Vertex specifics (optional)
+    vertex_project = models.CharField(max_length=128, blank=True)
+    vertex_location = models.CharField(max_length=64, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["display_name"]
+        indexes = [
+            models.Index(fields=["key"]),
+            models.Index(fields=["enabled"]),
+        ]
+
+    def __str__(self):
+        return f"{self.display_name} ({self.key})"
+
+
+class PersistentModelEndpoint(models.Model):
+    """Model endpoint for persistent agents (LiteLLM)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_gpt5'")
+    provider = models.ForeignKey(LLMProvider, on_delete=models.CASCADE, related_name="persistent_endpoints")
+    enabled = models.BooleanField(default=True)
+
+    # LiteLLM model string and options
+    litellm_model = models.CharField(max_length=256)
+    temperature_override = models.FloatField(null=True, blank=True)
+    supports_tool_choice = models.BooleanField(default=True)
+    # For OpenAI-compatible endpoints via LiteLLM (model startswith 'openai/...')
+    # provide the custom base URL used by your proxy (e.g., http://vllm-host:port/v1)
+    api_base = models.CharField(max_length=256, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider__display_name", "litellm_model"]
+        indexes = [
+            models.Index(fields=["key"]),
+            models.Index(fields=["enabled"]),
+            models.Index(fields=["provider"]),
+        ]
+
+    def __str__(self):
+        return f"{self.key} → {self.litellm_model}"
+
+
+class PersistentTokenRange(models.Model):
+    """Token ranges for selecting persistent LLM tiers."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=64, unique=True)
+    min_tokens = models.PositiveIntegerField()
+    max_tokens = models.PositiveIntegerField(null=True, blank=True, help_text="Exclusive upper bound; null means infinity")
+
+    class Meta:
+        ordering = ["min_tokens"]
+        indexes = [
+            models.Index(fields=["min_tokens", "max_tokens"]),
+        ]
+
+    def __str__(self):
+        upper = "∞" if self.max_tokens is None else str(self.max_tokens)
+        return f"{self.name} [{self.min_tokens}, {upper})"
+
+
+class PersistentLLMTier(models.Model):
+    """Tier within a token range for persistent agents."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    token_range = models.ForeignKey(PersistentTokenRange, on_delete=models.CASCADE, related_name="tiers")
+    order = models.PositiveIntegerField(help_text="1-based order within the range")
+    description = models.CharField(max_length=256, blank=True)
+
+    class Meta:
+        ordering = ["token_range__min_tokens", "order"]
+        unique_together = (("token_range", "order"),)
+
+    def __str__(self):
+        return f"{self.token_range.name} tier {self.order}"
+
+
+class PersistentTierEndpoint(models.Model):
+    """Weighted association between a Persistent tier and a model endpoint."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tier = models.ForeignKey(PersistentLLMTier, on_delete=models.CASCADE, related_name="tier_endpoints")
+    endpoint = models.ForeignKey(PersistentModelEndpoint, on_delete=models.CASCADE, related_name="in_tiers")
+    weight = models.FloatField(help_text="Relative weight within the tier; > 0")
+
+    class Meta:
+        ordering = ["tier__order", "endpoint__key"]
+        unique_together = (("tier", "endpoint"),)
+
+    def __str__(self):
+        return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
+
+
+class BrowserModelEndpoint(models.Model):
+    """Model endpoint for browser-use agents (Chat clients)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openrouter_glm_45'")
+    provider = models.ForeignKey(LLMProvider, on_delete=models.CASCADE, related_name="browser_endpoints")
+    enabled = models.BooleanField(default=True)
+
+    browser_model = models.CharField(max_length=256)
+    browser_base_url = models.CharField(max_length=256, blank=True, help_text="Base URL for OpenAI-compatible providers (optional)")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider__display_name", "browser_model"]
+        indexes = [
+            models.Index(fields=["key"]),
+            models.Index(fields=["enabled"]),
+            models.Index(fields=["provider"]),
+        ]
+
+    def __str__(self):
+        return f"{self.key} → {self.browser_model}"
+
+
+class BrowserLLMPolicy(models.Model):
+    """Active browser-use LLM policy (tiers)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=128, unique=True)
+    is_active = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name}{' (active)' if self.is_active else ''}"
+
+
+class BrowserLLMTier(models.Model):
+    """Tier within a browser-use policy."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    policy = models.ForeignKey(BrowserLLMPolicy, on_delete=models.CASCADE, related_name="tiers")
+    order = models.PositiveIntegerField(help_text="1-based order within the policy")
+    description = models.CharField(max_length=256, blank=True)
+
+    class Meta:
+        ordering = ["policy__name", "order"]
+        unique_together = (("policy", "order"),)
+
+    def __str__(self):
+        return f"{self.policy.name} tier {self.order}"
+
+
+class BrowserTierEndpoint(models.Model):
+    """Weighted association between a Browser tier and a model endpoint."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tier = models.ForeignKey(BrowserLLMTier, on_delete=models.CASCADE, related_name="tier_endpoints")
+    endpoint = models.ForeignKey(BrowserModelEndpoint, on_delete=models.CASCADE, related_name="in_tiers")
+    weight = models.FloatField(help_text="Relative weight within the tier; > 0")
+
+    class Meta:
+        ordering = ["tier__order", "endpoint__key"]
+        unique_together = (("tier", "endpoint"),)
+
+    def __str__(self):
+        return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
+
+
 class DecodoCredential(models.Model):
     """Decodo dedicated residential IP credentials"""
 
