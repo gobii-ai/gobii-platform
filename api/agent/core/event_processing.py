@@ -205,12 +205,34 @@ def _completion_with_failover(
                 llm_span.set_attribute("llm.model", model)
                 llm_span.set_attribute("llm.provider", provider)
 
-                # If the provider starts with "openai", add safety_identifier to params
-                if provider.startswith("openai") and safety_identifier:
+                # Extra diagnostics for OpenAI-compatible / custom bases
+                api_base = getattr(params, 'get', lambda *_: None)("api_base") if isinstance(params, dict) else None
+                api_key_present = isinstance(params, dict) and bool(params.get("api_key"))
+                if api_base:
+                    llm_span.set_attribute("llm.api_base", api_base)
+                llm_span.set_attribute("llm.api_key_present", bool(api_key_present))
+                try:
+                    masked = None
+                    if api_key_present:
+                        k = params.get("api_key")
+                        masked = (str(k)[:6] + "…") if k else None
+                    logger.info(
+                        "LLM call: provider=%s model=%s api_base=%s api_key=%s",
+                        provider,
+                        model,
+                        api_base or "",
+                        masked or "<none>",
+                    )
+                except Exception:
+                    pass
+
+                # If OpenAI family, add safety_identifier hint when available
+                if (provider.startswith("openai") or provider == "openai") and safety_identifier:
                     params["safety_identifier"] = str(safety_identifier)
                 
-                # Fireworks doesn't support tool_choice parameter
-                if provider == "fireworks_qwen3_235b_a22b":
+                # Respect endpoint tool-choice capability if provided via params hint
+                tool_choice_supported = params.pop("supports_tool_choice", True)
+                if not tool_choice_supported:
                     response = litellm.completion(
                         model=model,
                         messages=messages,
@@ -262,6 +284,16 @@ def _completion_with_failover(
             last_exc = exc
             current_span = trace.get_current_span()
             mark_span_failed_with_exception(current_span, exc, f"LLM completion failed with {provider}")
+            try:
+                logger.exception(
+                    "LLM call failed: provider=%s model=%s api_base=%s error=%s",
+                    provider,
+                    model,
+                    api_base or (params.get('api_base') if isinstance(params, dict) else ''),
+                    str(exc),
+                )
+            except Exception:
+                pass
             logger.exception(
                 "Provider %s failed for agent %s; trying next provider",
                 provider,

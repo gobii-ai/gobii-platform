@@ -130,84 +130,19 @@ def get_tier_config_for_tokens(token_count: int) -> List[List[Tuple[str, float]]
 
 
 def get_llm_config() -> Tuple[str, dict]:
-    """
-    Get the optimal LiteLLM model and configuration using simple priority fallback.
-    
-    This is kept for backward compatibility and simple use cases.
-    For failover scenarios, use get_llm_config_with_failover().
-    
-    Returns:
-        Tuple of (model_name, litellm_params)
-        
-    Priority:
-        1. Vertex AI (Gemini 2.5 Pro) - primary choice
-        2. Anthropic (Claude Sonnet 4) - fallback
-        3. OpenAI (GPT-4.1) - second fallback  
-        4. OpenRouter (Gemini 2.5 Pro) - final fallback
-        
-    Raises:
-        ValueError: If no provider is available
-    """
-    
-    # Check for Google first - primary choice for persistent agents
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    if google_api_key:
-        logger.info("Using Vertex AI (Google Cloud) as primary LLM provider")
-        
-        # Get project ID from environment or use default
-        vertex_project = os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
-        
-        # Get location from environment or use default to match infrastructure
-        vertex_location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
-        
-        return (
-            "vertex_ai/gemini-2.5-pro",
-            {
-                "temperature": 0.1,
-                "vertex_project": vertex_project,
-                "vertex_location": vertex_location,
-                # Vertex AI will use GOOGLE_API_KEY from environment
-            }
-        )
+    """DB-only: Return the first configured LiteLLM model+params.
 
-    # Anthropic as fallback
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    if anthropic_key:
-        logger.info("Using Anthropic as fallback LLM provider")
-        return (
-            "anthropic/claude-sonnet-4-20250514",
-            {
-                "temperature": 0.1,
-            }
-        )
-
-    # OpenAI as third priority fallback
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
-        logger.info("Using OpenAI as second fallback LLM provider")
-        return (
-            "openai/gpt-4.1",
-            {
-                "temperature": 0.1,
-            }
-        )
-        
-    # Fallback to OpenRouter GLM-4.5
-    openrouter_key = os.getenv("OPENROUTER_API_KEY")
-    if openrouter_key:
-        logger.info("Using OpenRouter GLM-4.5 as final fallback LLM provider")
-        return (
-            "openrouter/z-ai/glm-4.5", 
-            {
-                "temperature": 0.1,
-            }
-        )
-    
-    # No providers available
-    raise ValueError(
-        "No LLM provider available. Set either GOOGLE_API_KEY, ANTHROPIC_API_KEY, "
-        "OPENAI_API_KEY, or OPENROUTER_API_KEY."
-    )
+    Uses the same DB-backed tier selection as get_llm_config_with_failover
+    with token_count=0 and returns the first (primary) config.
+    Raises ValueError if no DB tiers/endpoints are configured.
+    """
+    configs = get_llm_config_with_failover(token_count=0)
+    if not configs:
+        raise ValueError("No DB-configured LLM providers/endpoints available")
+    _provider_key, model, params = configs[0]
+    # Remove any internal-only hints
+    params = {k: v for k, v in params.items() if k != "supports_tool_choice"}
+    return model, params
 
 
 def get_provider_config(provider: str) -> Tuple[str, dict]:
@@ -325,18 +260,20 @@ def get_llm_config_with_failover(
                 # Effective key present?
                 has_admin_key = bool(provider.api_key_encrypted)
                 has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
-                if not (has_admin_key or has_env_key):
+                # Allow OpenAI-compatible endpoints with no key (api_base + openai/ prefix)
+                is_openai_compat = endpoint.litellm_model.startswith('openai/') and bool(getattr(endpoint, 'api_base', None))
+                if not (has_admin_key or has_env_key or is_openai_compat):
+                    # Skip endpoints that truly require a key but none is configured
+                    logger.info(
+                        "DB LLM skip endpoint (no key): range=%s tier=%s endpoint=%s provider=%s model=%s api_base=%s",
+                        token_range.name,
+                        tier.order,
+                        endpoint.key,
+                        provider.key,
+                        endpoint.litellm_model,
+                        getattr(endpoint, 'api_base', '') or ''
+                    )
                     continue
-                # If admin key exists but env var is missing, export to env for LiteLLM
-                if has_admin_key and provider.env_var_name and not has_env_key:
-                    try:
-                        from api.encryption import SecretsEncryption
-                        decrypted = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
-                        if decrypted:
-                            os.environ[provider.env_var_name] = decrypted
-                            has_env_key = True
-                    except Exception:
-                        pass
                 endpoints_with_weights.append((endpoint, provider, te.weight))
 
             if not endpoints_with_weights:
@@ -349,6 +286,22 @@ def get_llm_config_with_failover(
                 endpoint, provider, _w = remaining.pop(selected_idx)
 
                 params: Dict[str, Any] = {"temperature": 0.1}
+                # Inject API key directly into LiteLLM params (DB-only routing).
+                try:
+                    effective_key = None
+                    if provider.api_key_encrypted:
+                        from api.encryption import SecretsEncryption
+                        effective_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
+                    if not effective_key and provider.env_var_name:
+                        effective_key = os.getenv(provider.env_var_name)
+                    if effective_key:
+                        params["api_key"] = effective_key
+                    else:
+                        # For OpenAI-compatible proxies that allow no auth, pass a dummy key
+                        if endpoint.litellm_model.startswith('openai/') and getattr(endpoint, 'api_base', None):
+                            params["api_key"] = "sk-noauth"
+                except Exception:
+                    pass
                 if endpoint.temperature_override is not None:
                     params["temperature"] = float(endpoint.temperature_override)
                 if provider.key == 'google':
@@ -364,79 +317,24 @@ def get_llm_config_with_failover(
                 # and configure api_base on the endpoint (e.g., http://vllm-host:port/v1)
                 if endpoint.litellm_model.startswith('openai/') and getattr(endpoint, 'api_base', None):
                     params["api_base"] = endpoint.api_base
+                    logger.info(
+                        "DB LLM endpoint configured with api_base: endpoint=%s provider=%s model=%s api_base=%s has_key=%s",
+                        endpoint.key,
+                        provider.key,
+                        endpoint.litellm_model,
+                        endpoint.api_base,
+                        bool(params.get('api_key')),
+                    )
 
-                failover_configs.append((endpoint.key, endpoint.litellm_model, params))
+                # Add tool-choice capability hint for callers (not passed to litellm)
+                params_with_hints = dict(params)
+                params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
+                failover_configs.append((endpoint.key, endpoint.litellm_model, params_with_hints))
 
         if failover_configs:
             return failover_configs
 
-    # Use provided tiers or select based on token count (legacy behavior)
-    if provider_tiers is None:
-        provider_tiers = get_tier_config_for_tokens(token_count)
-        logger.debug(
-            "Using token-based tier selection for %d tokens%s",
-            token_count,
-            f" (agent {agent_id})" if agent_id else ""
-        )
-    
-    failover_configs = []
-    
-    for tier_idx, tier in enumerate(provider_tiers, start=1):
-        # Build list of usable providers in this tier
-        tier_providers_with_weights = []
-        for provider, weight in tier:
-            if provider not in PROVIDER_CONFIG:
-                logger.warning("Unknown provider %s; skipping.", provider)
-                continue
-                
-            env_var = PROVIDER_CONFIG[provider]["env_var"]
-            if not os.getenv(env_var):
-                logger.info(
-                    "Skipping provider %s%s — missing env %s",
-                    provider,
-                    f" for agent {agent_id}" if agent_id else "",
-                    env_var,
-                )
-                continue
-                
-            tier_providers_with_weights.append((provider, weight))
-        
-        if not tier_providers_with_weights:
-            logger.info(
-                "No usable providers in tier %d%s; moving to next tier.",
-                tier_idx,
-                f" for agent {agent_id}" if agent_id else "",
-            )
-            continue
-        
-        # Create weighted-random order of providers for this tier
-        remaining_providers = tier_providers_with_weights.copy()
-        while remaining_providers:
-            providers = [p[0] for p in remaining_providers]
-            weights = [p[1] for p in remaining_providers]
-            selected_provider = random.choices(providers, weights=weights, k=1)[0]
-            
-            try:
-                model, params = get_provider_config(selected_provider)
-                failover_configs.append((selected_provider, model, params))
-                logger.debug(
-                    "Added provider %s (tier %d) to failover list%s",
-                    selected_provider,
-                    tier_idx,
-                    f" for agent {agent_id}" if agent_id else "",
-                )
-            except ValueError as e:
-                logger.warning("Failed to configure provider %s: %s", selected_provider, e)
-            
-            remaining_providers = [p for p in remaining_providers if p[0] != selected_provider]
-    
-    if not failover_configs:
-        raise ValueError(
-            "No LLM provider available with valid API keys. "
-            "Set GOOGLE_API_KEY for primary choice or ANTHROPIC_API_KEY for fallback."
-        )
-    
-    return failover_configs
+    raise ValueError("No DB-configured LLM providers/endpoints available for the given token count")
 
 
 def get_summarization_llm_config() -> Tuple[str, dict]:
@@ -449,7 +347,11 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
     Returns:
         Tuple of (model_name, litellm_params)
     """
-    model, params = get_llm_config()
-    # Ensure temperature is 0 for summarization
+    # DB-only: pick primary config and force temperature=0
+    configs = get_llm_config_with_failover(token_count=0)
+    if not configs:
+        raise ValueError("No DB-configured LLM providers/endpoints available for summarization")
+    _provider_key, model, params = configs[0]
+    params = {k: v for k, v in params.items() if k != "supports_tool_choice"}
     params["temperature"] = 0
     return model, params
