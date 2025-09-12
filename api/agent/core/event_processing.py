@@ -1102,12 +1102,16 @@ def _build_prompt_context(agent: PersistentAgent, event_window: EventWindow, cur
     )
 
     # Get the model being used for accurate token counting
-    # Note: We use the reference model here to decide the tier, then the primary
-    # model of that tier is used for prompt building.
-    failover_configs = get_llm_config_with_failover(
-        agent_id=str(agent.id),
-        token_count=0  # Get default/small config to find primary model
-    )
+    # Note: We attempt to read DB-configured tiers with token_count=0 to pick
+    # a primary model; if unavailable, fall back to the reference tokenizer
+    # model so prompt building doesn’t hard-fail during tests or bootstrap.
+    try:
+        failover_configs = get_llm_config_with_failover(
+            agent_id=str(agent.id),
+            token_count=0
+        )
+    except Exception:
+        failover_configs = None
     model = failover_configs[0][1] if failover_configs else _AGENT_MODEL
     
     # Create token estimator for the specific model
