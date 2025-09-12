@@ -1105,7 +1105,7 @@ def _execute_agent_with_failover(
 
                 logger.info(
                     "Provider %s succeeded for task %s (tier %d)",
-                    provider,
+                    provider_key,
                     task_id,
                     tier_idx,
                 )
@@ -1115,7 +1115,7 @@ def _execute_agent_with_failover(
                 last_exc = exc
                 logger.exception(
                     "Provider %s failed for task %s (tier %d); trying next provider in tier.",
-                    provider,
+                    provider_key,
                     task_id,
                     tier_idx,
                 )
