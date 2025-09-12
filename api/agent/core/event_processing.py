@@ -977,8 +977,8 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                         result = execute_enable_tool(agent, tool_params)
                         # After enabling/disabling a tool (via LRU), refresh the tools list for next iteration
                         tools = _get_agent_tools(agent)
-                    elif tool_name.startswith("mcp_"):
-                        # Handle dynamic MCP tool execution
+                    elif get_mcp_manager().has_tool(tool_name):
+                        # Handle dynamic MCP tool execution (supports prefixed and unprefixed MCP tool names)
                         result = execute_mcp_tool(agent, tool_name, tool_params)
                     else:
                         result = {
