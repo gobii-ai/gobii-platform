@@ -61,6 +61,7 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENTS_LISTED = 'Persistent Agents Listed'
     PERSISTENT_AGENT_EMAIL_SENT = 'Persistent Agent Message Sent'
     PERSISTENT_AGENT_EMAIL_RECEIVED = 'Persistent Agent Message Received'
+    PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS = 'Persistent Agent Out of Credits Email'
 
     # SMS Events
     PERSISTENT_AGENT_SMS_SENT = 'Persistent Agent SMS Sent'

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+
 """Service helpers for inbound communication messages."""
 
 from dataclasses import dataclass
@@ -12,6 +14,8 @@ import requests
 
 import requests
 from django.core.files.base import ContentFile, File
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
 from django.db import transaction
 from ..files.filespace_service import enqueue_import_after_commit
 
@@ -28,6 +32,7 @@ from .adapters import ParsedMessage
 from observability import traced
 from opentelemetry import baggage
 from config import settings
+from util.constants.task_constants import TASKS_UNLIMITED
 
 @dataclass
 class InboundMessageInfo:
@@ -202,9 +207,80 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
             except PersistentAgent.DoesNotExist:
                 pass
 
-            from api.agent.tasks import process_agent_events_task
-            # Top-level trigger: no budget context provided
-            process_agent_events_task.delay(str(owner_id))
+            # Before triggering agent processing, check if the agent owner's
+            # account is out of credits. If so, send a reply email to the sender
+            # (only for email channel) and skip processing.
+            should_skip_processing = False
+
+            try:
+                if channel_val == CommsChannel.EMAIL:
+                    from api.models import PersistentAgent
+                    from tasks.services import TaskCreditService
+
+                    agent_obj = PersistentAgent.objects.filter(id=owner_id).select_related("user").first()
+                    if agent_obj and agent_obj.user_id:
+                        # Ensure the sender is in the agent's allow list before replying
+                        if agent_obj.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):
+                            available = TaskCreditService.calculate_available_tasks(agent_obj.user)
+                            if available != TASKS_UNLIMITED and available <= 0:
+                                # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
+                                try:
+                                    context = {
+                                        "agent": agent_obj,
+                                        "owner": agent_obj.user,
+                                        "sender": parsed.sender,
+                                        "subject": parsed.subject or "",
+                                    }
+                                    subject = render_to_string(
+                                        "emails/agent_out_of_credits_subject.txt", context
+                                    ).strip() or f"Re: {parsed.subject or agent_obj.name}"
+                                    text_body = render_to_string(
+                                        "emails/agent_out_of_credits.txt", context
+                                    )
+                                    html_body = render_to_string(
+                                        "emails/agent_out_of_credits.html", context
+                                    )
+                                    recipients = {parsed.sender}
+                                    try:
+                                        owner_email = (agent_obj.user.email or "").strip()
+                                        if owner_email:
+                                            recipients.add(owner_email)
+                                    except Exception:
+                                        logging.warning(f"Failed to add owner's email to recipients for agent {agent_obj.id}", exc_info=True)
+
+                                    send_mail(
+                                        subject,
+                                        text_body,
+                                        None,  # use DEFAULT_FROM_EMAIL
+                                        list(recipients),
+                                        html_message=html_body,
+                                        fail_silently=True,
+                                    )
+
+                                    Analytics.track_event(
+                                        user_id=str(agent_obj.user.id),
+                                        event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS,
+                                        source=AnalyticsSource.EMAIL,
+                                        properties={
+                                            "agent_id": str(agent_obj.id),
+                                            "agent_name": agent_obj.name,
+                                            "channel": channel_val,
+                                            "sender": parsed.sender,
+                                        },
+                                    )
+                                except Exception:
+                                    # Do not block on email failures
+                                    logging.exception("Failed sending out-of-credits reply email")
+
+                                # Skip processing by the agent
+                                should_skip_processing = True
+            except Exception:
+                logging.exception("Error during out-of-credits pre-processing check")
+
+            if not should_skip_processing:
+                from api.agent.tasks import process_agent_events_task
+                # Top-level trigger: no budget context provided
+                process_agent_events_task.delay(str(owner_id))
 
         return InboundMessageInfo(message=message)
 

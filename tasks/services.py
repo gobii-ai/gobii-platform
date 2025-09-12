@@ -59,7 +59,15 @@ class TaskCreditService:
 
         used = TaskCreditService.get_user_task_credits_used(user, task_credits)
 
-        return entitled - used
+        available = entitled - used
+
+        # This happens if the user switched plans, etc - don't allow negative available. The exception is
+        # the magic value of -1 which means unlimited tasks but we already handled that above
+        if available < 0:
+            logger.warning(f"calculate_available_tasks: User {user.id} has more tasks used ({used}) than entitled ({entitled}). Resetting available to 0.")
+            available = 0
+
+        return available
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Grant Subscription Credits")

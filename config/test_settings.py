@@ -17,6 +17,7 @@ os.environ.setdefault("SEGMENT_WRITE_KEY", "")
 # Disable the community unlimited override so plan limits behave predictably in tests
 os.environ.setdefault("GOBII_ENABLE_COMMUNITY_UNLIMITED", "0")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
+os.environ.setdefault("GOBII_ENABLE_TRACING", "0")
 
 from .settings import *
 
