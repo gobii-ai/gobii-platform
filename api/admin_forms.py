@@ -1,7 +1,7 @@
 # admin_forms.py  (optional file)
 from django import forms
 from django.forms import ModelForm
-from .models import CommsChannel, AgentEmailAccount
+from .models import CommsChannel, AgentEmailAccount, LLMProvider
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 class AgentEmailAccountForm(ModelForm):
@@ -203,26 +203,65 @@ class GrantCreditsByUserIdsForm(forms.Form):
         help_text="When the credits are considered granted",
         widget=AdminSplitDateTime,
     )
-    expiration_date = forms.SplitDateTimeField(
-        label="Expiration Date",
-        help_text="When the credits expire",
-        widget=AdminSplitDateTime,
+
+
+class LLMProviderForm(ModelForm):
+    """Admin form for LLMProvider with write-only API key handling."""
+    api_key = forms.CharField(
+        label="Admin API Key",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leave blank to keep existing key."
     )
-    dry_run = forms.BooleanField(
-        label="Dry Run",
+    clear_api_key = forms.BooleanField(
+        label="Clear stored admin API key",
         required=False,
         initial=False,
-        help_text="If checked, shows how many users would be granted without creating TaskCredits",
     )
-    only_if_out_of_credits = forms.BooleanField(
-        label="Only if out of credits",
-        required=False,
-        initial=False,
-        help_text="Grant only to users who currently have 0 available credits",
-    )
-    export_csv = forms.BooleanField(
-        label="Export CSV (dry‑run)",
-        required=False,
-        initial=False,
-        help_text="When Dry Run is checked, download a CSV of affected users",
-    )
+
+    class Meta:
+        model = LLMProvider
+        fields = (
+            "display_name",
+            "key",
+            "enabled",
+            "env_var_name",
+            "browser_backend",
+            "supports_safety_identifier",
+            "vertex_project",
+            "vertex_location",
+        )
+
+    def clean(self):
+        cleaned = super().clean()
+        # Explicit uniqueness feedback for 'key' to avoid generic banner only
+        key = cleaned.get("key")
+        if key:
+            qs = LLMProvider.objects.filter(key=key)
+            if self.instance.pk:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                self.add_error("key", "A provider with this key already exists.")
+
+        # Allow providers without any key (admin or env) — no validation required here.
+        # Vertex fields are optional and only used if backend == GOOGLE (no strict enforcement).
+        # Ensure display_name and key are non-empty strings
+        if not cleaned.get("display_name"):
+            self.add_error("display_name", "Display name is required.")
+        if not cleaned.get("key"):
+            self.add_error("key", "Key is required.")
+        return cleaned
+
+    def save(self, commit=True):
+        instance: LLMProvider = super().save(commit=False)
+        api_key = self.cleaned_data.get("api_key")
+        clear = self.cleaned_data.get("clear_api_key")
+        if clear:
+            instance.api_key_encrypted = None
+        elif api_key:
+            from .encryption import SecretsEncryption
+            instance.api_key_encrypted = SecretsEncryption.encrypt_value(api_key)
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance

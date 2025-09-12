@@ -96,9 +96,8 @@ TOOL_CALL_HISTORY_LIMIT = 10
 PROMPT_TOKEN_BUDGET = 96000
 # PROMPT_TOKEN_BUDGET = 20000
 
-# Legacy fallback - kept for backward compatibility with simpler use cases
-# Get LLM configuration at module load time
-_AGENT_MODEL, _AGENT_MODEL_PARAMS = get_llm_config()
+# Default reference model for token estimation and rare fallbacks
+_AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
 
 
 def _create_token_estimator(model: str) -> callable:

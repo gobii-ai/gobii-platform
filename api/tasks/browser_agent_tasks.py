@@ -18,6 +18,7 @@ from django.core.files import File
 from celery import shared_task
 from django.utils import timezone
 from django.conf import settings
+from django.apps import apps
 from django.db import close_old_connections
 from django.db.utils import OperationalError
 
@@ -205,6 +206,67 @@ PROVIDER_PRIORITY: List[List[Any]] = getattr(
 
 DEFAULT_GOOGLE_MODEL = getattr(settings, "GOOGLE_LLM_MODEL", "gemini-2.5-pro")
 
+
+def _resolve_browser_provider_priority_from_db():
+    """Return DB-configured browser tiers as a list of tiers with endpoint dicts.
+
+    Each tier is a list of dicts: {
+        'provider_key': str,
+        'endpoint_key': str,
+        'weight': float,
+        'browser_model': str,
+        'base_url': str | '',
+        'backend': str (OPENAI|ANTHROPIC|GOOGLE|OPENAI_COMPAT),
+        'has_key': bool,
+    }
+    Returns None if DB feature disabled or on error/empty.
+    """
+    try:
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        BrowserLLMPolicy = apps.get_model('api', 'BrowserLLMPolicy')
+        BrowserLLMTier = apps.get_model('api', 'BrowserLLMTier')
+        BrowserTierEndpoint = apps.get_model('api', 'BrowserTierEndpoint')
+        active = BrowserLLMPolicy.objects.filter(is_active=True).first()
+        if not active:
+            return None
+        tiers = []
+        for tier in BrowserLLMTier.objects.filter(policy=active).order_by('order'):
+            entries = []
+            for te in BrowserTierEndpoint.objects.filter(tier=tier).select_related('endpoint__provider').all():
+                endpoint = te.endpoint
+                provider = endpoint.provider
+                if not (provider.enabled and endpoint.enabled):
+                    continue
+                has_admin_key = bool(provider.api_key_encrypted)
+                has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
+                if not (has_admin_key or has_env_key):
+                    continue
+                # Resolve effective API key (admin or env)
+                api_key = None
+                if has_admin_key:
+                    try:
+                        from api.encryption import SecretsEncryption
+                        api_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
+                    except Exception:
+                        api_key = None
+                if api_key is None and has_env_key:
+                    api_key = os.getenv(provider.env_var_name)
+                entries.append({
+                    'provider_key': provider.key,
+                    'endpoint_key': endpoint.key,
+                    'weight': float(te.weight),
+                    'browser_model': endpoint.browser_model,
+                    'base_url': endpoint.browser_base_url or '',
+                    'backend': provider.browser_backend,
+                    'api_key': api_key,
+                    'has_key': True,
+                })
+            if entries:
+                tiers.append(entries)
+        return tiers or None
+    except Exception:
+        return None
+
 # --------------------------------------------------------------------------- #
 #  Filespace helpers (available_file_paths)
 # --------------------------------------------------------------------------- #
@@ -391,6 +453,10 @@ async def _run_agent(
     output_schema: Optional[dict] = None,
     browser_use_agent_id: Optional[str] = None,
     persistent_agent_id: Optional[str] = None,
+    *,
+    override_model: Optional[str] = None,
+    override_base_url: Optional[str] = None,
+    provider_backend_override: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """Execute the Browser‑Use agent for a single provider."""
     if baggage:
@@ -574,22 +640,45 @@ async def _run_agent(
 
             llm_params = {"api_key": llm_api_key, "temperature": 0}
 
-            if provider == "google":
-                llm_params["model"] = DEFAULT_GOOGLE_MODEL
+            backend = provider_backend_override
+            if backend is None:
+                # Infer from provider string for legacy path
+                if provider == "google":
+                    backend = "GOOGLE"
+                elif provider == "anthropic":
+                    backend = "ANTHROPIC"
+                elif provider in ("openrouter", "fireworks"):
+                    backend = "OPENAI_COMPAT"
+                else:
+                    backend = "OPENAI"
+
+            # Resolve model/base_url
+            model_name = override_model
+            base_url = override_base_url
+
+            if model_name is None:
+                if backend == "GOOGLE":
+                    model_name = DEFAULT_GOOGLE_MODEL
+                elif backend == "ANTHROPIC":
+                    model_name = "claude-sonnet-4-20250514"
+                elif backend == "OPENAI_COMPAT":
+                    if provider == "openrouter":
+                        model_name = "z-ai/glm-4.5"
+                        base_url = base_url or "https://openrouter.ai/api/v1"
+                    else:
+                        model_name = "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
+                        base_url = base_url or "https://api.fireworks.ai/inference/v1"
+                else:  # OPENAI
+                    model_name = "gpt-5-mini"
+
+            llm_params["model"] = model_name
+            if backend == "GOOGLE":
                 llm = ChatGoogle(**llm_params)
-            elif provider == "openrouter":
-                llm_params["model"] = "z-ai/glm-4.5"
-                llm_params["base_url"] = "https://openrouter.ai/api/v1"
-                llm = ChatOpenAI(**llm_params)
-            elif provider == "fireworks":
-                llm_params["model"] = "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
-                llm_params["base_url"] = "https://api.fireworks.ai/inference/v1"
-                llm = ChatOpenAI(**llm_params)
-            elif provider == "anthropic":
-                llm_params["model"] = "claude-sonnet-4-20250514"
+            elif backend == "ANTHROPIC":
                 llm = ChatAnthropic(**llm_params)
-            else:  # openai
-                llm_params["model"] = "gpt-5-mini"
+            else:
+                if base_url:
+                    llm_params["base_url"] = base_url
                 llm = ChatOpenAI(**llm_params)
 
             # Get current time with timezone for context
@@ -919,49 +1008,73 @@ def _execute_agent_with_failover(
     last_exc: Optional[Exception] = None
 
     for tier_idx, tier in enumerate(provider_priority, start=1):
-        # Build list of usable providers in this tier.
-        tier_providers_with_weights: List[Tuple[str, float]] = []
-        for provider_config in tier:
-            provider, weight = provider_config
-            env_var = PROVIDER_CONFIG.get(provider, {}).get("env_var")
-            if not env_var:
-                logger.warning("Unknown provider %s; skipping.", provider)
+        # Two paths: DB-endpoint dicts or legacy provider strings
+        if tier and isinstance(tier[0], dict):
+            entries = [(e['endpoint_key'], e['provider_key'], e['weight'], e['browser_model'], e.get('base_url') or '', e.get('backend')) for e in tier]  # type: ignore[index]
+            if not entries:
                 continue
-            if not os.getenv(env_var):
+            remaining = entries.copy()
+            order = []
+            while remaining:
+                weights = [r[2] for r in remaining]
+                idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
+                order.append(remaining.pop(idx))
+            attempts = order
+        else:
+            # Legacy provider keys
+            tier_providers_with_weights: List[Tuple[str, float]] = []
+            for provider_config in tier:
+                provider, weight = provider_config
+                env_var = PROVIDER_CONFIG.get(provider, {}).get("env_var")
+                if not env_var:
+                    logger.warning("Unknown provider %s; skipping.", provider)
+                    continue
+                if not os.getenv(env_var):
+                    logger.info(
+                        "Skipping provider %s for task %s — missing env %s",
+                        provider,
+                        task_id,
+                        env_var,
+                    )
+                    continue
+                tier_providers_with_weights.append((provider, weight))
+
+            if not tier_providers_with_weights:
                 logger.info(
-                    "Skipping provider %s for task %s — missing env %s",
-                    provider,
+                    "No usable providers in tier %d for task %s; moving to next tier.",
+                    tier_idx,
                     task_id,
-                    env_var,
                 )
                 continue
-            tier_providers_with_weights.append((provider, weight))
 
-        if not tier_providers_with_weights:
-            logger.info(
-                "No usable providers in tier %d for task %s; moving to next tier.",
-                tier_idx,
-                task_id,
-            )
-            continue
+            remaining_providers = tier_providers_with_weights.copy()
+            attempts = []
+            while remaining_providers:
+                providers = [p[0] for p in remaining_providers]
+                weights = [p[1] for p in remaining_providers]
+                selected_provider = random.choices(providers, weights=weights, k=1)[0]
+                # shape: (endpoint_key, provider_key, weight, model, base_url, backend)
+                attempts.append((selected_provider, selected_provider, 0.0, None, None, None))
+                remaining_providers = [p for p in remaining_providers if p[0] != selected_provider]
 
-        # Create a weighted-random order of providers to attempt for this tier.
-        providers_to_attempt = []
-        remaining_providers = tier_providers_with_weights.copy()
-        while remaining_providers:
-            providers = [p[0] for p in remaining_providers]
-            weights = [p[1] for p in remaining_providers]
-            selected_provider = random.choices(providers, weights=weights, k=1)[0]
-            providers_to_attempt.append(selected_provider)
-            remaining_providers = [p for p in remaining_providers if p[0] != selected_provider]
-
-        for provider in providers_to_attempt:
-            env_var = PROVIDER_CONFIG[provider]["env_var"]
-            llm_api_key = os.getenv(env_var)
+        for (endpoint_key, provider_key, _w, browser_model, base_url, backend) in attempts:
+            # Resolve API key
+            llm_api_key = None
+            if isinstance(tier[0], dict):
+                # DB path: retrieve api_key from dict list by matching endpoint_key
+                for entry in tier:
+                    if entry.get('endpoint_key') == endpoint_key:
+                        llm_api_key = entry.get('api_key')
+                        break
+            else:
+                env_var = PROVIDER_CONFIG.get(provider_key, {}).get("env_var")
+                llm_api_key = os.getenv(env_var) if env_var else None
+            # Logging provider label
+            label = provider_key
 
             logger.info(
                 "Attempting provider %s (tier %d) for task %s",
-                provider,
+                label,
                 tier_idx,
                 task_id,
             )
@@ -972,12 +1085,15 @@ def _execute_agent_with_failover(
                         llm_api_key=llm_api_key,
                         task_id=task_id,
                         proxy_server=proxy_server,
-                        provider=provider,
+                        provider=provider_key,
                         controller=controller,
                         sensitive_data=sensitive_data,
                         output_schema=output_schema,
                         browser_use_agent_id=browser_use_agent_id,
                         persistent_agent_id=persistent_agent_id,
+                        override_model=browser_model,
+                        override_base_url=base_url,
+                        provider_backend_override=backend,
                     )
                 )
 
@@ -1145,13 +1261,17 @@ def _process_browser_use_task_core(
                 logger.warning("Failed to register custom actions for task %s: %s", task_obj.id, str(exc))
 
             with traced("Execute Agent") as agent_span:
+                # Resolve provider priority from DB if enabled, else use defaults
+                db_priority = _resolve_browser_provider_priority_from_db()
+                provider_priority = db_priority if db_priority else PROVIDER_PRIORITY
+
                 raw_result, token_usage = _execute_agent_with_failover(
                     task_input=task_obj.prompt,
                     task_id=str(task_obj.id),
                     proxy_server=proxy_server,
                     controller=controller,
                     sensitive_data=sensitive_data,
-                    provider_priority=PROVIDER_PRIORITY,
+                    provider_priority=provider_priority,
                     output_schema=task_obj.output_schema,
                     browser_use_agent_id=browser_use_agent_id,
                     persistent_agent_id=persistent_agent_id

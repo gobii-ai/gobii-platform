@@ -639,3 +639,5 @@ DEFAULT_AGENT_EMAIL_DOMAIN = env("DEFAULT_AGENT_EMAIL_DOMAIN", default="my.gobii
 ENABLE_DEFAULT_AGENT_EMAIL = env.bool(
     "ENABLE_DEFAULT_AGENT_EMAIL", default=GOBII_PROPRIETARY_MODE
 )
+# DB-backed LLM config is always enabled; system falls back to legacy
+# behavior only when DB has no usable tiers/endpoints.

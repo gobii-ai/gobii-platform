@@ -11,6 +11,9 @@ import os
 import logging
 from typing import Dict, List, Tuple, Any
 import random
+from django.apps import apps
+from django.db import connection
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +296,81 @@ def get_llm_config_with_failover(
     Raises:
         ValueError: If no providers are available with valid API keys
     """
-    # Use provided tiers or select based on token count
+    # Always attempt DB-backed configuration first; fallback to legacy when empty
+    try:
+        PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+        PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+
+        token_range = (
+            PersistentTokenRange.objects
+            .filter(min_tokens__lte=token_count)
+            .filter(Q(max_tokens__gt=token_count) | Q(max_tokens__isnull=True))
+            .order_by('min_tokens')
+            .last()
+        )
+    except Exception:
+        token_range = None
+
+    if token_range is not None:
+        failover_configs: List[Tuple[str, str, dict]] = []
+        tiers = PersistentLLMTier.objects.filter(token_range=token_range).order_by('order')
+        for tier_idx, tier in enumerate(tiers, start=1):
+            # Build usable endpoints in this tier
+            endpoints_with_weights = []
+            for te in tier.tier_endpoints.select_related('endpoint__provider').all():
+                endpoint = te.endpoint
+                provider = endpoint.provider
+                if not (provider.enabled and endpoint.enabled):
+                    continue
+                # Effective key present?
+                has_admin_key = bool(provider.api_key_encrypted)
+                has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
+                if not (has_admin_key or has_env_key):
+                    continue
+                # If admin key exists but env var is missing, export to env for LiteLLM
+                if has_admin_key and provider.env_var_name and not has_env_key:
+                    try:
+                        from api.encryption import SecretsEncryption
+                        decrypted = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
+                        if decrypted:
+                            os.environ[provider.env_var_name] = decrypted
+                            has_env_key = True
+                    except Exception:
+                        pass
+                endpoints_with_weights.append((endpoint, provider, te.weight))
+
+            if not endpoints_with_weights:
+                continue
+
+            remaining = endpoints_with_weights.copy()
+            while remaining:
+                weights = [r[2] for r in remaining]
+                selected_idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
+                endpoint, provider, _w = remaining.pop(selected_idx)
+
+                params: Dict[str, Any] = {"temperature": 0.1}
+                if endpoint.temperature_override is not None:
+                    params["temperature"] = float(endpoint.temperature_override)
+                if provider.key == 'google':
+                    vertex_project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
+                    vertex_location = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
+                    params.update({
+                        "vertex_project": vertex_project,
+                        "vertex_location": vertex_location,
+                    })
+
+                # Support OpenAI-compatible endpoints for persistent agents via LiteLLM
+                # When using an OpenAI-compatible proxy, set litellm_model to 'openai/<your-model>'
+                # and configure api_base on the endpoint (e.g., http://vllm-host:port/v1)
+                if endpoint.litellm_model.startswith('openai/') and getattr(endpoint, 'api_base', None):
+                    params["api_base"] = endpoint.api_base
+
+                failover_configs.append((endpoint.key, endpoint.litellm_model, params))
+
+        if failover_configs:
+            return failover_configs
+
+    # Use provided tiers or select based on token count (legacy behavior)
     if provider_tiers is None:
         provider_tiers = get_tier_config_for_tokens(token_count)
         logger.debug(
