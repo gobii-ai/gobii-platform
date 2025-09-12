@@ -236,6 +236,8 @@ def get_llm_config_with_failover(
         PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
         PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
 
+        
+
         token_range = (
             PersistentTokenRange.objects
             .filter(min_tokens__lte=token_count)

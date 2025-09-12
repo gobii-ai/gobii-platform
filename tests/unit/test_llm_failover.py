@@ -1,117 +1,88 @@
-"""
-Unit tests for LLM failover configuration.
-"""
+"""Unit tests for LLM failover (DB-only)."""
 import os
 from unittest import mock
 
 from django.test import TestCase, tag
+from django.apps import apps
 from api.agent.core.llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
-    get_available_providers,
-    get_tier_config_for_tokens,
-    PROVIDER_CONFIG,
-    TOKEN_BASED_TIER_CONFIGS,
 )
+
+
+def seed_db_small_tier(anthropic_weight=1.0, google_weight=0.0, include_openrouter=False):
+    LLMProvider = apps.get_model('api', 'LLMProvider')
+    PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+    PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+    PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+    PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
+    # Clear
+    LLMProvider.objects.all().delete()
+    PersistentModelEndpoint.objects.all().delete()
+    PersistentTierEndpoint.objects.all().delete()
+    PersistentLLMTier.objects.all().delete()
+    PersistentTokenRange.objects.all().delete()
+    # Providers
+    a = LLMProvider.objects.create(key='anthropic', display_name='Anthropic', enabled=True, env_var_name='ANTHROPIC_API_KEY', browser_backend='ANTHROPIC')
+    g = LLMProvider.objects.create(key='google', display_name='Google', enabled=True, env_var_name='GOOGLE_API_KEY', browser_backend='GOOGLE')
+    endpoints = {}
+    endpoints['anthro'] = PersistentModelEndpoint.objects.create(key='anthropic_sonnet4', provider=a, enabled=True, litellm_model='anthropic/claude-sonnet-4-20250514')
+    endpoints['google'] = PersistentModelEndpoint.objects.create(key='google_gemini_25_pro', provider=g, enabled=True, litellm_model='vertex_ai/gemini-2.5-pro')
+    if include_openrouter:
+        o = LLMProvider.objects.create(key='openrouter', display_name='OpenRouter', enabled=True, env_var_name='OPENROUTER_API_KEY', browser_backend='OPENAI_COMPAT')
+        endpoints['openrouter'] = PersistentModelEndpoint.objects.create(key='openrouter_glm_45', provider=o, enabled=True, litellm_model='openrouter/z-ai/glm-4.5')
+    # Ranges
+    small = PersistentTokenRange.objects.create(name='small', min_tokens=0, max_tokens=7500)
+    tier1 = PersistentLLMTier.objects.create(token_range=small, order=1)
+    if anthropic_weight > 0:
+        PersistentTierEndpoint.objects.create(tier=tier1, endpoint=endpoints['anthro'], weight=anthropic_weight)
+    if google_weight > 0:
+        PersistentTierEndpoint.objects.create(tier=tier1, endpoint=endpoints['google'], weight=google_weight)
+    if include_openrouter:
+        # Add a second tier with openrouter
+        tier2 = PersistentLLMTier.objects.create(token_range=small, order=2)
+        PersistentTierEndpoint.objects.create(tier=tier2, endpoint=endpoints['openrouter'], weight=1.0)
 
 
 @tag("batch_event_llm")
 class TestLLMFailover(TestCase):
-    """Test LLM failover configuration and provider selection."""
-
     def test_simple_config_anthropic_primary(self):
-        """Anthropic is chosen when Google key is absent."""
-        # Clear existing env to ensure GOOGLE_API_KEY is absent
+        seed_db_small_tier(anthropic_weight=1.0, google_weight=0.0)
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}, clear=True):
             model, params = get_llm_config()
             self.assertEqual(model, "anthropic/claude-sonnet-4-20250514")
-            self.assertEqual(params["temperature"], 0.1)
+            self.assertIn("temperature", params)
 
     def test_simple_config_google_primary(self):
-        """Google is chosen as primary when its key is present."""
+        seed_db_small_tier(anthropic_weight=0.0, google_weight=1.0)
         with mock.patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}, clear=True):
             model, params = get_llm_config()
             self.assertEqual(model, "vertex_ai/gemini-2.5-pro")
-            self.assertEqual(params["temperature"], 0.1)
             self.assertIn("vertex_project", params)
             self.assertIn("vertex_location", params)
 
     def test_simple_config_no_providers(self):
-        """ValueError when no providers are available."""
+        seed_db_small_tier(anthropic_weight=1.0, google_weight=0.0)
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ValueError):
                 get_llm_config()
 
-    def test_failover_config_default_weighted(self):
-        """Failover list returns all providers with weighted distribution."""
+    def test_failover_config_includes_all_tier_endpoints(self):
+        seed_db_small_tier(anthropic_weight=0.75, google_weight=0.25, include_openrouter=True)
         with mock.patch.dict(os.environ, {
             "ANTHROPIC_API_KEY": "anthropic-key",
             "GOOGLE_API_KEY": "google-key",
             "OPENROUTER_API_KEY": "openrouter-key",
         }, clear=True):
-            configs = get_llm_config_with_failover()
-            # With the new tier 1 config, Google appears twice (in tier 1 with 25% weight and tier 2 with 100%)
-            # So we expect 4 entries total
-            self.assertEqual(len(configs), 4)
-
-            # All three providers should be included (order may vary due to weighted selection)
-            providers = [config[0] for config in configs]
-            models = [config[1] for config in configs]
-            
-            self.assertIn("google", providers)
-            self.assertIn("anthropic", providers)
-            self.assertIn("openrouter_glm", providers)
-            self.assertIn("vertex_ai/gemini-2.5-pro", models)
+            configs = get_llm_config_with_failover(token_count=200)
+            providers = [c[0] for c in configs]
+            models = [c[1] for c in configs]
+            self.assertIn("anthropic_sonnet4", providers)
+            self.assertIn("google_gemini_25_pro", providers)
+            self.assertIn("openrouter_glm_45", providers)
             self.assertIn("anthropic/claude-sonnet-4-20250514", models)
+            self.assertIn("vertex_ai/gemini-2.5-pro", models)
             self.assertIn("openrouter/z-ai/glm-4.5", models)
-
-    def test_failover_config_only_google(self):
-        """Failover when only Google is available."""
-        with mock.patch.dict(os.environ, {"GOOGLE_API_KEY": "google-key"}, clear=True):
-            configs = get_llm_config_with_failover()
-            # Google appears in tier 1 (25% weight) and tier 2 (100%), so we get 2 entries
-            self.assertEqual(len(configs), 2)
-            # Both should be Google
-            for provider, model, _ in configs:
-                self.assertEqual(provider, "google")
-                self.assertEqual(model, "vertex_ai/gemini-2.5-pro")
-
-    def test_failover_config_no_providers(self):
-        """ValueError when no providers available."""
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(ValueError):
-                get_llm_config_with_failover()
-
-    def test_available_providers(self):
-        """Available providers are correctly identified."""
-        with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "anthropic-key",
-            "OPENAI_API_KEY": "openai-key",
-            "OPENROUTER_API_KEY": "openrouter-key",
-        }, clear=True):
-            available = get_available_providers()
-            self.assertIn("anthropic", available)
-            self.assertIn("openrouter_glm", available)
-            # OpenAI is not in the small tier config, so shouldn't be included
-            self.assertNotIn("openai", available)
-
-    def test_available_providers_empty(self):
-        """No providers available when no API keys set."""
-        with mock.patch.dict(os.environ, {}, clear=True):
-            available = get_available_providers()
-            self.assertEqual(available, [])
-
-    def test_default_fallover_uses_small_tier(self):
-        """When no token_count provided, should use small tier config."""
-        with mock.patch.dict(os.environ, {
-            "GOOGLE_API_KEY": "google-key",
-            "ANTHROPIC_API_KEY": "anthropic-key",
-        }, clear=True):
-            # Without token_count or provider_tiers, should use small tier (0 tokens)
-            configs = get_llm_config_with_failover()
-            
-            # Small tier has 75/25 split between GPT-5 and Google in tier 1, but GPT-5 not available
-            # So we get Google from tier 1, Google from tier 2, and Anthropic from tier 3
             self.assertEqual(len(configs), 3)
             
             # All configs should include Google and Anthropic
