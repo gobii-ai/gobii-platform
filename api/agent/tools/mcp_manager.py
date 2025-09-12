@@ -95,11 +95,17 @@ class MCPToolManager:
                 "PIPEDREAM_PROJECT_ID": os.getenv("PIPEDREAM_PROJECT_ID", ""),
                 "PIPEDREAM_ENVIRONMENT": os.getenv("PIPEDREAM_ENVIRONMENT", "development"),
                 # Optional comma-separated app slugs to prefetch tool catalogs for
-                "PIPEDREAM_PREFETCH_APPS": os.getenv("PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse"),
+                "PIPEDREAM_PREFETCH_APPS": os.getenv("PIPEDREAM_PREFETCH_APPS", "google_sheets"),
+                # Default apps to auto-select per agent session
+                "PIPEDREAM_DEFAULT_APPS": os.getenv("PIPEDREAM_DEFAULT_APPS", "google_sheets"),
             },
             headers={
-                "x-pd-app-discovery": "false",
+                # Default to full-config so begin_configuration and dynamic props work during discovery
                 "x-pd-tool-mode": "full-config",
+                "x-pd-external-user-id": "gobii-discovery",  # overridden per-agent on calls
+                "x-pd-conversation-id": "discovery",        # overridden per-agent
+                # Let app discovery drive catalogs by default; specific app slugs set during prefetch
+                "x-pd-app-discovery": "true",
             },
             enabled=True,
 
@@ -116,6 +122,7 @@ class MCPToolManager:
     # Tools matching these patterns will be excluded from discovery and execution
     TOOL_BLACKLIST = [
         "mcp_brightdata_scraping_browser_*",  # Blacklist all scraping browser tools
+        "select_apps"
         # Add more blacklist patterns here as needed
     ]
     
@@ -127,6 +134,8 @@ class MCPToolManager:
         # Cached Pipedream token and expiry
         self._pd_access_token: Optional[str] = None
         self._pd_token_expiry: Optional[datetime] = None
+        # Per‑agent Pipedream clients (unique connection per agent id)
+        self._pd_agent_clients: Dict[str, Client] = {}
         
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
         """Ensure we have an event loop for async operations."""
@@ -248,7 +257,7 @@ class MCPToolManager:
         async with client:
             # Always fetch the base tool list first
             mcp_tools = await client.list_tools()
-            tools.extend(self._convert_tools(server, mcp_tools, blacklisted_count))
+            tools.extend(self._convert_tools(server, mcp_tools))
 
             # For Pipedream, optionally prefetch select app catalogs to expose app-specific tools
             if server.name == "pipedream":
@@ -260,21 +269,27 @@ class MCPToolManager:
                         if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
                             client.transport.headers["x-pd-app-slug"] = app_slug
                         app_tools = await client.list_tools()
-                        tools.extend(self._convert_tools(server, app_tools, blacklisted_count))
+                        tools.extend(self._convert_tools(server, app_tools))
                     except Exception as e:
                         logger.warning(f"Pipedream prefetch for app '{app_slug}' failed: {e}")
         
-        if blacklisted_count > 0:
-            logger.info(f"Filtered out {blacklisted_count} blacklisted tools from server '{server.name}'")
+        # Note: blacklist logging moved inside converter per-batch
         
         return tools
 
-    def _convert_tools(self, server: MCPServer, mcp_tools: List[MCPTool], blacklisted_count_ref: int) -> List[MCPToolInfo]:
-        """Helper to convert MCP tool records to MCPToolInfo list with blacklist applied."""
+    def _convert_tools(self, server: MCPServer, mcp_tools: List[MCPTool]) -> List[MCPToolInfo]:
+        """Helper to convert MCP tool records to MCPToolInfo list with blacklist applied.
+
+        For Pipedream, we intentionally DO NOT prefix tool names to avoid overly long names.
+        For other servers, we keep the legacy prefix 'mcp_{server}_{tool}'.
+        """
         tools: List[MCPToolInfo] = []
         blacklisted_count = 0
         for tool in mcp_tools:
-            full_name = f"mcp_{server.name}_{tool.name}"
+            if server.name == "pipedream":
+                full_name = tool.name
+            else:
+                full_name = f"mcp_{server.name}_{tool.name}"
             if self._is_tool_blacklisted(full_name):
                 blacklisted_count += 1
                 continue
@@ -287,7 +302,8 @@ class MCPToolManager:
                     parameters=tool.inputSchema or {"type": "object", "properties": {}}
                 )
             )
-        # Increment caller's count via return value aggregation
+        if blacklisted_count:
+            logger.info(f"Filtered out {blacklisted_count} blacklisted tools from server '{server.name}'")
         return tools
     
     def get_all_available_tools(self) -> List[MCPToolInfo]:
@@ -299,6 +315,20 @@ class MCPToolManager:
         for server_tools in self._tools_cache.values():
             all_tools.extend(server_tools)
         return all_tools
+
+    def find_tool_by_name(self, full_name: str) -> Optional[MCPToolInfo]:
+        """Find a discovered MCP tool by its full name (exact match)."""
+        if not self._initialized:
+            self.initialize()
+        for tools in self._tools_cache.values():
+            for t in tools:
+                if t.full_name == full_name:
+                    return t
+        return None
+
+    def has_tool(self, full_name: str) -> bool:
+        """Return True if a discovered MCP tool with this full name exists."""
+        return self.find_tool_by_name(full_name) is not None
     
     def get_enabled_tools_definitions(self, agent: PersistentAgent) -> List[Dict[str, Any]]:
         """Get OpenAI-format tool definitions for enabled MCP tools."""
@@ -346,21 +376,11 @@ class MCPToolManager:
         agent.mcp_tool_usage = tool_usage
         agent.save(update_fields=['mcp_tool_usage'])
         
-        # Parse tool name
-        if not tool_name.startswith("mcp_"):
-            return {
-                "status": "error", 
-                "message": f"Invalid MCP tool name format: {tool_name}"
-            }
-        
-        parts = tool_name.split("_", 2)
-        if len(parts) != 3:
-            return {
-                "status": "error",
-                "message": f"Invalid MCP tool name format: {tool_name}"
-            }
-        
-        _, server_name, actual_tool_name = parts
+        # Resolve tool to server + actual tool name (supports unprefixed Pipedream tool names)
+        resolved = self._resolve_tool(tool_name)
+        if not resolved:
+            return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
+        server_name, actual_tool_name = resolved
         
         if server_name not in self._clients:
             return {
@@ -368,22 +388,11 @@ class MCPToolManager:
                 "message": f"MCP server '{server_name}' not available"
             }
         
-        client = self._clients[server_name]
-
-        # Inject per-agent headers for Pipedream before execution
+        # Choose the right client
         if server_name == "pipedream":
-            try:
-                # Ensure token is fresh (in case long-lived process)
-                server = next(s for s in self.AVAILABLE_SERVERS if s.name == "pipedream")
-                token = self._get_pipedream_access_token(server.env or {})
-                if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
-                    client.transport.headers.update({
-                        "Authorization": f"Bearer {token}",
-                        "x-pd-external-user-id": str(agent.id),  # per-user isolation uses agent_id
-                        "x-pd-conversation-id": str(agent.id),    # keep state per agent conversation
-                    })
-            except Exception as e:
-                logger.warning(f"Failed to refresh Pipedream headers: {e}")
+            client = self._get_pipedream_agent_client(agent)
+        else:
+            client = self._clients[server_name]
         
         try:
             loop = self._ensure_event_loop()
@@ -441,11 +450,37 @@ class MCPToolManager:
     
     def cleanup(self):
         """Clean up resources."""
+        # Attempt to close per-agent Pipedream clients
+        for c in self._pd_agent_clients.values():
+            try:
+                c.close()
+            except Exception:
+                pass
+        self._pd_agent_clients.clear()
         self._clients.clear()
         self._tools_cache.clear()
         if self._loop and not self._loop.is_closed():
             self._loop.close()
         self._initialized = False
+
+    def _resolve_tool(self, tool_name: str) -> Optional[Tuple[str, str]]:
+        """Resolve a tool's server and actual MCP tool name from the provided name.
+
+        - For servers that prefix (e.g., brightdata), the provided name is 'mcp_{server}_{tool}'.
+        - For Pipedream, provided names are unprefixed and match the actual tool name.
+        """
+        # Fast path: search the cached list for an exact full_name match
+        for server, tools in self._tools_cache.items():
+            for t in tools:
+                if t.full_name == tool_name:
+                    return (t.server_name, t.tool_name)
+        # Backward-compatible fallback: parse legacy prefixed format
+        if tool_name.startswith("mcp_"):
+            parts = tool_name.split("_", 2)
+            if len(parts) == 3:
+                _, server_name, actual = parts
+                return (server_name, actual)
+        return None
 
     def _get_pipedream_access_token(self, env: Dict[str, str]) -> Optional[str]:
         """Acquire or refresh the Pipedream OAuth access token (cached)."""
@@ -480,6 +515,55 @@ class MCPToolManager:
         except Exception as e:
             logger.error(f"Failed to obtain Pipedream access token: {e}")
             return None
+
+    def _get_pipedream_agent_client(self, agent: PersistentAgent) -> Client:
+        """Get or create a unique Pipedream client for a given agent.
+
+        Ensures per-agent isolation via x-pd-external-user-id (agent.id) and
+        a dedicated conversation id (also agent.id by default).
+        """
+        agent_key = str(agent.id)
+        if agent_key in self._pd_agent_clients:
+            return self._pd_agent_clients[agent_key]
+
+        server = next(s for s in self.AVAILABLE_SERVERS if s.name == "pipedream")
+        env = server.env or {}
+        token = self._get_pipedream_access_token(env) or ""
+
+        from fastmcp.client.transports import StreamableHttpTransport
+        headers: Dict[str, str] = {
+            "Authorization": f"Bearer {token}",
+            "x-pd-project-id": env.get("PIPEDREAM_PROJECT_ID", ""),
+            "x-pd-environment": env.get("PIPEDREAM_ENVIRONMENT", "development"),
+            "x-pd-external-user-id": agent_key,
+            "x-pd-conversation-id": agent_key,
+            "x-pd-app-discovery": "true",
+            # Full-config is required for begin_configuration / configure_props / run_* flows
+            "x-pd-tool-mode": "full-config",
+            # Optionally set an app slug per agent/session as needed
+            # "x-pd-app-slug": "google_sheets",
+        }
+        transport = StreamableHttpTransport(url=server.url, headers=headers)
+        client = Client(transport)
+        self._pd_agent_clients[agent_key] = client
+        # Auto-select default apps for this agent session so catalogs are available
+        apps_csv = (env.get("PIPEDREAM_DEFAULT_APPS") or "google_sheets").strip()
+        app_list = [a.strip() for a in apps_csv.split(',') if a.strip()]
+        if app_list:
+            try:
+                loop = self._ensure_event_loop()
+                loop.run_until_complete(self._pipedream_auto_select_apps(client, app_list))
+            except Exception as e:
+                logger.info(f"Pipedream select_apps init failed for agent {agent_key}: {e}")
+        return client
+
+    async def _pipedream_auto_select_apps(self, client: Client, apps: List[str]):
+        """Select default apps for a Pipedream client session.
+
+        This is internal bootstrap and not exposed to the agent (blacklist still blocks agent).
+        """
+        async with client:
+            await client.call_tool("select_apps", {"apps": apps})
 
 
 # Global manager instance
