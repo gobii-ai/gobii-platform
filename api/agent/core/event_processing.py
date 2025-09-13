@@ -91,6 +91,8 @@ tracer = trace.get_tracer("gobii.utils")
 MAX_AGENT_LOOP_ITERATIONS = 100
 MESSAGE_HISTORY_LIMIT = 15
 TOOL_CALL_HISTORY_LIMIT = 10
+ARG_LOG_MAX_CHARS = 500
+RESULT_LOG_MAX_CHARS = 500
 
 # Token budget for prompts using promptree
 PROMPT_TOKEN_BUDGET = 96000
@@ -232,11 +234,15 @@ def _completion_with_failover(
                 
                 # Respect endpoint tool-choice capability if provided via params hint
                 tool_choice_supported = params.pop("supports_tool_choice", True)
+                # Endpoint preference for parallel tool calling (caller hint)
+                use_parallel_tool_calls = params.pop("use_parallel_tool_calls", True)
                 if not tool_choice_supported:
                     response = litellm.completion(
                         model=model,
                         messages=messages,
                         tools=tools,
+                        parallel_tool_calls=bool(use_parallel_tool_calls),
+                        drop_params=True,
                         **params,
                     )
                 else:
@@ -245,6 +251,8 @@ def _completion_with_failover(
                         messages=messages,
                         tools=tools,
                         tool_choice="auto",
+                        parallel_tool_calls=bool(use_parallel_tool_calls),
+                        drop_params=True,
                         **params,
                     )
                 
@@ -880,6 +888,14 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     # Keep the last model and provider
                     cumulative_token_usage["model"] = token_usage.get("model")
                     cumulative_token_usage["provider"] = token_usage.get("provider")
+                    logger.info(
+                        "LLM usage: model=%s provider=%s pt=%s ct=%s tt=%s",
+                        token_usage.get("model"),
+                        token_usage.get("provider"),
+                        token_usage.get("prompt_tokens"),
+                        token_usage.get("completion_tokens"),
+                        token_usage.get("total_tokens"),
+                    )
                     
             except Exception as e:
                 current_span = trace.get_current_span()
@@ -889,7 +905,8 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
 
             msg = response.choices[0].message
 
-            if not getattr(msg, "tool_calls", None):
+            tool_calls = getattr(msg, "tool_calls", None)
+            if not tool_calls:
                 if msg.content:
                     logger.info("Agent %s reasoning: %s", agent.id, msg.content)
                     # Create a reasoning step with token usage
@@ -909,13 +926,46 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     PersistentAgentStep.objects.create(**step_kwargs)
                 continue
 
+            # Log high-level summary of tool calls
+            try:
+                logger.info(
+                    "Agent %s: model returned %d tool_call(s)",
+                    agent.id,
+                    len(tool_calls) if isinstance(tool_calls, list) else 0,
+                )
+                for idx, call in enumerate(list(tool_calls) or [], start=1):
+                    try:
+                        fn_name = getattr(getattr(call, "function", None), "name", None) or (
+                            call.get("function", {}).get("name") if isinstance(call, dict) else None
+                        )
+                        raw_args = getattr(getattr(call, "function", None), "arguments", None) or (
+                            call.get("function", {}).get("arguments") if isinstance(call, dict) else ""
+                        )
+                        call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
+                        arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
+                        logger.info(
+                            "Agent %s: tool_call %d: id=%s name=%s args=%s%s",
+                            agent.id,
+                            idx,
+                            call_id or "<none>",
+                            fn_name or "<unknown>",
+                            arg_preview,
+                            "…" if raw_args and len(raw_args) > len(arg_preview) else "",
+                        )
+                    except Exception:
+                        logger.info("Agent %s: failed to log one tool_call entry", agent.id)
+            except Exception:
+                logger.debug("Tool call summary logging failed", exc_info=True)
+
             all_calls_sleep = True
-            for call in msg.tool_calls:
+            sleep_requested = False  # sleep tool was included anywhere in this batch
+            executed_calls = 0
+            for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
                     tool_span.set_attribute("persistent_agent.id", str(agent.id))
                     tool_name = call.function.name
                     tool_span.set_attribute("tool.name", tool_name)
-                    logger.info("Agent %s calling tool: %s", agent.id, tool_name)
+                    logger.info("Agent %s executing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
                     # Ensure credit is available and consume just-in-time
                     credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
@@ -939,15 +989,31 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                                 "llm_provider": token_usage.get("provider"),
                             })
                         PersistentAgentStep.objects.create(**step_kwargs)
+                        sleep_requested = True
+                        logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
                         continue
 
                     all_calls_sleep = False
-                    tool_params = json.loads(call.function.arguments)
+                    try:
+                        raw_args = getattr(call.function, "arguments", "") or ""
+                        tool_params = json.loads(raw_args)
+                    except Exception as arg_exc:
+                        preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
+                        logger.exception(
+                            "Agent %s: failed to parse arguments for tool %s (preview=%s%s)",
+                            agent.id,
+                            tool_name,
+                            preview,
+                            "…" if raw_args and len(raw_args) > len(preview) else "",
+                        )
+                        raise
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
+                    logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
                     # Ensure a fresh DB connection before tool execution and subsequent ORM writes
                     close_old_connections()
 
+                    logger.info("Agent %s: executing %s now", agent.id, tool_name)
                     if tool_name == "spawn_web_task":
                         # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
                         result = execute_spawn_web_task(agent, tool_params)
@@ -974,7 +1040,15 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     elif tool_name == "search_tools":
                         result = execute_search_tools(agent, tool_params)
                         # After search_tools auto-enables relevant tools, refresh tool definitions
+                        before_count = len(tools)
                         tools = _get_agent_tools(agent)
+                        after_count = len(tools)
+                        logger.info(
+                            "Agent %s: refreshed tools after search_tools (before=%d after=%d)",
+                            agent.id,
+                            before_count,
+                            after_count,
+                        )
                     # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
                     elif get_mcp_manager().has_tool(tool_name):
                         # Handle dynamic MCP tool execution (supports prefixed and unprefixed MCP tool names)
@@ -986,6 +1060,20 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                         }
 
                     result_content = json.dumps(result)
+                    # Log result summary
+                    try:
+                        status = result.get("status") if isinstance(result, dict) else None
+                    except Exception:
+                        status = None
+                    result_preview = result_content[:RESULT_LOG_MAX_CHARS]
+                    logger.info(
+                        "Agent %s: %s completed status=%s result=%s%s",
+                        agent.id,
+                        tool_name,
+                        status or "",
+                        result_preview,
+                        "…" if len(result_content) > len(result_preview) else "",
+                    )
 
                     # Guard ORM writes against stale connections; retry once on OperationalError
                     close_old_connections()
@@ -1013,6 +1101,7 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                             tool_params=tool_params,
                             result=result_content,
                         )
+                        logger.info("Agent %s: persisted tool call step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
                     except OperationalError:
                         close_old_connections()
                         # Create step with token usage if available (retry)
@@ -1036,6 +1125,8 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                             tool_params=tool_params,
                             result=result_content,
                         )
+                        logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
+                    executed_calls += 1
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)
@@ -1067,6 +1158,43 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     except Exception:
                         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
                 return cumulative_token_usage
+            # If batch included any sleep tool call (even if not all), sleep after executing others
+            if sleep_requested:
+                logger.info("Agent %s: batch included sleep_until_next_trigger; sleeping after executing other tools.", agent.id)
+                if budget_ctx is not None:
+                    try:
+                        current_depth = (
+                            AgentBudgetManager.get_branch_depth(
+                                agent_id=budget_ctx.agent_id,
+                                branch_id=budget_ctx.branch_id,
+                            )
+                            or 0
+                        )
+                    except Exception:
+                        current_depth = getattr(budget_ctx, "depth", 0) or 0
+
+                    if current_depth > 0:
+                        logger.info(
+                            "Agent %s sleeping (batch) with %s outstanding child tasks; leaving cycle active.",
+                            agent.id,
+                            current_depth,
+                        )
+                        return cumulative_token_usage
+
+                    try:
+                        AgentBudgetManager.close_cycle(
+                            agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id
+                        )
+                    except Exception:
+                        logger.debug("Failed to close budget cycle on sleep (batch)", exc_info=True)
+                return cumulative_token_usage
+            else:
+                logger.info(
+                    "Agent %s: executed %d/%d tool_call(s) this iteration",
+                    agent.id,
+                    executed_calls,
+                    len(tool_calls),
+                )
 
     else:
         logger.warning("Agent %s reached max iterations.", agent.id)
@@ -1567,10 +1695,13 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "Use search_tools to search for additional tools; it will automatically enable all relevant tools in one step. "
         "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
-        "Call just one tool at a time. Remember, you are in an infinite loop until you call sleep_until_next_trigger, so you have plenty of opporunity to make multiple tool calls."
+        "When multiple actions are independent, RETURN THEM AS MULTIPLE TOOL CALLS IN A SINGLE REPLY. Prefer batching related actions together to reduce latency. "
+        "If there is nothing else to do after your actions, include a final sleep_until_next_trigger tool call in the SAME reply. "
+        "Example: send_email(...), update_charter(...), sqlite_batch(...), sleep_until_next_trigger(). "
+        "If a later action depends on the output of an earlier tool call (true dependency), it is acceptable to wait for the next iteration before proceeding."
         "Sometimes your schedule will need to run more frequently than you need to contact the user. That is OK. You can, for example, set yourself to run every 1 hour, but only call send_email when you actually need to contact the user. This is your expected behavior. "
         
-        "When you are finished work for this cycle, or if there is no needed work, use sleep_until_next_trigger."
+        "When you are finished work for this cycle, or if there is no needed work, use sleep_until_next_trigger (ideally in the same reply after your other tool calls)."
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "

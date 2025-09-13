@@ -712,7 +712,7 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
                     model,
                 )
                 # Remove internal-only hints (not accepted by litellm)
-                params = {k: v for k, v in params.items() if k != 'supports_tool_choice'}
+                params = {k: v for k, v in params.items() if k not in ('supports_tool_choice', 'use_parallel_tool_calls')}
 
                 enable_tools_def = {
                     "type": "function",

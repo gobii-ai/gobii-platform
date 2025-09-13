@@ -2264,10 +2264,10 @@ class LLMProviderAdmin(admin.ModelAdmin):
 
 @admin.register(PersistentModelEndpoint)
 class PersistentModelEndpointAdmin(admin.ModelAdmin):
-    list_display = ("key", "provider", "litellm_model", "api_base", "enabled", "supports_tool_choice")
+    list_display = ("key", "provider", "litellm_model", "api_base", "enabled", "supports_tool_choice", "use_parallel_tool_calls")
     list_filter = ("enabled", "provider")
     search_fields = ("key", "litellm_model")
-    fields = ("key", "provider", "enabled", "litellm_model", "api_base", "temperature_override", "supports_tool_choice")
+    fields = ("key", "provider", "enabled", "litellm_model", "api_base", "temperature_override", "supports_tool_choice", "use_parallel_tool_calls")
 
 
 class PersistentTierEndpointInline(admin.TabularInline):

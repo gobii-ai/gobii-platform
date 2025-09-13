@@ -385,6 +385,38 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result.get("enabled_tools"), ["mcp_brightdata_scrape", "mcp_brightdata_search"]) 
         mock_enable_batch.assert_called_once()
 
+    @patch('api.agent.tools.mcp_manager.get_llm_config_with_failover')
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    @patch('api.agent.tools.mcp_manager.litellm.completion')
+    def test_search_tools_drops_parallel_hint_from_params(self, mock_completion, mock_init, mock_get_tools, mock_get_config):
+        """search_tools should not forward internal 'use_parallel_tool_calls' hint to LiteLLM."""
+        mock_get_tools.return_value = [
+            MCPToolInfo("mcp_brightdata_scrape", "brightdata", "scrape", "Scrape pages", {}),
+        ]
+        # Return a single config with both hints present
+        mock_get_config.return_value = [(
+            "openai", "openai/gpt-4o", {"temperature": 0.1, "supports_tool_choice": True, "use_parallel_tool_calls": True}
+        )]
+
+        # Make litellm.completion return a minimal response
+        from unittest.mock import MagicMock
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No tools"
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_completion.return_value = mock_response
+
+        # Call search_tools (module-level function)
+        res = search_tools(self.agent, "anything")
+        self.assertEqual(res["status"], "success")
+        # Assert the forwarded kwargs do not contain the internal hint
+        kwargs = mock_completion.call_args.kwargs
+        self.assertNotIn('use_parallel_tool_calls', kwargs)
+
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_search_tools_no_tools(self, mock_init, mock_get_tools):

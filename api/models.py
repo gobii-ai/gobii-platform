@@ -860,6 +860,7 @@ class PersistentModelEndpoint(models.Model):
     litellm_model = models.CharField(max_length=256)
     temperature_override = models.FloatField(null=True, blank=True)
     supports_tool_choice = models.BooleanField(default=True)
+    use_parallel_tool_calls = models.BooleanField(default=True)
     # For OpenAI-compatible endpoints via LiteLLM (model startswith 'openai/...')
     # provide the custom base URL used by your proxy (e.g., http://vllm-host:port/v1)
     api_base = models.CharField(max_length=256, blank=True)
