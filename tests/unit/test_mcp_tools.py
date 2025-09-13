@@ -343,7 +343,7 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_search_mcp_tools_success(self, mock_init, mock_get_tools, mock_completion):
-        """Test successful MCP tool search."""
+        """Test successful MCP tool search returning plain text."""
         mock_get_tools.return_value = [
             MCPToolInfo("mcp_brightdata_scrape", "brightdata", "scrape", "Scrape pages", {}),
             MCPToolInfo("mcp_brightdata_search", "brightdata", "search", "Search web", {})
@@ -351,16 +351,39 @@ class MCPToolFunctionsTests(TestCase):
         
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps([
-            {"name": "mcp_brightdata_scrape", "relevance": "Can scrape web pages"}
-        ])
+        mock_response.choices[0].message.content = (
+            "- mcp_brightdata_scrape: Can scrape web pages\n"
+            "- mcp_brightdata_search: Can search the web"
+        )
         mock_completion.return_value = mock_response
         
         result = search_mcp_tools(self.agent, "scrape web pages")
         
         self.assertEqual(result["status"], "success")
-        self.assertEqual(len(result["tools"]), 1)
-        self.assertEqual(result["tools"][0]["name"], "mcp_brightdata_scrape")
+        self.assertIn("mcp_brightdata_scrape", result["message"]) 
+        self.assertIn("mcp_brightdata_search", result["message"]) 
+
+    @patch('api.agent.tools.mcp_manager.litellm.completion')
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_search_mcp_tools_plain_text_single_line(self, mock_init, mock_get_tools, mock_completion):
+        """Model may return a single-line plain text; we pass it through."""
+        mock_get_tools.return_value = [
+            MCPToolInfo("google_sheets-create-spreadsheet", "pipedream", "google_sheets-create-spreadsheet", "Create sheet", {}),
+            MCPToolInfo("google_sheets-add-single-row", "pipedream", "google_sheets-add-single-row", "Add row", {}),
+        ]
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = (
+            "google_sheets-create-spreadsheet — Create a new spreadsheet"
+        )
+        mock_completion.return_value = mock_response
+
+        result = search_mcp_tools(self.agent, "create a sheet")
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("google_sheets-create-spreadsheet", result["message"]) 
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
@@ -371,7 +394,6 @@ class MCPToolFunctionsTests(TestCase):
         result = search_mcp_tools(self.agent, "any query")
         
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["tools"], [])
         self.assertIn("No MCP tools available", result["message"])
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
@@ -517,18 +539,12 @@ class MCPToolExecutorsTests(TestCase):
     @patch('api.agent.tools.mcp_tools.search_mcp_tools')
     def test_execute_search_tools(self, mock_search):
         """Test executing search_tools function."""
-        mock_search.return_value = {
-            "status": "success",
-            "tools": [
-                {"name": "mcp_test_tool", "relevance": "Test relevance"}
-            ]
-        }
+        mock_search.return_value = {"status": "success", "message": "- mcp_test_tool: Test relevance"}
         
         result = execute_search_tools(self.agent, {"query": "test query"})
         
         self.assertEqual(result["status"], "success")
-        self.assertIn("Found 1 relevant tool", result["message"])
-        self.assertIn("mcp_test_tool", result["message"])
+        self.assertEqual(result["message"], "- mcp_test_tool: Test relevance")
         mock_search.assert_called_once_with(self.agent, "test query")
         
     def test_execute_search_tools_missing_query(self):

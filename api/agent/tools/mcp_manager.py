@@ -279,7 +279,24 @@ class MCPToolManager:
                         logger.warning(f"Pipedream prefetch for app '{app_slug}' failed: {e}")
         
         # Note: blacklist logging moved inside converter per-batch
-        
+        # Deduplicate by full tool name to avoid repeated entries across app slugs
+        try:
+            if tools:
+                unique: Dict[str, MCPToolInfo] = {}
+                for t in tools:
+                    if t.full_name not in unique:
+                        unique[t.full_name] = t
+                if len(unique) != len(tools):
+                    logger.info(
+                        "Deduplicated tools for server '%s': %d -> %d",
+                        server.name,
+                        len(tools),
+                        len(unique),
+                    )
+                tools = list(unique.values())
+        except Exception:
+            logger.exception("Failed while deduplicating tools for server '%s'", server.name)
+
         return tools
 
     def _convert_tools(self, server: MCPServer, mcp_tools: List[MCPTool]) -> List[MCPToolInfo]:
@@ -623,28 +640,20 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
     except Exception:
         logger.exception("search_mcp_tools: failed to log tools_context preview")
     
-    # Prepare the search prompt
-    system_prompt = """You are a tool discovery assistant. Given a query about what the user wants to accomplish, 
-search through the available MCP tools and return ONLY the most relevant tools that could help.
+    # Prepare the search prompt (plain text output)
+    system_prompt = (
+        "You are a concise tool discovery assistant. Given a user query and a list of "
+        "available MCP tools (with names, descriptions, and parameters), output a plain-text list "
+        "of ANY AND ALL tools relevant to the query. For each tool, include the exact tool name and a short reason. "
+        "If no tools are relevant, explicitly write: 'No relevant tools found.' Do not return JSON; write normal text."
+    )
 
-Return your response as a JSON array of relevant tools. Each tool should have:
-- name: the full tool name (e.g., "mcp_brightdata_search_engine")
-- relevance: a brief note about why this tool is relevant to the query
-
-If no tools are relevant, return an empty array.
-
-Example response:
-[
-  {"name": "mcp_brightdata_search_engine", "relevance": "Can search the web for current information"},
-  {"name": "mcp_brightdata_scrape_as_markdown", "relevance": "Can extract content from specific web pages"}
-]"""
-
-    user_prompt = f"""Query: {query}
-
-Available tools:
-{json.dumps(tools_context, indent=2)}
-
-Return the relevant tools as a JSON array:"""
+    user_prompt = (
+        f"Query: {query}\n\n"
+        f"Available tools (JSON for reference only — respond in plain text):\n"
+        f"{json.dumps(tools_context, indent=2)}\n\n"
+        f"Now output a plain-text list of relevant tools (or 'No relevant tools found.')."
+    )
 
     try:
         # Get LLM configuration with failover
@@ -670,45 +679,14 @@ Return the relevant tools as a JSON array:"""
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    response_format={"type": "json_object"},
                     safety_identifier=str(agent.user.id if agent.user else ""),
                     **params
                 )
                 
-                # Parse the response
+                # Raw text response; no parsing
                 content = response.choices[0].message.content
-                logger.info("search_mcp_tools: raw LLM response content: %s", content)
-                result = json.loads(content)
-                
-                # Ensure it's a list
-                if isinstance(result, dict) and "tools" in result:
-                    result = result["tools"]
-                elif not isinstance(result, list):
-                    result = []
-                
-                # Validate tool names exist
-                valid_tool_names = {tool.full_name for tool in all_tools}
-                filtered_results = [
-                    tool for tool in result 
-                    if isinstance(tool, dict) and tool.get("name") in valid_tool_names
-                ]
-                # Log what the model suggested vs what is valid
-                try:
-                    suggested_names = [t.get("name") for t in result if isinstance(t, dict)]
-                    invalid = [n for n in suggested_names if n not in valid_tool_names]
-                    logger.info(
-                        "search_mcp_tools: suggested=%s | valid_selected=%s | invalid_suggested=%s",
-                        suggested_names,
-                        [t.get("name") for t in filtered_results],
-                        invalid,
-                    )
-                except Exception:
-                    logger.exception("search_mcp_tools: failed to log suggestion diffs")
-                
-                return {
-                    "status": "success",
-                    "tools": filtered_results
-                }
+                logger.info("search_mcp_tools: raw LLM response (text): %s", content)
+                return {"status": "success", "message": content or ""}
                 
             except Exception as e:
                 last_exc = e

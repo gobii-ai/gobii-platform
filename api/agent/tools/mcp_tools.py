@@ -26,7 +26,7 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "search_tools",
-            "description": "Search for available MCP tools that could help with a specific task or query. Returns relevant tool names with descriptions.",
+            "description": "Search for available MCP tools relevant to a query. Returns a plain-text list of ANY AND ALL relevant tools (or 'No relevant tools found.').",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -78,26 +78,10 @@ def execute_search_tools(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     logger.info(f"Agent {agent.id} searching for tools: {query}")
     
     result = search_mcp_tools(agent, query)
-    
-    # Format the result for the agent
-    if result["status"] == "success":
-        tools = result.get("tools", [])
-        if tools:
-            formatted_tools = "\n".join([
-                f"- {tool['name']}: {tool.get('relevance', 'Relevant to your query')}"
-                for tool in tools
-            ])
-            return {
-                "status": "success",
-                "message": f"Found {len(tools)} relevant tool(s):\n{formatted_tools}"
-            }
-        else:
-            return {
-                "status": "success",
-                "message": "No relevant tools found for your query."
-            }
-    else:
-        return result
+    # Pass through the raw text message from search_mcp_tools
+    if result.get("status") == "success":
+        return {"status": "success", "message": result.get("message", "")}
+    return result
 
 
 @tracer.start_as_current_span("AGENT TOOL Enable Tool")
