@@ -226,6 +226,20 @@ class MCPToolManager:
         self._tools_cache[server.name] = tools
         
         logger.info(f"Registered MCP server '{server.name}' with {len(tools)} tools")
+        # Dump full tool list at INFO for observability
+        if tools:
+            try:
+                for t in tools:
+                    logger.info(
+                        "MCP tool (server=%s): name=%s desc=%s params=%s",
+                        server.name,
+                        t.full_name,
+                        (t.description or "").strip(),
+                        json.dumps(t.parameters) if t.parameters else "{}",
+                    )
+            except Exception:
+                # Never allow logging issues to break initialization
+                logger.exception("Failed while logging MCP tool list for server '%s'", server.name)
     
     async def _fetch_server_tools(self, client: Client, server: MCPServer) -> List[MCPToolInfo]:
         """Fetch tools from an MCP server, filtering out blacklisted tools.
@@ -247,6 +261,19 @@ class MCPToolManager:
                             client.transport.headers["x-pd-app-slug"] = app_slug
                             client.transport.headers["x-pd-tool-mode"] = "sub-agent"
                         app_tools = await client.list_tools()
+                        logger.info(
+                            "Pipedream list_tools returned %d tools for app_slug='%s'",
+                            len(app_tools or []),
+                            app_slug,
+                        )
+                        # Log raw tool names from server response (best-effort)
+                        try:
+                            for t in app_tools or []:
+                                name = getattr(t, "name", "<unnamed>")
+                                desc = (getattr(t, "description", None) or "").strip()
+                                logger.info("Pipedream raw tool: %s | %s", name, desc)
+                        except Exception:
+                            logger.exception("Error while logging raw Pipedream tools for '%s'", app_slug)
                         tools.extend(self._convert_tools(server, app_tools))
                     except Exception as e:
                         logger.warning(f"Pipedream prefetch for app '{app_slug}' failed: {e}")
@@ -567,6 +594,13 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
     
     # Get all available tools
     all_tools = _mcp_manager.get_all_available_tools()
+    logger.info("search_mcp_tools: %d tools available across servers", len(all_tools))
+    try:
+        # Log the full set of discovered tool names (server/name)
+        names = [f"{t.server_name}:{t.full_name}" for t in all_tools]
+        logger.info("search_mcp_tools: available tool names: %s", ", ".join(names))
+    except Exception:
+        logger.exception("search_mcp_tools: failed to log available tool names")
     
     if not all_tools:
         return {
@@ -577,6 +611,17 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
     
     # Prepare tool information for LLM
     tools_context = [tool.to_search_dict() for tool in all_tools]
+    # Log the context we’ll provide to the LLM for transparency
+    try:
+        logger.info(
+            "search_mcp_tools: tools_context prepared with %d entries; first few: %s",
+            len(tools_context),
+            json.dumps(tools_context[:5], indent=2),
+        )
+        if len(tools_context) > 5:
+            logger.info("search_mcp_tools: (truncated context log; total entries=%d)", len(tools_context))
+    except Exception:
+        logger.exception("search_mcp_tools: failed to log tools_context preview")
     
     # Prepare the search prompt
     system_prompt = """You are a tool discovery assistant. Given a query about what the user wants to accomplish, 
@@ -609,7 +654,13 @@ Return the relevant tools as a JSON array:"""
         last_exc = None
         for i, (provider, model, params) in enumerate(failover_configs):
             try:
-                logger.info(f"Searching MCP tools with provider {i+1}/{len(failover_configs)}: {provider}")
+                logger.info(
+                    "Searching MCP tools with provider %s/%s: provider=%s model=%s",
+                    i + 1,
+                    len(failover_configs),
+                    provider,
+                    model,
+                )
                 # Remove internal-only hints (not accepted by litellm)
                 params = {k: v for k, v in params.items() if k != 'supports_tool_choice'}
 
@@ -626,6 +677,7 @@ Return the relevant tools as a JSON array:"""
                 
                 # Parse the response
                 content = response.choices[0].message.content
+                logger.info("search_mcp_tools: raw LLM response content: %s", content)
                 result = json.loads(content)
                 
                 # Ensure it's a list
@@ -640,6 +692,18 @@ Return the relevant tools as a JSON array:"""
                     tool for tool in result 
                     if isinstance(tool, dict) and tool.get("name") in valid_tool_names
                 ]
+                # Log what the model suggested vs what is valid
+                try:
+                    suggested_names = [t.get("name") for t in result if isinstance(t, dict)]
+                    invalid = [n for n in suggested_names if n not in valid_tool_names]
+                    logger.info(
+                        "search_mcp_tools: suggested=%s | valid_selected=%s | invalid_suggested=%s",
+                        suggested_names,
+                        [t.get("name") for t in filtered_results],
+                        invalid,
+                    )
+                except Exception:
+                    logger.exception("search_mcp_tools: failed to log suggestion diffs")
                 
                 return {
                     "status": "success",
