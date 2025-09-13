@@ -630,7 +630,16 @@ EMAIL_STRIP_REPLIES = env.bool("EMAIL_STRIP_REPLIES", default=False)
 PIPEDREAM_CLIENT_ID = env("PIPEDREAM_CLIENT_ID", default="")
 PIPEDREAM_CLIENT_SECRET = env("PIPEDREAM_CLIENT_SECRET", default="")
 PIPEDREAM_PROJECT_ID = env("PIPEDREAM_PROJECT_ID", default="")
-PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default="development")
+
+# Map Gobii release env → Pipedream Connect environment.
+# Pipedream supports only two environments: "development" and "production".
+def _default_pipedream_environment() -> str:
+    rel = os.getenv("GOBII_RELEASE_ENV", "local").lower()
+    # Treat only prod/production as production; everything else uses development.
+    return "production" if rel in ("prod", "production") else "development"
+
+PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default=_default_pipedream_environment())
+
 # Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,greenhouse")
 PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,greenhouse")
 

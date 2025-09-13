@@ -52,13 +52,17 @@ REQUIRED_ENVS = [
     "PIPEDREAM_CLIENT_ID",
     "PIPEDREAM_CLIENT_SECRET",
     "PIPEDREAM_PROJECT_ID",
-    "PIPEDREAM_ENVIRONMENT",
 ]
 
 
 def _fail(msg: str, code: int = 2) -> None:
     print(f"[pipedream-mcp-poc] {msg}", file=sys.stderr)
     sys.exit(code)
+
+
+def _pd_env_default() -> str:
+    rel = os.getenv("GOBII_RELEASE_ENV", "local").lower()
+    return "production" if rel in ("prod", "production") else "development"
 
 
 def _validate_env() -> Dict[str, str]:
@@ -72,7 +76,8 @@ def _validate_env() -> Dict[str, str]:
         "CLIENT_ID": os.environ["PIPEDREAM_CLIENT_ID"],
         "CLIENT_SECRET": os.environ["PIPEDREAM_CLIENT_SECRET"],
         "PROJECT_ID": os.environ["PIPEDREAM_PROJECT_ID"],
-        "ENVIRONMENT": os.environ["PIPEDREAM_ENVIRONMENT"],
+        # Default Pipedream env from GOBII_RELEASE_ENV when not explicitly provided
+        "ENVIRONMENT": os.getenv("PIPEDREAM_ENVIRONMENT", _pd_env_default()),
         "REMOTE_URL": os.getenv("PIPEDREAM_REMOTE_URL", "https://remote.mcp.pipedream.net"),
         "APP_SLUG": os.getenv("PIPEDREAM_APP_SLUG", "google_sheets"),
         "EXTERNAL_USER_ID": os.getenv("PIPEDREAM_EXTERNAL_USER_ID", _default_user_id()),
