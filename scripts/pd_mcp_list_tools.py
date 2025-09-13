@@ -42,7 +42,7 @@ from typing import Dict, Any, Optional, Tuple
 import requests
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
-from datetime import datetime
+from datetime import datetime, UTC
 import argparse
 import json
 import re
@@ -181,99 +181,127 @@ async def _list_tools(env: Dict[str, str]) -> int:
 
 
 async def _create_and_add_row(env: Dict[str, str]) -> int:
-    # Step 0: ensure the account is connected (prompt with Connect Link if needed)
-    print("[1/4] Checking Google auth via begin_configuration…")
-    client_fc = _connect_client(env, tool_mode="full-config")
-    async with client_fc:
-        # Trigger flow that will return a Connect Link if auth missing
-        r = await client_fc.call_tool("begin_configuration_google_sheets-create-spreadsheet", {})
-        text, data = _extract_text_and_data(r)
-        url = _find_connect_url(text, data)
-    if url:
-        print("Authorization required. Please open this URL, connect your Google account, then return here:")
-        print(url)
-        input("Press Enter after you have completed the connection in your browser… ")
-    else:
-        print("Looks like Google is already connected for this user.")
-
-    # Build a sub-agent client for simple instruction-driven actions
+    # Use a single sub-agent client for the whole flow to keep context
     client_sa = _connect_client(env, tool_mode="sub-agent")
 
-    # Step 1: create spreadsheet
-    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     title = os.getenv("POC_TITLE", f"Gobii MCP PoC {ts}")
-    create_instr = (
-        "Create a blank Google spreadsheet titled '" + title + "'. "
-        "Return a compact JSON object with keys spreadsheetId and spreadsheetUrl only."
-    )
-    print("[2/4] Creating spreadsheet…")
+
     async with client_sa:
+        # Step 1: Create spreadsheet (handle Connect Link if needed)
+        print("[1/5] Creating spreadsheet…")
+        create_instr = (
+            "Create a blank Google spreadsheet titled '" + title + "'. "
+            "Return a compact JSON object with keys spreadsheetId and spreadsheetUrl only."
+        )
         r = await client_sa.call_tool("google_sheets-create-spreadsheet", {"instruction": create_instr})
-    text, data = _extract_text_and_data(r)
-    url = _find_connect_url(text, data)
-    if url:
-        print("Authorization required again. Open this URL, complete the connection, then retrying automatically…")
-        print(url)
-        input("Press Enter after connecting… ")
-        async with client_sa:
+        text, data = _extract_text_and_data(r)
+        url = _find_connect_url(text, data)
+        if url:
+            print("Authorization required. Open this URL, complete the connection, then press Enter here:")
+            print(url)
+            input("")
             r = await client_sa.call_tool("google_sheets-create-spreadsheet", {"instruction": create_instr})
+            text, data = _extract_text_and_data(r)
+
+        spreadsheet_id = None
+        spreadsheet_url = None
+        if isinstance(data, dict):
+            spreadsheet_id = data.get("spreadsheetId")
+            spreadsheet_url = data.get("spreadsheetUrl") or data.get("url")
+        if not spreadsheet_id and text:
+            try:
+                maybe = json.loads(text)
+                if isinstance(maybe, dict):
+                    spreadsheet_id = spreadsheet_id or maybe.get("spreadsheetId")
+                    spreadsheet_url = spreadsheet_url or maybe.get("spreadsheetUrl") or maybe.get("url")
+            except Exception:
+                pass
+        if not spreadsheet_id and text:
+            m = re.search(r"[0-9A-Za-z-_]{40,}", text)
+            if m:
+                spreadsheet_id = m.group(0)
+        if not spreadsheet_id:
+            print("Could not parse spreadsheet ID from response. Raw response:")
+            print(text or data)
+            return 1
+        print(f"Created spreadsheet: {spreadsheet_url or spreadsheet_id}")
+
+        # Prepare row payload
+        default_row = {"Name": "Gobii", "Email": "hello@gobii.ai", "Note": "Hello from MCP!"}
+        try:
+            row = json.loads(os.getenv("POC_ROW_JSON", ""))
+            if not isinstance(row, dict):
+                row = default_row
+        except Exception:
+            row = default_row
+
+        headers_csv = ", ".join(row.keys())
+        values_csv = ", ".join(str(v) for v in row.values())
+
+        # Step 2: Ensure header row exists (idempotent)
+        print("[2/5] Ensuring header row exists (Name, Email, Note)…")
+        ensure_header_instr = (
+            f"For spreadsheet with ID {spreadsheet_id}, in the first worksheet, ensure the first row is a header row "
+            f"with columns: {headers_csv}. If headers already exist, do not duplicate or reorder them."
+        )
+        _ = await client_sa.call_tool("google_sheets-update-row", {"instruction": ensure_header_instr})
+
+        # Step 3: Add data row
+        print("[3/5] Adding data row…")
+        add_instr = (
+            f"For spreadsheet with ID {spreadsheet_id}, append a new row to the first worksheet immediately below the header row. "
+            f"Use these columns and values: {headers_csv} -> {values_csv}. "
+            f"Return a short confirmation including the A1 range of the inserted row."
+        )
+        r = await client_sa.call_tool("google_sheets-add-single-row", {"instruction": add_instr})
         text, data = _extract_text_and_data(r)
 
-    # Try to extract spreadsheetId and url from data or text
-    spreadsheet_id = None
-    spreadsheet_url = None
-    if isinstance(data, dict):
-        spreadsheet_id = data.get("spreadsheetId")
-        spreadsheet_url = data.get("spreadsheetUrl") or data.get("url")
-    if not spreadsheet_id and text:
-        # Try to find JSON in text
+        # Step 4: Verify by reading first 3 rows
+        print("[4/5] Verifying inserted row…")
+        verify_instr = (
+            f"For spreadsheet with ID {spreadsheet_id}, read the first worksheet range A1:C3. "
+            f"Return pure JSON with a 'values' array of arrays, no prose."
+        )
+        values = None
         try:
-            maybe = json.loads(text)
-            if isinstance(maybe, dict):
-                spreadsheet_id = spreadsheet_id or maybe.get("spreadsheetId")
-                spreadsheet_url = spreadsheet_url or maybe.get("spreadsheetUrl") or maybe.get("url")
+            vr = await client_sa.call_tool("google_sheets-get-values-in-range", {"instruction": verify_instr})
+            vtext, vdata = _extract_text_and_data(vr)
+
+            if isinstance(vdata, dict) and isinstance(vdata.get("values"), list):
+                values = vdata["values"]
+            else:
+                try:
+                    if vtext:
+                        maybe = json.loads(vtext)
+                        if isinstance(maybe, dict) and isinstance(maybe.get("values"), list):
+                            values = maybe["values"]
+                except Exception:
+                    pass
         except Exception:
-            pass
-    if not spreadsheet_id and text:
-        m = re.search(r"[0-9A-Za-z-_]{40,}", text)
-        if m:
-            spreadsheet_id = m.group(0)
-    if not spreadsheet_id:
-        print("Could not parse spreadsheet ID from response. Raw response:")
-        print(text or data)
-        return 1
-    if spreadsheet_url:
-        print(f"Created spreadsheet: {spreadsheet_url}")
-    else:
-        print(f"Created spreadsheet with ID: {spreadsheet_id}")
+            # Verification is best-effort; continue without failing the flow
+            values = None
 
-    # Step 2: add a row
-    default_row = {"Name": "Gobii", "Email": "hello@gobii.ai", "Note": "Hello from MCP!"}
-    try:
-        row = json.loads(os.getenv("POC_ROW_JSON", ""))
-        if not isinstance(row, dict):
-            row = default_row
-    except Exception:
-        row = default_row
-    # Compose instruction for adding row. Ask it to create headers if missing.
-    row_pairs = ", ".join(f"{k}: {v}" for k, v in row.items())
-    add_instr = (
-        f"For spreadsheet with ID {spreadsheet_id}, add a single row to the first worksheet. "
-        f"If the sheet has no header row, create headers using these keys first. "
-        f"Row values -> {row_pairs}. "
-        "Return a brief success message including the worksheet name."
-    )
-    print("[3/4] Adding a row to the first worksheet…")
-    async with client_sa:
-        r = await client_sa.call_tool("google_sheets-add-single-row", {"instruction": add_instr})
-    text, data = _extract_text_and_data(r)
+        ok = False
+        if isinstance(values, list) and len(values) >= 2:
+            # Basic check: header present and at least one data row
+            ok = True
 
-    # Final output
-    print("[4/4] Done. Result:")
-    if spreadsheet_url:
-        print(f"Spreadsheet URL: {spreadsheet_url}")
-    print(text or data or "Added a row.")
-    return 0
+        # If still not ok, try one more explicit append
+        if not ok:
+            print("Row verification inconclusive; attempting a second append…")
+            add_instr2 = (
+                f"Append one row under the header in the first worksheet of spreadsheet {spreadsheet_id}. "
+                f"Columns: {headers_csv}. Values: {values_csv}."
+            )
+            _ = await client_sa.call_tool("google_sheets-add-single-row", {"instruction": add_instr2})
+
+        # Step 5: Final output
+        print("[5/5] Done.")
+        if spreadsheet_url:
+            print(f"Spreadsheet URL: {spreadsheet_url}")
+        print(text or data or "Row append attempted.")
+        return 0
 
 
 def main() -> None:
