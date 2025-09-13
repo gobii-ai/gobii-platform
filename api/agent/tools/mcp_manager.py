@@ -193,13 +193,17 @@ class MCPToolManager:
             from fastmcp.client.transports import StreamableHttpTransport
             headers: Dict[str, str] = dict(server.headers or {})
             if server.name == "pipedream":
-                # Build discovery headers in sub-agent mode; app slug set per request
+                # Build discovery headers in sub-agent mode with an initial app slug
+                # Some servers expect an app slug present during the initial handshake.
+                app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets")
+                first_slug = next((s.strip() for s in app_csv.split(',') if s.strip()), "google_sheets")
                 headers = self._pd_build_headers(
                     mode="sub-agent",
-                    app_slug=None,
+                    app_slug=first_slug,
                     external_user_id="gobii-discovery",
                     conversation_id="discovery",
                 )
+                logger.info(f"Pipedream discovery initializing with app slug '{first_slug}' and sub-agent mode")
             transport = StreamableHttpTransport(url=server.url, headers=headers)
         elif server.command:
             # For stdio servers like npx

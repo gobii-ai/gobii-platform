@@ -599,6 +599,13 @@ EXA_SEARCH_API_KEY = env("EXA_SEARCH_API_KEY", default="dummy-exa-search-api-key
 
 GOBII_RELEASE_ENV = env("GOBII_RELEASE_ENV", default="local")
 
+# In local/dev by default, simulate email delivery when no real provider is configured.
+# This avoids blocking first‑run UX. If SMTP is configured per agent or
+# POSTMARK_SERVER_TOKEN is set, real delivery is used instead.
+SIMULATE_EMAIL_DELIVERY = env.bool(
+    "SIMULATE_EMAIL_DELIVERY", default=(GOBII_RELEASE_ENV != "prod")
+)
+
 
 # Twilio
 TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID", default="")

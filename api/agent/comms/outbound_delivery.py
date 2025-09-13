@@ -360,14 +360,14 @@ def deliver_agent_email(message: PersistentAgentMessage):
     # Check environment and token once up front (Postmark or simulation)
     postmark_token = os.getenv("POSTMARK_SERVER_TOKEN")
     release_env = getattr(settings, "GOBII_RELEASE_ENV", os.getenv("GOBII_RELEASE_ENV", "local"))
-    is_non_prod = release_env != "prod"
     missing_token = not postmark_token
     simulation_flag = getattr(settings, "SIMULATE_EMAIL_DELIVERY", False)
 
-    # Explicit simulation flag: only honor in non-prod or when no token
-    if simulation_flag and (is_non_prod or missing_token):
+    # Simulate only when explicitly enabled and Postmark is not configured.
+    # SMTP (per-endpoint) was handled above and takes precedence when present.
+    if simulation_flag and missing_token:
         # Tailor message to reason for simulation (explicit flag vs missing token)
-        if is_non_prod and missing_token:
+        if release_env != "prod" and missing_token:
             logger.info(
                 "Running in non-prod environment without POSTMARK_SERVER_TOKEN. Simulating email delivery for message %s.",
                 message.id,
