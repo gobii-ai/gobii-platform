@@ -16,6 +16,7 @@ import logging
 import asyncio
 import os
 import fnmatch
+import re
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
@@ -626,19 +627,59 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
             "message": "No MCP tools available"
         }
     
-    # Prepare tool information for LLM
-    tools_context = [tool.to_search_dict() for tool in all_tools]
-    # Log the context we’ll provide to the LLM for transparency
+    # Prepare concise, plain‑text tool catalog for the LLM (save tokens)
+    def _strip_desc(text: str, limit: int = 180) -> str:
+        if not text:
+            return ""
+        # Remove markdown links [text](url) → text
+        text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\\1", text)
+        # Remove bare URLs
+        text = re.sub(r"https?://\S+", "", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return (text[: limit].rstrip() + ("…" if len(text) > limit else ""))
+
+    def _summarize_params(schema: Dict[str, Any], limit: int = 6) -> str:
+        try:
+            if not isinstance(schema, dict):
+                return ""
+            props = schema.get("properties") or {}
+            if not isinstance(props, dict) or not props:
+                return ""
+            required = set(schema.get("required") or [])
+            items = []
+            for i, (k, v) in enumerate(props.items()):
+                if i >= limit:
+                    items.append(f"+{len(props) - limit} more")
+                    break
+                t = v.get("type") if isinstance(v, dict) else None
+                t = t if isinstance(t, str) else "any"
+                star = "*" if k in required else ""
+                items.append(f"{k}{star}:{t}")
+            return ", ".join(items)
+        except Exception:
+            return ""
+
+    tools_lines: List[str] = []
+    for tool in all_tools:
+        desc = _strip_desc(tool.description or "")
+        p = _summarize_params(tool.parameters or {})
+        line = f"- {tool.full_name}: {desc}" if desc else f"- {tool.full_name}"
+        if p:
+            line += f" | params: {p}"
+        tools_lines.append(line)
+
+    # Log preview of the compact catalog
     try:
+        preview = "\n".join(tools_lines[:5])
         logger.info(
-            "search_mcp_tools: tools_context prepared with %d entries; first few: %s",
-            len(tools_context),
-            json.dumps(tools_context[:5], indent=2),
+            "search_mcp_tools: compact catalog prepared with %d entries; first few:\n%s",
+            len(tools_lines),
+            preview,
         )
-        if len(tools_context) > 5:
-            logger.info("search_mcp_tools: (truncated context log; total entries=%d)", len(tools_context))
+        if len(tools_lines) > 5:
+            logger.info("search_mcp_tools: (truncated catalog log; total entries=%d)", len(tools_lines))
     except Exception:
-        logger.exception("search_mcp_tools: failed to log tools_context preview")
+        logger.exception("search_mcp_tools: failed to log compact catalog preview")
     
     # Prepare the search prompt (plain text output)
     system_prompt = (
@@ -650,9 +691,9 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
 
     user_prompt = (
         f"Query: {query}\n\n"
-        f"Available tools (JSON for reference only — respond in plain text):\n"
-        f"{json.dumps(tools_context, indent=2)}\n\n"
-        f"Now output a plain-text list of relevant tools (or 'No relevant tools found.')."
+        "Available tools (respond in plain text; names and brief details):\n"
+        + "\n".join(tools_lines)
+        + "\n\nNow output a plain-text list of relevant tools (or 'No relevant tools found.')."
     )
 
     try:
