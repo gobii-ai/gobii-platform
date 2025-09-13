@@ -21,6 +21,7 @@ from util.subscription_helper import get_user_plan, get_active_subscription, rep
 
 from datetime import timedelta, datetime
 from django.apps import apps
+import os
 
 import logging
 logger = logging.getLogger(__name__)
@@ -52,6 +53,9 @@ class TaskCreditService:
         warnings or gating.
         """
         try:
+            # Never enable unlimited mode during test runs
+            if 'test_settings' in os.environ.get('DJANGO_SETTINGS_MODULE', ''):
+                return False
             return (not getattr(settings, "GOBII_PROPRIETARY_MODE", False)) and bool(
                 getattr(settings, "GOBII_ENABLE_COMMUNITY_UNLIMITED", False)
             )

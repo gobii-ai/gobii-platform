@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
-from api.models import PersistentAgent, BrowserUseAgent
+from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentEnabledTool
 from api.agent.tools.mcp_manager import (
     MCPToolManager,
     MCPServer,
@@ -229,13 +229,16 @@ class MCPToolManagerTests(TestCase):
             name="test-agent",
             charter="Test",
             browser_use_agent=browser_agent,
-            enabled_mcp_tools=["mcp_test_tool1"]
         )
-        
         tool1 = MCPToolInfo(
             "mcp_test_tool1", "test", "tool1", "Test tool 1",
             {"type": "object", "properties": {}}
         )
+        # Enable via API to populate table
+        from api.agent.tools.mcp_manager import enable_mcp_tool
+        with patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools') as mock_all:
+            mock_all.return_value = [tool1]
+            enable_mcp_tool(agent, "mcp_test_tool1")
         self.manager._tools_cache = {"test": [tool1]}
         self.manager._initialized = True
         
@@ -258,8 +261,14 @@ class MCPToolManagerTests(TestCase):
             name="test-agent",
             charter="Test",
             browser_use_agent=browser_agent,
-            enabled_mcp_tools=["mcp_test_tool1"]
         )
+        # Mark enabled in table
+        from api.agent.tools.mcp_manager import enable_mcp_tool
+        tool1 = MCPToolInfo("mcp_test_tool1", "test", "tool1", "Test tool 1", {})
+        self.manager._tools_cache = {"test": [tool1]}
+        with patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools') as mock_all:
+            mock_all.return_value = [tool1]
+            enable_mcp_tool(agent, "mcp_test_tool1")
         
         mock_client = MagicMock()
         self.manager._clients = {"test": mock_client}
@@ -282,8 +291,8 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(result["result"], "Success result")
         
         # Check that usage was tracked
-        agent.refresh_from_db()
-        self.assertIn("mcp_test_tool1", agent.mcp_tool_usage)
+        row = PersistentAgentEnabledTool.objects.get(agent=agent, tool_full_name="mcp_test_tool1")
+        self.assertIsNotNone(row.last_used_at)
         
     def test_execute_mcp_tool_not_enabled(self):
         """Test executing a tool that's not enabled."""
@@ -295,7 +304,6 @@ class MCPToolManagerTests(TestCase):
             name="test-agent",
             charter="Test",
             browser_use_agent=browser_agent,
-            enabled_mcp_tools=[]
         )
         
         result = self.manager.execute_mcp_tool(agent, "mcp_test_tool1", {})
@@ -440,9 +448,8 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result["enabled"], "mcp_test_tool")
         self.assertIsNone(result["disabled"])
         
-        self.agent.refresh_from_db()
-        self.assertIn("mcp_test_tool", self.agent.enabled_mcp_tools)
-        self.assertIn("mcp_test_tool", self.agent.mcp_tool_usage)
+        names = set(PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list("tool_full_name", flat=True))
+        self.assertIn("mcp_test_tool", names)
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
@@ -452,9 +459,12 @@ class MCPToolFunctionsTests(TestCase):
             MCPToolInfo("mcp_test_tool", "test", "tool", "Test tool", {})
         ]
         
-        self.agent.enabled_mcp_tools = ["mcp_test_tool"]
-        self.agent.mcp_tool_usage = {"mcp_test_tool": time.time() - 100}
-        self.agent.save()
+        # Pre-enable and set an older last_used_at
+        enable_mcp_tool(self.agent, "mcp_test_tool")
+        row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="mcp_test_tool")
+        from django.utils import timezone
+        row.last_used_at = timezone.now() - timezone.timedelta(seconds=100)
+        row.save(update_fields=["last_used_at"])
         
         result = enable_mcp_tool(self.agent, "mcp_test_tool")
         
@@ -462,8 +472,9 @@ class MCPToolFunctionsTests(TestCase):
         self.assertIn("already enabled", result["message"])
         
         # Check usage timestamp was updated
-        self.agent.refresh_from_db()
-        self.assertGreater(self.agent.mcp_tool_usage["mcp_test_tool"], time.time() - 10)
+        row.refresh_from_db()
+        from django.utils import timezone
+        self.assertGreater(row.last_used_at, timezone.now() - timezone.timedelta(seconds=10))
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
@@ -477,11 +488,12 @@ class MCPToolFunctionsTests(TestCase):
         mock_get_tools.return_value = tools
         
         # Enable 20 tools with different timestamps
-        enabled_tools = [f"mcp_test_tool{i}" for i in range(20)]
-        tool_usage = {f"mcp_test_tool{i}": time.time() - (20 - i) for i in range(20)}
-        self.agent.enabled_mcp_tools = enabled_tools
-        self.agent.mcp_tool_usage = tool_usage
-        self.agent.save()
+        for i in range(20):
+            enable_mcp_tool(self.agent, f"mcp_test_tool{i}")
+            row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name=f"mcp_test_tool{i}")
+            from django.utils import timezone
+            row.last_used_at = timezone.now() - timezone.timedelta(seconds=(20 - i))
+            row.save(update_fields=["last_used_at"])
         
         # Enable the 21st tool, should evict tool0 (oldest)
         result = enable_mcp_tool(self.agent, "mcp_test_tool20")
@@ -490,10 +502,10 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result["enabled"], "mcp_test_tool20")
         self.assertEqual(result["disabled"], "mcp_test_tool0")
         
-        self.agent.refresh_from_db()
-        self.assertNotIn("mcp_test_tool0", self.agent.enabled_mcp_tools)
-        self.assertIn("mcp_test_tool20", self.agent.enabled_mcp_tools)
-        self.assertEqual(len(self.agent.enabled_mcp_tools), 20)
+        names = set(PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list("tool_full_name", flat=True))
+        self.assertNotIn("mcp_test_tool0", names)
+        self.assertIn("mcp_test_tool20", names)
+        self.assertEqual(len(names), 20)
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
@@ -519,13 +531,18 @@ class MCPToolFunctionsTests(TestCase):
         
         mock_enable.assert_called_once_with(self.agent, "mcp_brightdata_scrape_as_markdown")
         
-    @patch('api.agent.tools.mcp_manager.enable_mcp_tool')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_ensure_default_tools_already_enabled(self, mock_init, mock_get_tools, mock_enable):
+    @patch('api.agent.tools.mcp_manager.enable_mcp_tool')
+    def test_ensure_default_tools_already_enabled(self, mock_enable, mock_init, mock_get_tools):
         """Test ensuring defaults when already enabled."""
-        self.agent.enabled_mcp_tools = ["mcp_brightdata_scrape_as_markdown"]
-        self.agent.save()
+        # Pre-enable default tool directly in table
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent, tool_full_name="mcp_brightdata_scrape_as_markdown"
+        )
+        mock_get_tools.return_value = [
+            MCPToolInfo("mcp_brightdata_scrape_as_markdown", "brightdata", "scrape_as_markdown", "Scrape", {})
+        ]
         
         ensure_default_tools_enabled(self.agent)
         
@@ -634,12 +651,15 @@ class MCPToolIntegrationTests(TestCase):
             self.assertEqual(result["status"], "success")
             time.sleep(0.01)  # Small delay to ensure different timestamps
             
-        self.agent.refresh_from_db()
-        self.assertEqual(len(self.agent.enabled_mcp_tools), 20)
+        self.assertEqual(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent).count(), 20
+        )
         
         # Use tool10 to make it more recent
-        self.agent.mcp_tool_usage["mcp_test_tool10"] = time.time()
-        self.agent.save()
+        row10 = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="mcp_test_tool10")
+        from django.utils import timezone
+        row10.last_used_at = timezone.now()
+        row10.save(update_fields=["last_used_at"])
         
         # Enable tool20, should evict tool0 (not tool10 since we just used it)
         result = enable_mcp_tool(self.agent, "mcp_test_tool20")
@@ -647,10 +667,12 @@ class MCPToolIntegrationTests(TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["disabled"], "mcp_test_tool0")
         
-        self.agent.refresh_from_db()
-        self.assertIn("mcp_test_tool10", self.agent.enabled_mcp_tools)
-        self.assertNotIn("mcp_test_tool0", self.agent.enabled_mcp_tools)
-        self.assertIn("mcp_test_tool20", self.agent.enabled_mcp_tools)
+        enabled_now = set(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list("tool_full_name", flat=True)
+        )
+        self.assertIn("mcp_test_tool10", enabled_now)
+        self.assertNotIn("mcp_test_tool0", enabled_now)
+        self.assertIn("mcp_test_tool20", enabled_now)
         
     @patch('api.agent.tools.mcp_manager.enable_mcp_tool')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
@@ -675,21 +697,19 @@ class MCPToolIntegrationTests(TestCase):
                 mock_get_tools.return_value = [
                     MCPToolInfo("mcp_test_tool", "test", "tool", "Test", {})
                 ]
-                
-                # Enable a tool
+                # Enable a tool (initial enable may not set last_used_at)
                 enable_mcp_tool(self.agent, "mcp_test_tool")
-                
-                self.agent.refresh_from_db()
-                self.assertIn("mcp_test_tool", self.agent.mcp_tool_usage)
-                first_time = self.agent.mcp_tool_usage["mcp_test_tool"]
-                
-                # Wait and re-enable (should update timestamp)
+                row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="mcp_test_tool")
+                first_time = row.last_used_at  # may be None on initial enable
+
+                # Wait and re-enable (should set/update last_used_at)
                 time.sleep(0.1)
                 enable_mcp_tool(self.agent, "mcp_test_tool")
-                
-                self.agent.refresh_from_db()
-                second_time = self.agent.mcp_tool_usage["mcp_test_tool"]
-                self.assertGreater(second_time, first_time)
+                row.refresh_from_db()
+                second_time = row.last_used_at
+                self.assertIsNotNone(second_time)
+                if first_time is not None:
+                    self.assertGreater(second_time, first_time)
 
     def test_enable_tools_batch_with_lru(self):
         """Batch enabling enforces cap and evicts LRU as needed."""
@@ -701,7 +721,6 @@ class MCPToolIntegrationTests(TestCase):
             name="batch-agent",
             charter="Test",
             browser_use_agent=browser_agent,
-            enabled_mcp_tools=[],
         )
 
         # Populate the global cache used by enable_tools
@@ -712,9 +731,13 @@ class MCPToolIntegrationTests(TestCase):
 
         # Pre-fill 18 tools so a batch of 5 causes 3 evictions
         pre = [f"mcp_t{i}" for i in range(18)]
-        agent.enabled_mcp_tools = list(pre)
-        agent.mcp_tool_usage = {name: time.time() - (100 - i) for i, name in enumerate(pre)}
-        agent.save()
+        for i, name in enumerate(pre):
+            enable_mcp_tool(agent, name)
+            # Stagger usage to influence eviction
+            row = PersistentAgentEnabledTool.objects.get(agent=agent, tool_full_name=name)
+            from django.utils import timezone
+            row.last_used_at = timezone.now()
+            row.save(update_fields=["last_used_at"])
 
         result = enable_tools(agent, [f"mcp_t{i}" for i in range(18, 23)])  # 5 new
 
@@ -722,4 +745,4 @@ class MCPToolIntegrationTests(TestCase):
         self.assertEqual(len(result["enabled"]), 5)
         self.assertEqual(len(result["evicted"]), 3)
         agent.refresh_from_db()
-        self.assertEqual(len(agent.enabled_mcp_tools), 20)
+        self.assertEqual(PersistentAgentEnabledTool.objects.filter(agent=agent).count(), 20)

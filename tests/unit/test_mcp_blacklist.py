@@ -1,11 +1,11 @@
 """Tests for MCP tool blacklist functionality."""
 
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import asyncio
 from django.test import TestCase, tag
 
 from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, MCPServer
-from api.models import PersistentAgent
+from api.models import PersistentAgent, BrowserUseAgent
 
 
 @tag("batch_mcp_tools")
@@ -99,9 +99,12 @@ class TestMCPToolBlacklist(TestCase):
     
     def test_execute_mcp_tool_blocks_blacklisted(self):
         """Test that execute_mcp_tool blocks blacklisted tools."""
-        # Create a mock agent
-        agent = Mock(spec=PersistentAgent)
-        agent.enabled_mcp_tools = ["mcp_brightdata_scraping_browser_navigate"]
+        # Create a real agent
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        user = User.objects.create_user(username='blk@example.com')
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="blk-browser")
+        agent = PersistentAgent.objects.create(user=user, name="blk-agent", charter="T", browser_use_agent=browser_agent)
         
         # Try to execute a blacklisted tool
         result = self.manager.execute_mcp_tool(
@@ -118,10 +121,12 @@ class TestMCPToolBlacklist(TestCase):
         """Test that enable_mcp_tool blocks blacklisted tools."""
         from api.agent.tools.mcp_manager import enable_mcp_tool
         
-        # Create a mock agent
-        agent = Mock(spec=PersistentAgent)
-        agent.enabled_mcp_tools = []
-        agent.mcp_tool_usage = {}
+        # Create a real agent
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        user = User.objects.create_user(username='blk2@example.com')
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="blk2-browser")
+        agent = PersistentAgent.objects.create(user=user, name="blk2-agent", charter="T", browser_use_agent=browser_agent)
         
         # Mock the manager initialization
         with patch.object(self.manager, '_initialized', True):
@@ -141,10 +146,12 @@ class TestMCPToolBlacklist(TestCase):
         MCPToolManager.DEFAULT_ENABLED_TOOLS.append("mcp_brightdata_scraping_browser_navigate")
         
         try:
-            # Create a mock agent
-            agent = Mock(spec=PersistentAgent)
-            agent.enabled_mcp_tools = []
-            agent.id = 1
+            # Create a real agent
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            user = User.objects.create_user(username='blk3@example.com')
+            browser_agent = BrowserUseAgent.objects.create(user=user, name="blk3-browser")
+            agent = PersistentAgent.objects.create(user=user, name="blk3-agent", charter="T", browser_use_agent=browser_agent)
             
             # Mock the global manager instance and available tools
             with patch.object(_mcp_manager, '_initialized', True):

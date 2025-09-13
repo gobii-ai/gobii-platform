@@ -29,7 +29,7 @@ from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
 
-from ...models import PersistentAgent
+from ...models import PersistentAgent, PersistentAgentEnabledTool
 from ..core.llm_config import get_llm_config_with_failover
 
 logger = logging.getLogger(__name__)
@@ -357,22 +357,29 @@ class MCPToolManager:
         """Get OpenAI-format tool definitions for enabled MCP tools."""
         if not self._initialized:
             self.initialize()
-            
-        enabled_names = agent.enabled_mcp_tools or []
-        definitions = []
-        
+
+        enabled_names = list(
+            PersistentAgentEnabledTool.objects.filter(agent=agent)
+            .values_list("tool_full_name", flat=True)
+        )
+        if not enabled_names:
+            return []
+
+        definitions: List[Dict[str, Any]] = []
+        enabled_set = set(enabled_names)
         for tool_info in self.get_all_available_tools():
-            if tool_info.full_name in enabled_names:
-                definition = {
-                    "type": "function",
-                    "function": {
-                        "name": tool_info.full_name,
-                        "description": tool_info.description,
-                        "parameters": tool_info.parameters,
+            if tool_info.full_name in enabled_set:
+                definitions.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tool_info.full_name,
+                            "description": tool_info.description,
+                            "parameters": tool_info.parameters,
+                        },
                     }
-                }
-                definitions.append(definition)
-        
+                )
+
         return definitions
     
     def execute_mcp_tool(self, agent: PersistentAgent, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -387,17 +394,22 @@ class MCPToolManager:
             }
         
         # Check if tool is enabled
-        if tool_name not in (agent.enabled_mcp_tools or []):
+        if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
             return {
                 "status": "error",
                 "message": f"Tool '{tool_name}' is not enabled for this agent"
             }
         
         # Update usage timestamp
-        tool_usage = dict(agent.mcp_tool_usage or {})
-        tool_usage[tool_name] = time.time()
-        agent.mcp_tool_usage = tool_usage
-        agent.save(update_fields=['mcp_tool_usage'])
+        try:
+            row, _ = PersistentAgentEnabledTool.objects.get_or_create(
+                agent=agent, tool_full_name=tool_name
+            )
+            row.last_used_at = datetime.now(UTC)
+            row.usage_count = (row.usage_count or 0) + 1
+            row.save(update_fields=["last_used_at", "usage_count"])
+        except Exception:
+            logger.exception("Failed to update usage for tool %s", tool_name)
         
         # Resolve tool to server + actual tool name (supports unprefixed Pipedream tool names)
         resolved = self._resolve_tool(tool_name)
@@ -856,44 +868,52 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
     all_tools = _mcp_manager.get_all_available_tools()
     available = {t.full_name for t in all_tools}
 
-    enabled_tools = list(agent.enabled_mcp_tools or [])
-    tool_usage = dict(agent.mcp_tool_usage or {})
-
     enabled: List[str] = []
     already_enabled: List[str] = []
     evicted: List[str] = []
     invalid: List[str] = []
 
+    # Enable or mark already-enabled
     for name in requested:
-        # Existence check
         if name not in available or _mcp_manager._is_tool_blacklisted(name):
             invalid.append(name)
             continue
 
-        if name in enabled_tools:
-            tool_usage[name] = time.time()
-            already_enabled.append(name)
-            continue
+        try:
+            row, created = PersistentAgentEnabledTool.objects.get_or_create(
+                agent=agent, tool_full_name=name
+            )
+            if created:
+                # Derive server/tool fields when possible
+                resolved = _mcp_manager._resolve_tool(name)
+                if resolved:
+                    row.tool_server, row.tool_name = resolved
+                    row.save(update_fields=["tool_server", "tool_name"])
+                enabled.append(name)
+            else:
+                already_enabled.append(name)
+        except Exception:
+            logger.exception("Failed enabling tool %s", name)
+            invalid.append(name)
 
-        # Evict if over limit
-        if len(enabled_tools) >= MAX_MCP_TOOLS:
-            valid_usage = {t: tool_usage.get(t, 0) for t in enabled_tools}
-            lru_tool = min(valid_usage, key=valid_usage.get)
-            enabled_tools.remove(lru_tool)
-            if lru_tool in tool_usage:
-                del tool_usage[lru_tool]
-            evicted.append(lru_tool)
-            logger.info(f"Evicted LRU tool '{lru_tool}' to make room for '{name}'")
-
-        enabled_tools.append(name)
-        tool_usage[name] = time.time()
-        enabled.append(name)
-
-    # Persist changes if anything changed
-    if enabled or already_enabled or evicted or invalid:
-        agent.enabled_mcp_tools = enabled_tools
-        agent.mcp_tool_usage = tool_usage
-        agent.save(update_fields=['enabled_mcp_tools', 'mcp_tool_usage'])
+    # Enforce LRU cap of 20 after all insertions
+    total = PersistentAgentEnabledTool.objects.filter(agent=agent).count()
+    if total > MAX_MCP_TOOLS:
+        overflow = total - MAX_MCP_TOOLS
+        # Oldest by (last_used_at NULLS FIRST, enabled_at ASC)
+        oldest = (
+            PersistentAgentEnabledTool.objects.filter(agent=agent)
+            .order_by("last_used_at", "enabled_at")
+            [:overflow]
+        )
+        evicted_names = [o.tool_full_name for o in oldest]
+        PersistentAgentEnabledTool.objects.filter(id__in=[o.id for o in oldest]).delete()
+        evicted.extend(evicted_names)
+        if evicted_names:
+            logger.info(
+                "Evicted %d tool(s) for agent %s due to 20-tool cap: %s",
+                len(evicted_names), agent.id, ", ".join(evicted_names)
+            )
 
     # Build message
     parts: List[str] = []
@@ -918,88 +938,80 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
 
 def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     """Enable an MCP tool for the agent with LRU eviction if over limit."""
-    import time
-    
-    MAX_MCP_TOOLS = 20  # Maximum number of MCP tools per agent
-    
+    MAX_MCP_TOOLS = 20
+
     if not _mcp_manager._initialized:
         _mcp_manager.initialize()
-    
+
     # Check if tool is blacklisted
     if _mcp_manager._is_tool_blacklisted(tool_name):
         return {
             "status": "error",
             "message": f"Tool '{tool_name}' is blacklisted and cannot be enabled"
         }
-    
+
     # Check if tool exists
     all_tools = _mcp_manager.get_all_available_tools()
     tool_exists = any(tool.full_name == tool_name for tool in all_tools)
-    
     if not tool_exists:
         return {
             "status": "error",
             "message": f"Tool '{tool_name}' does not exist"
         }
-    
-    # Get current enabled tools and usage tracking
-    enabled_tools = list(agent.enabled_mcp_tools or [])
-    tool_usage = dict(agent.mcp_tool_usage or {})
-    
-    # Check if already enabled
-    if tool_name in enabled_tools:
-        # Update usage timestamp for already enabled tool
-        tool_usage[tool_name] = time.time()
-        agent.mcp_tool_usage = tool_usage
-        agent.save(update_fields=['mcp_tool_usage'])
-        
-        return {
-            "status": "success",
-            "message": f"Tool '{tool_name}' is already enabled",
-            "enabled": tool_name,
-            "disabled": None
-        }
-    
+
+    # Already enabled?
+    try:
+        row = PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).first()
+        if row:
+            # Touch usage to reflect interest
+            row.last_used_at = datetime.now(UTC)
+            row.usage_count = (row.usage_count or 0) + 1
+            row.save(update_fields=["last_used_at", "usage_count"])
+            return {
+                "status": "success",
+                "message": f"Tool '{tool_name}' is already enabled",
+                "enabled": tool_name,
+                "disabled": None,
+            }
+    except Exception:
+        logger.exception("Error checking existing enabled tool %s", tool_name)
+
+    # Enable new tool
+    try:
+        row = PersistentAgentEnabledTool.objects.create(agent=agent, tool_full_name=tool_name)
+        resolved = _mcp_manager._resolve_tool(tool_name)
+        if resolved:
+            row.tool_server, row.tool_name = resolved
+            row.save(update_fields=["tool_server", "tool_name"])
+    except Exception as e:
+        logger.error("Failed to create enabled tool %s: %s", tool_name, e)
+        return {"status": "error", "message": str(e)}
+
+    # Enforce cap
+    total = PersistentAgentEnabledTool.objects.filter(agent=agent).count()
     disabled_tool = None
-    
-    # Check if we need to evict a tool (LRU)
-    if len(enabled_tools) >= MAX_MCP_TOOLS:
-        # Find the least recently used tool
-        # Filter tool_usage to only include currently enabled tools
-        valid_usage = {t: tool_usage.get(t, 0) for t in enabled_tools}
-        
-        # Find the tool with the oldest timestamp (or 0 if never used)
-        lru_tool = min(valid_usage, key=valid_usage.get)
-        
-        # Remove the LRU tool
-        enabled_tools.remove(lru_tool)
-        if lru_tool in tool_usage:
-            del tool_usage[lru_tool]
-        disabled_tool = lru_tool
-        
-        logger.info(f"Evicted LRU tool '{lru_tool}' to make room for '{tool_name}'")
-    
-    # Add the new tool
-    enabled_tools.append(tool_name)
-    tool_usage[tool_name] = time.time()
-    
-    # Save the updated state
-    agent.enabled_mcp_tools = enabled_tools
-    agent.mcp_tool_usage = tool_usage
-    agent.save(update_fields=['enabled_mcp_tools', 'mcp_tool_usage'])
-    
-    logger.info(f"Enabled MCP tool '{tool_name}' for agent {agent.id}")
-    
+    if total > MAX_MCP_TOOLS:
+        # Exclude the just-added tool from eviction so we always keep it
+        oldest = (
+            PersistentAgentEnabledTool.objects.filter(agent=agent)
+            .exclude(tool_full_name=tool_name)
+            .order_by("last_used_at", "enabled_at")
+            .first()
+        )
+        if oldest:
+            disabled_tool = oldest.tool_full_name
+            oldest.delete()
+            logger.info("Evicted LRU tool '%s' to make room for '%s'", disabled_tool, tool_name)
+
+    logger.info("Enabled MCP tool '%s' for agent %s", tool_name, agent.id)
     result = {
         "status": "success",
         "message": f"Successfully enabled tool '{tool_name}'",
         "enabled": tool_name,
-        "disabled": disabled_tool
+        "disabled": disabled_tool,
     }
-    
     if disabled_tool:
         result["message"] += f" (disabled '{disabled_tool}' due to 20 tool limit)"
-    
     return result
 
 
@@ -1011,7 +1023,9 @@ def ensure_default_tools_enabled(agent: PersistentAgent) -> None:
         _mcp_manager.initialize()
     
     # Get current enabled tools
-    enabled_tools = set(agent.enabled_mcp_tools or [])
+    enabled_tools = set(
+        PersistentAgentEnabledTool.objects.filter(agent=agent).values_list("tool_full_name", flat=True)
+    )
     
     # Check if any default tools are missing
     default_tools = set(MCPToolManager.DEFAULT_ENABLED_TOOLS)

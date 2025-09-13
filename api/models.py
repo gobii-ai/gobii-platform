@@ -1384,16 +1384,7 @@ class PersistentAgent(models.Model):
         related_name="preferred_by_agents",
         help_text="Communication endpoint (email/SMS/etc.) the agent should use by default to reach its owner user."
     )
-    enabled_mcp_tools = models.JSONField(
-        default=list,
-        blank=True,
-        help_text='List of enabled MCP tool names for this agent (e.g., ["mcp_brightdata_search_engine"])'
-    )
-    mcp_tool_usage = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text='Dictionary mapping MCP tool names to last usage timestamps for LRU tracking'
-    )
+    # NOTE: Enabled MCP tools are now tracked in PersistentAgentEnabledTool.
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1722,6 +1713,46 @@ class PersistentAgent(models.Model):
         # the database transaction that deletes this instance successfully commits.
         transaction.on_commit(self._remove_celery_beat_task)
         return super().delete(*args, **kwargs)
+
+
+class PersistentAgentEnabledTool(models.Model):
+    """Normalized record of a tool enabled for a persistent agent.
+
+    Replaces the old JSON fields on PersistentAgent:
+    - enabled_mcp_tools (list[str])
+    - mcp_tool_usage (dict[str -> last_used_epoch_seconds])
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="enabled_tools",
+    )
+    tool_full_name = models.CharField(max_length=256)
+    # Optional denormalization to aid analytics/routing
+    tool_server = models.CharField(max_length=64, blank=True)
+    tool_name = models.CharField(max_length=128, blank=True)
+
+    enabled_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    usage_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "tool_full_name"],
+                name="unique_agent_tool_full_name",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["agent", "last_used_at"], name="pa_en_tool_agent_lu_idx"),
+            models.Index(fields=["tool_full_name"], name="pa_en_tool_name_idx"),
+        ]
+        ordering = ["-last_used_at", "-enabled_at"]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"EnabledTool<{self.tool_full_name}> for {getattr(self.agent, 'name', 'agent')}"
 
 
 class PersistentAgentSecret(models.Model):
