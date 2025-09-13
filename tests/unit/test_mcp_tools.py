@@ -11,17 +11,16 @@ from api.agent.tools.mcp_manager import (
     MCPToolManager,
     MCPServer,
     MCPToolInfo,
-    search_mcp_tools,
+    search_tools,
     enable_mcp_tool,
+    enable_tools,
     ensure_default_tools_enabled,
     get_mcp_manager,
 )
 from api.agent.tools.mcp_tools import (
     execute_search_tools,
-    execute_enable_tool,
     execute_mcp_tool,
     get_search_tools_tool,
-    get_enable_tool_tool,
 )
 from tests.utils.llm_seed import seed_persistent_basic
 
@@ -339,60 +338,59 @@ class MCPToolFunctionsTests(TestCase):
         # Ensure persistent LLM config exists for DB-only selection
         seed_persistent_basic(include_openrouter=False)
         
+    @patch('api.agent.tools.mcp_manager.enable_tools')
     @patch('api.agent.tools.mcp_manager.litellm.completion')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_search_mcp_tools_success(self, mock_init, mock_get_tools, mock_completion):
-        """Test successful MCP tool search returning plain text."""
+    def test_search_tools_calls_enable_tools(self, mock_init, mock_get_tools, mock_completion, mock_enable_batch):
+        """search_tools should invoke internal enable_tools via a tool call."""
         mock_get_tools.return_value = [
             MCPToolInfo("mcp_brightdata_scrape", "brightdata", "scrape", "Scrape pages", {}),
-            MCPToolInfo("mcp_brightdata_search", "brightdata", "search", "Search web", {})
-        ]
-        
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = (
-            "- mcp_brightdata_scrape: Can scrape web pages\n"
-            "- mcp_brightdata_search: Can search the web"
-        )
-        mock_completion.return_value = mock_response
-        
-        result = search_mcp_tools(self.agent, "scrape web pages")
-        
-        self.assertEqual(result["status"], "success")
-        self.assertIn("mcp_brightdata_scrape", result["message"]) 
-        self.assertIn("mcp_brightdata_search", result["message"]) 
-
-    @patch('api.agent.tools.mcp_manager.litellm.completion')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_search_mcp_tools_plain_text_single_line(self, mock_init, mock_get_tools, mock_completion):
-        """Model may return a single-line plain text; we pass it through."""
-        mock_get_tools.return_value = [
-            MCPToolInfo("google_sheets-create-spreadsheet", "pipedream", "google_sheets-create-spreadsheet", "Create sheet", {}),
-            MCPToolInfo("google_sheets-add-single-row", "pipedream", "google_sheets-add-single-row", "Add row", {}),
+            MCPToolInfo("mcp_brightdata_search", "brightdata", "search", "Search web", {}),
         ]
 
+        # Mock a tool-call style response
+        tool_call = {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "enable_tools",
+                "arguments": json.dumps({"tool_names": [
+                    "mcp_brightdata_scrape", "mcp_brightdata_search"
+                ]}),
+            },
+        }
+        message = MagicMock()
+        message.content = "Enabling Bright Data scraping and search."
+        # Support both dict-style and attr-style access depending on litellm
+        setattr(message, 'tool_calls', [tool_call])
+        choice = MagicMock()
+        choice.message = message
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = (
-            "google_sheets-create-spreadsheet — Create a new spreadsheet"
-        )
+        mock_response.choices = [choice]
         mock_completion.return_value = mock_response
 
-        result = search_mcp_tools(self.agent, "create a sheet")
+        mock_enable_batch.return_value = {
+            "status": "success",
+            "message": "Enabled: mcp_brightdata_scrape, mcp_brightdata_search",
+            "enabled": ["mcp_brightdata_scrape", "mcp_brightdata_search"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
 
+        result = search_tools(self.agent, "scrape web pages")
         self.assertEqual(result["status"], "success")
-        self.assertIn("google_sheets-create-spreadsheet", result["message"]) 
-        
+        self.assertIn("Enabled:", result["message"]) 
+        self.assertEqual(result.get("enabled_tools"), ["mcp_brightdata_scrape", "mcp_brightdata_search"]) 
+        mock_enable_batch.assert_called_once()
+
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_search_mcp_tools_no_tools(self, mock_init, mock_get_tools):
-        """Test search when no tools are available."""
+    def test_search_tools_no_tools(self, mock_init, mock_get_tools):
+        """search_tools when no tools are available returns a message."""
         mock_get_tools.return_value = []
-        
-        result = search_mcp_tools(self.agent, "any query")
-        
+        result = search_tools(self.agent, "any query")
         self.assertEqual(result["status"], "success")
         self.assertIn("No MCP tools available", result["message"])
         
@@ -526,25 +524,20 @@ class MCPToolExecutorsTests(TestCase):
         self.assertIn("query", tool_def["function"]["parameters"]["properties"])
         self.assertIn("query", tool_def["function"]["parameters"]["required"])
         
-    def test_get_enable_tool_tool_definition(self):
-        """Test enable_tool tool definition."""
-        tool_def = get_enable_tool_tool()
-        
-        self.assertEqual(tool_def["function"]["name"], "enable_tool")
-        self.assertIn("tool_name", tool_def["function"]["parameters"]["properties"])
-        self.assertIn("tool_name", tool_def["function"]["parameters"]["required"])
-        self.assertIn("20 MCP tools", tool_def["function"]["description"])
-        self.assertIn("least recently used", tool_def["function"]["description"])
-        
-    @patch('api.agent.tools.mcp_tools.search_mcp_tools')
+    @patch('api.agent.tools.mcp_tools.search_tools')
     def test_execute_search_tools(self, mock_search):
-        """Test executing search_tools function."""
-        mock_search.return_value = {"status": "success", "message": "- mcp_test_tool: Test relevance"}
-        
+        """Test executing search_tools function returns pass-through result."""
+        mock_search.return_value = {
+            "status": "success",
+            "message": "Enabled: mcp_tool_a",
+            "enabled_tools": ["mcp_tool_a"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": []
+        }
         result = execute_search_tools(self.agent, {"query": "test query"})
-        
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["message"], "- mcp_test_tool: Test relevance")
+        self.assertIn("Enabled: mcp_tool_a", result["message"]) 
         mock_search.assert_called_once_with(self.agent, "test query")
         
     def test_execute_search_tools_missing_query(self):
@@ -554,29 +547,7 @@ class MCPToolExecutorsTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("Missing required parameter: query", result["message"])
         
-    @patch('api.agent.tools.mcp_tools.enable_mcp_tool')
-    def test_execute_enable_tool(self, mock_enable):
-        """Test executing enable_tool function."""
-        mock_enable.return_value = {
-            "status": "success",
-            "enabled": "mcp_test_tool",
-            "disabled": "mcp_old_tool"
-        }
-        
-        result = execute_enable_tool(self.agent, {"tool_name": "mcp_test_tool"})
-        
-        self.assertEqual(result["status"], "success")
-        self.assertIn("Enabled tool 'mcp_test_tool'", result["message"])
-        self.assertIn("Disabled 'mcp_old_tool'", result["message"])
-        self.assertIn("least recently used", result["message"])
-        mock_enable.assert_called_once_with(self.agent, "mcp_test_tool")
-        
-    def test_execute_enable_tool_missing_name(self):
-        """Test enable_tool with missing tool_name."""
-        result = execute_enable_tool(self.agent, {})
-        
-        self.assertEqual(result["status"], "error")
-        self.assertIn("Missing required parameter: tool_name", result["message"])
+    # enable_tool is no longer exposed to the main agent; auto-enabling is handled inside search_tools
         
     @patch('api.agent.tools.mcp_tools.get_mcp_manager')
     def test_execute_mcp_tool(self, mock_get_manager):
@@ -687,3 +658,36 @@ class MCPToolIntegrationTests(TestCase):
                 self.agent.refresh_from_db()
                 second_time = self.agent.mcp_tool_usage["mcp_test_tool"]
                 self.assertGreater(second_time, first_time)
+
+    def test_enable_tools_batch_with_lru(self):
+        """Batch enabling enforces cap and evicts LRU as needed."""
+        User = get_user_model()
+        user = User.objects.create_user(username='batch@example.com')
+        browser_agent = create_test_browser_agent(user)
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="batch-agent",
+            charter="Test",
+            browser_use_agent=browser_agent,
+            enabled_mcp_tools=[],
+        )
+
+        # Populate the global cache used by enable_tools
+        from api.agent.tools import mcp_manager as mm
+        mm._mcp_manager._initialized = True
+        tools = [MCPToolInfo(f"mcp_t{i}", "test", f"t{i}", f"Tool {i}", {}) for i in range(25)]
+        mm._mcp_manager._tools_cache = {"test": tools}
+
+        # Pre-fill 18 tools so a batch of 5 causes 3 evictions
+        pre = [f"mcp_t{i}" for i in range(18)]
+        agent.enabled_mcp_tools = list(pre)
+        agent.mcp_tool_usage = {name: time.time() - (100 - i) for i, name in enumerate(pre)}
+        agent.save()
+
+        result = enable_tools(agent, [f"mcp_t{i}" for i in range(18, 23)])  # 5 new
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["enabled"]), 5)
+        self.assertEqual(len(result["evicted"]), 3)
+        agent.refresh_from_db()
+        self.assertEqual(len(agent.enabled_mcp_tools), 20)

@@ -596,8 +596,8 @@ class MCPToolManager:
 _mcp_manager = MCPToolManager()
 
 
-@tracer.start_as_current_span("AGENT TOOL Search MCP Tools")
-def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
+@tracer.start_as_current_span("AGENT TOOL Search Tools")
+def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
     """
     Search for relevant MCP tools using LLM.
     
@@ -612,13 +612,13 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
     
     # Get all available tools
     all_tools = _mcp_manager.get_all_available_tools()
-    logger.info("search_mcp_tools: %d tools available across servers", len(all_tools))
+    logger.info("search_tools: %d tools available across servers", len(all_tools))
     try:
         # Log the full set of discovered tool names (server/name)
         names = [f"{t.server_name}:{t.full_name}" for t in all_tools]
-        logger.info("search_mcp_tools: available tool names: %s", ", ".join(names))
+        logger.info("search_tools: available tool names: %s", ", ".join(names))
     except Exception:
-        logger.exception("search_mcp_tools: failed to log available tool names")
+        logger.exception("search_tools: failed to log available tool names")
     
     if not all_tools:
         return {
@@ -672,28 +672,28 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
     try:
         preview = "\n".join(tools_lines[:5])
         logger.info(
-            "search_mcp_tools: compact catalog prepared with %d entries; first few:\n%s",
+            "search_tools: compact catalog prepared with %d entries; first few:\n%s",
             len(tools_lines),
             preview,
         )
         if len(tools_lines) > 5:
-            logger.info("search_mcp_tools: (truncated catalog log; total entries=%d)", len(tools_lines))
+            logger.info("search_tools: (truncated catalog log; total entries=%d)", len(tools_lines))
     except Exception:
-        logger.exception("search_mcp_tools: failed to log compact catalog preview")
+        logger.exception("search_tools: failed to log compact catalog preview")
     
-    # Prepare the search prompt (plain text output)
+    # Prepare the search prompt with an internal tool-call to enable_tools
     system_prompt = (
-        "You are a concise tool discovery assistant. Given a user query and a list of "
-        "available MCP tools (with names, descriptions, and parameters), output a plain-text list "
-        "of ANY AND ALL tools relevant to the query. For each tool, include the exact tool name and a short reason. "
-        "If no tools are relevant, explicitly write: 'No relevant tools found.' Do not return JSON; write normal text."
+        "You are a concise tool discovery assistant. Given a user query and a list of available MCP tools "
+        "(names, brief descriptions, and summarized parameters), you MUST select ALL relevant tools and then "
+        "call the function enable_tools exactly once with the full tool names you selected. "
+        "If no tools are relevant, do not call the function and reply briefly explaining that none are relevant."
     )
 
     user_prompt = (
         f"Query: {query}\n\n"
-        "Available tools (respond in plain text; names and brief details):\n"
+        "Available tools (names and brief details):\n"
         + "\n".join(tools_lines)
-        + "\n\nNow output a plain-text list of relevant tools (or 'No relevant tools found.')."
+        + "\n\nSelect the relevant tools and call enable_tools once with their exact full names."
     )
 
     try:
@@ -705,7 +705,7 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
         for i, (provider, model, params) in enumerate(failover_configs):
             try:
                 logger.info(
-                    "Searching MCP tools with provider %s/%s: provider=%s model=%s",
+                    "search_tools with provider %s/%s: provider=%s model=%s",
                     i + 1,
                     len(failover_configs),
                     provider,
@@ -714,20 +714,104 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
                 # Remove internal-only hints (not accepted by litellm)
                 params = {k: v for k, v in params.items() if k != 'supports_tool_choice'}
 
+                enable_tools_def = {
+                    "type": "function",
+                    "function": {
+                        "name": "enable_tools",
+                        "description": (
+                            "Enable multiple MCP tools in one call. Provide the exact full names "
+                            "from the catalog above."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "tool_names": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "minItems": 1,
+                                    "uniqueItems": True,
+                                    "description": "List of full tool names to enable"
+                                }
+                            },
+                            "required": ["tool_names"],
+                        },
+                    },
+                }
+
                 response = litellm.completion(
                     model=model,
                     messages=[
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
+                        {"role": "user", "content": user_prompt},
                     ],
+                    tools=[enable_tools_def],
+                    tool_choice="auto",
                     safety_identifier=str(agent.user.id if agent.user else ""),
-                    **params
+                    **params,
                 )
-                
-                # Raw text response; no parsing
-                content = response.choices[0].message.content
-                logger.info("search_mcp_tools: raw LLM response (text): %s", content)
-                return {"status": "success", "message": content or ""}
+
+                msg = response.choices[0].message
+                content_text = getattr(msg, "content", None) or ""
+
+                # Collect tool names from any enable_tools tool-calls (single-turn, no loop)
+                requested: List[str] = []
+                tool_calls = getattr(msg, "tool_calls", None) or []
+                for tc in tool_calls:
+                    try:
+                        if not tc:
+                            continue
+                        fn = getattr(tc, "function", None) or tc.get("function")
+                        if not fn:
+                            continue
+                        fn_name = getattr(fn, "name", None) or fn.get("name")
+                        if fn_name != "enable_tools":
+                            continue
+                        raw_args = getattr(fn, "arguments", None) or fn.get("arguments") or "{}"
+                        args = json.loads(raw_args)
+                        names = args.get("tool_names") or []
+                        if isinstance(names, list):
+                            for n in names:
+                                if isinstance(n, str) and n not in requested:
+                                    requested.append(n)
+                    except Exception:
+                        logger.exception("search_tools: failed to parse tool call; skipping one call")
+
+                enabled_result = None
+                if requested:
+                    try:
+                        enabled_result = enable_tools(agent, requested)
+                    except Exception as e:
+                        logger.error(f"search_tools: enable_tools failed: {e}")
+
+                # Build final message + structured response
+                message_lines: List[str] = []
+                if content_text:
+                    message_lines.append(content_text.strip())
+                if enabled_result and enabled_result.get("status") == "success":
+                    summary = []
+                    if enabled_result.get("enabled"):
+                        summary.append(f"Enabled: {', '.join(enabled_result['enabled'])}")
+                    if enabled_result.get("already_enabled"):
+                        summary.append(f"Already enabled: {', '.join(enabled_result['already_enabled'])}")
+                    if enabled_result.get("evicted"):
+                        summary.append(f"Evicted (LRU): {', '.join(enabled_result['evicted'])}")
+                    if enabled_result.get("invalid"):
+                        summary.append(f"Invalid: {', '.join(enabled_result['invalid'])}")
+                    if summary:
+                        message_lines.append("; ".join(summary))
+
+                final = {
+                    "status": "success",
+                    "message": "\n".join([ln for ln in message_lines if ln]) or "",
+                }
+                if enabled_result and enabled_result.get("status") == "success":
+                    final.update({
+                        "enabled_tools": enabled_result.get("enabled", []),
+                        "already_enabled": enabled_result.get("already_enabled", []),
+                        "evicted": enabled_result.get("evicted", []),
+                        "invalid": enabled_result.get("invalid", []),
+                    })
+                return final
                 
             except Exception as e:
                 last_exc = e
@@ -739,16 +823,97 @@ def search_mcp_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
         return {
             "status": "error",
             "message": "Failed to search tools",
-            "tools": []
         }
         
     except Exception as e:
-        logger.error(f"Failed to search MCP tools: {e}")
+        logger.error(f"Failed to search tools: {e}")
         return {
             "status": "error",
             "message": str(e),
-            "tools": []
         }
+
+
+def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any]:
+    """Enable multiple MCP tools for the agent with LRU eviction (cap=20).
+
+    Blacklisted or non-existent tools are returned in `invalid` (no separate blacklist reporting).
+    """
+    import time
+
+    MAX_MCP_TOOLS = 20
+
+    if not _mcp_manager._initialized:
+        _mcp_manager.initialize()
+
+    # Normalize and de-dupe
+    requested: List[str] = []
+    seen = set()
+    for n in tool_names or []:
+        if isinstance(n, str) and n not in seen:
+            requested.append(n)
+            seen.add(n)
+
+    all_tools = _mcp_manager.get_all_available_tools()
+    available = {t.full_name for t in all_tools}
+
+    enabled_tools = list(agent.enabled_mcp_tools or [])
+    tool_usage = dict(agent.mcp_tool_usage or {})
+
+    enabled: List[str] = []
+    already_enabled: List[str] = []
+    evicted: List[str] = []
+    invalid: List[str] = []
+
+    for name in requested:
+        # Existence check
+        if name not in available or _mcp_manager._is_tool_blacklisted(name):
+            invalid.append(name)
+            continue
+
+        if name in enabled_tools:
+            tool_usage[name] = time.time()
+            already_enabled.append(name)
+            continue
+
+        # Evict if over limit
+        if len(enabled_tools) >= MAX_MCP_TOOLS:
+            valid_usage = {t: tool_usage.get(t, 0) for t in enabled_tools}
+            lru_tool = min(valid_usage, key=valid_usage.get)
+            enabled_tools.remove(lru_tool)
+            if lru_tool in tool_usage:
+                del tool_usage[lru_tool]
+            evicted.append(lru_tool)
+            logger.info(f"Evicted LRU tool '{lru_tool}' to make room for '{name}'")
+
+        enabled_tools.append(name)
+        tool_usage[name] = time.time()
+        enabled.append(name)
+
+    # Persist changes if anything changed
+    if enabled or already_enabled or evicted or invalid:
+        agent.enabled_mcp_tools = enabled_tools
+        agent.mcp_tool_usage = tool_usage
+        agent.save(update_fields=['enabled_mcp_tools', 'mcp_tool_usage'])
+
+    # Build message
+    parts: List[str] = []
+    if enabled:
+        parts.append(f"Enabled: {', '.join(enabled)}")
+    if already_enabled:
+        parts.append(f"Already enabled: {', '.join(already_enabled)}")
+    if evicted:
+        parts.append(f"Evicted (LRU): {', '.join(evicted)}")
+    if invalid:
+        parts.append(f"Invalid: {', '.join(invalid)}")
+
+    return {
+        "status": "success",
+        "message": "; ".join(parts),
+        "enabled": enabled,
+        "already_enabled": already_enabled,
+        "evicted": evicted,
+        "invalid": invalid,
+    }
 
 
 def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:

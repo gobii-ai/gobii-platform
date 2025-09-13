@@ -60,8 +60,8 @@ from ..tools.http_request import execute_http_request, get_http_request_tool
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
 from ..tools.request_contact_permission import execute_request_contact_permission, get_request_contact_permission_tool
 from ..tools.mcp_tools import (
-    get_search_tools_tool, get_enable_tool_tool,
-    execute_search_tools, execute_enable_tool, execute_mcp_tool
+    get_search_tools_tool,
+    execute_search_tools, execute_mcp_tool
 )
 from ..tools.mcp_manager import get_mcp_manager
 from ...models import (
@@ -973,10 +973,9 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                         result = execute_request_contact_permission(agent, tool_params)
                     elif tool_name == "search_tools":
                         result = execute_search_tools(agent, tool_params)
-                    elif tool_name == "enable_tool":
-                        result = execute_enable_tool(agent, tool_params)
-                        # After enabling/disabling a tool (via LRU), refresh the tools list for next iteration
+                        # After search_tools auto-enables relevant tools, refresh tool definitions
                         tools = _get_agent_tools(agent)
+                    # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
                     elif get_mcp_manager().has_tool(tool_name):
                         # Handle dynamic MCP tool execution (supports prefixed and unprefixed MCP tool names)
                         result = execute_mcp_tool(agent, tool_name, tool_params)
@@ -1544,6 +1543,7 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
 
         "IF YOU CAN DO SOMETHING CHEAPER WITH A FREE, UNAUTHENTICATED API, TRY USING THE API. "
         "IF THE USER REQUESTS FOR YOU TO USE AN AUTHENTICATED API, USE THE 'secure_credentials_request' TOOL. THEN USE THE API. "
+        "IF A TOOL IS AVAILABLE, CALL IT FIRST TO SEE IF IT WORKS WITHOUT EXTRA AUTH. MANY TOOLS EITHER WORK OUT-OF-THE-BOX OR WILL RETURN AN 'action_required' RESPONSE WITH A CONNECT/AUTH LINK. IF YOU RECEIVE AN AUTH REQUIREMENT, IMMEDIATELY SURFACE THE PROVIDED LINK TO THE USER (OR USE 'secure_credentials_request' IF NEEDED), THEN RETRY THE TOOL AFTER AUTH IS COMPLETE. "
         
         "Use the http_request tool for any HTTP request, including GET, POST, PUT, DELETE, etc. "
         "The http_request tool always uses a proxy server for security. If no proxy is available, the tool will fail with an error. "
@@ -1564,8 +1564,8 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "Use mode=atomic when operations depend on each other (all-or-nothing); use mode=per_statement to continue past individual errors when operations are independent. "
         "Be very mindful to keep the db efficient and the total size no greater than 50MB of data. "
 
-        "You can use search_tools and enable_tool to search for additional tools that may be available to help you do your work. "
-        "In particular, if you need to access any specific services like Instagram, LinkedIn, Reddit, Zillow, Amazon, etc... you should call search_tools and see if there is a specific tool to help you with that service. "
+        "Use search_tools to search for additional tools; it will automatically enable all relevant tools in one step. "
+        "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
         "Call just one tool at a time. Remember, you are in an infinite loop until you call sleep_until_next_trigger, so you have plenty of opporunity to make multiple tool calls."
         "Sometimes your schedule will need to run more frequently than you need to contact the user. That is OK. You can, for example, set yourself to run every 1 hour, but only call send_email when you actually need to contact the user. This is your expected behavior. "
@@ -1625,7 +1625,7 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
                     "3. If you know your charter at this ponit, set your charter using the 'update_charter' tool based on their request - this will be your working charter that you can evolve over time. BE DETAILED. "
                     "4. Inform the user they can contact you at any time to give new instructions, ask questions, or just chat. Hint or let them know that they can just reply to this message with anything they want. e.g. 'You can reply to this email now, or contact me at any time.' "
                     "This is your opportunity to decide what your personality and writing style will be --it could be anything-- you'll generally adapt this based on the user's initial request and what you know about them. THIS IS YOUR CHANCE to create a new and exciting personality. "
-                    "Immediately after sending your welcome message, call search_tools for the first time to find the best tools to efficiently and accurately complete your task with the most timely information. Then call enable_tool to enable the relevant tools. Remember you can search and enable more tools in the future as well as your job evolves. "
+                    "Immediately after sending your welcome message, call search_tools to find and automatically enable the best tools to efficiently and accurately complete your task with the most timely information. You can run search_tools again later as your job evolves. "
                     "Use phrasing like 'I'm your new agent' vs just 'I'm an agent' or 'I'm an assistant'."
                 )
                 return welcome_instruction + "\n\n" + base_prompt
@@ -1897,7 +1897,6 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_secure_credentials_request_tool(),
         # MCP management tools
         get_search_tools_tool(),
-        get_enable_tool_tool(),
         get_request_contact_permission_tool(),
     ]
 
