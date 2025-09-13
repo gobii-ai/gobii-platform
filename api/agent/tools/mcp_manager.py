@@ -3,6 +3,12 @@ MCP (Model Context Protocol) tool management for persistent agents.
 
 This module provides dynamic tool discovery, search, and enable/disable functionality
 for MCP servers, allowing agents to intelligently select tools from a large ecosystem.
+
+Pipedream (remote MCP) integration goals:
+- Centralize headers + token handling
+- Discover action tools (sub-agent mode) so the full catalog is searchable
+- Enable only tools needed (20-cap enforced separately)
+- Route execution automatically and surface Connect Links via action_required
 """
 
 import json
@@ -12,7 +18,7 @@ import os
 import fnmatch
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 import requests
 
@@ -88,25 +94,8 @@ class MCPToolManager:
             display_name="Pipedream",
             description="Access 2,800+ API integrations with per-user OAuth via Pipedream Connect",
             url="https://remote.mcp.pipedream.net",
-            # Use env to pass required config; we validate on init.
-            env={
-                "PIPEDREAM_CLIENT_ID": os.getenv("PIPEDREAM_CLIENT_ID", ""),
-                "PIPEDREAM_CLIENT_SECRET": os.getenv("PIPEDREAM_CLIENT_SECRET", ""),
-                "PIPEDREAM_PROJECT_ID": os.getenv("PIPEDREAM_PROJECT_ID", ""),
-                "PIPEDREAM_ENVIRONMENT": os.getenv("PIPEDREAM_ENVIRONMENT", "development"),
-                # Optional comma-separated app slugs to prefetch tool catalogs for
-                "PIPEDREAM_PREFETCH_APPS": os.getenv("PIPEDREAM_PREFETCH_APPS", "google_sheets"),
-                # Default apps to auto-select per agent session
-                "PIPEDREAM_DEFAULT_APPS": os.getenv("PIPEDREAM_DEFAULT_APPS", "google_sheets"),
-            },
-            headers={
-                # Default to full-config so begin_configuration and dynamic props work during discovery
-                "x-pd-tool-mode": "full-config",
-                "x-pd-external-user-id": "gobii-discovery",  # overridden per-agent on calls
-                "x-pd-conversation-id": "discovery",        # overridden per-agent
-                # Let app discovery drive catalogs by default; specific app slugs set during prefetch
-                "x-pd-app-discovery": "true",
-            },
+            env={},
+            headers={},
             enabled=True,
 
         ),
@@ -173,13 +162,12 @@ class MCPToolManager:
                 logger.warning(f"MCP server '{server.name}' missing API_TOKEN, skipping")
                 continue
             if server.name == "pipedream":
-                # Require client credentials and project info
-                env = server.env or {}
+                # Require client credentials and project info from settings
                 required = [
-                    env.get("PIPEDREAM_CLIENT_ID"),
-                    env.get("PIPEDREAM_CLIENT_SECRET"),
-                    env.get("PIPEDREAM_PROJECT_ID"),
-                    env.get("PIPEDREAM_ENVIRONMENT"),
+                    getattr(settings, "PIPEDREAM_CLIENT_ID", ""),
+                    getattr(settings, "PIPEDREAM_CLIENT_SECRET", ""),
+                    getattr(settings, "PIPEDREAM_PROJECT_ID", ""),
+                    getattr(settings, "PIPEDREAM_ENVIRONMENT", ""),
                 ]
                 if not all(required):
                     logger.warning(
@@ -204,29 +192,14 @@ class MCPToolManager:
             # For HTTP/SSE servers
             from fastmcp.client.transports import StreamableHttpTransport
             headers: Dict[str, str] = dict(server.headers or {})
-
-            # Special handling for Pipedream: acquire token and set required headers
             if server.name == "pipedream":
-                env = server.env or {}
-                token = self._get_pipedream_access_token(env)
-                if not token:
-                    raise RuntimeError("Pipedream access token acquisition failed")
-
-                # Base headers for Pipedream remote MCP
-                headers.update({
-                    "Authorization": f"Bearer {token}",
-                    "x-pd-project-id": env.get("PIPEDREAM_PROJECT_ID", ""),
-                    "x-pd-environment": env.get("PIPEDREAM_ENVIRONMENT", "development"),
-                    # External user id is set per-call (agent.id); keep a discovery default for list_tools
-                    "x-pd-external-user-id": env.get("PIPEDREAM_DISCOVERY_USER", "gobii-discovery"),
-                    # Enable broad discovery so the catalog at least includes the discovery tool
-                    "x-pd-app-discovery": "true",
-                    # Full config exposes discovery and sub-agent capabilities
-                    "x-pd-tool-mode": "full-config",
-                    # Provide a stable conversation id for discovery/listing
-                    "x-pd-conversation-id": env.get("PIPEDREAM_DISCOVERY_CONVERSATION", "discovery"),
-                })
-
+                # Build discovery headers in sub-agent mode; app slug set per request
+                headers = self._pd_build_headers(
+                    mode="sub-agent",
+                    app_slug=None,
+                    external_user_id="gobii-discovery",
+                    conversation_id="discovery",
+                )
             transport = StreamableHttpTransport(url=server.url, headers=headers)
         elif server.command:
             # For stdio servers like npx
@@ -251,23 +224,24 @@ class MCPToolManager:
         logger.info(f"Registered MCP server '{server.name}' with {len(tools)} tools")
     
     async def _fetch_server_tools(self, client: Client, server: MCPServer) -> List[MCPToolInfo]:
-        """Fetch tools from an MCP server, filtering out blacklisted tools."""
+        """Fetch tools from an MCP server, filtering out blacklisted tools.
+
+        For Pipedream, discover action tools per app slug in sub-agent mode.
+        """
         tools = []
         blacklisted_count = 0
         async with client:
-            # Always fetch the base tool list first
-            mcp_tools = await client.list_tools()
-            tools.extend(self._convert_tools(server, mcp_tools))
-
-            # For Pipedream, optionally prefetch select app catalogs to expose app-specific tools
-            if server.name == "pipedream":
-                env = server.env or {}
-                prefetch = [s.strip() for s in (env.get("PIPEDREAM_PREFETCH_APPS", "").split(",")) if s.strip()]
+            if server.name != "pipedream":
+                mcp_tools = await client.list_tools()
+                tools.extend(self._convert_tools(server, mcp_tools))
+            else:
+                app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets")
+                prefetch = [s.strip() for s in app_csv.split(",") if s.strip()]
                 for app_slug in prefetch:
                     try:
-                        # Mutate header for app slug and refetch tools
                         if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
                             client.transport.headers["x-pd-app-slug"] = app_slug
+                            client.transport.headers["x-pd-tool-mode"] = "sub-agent"
                         app_tools = await client.list_tools()
                         tools.extend(self._convert_tools(server, app_tools))
                     except Exception as e:
@@ -382,15 +356,17 @@ class MCPToolManager:
             return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
         server_name, actual_tool_name = resolved
         
-        if server_name not in self._clients:
+        # Ensure server availability (non-Pipedream servers)
+        if server_name != "pipedream" and server_name not in self._clients:
             return {
                 "status": "error",
                 "message": f"MCP server '{server_name}' not available"
             }
-        
+
         # Choose the right client
         if server_name == "pipedream":
-            client = self._get_pipedream_agent_client(agent)
+            app_slug, mode = self._pd_parse_tool(actual_tool_name)
+            client = self._get_pipedream_agent_client(agent, app_slug=app_slug, mode=mode)
         else:
             client = self._clients[server_name]
         
@@ -466,15 +442,15 @@ class MCPToolManager:
     def _resolve_tool(self, tool_name: str) -> Optional[Tuple[str, str]]:
         """Resolve a tool's server and actual MCP tool name from the provided name.
 
-        - For servers that prefix (e.g., brightdata), the provided name is 'mcp_{server}_{tool}'.
-        - For Pipedream, provided names are unprefixed and match the actual tool name.
+        - For prefixed servers (e.g., brightdata): 'mcp_{server}_{tool}'
+        - For Pipedream: unprefixed and matches the actual tool name
         """
-        # Fast path: search the cached list for an exact full_name match
-        for server, tools in self._tools_cache.items():
+        # Exact match in the discovered catalog
+        for _, tools in self._tools_cache.items():
             for t in tools:
                 if t.full_name == tool_name:
                     return (t.server_name, t.tool_name)
-        # Backward-compatible fallback: parse legacy prefixed format
+        # Backward-compatible fallback
         if tool_name.startswith("mcp_"):
             parts = tool_name.split("_", 2)
             if len(parts) == 3:
@@ -482,15 +458,15 @@ class MCPToolManager:
                 return (server_name, actual)
         return None
 
-    def _get_pipedream_access_token(self, env: Dict[str, str]) -> Optional[str]:
+    def _get_pipedream_access_token(self) -> Optional[str]:
         """Acquire or refresh the Pipedream OAuth access token (cached)."""
         try:
             # Reuse cached token if valid for at least 2 minutes
-            if self._pd_access_token and self._pd_token_expiry and datetime.utcnow() < (self._pd_token_expiry - timedelta(minutes=2)):
+            if self._pd_access_token and self._pd_token_expiry and datetime.now(UTC) < (self._pd_token_expiry - timedelta(minutes=2)):
                 return self._pd_access_token
 
-            client_id = env.get("PIPEDREAM_CLIENT_ID", "")
-            client_secret = env.get("PIPEDREAM_CLIENT_SECRET", "")
+            client_id = getattr(settings, "PIPEDREAM_CLIENT_ID", "")
+            client_secret = getattr(settings, "PIPEDREAM_CLIENT_SECRET", "")
             if not client_id or not client_secret:
                 return None
 
@@ -510,60 +486,61 @@ class MCPToolManager:
             if not access_token:
                 return None
             self._pd_access_token = access_token
-            self._pd_token_expiry = datetime.utcnow() + timedelta(seconds=expires_in)
+            self._pd_token_expiry = datetime.now(UTC) + timedelta(seconds=expires_in)
             return access_token
         except Exception as e:
             logger.error(f"Failed to obtain Pipedream access token: {e}")
             return None
 
-    def _get_pipedream_agent_client(self, agent: PersistentAgent) -> Client:
-        """Get or create a unique Pipedream client for a given agent.
-
-        Ensures per-agent isolation via x-pd-external-user-id (agent.id) and
-        a dedicated conversation id (also agent.id by default).
-        """
-        agent_key = str(agent.id)
-        if agent_key in self._pd_agent_clients:
-            return self._pd_agent_clients[agent_key]
-
-        server = next(s for s in self.AVAILABLE_SERVERS if s.name == "pipedream")
-        env = server.env or {}
-        token = self._get_pipedream_access_token(env) or ""
-
-        from fastmcp.client.transports import StreamableHttpTransport
+    def _pd_build_headers(self, mode: str, app_slug: Optional[str], external_user_id: str, conversation_id: str) -> Dict[str, str]:
+        token = self._get_pipedream_access_token() or ""
         headers: Dict[str, str] = {
             "Authorization": f"Bearer {token}",
-            "x-pd-project-id": env.get("PIPEDREAM_PROJECT_ID", ""),
-            "x-pd-environment": env.get("PIPEDREAM_ENVIRONMENT", "development"),
-            "x-pd-external-user-id": agent_key,
-            "x-pd-conversation-id": agent_key,
+            "x-pd-project-id": getattr(settings, "PIPEDREAM_PROJECT_ID", ""),
+            "x-pd-environment": getattr(settings, "PIPEDREAM_ENVIRONMENT", "development"),
+            "x-pd-external-user-id": external_user_id,
+            "x-pd-conversation-id": conversation_id,
             "x-pd-app-discovery": "true",
-            # Full-config is required for begin_configuration / configure_props / run_* flows
-            "x-pd-tool-mode": "full-config",
-            # Optionally set an app slug per agent/session as needed
-            # "x-pd-app-slug": "google_sheets",
+            "x-pd-tool-mode": mode,
         }
+        if app_slug:
+            headers["x-pd-app-slug"] = app_slug
+        return headers
+
+    def _pd_parse_tool(self, tool_name: str) -> Tuple[Optional[str], str]:
+        """Infer app slug for a Pipedream action tool and return sub-agent mode.
+
+        Expected names look like '<app>-<action>', e.g., 'google_sheets-add-single-row'.
+        """
+        app = tool_name.split("-", 1)[0] if "-" in tool_name else None
+        return (app or None, "sub-agent")
+
+    def _get_pipedream_agent_client(self, agent: PersistentAgent, app_slug: Optional[str], mode: str) -> Client:
+        """Get or create a Pipedream client for (agent, app_slug, mode)."""
+        agent_key = str(agent.id)
+        cache_key = f"{agent_key}:{app_slug or ''}:{mode}"
+        if cache_key in self._pd_agent_clients:
+            client = self._pd_agent_clients[cache_key]
+            # Ensure Authorization header is current
+            if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
+                token = self._get_pipedream_access_token() or ""
+                client.transport.headers["Authorization"] = f"Bearer {token}"
+            return client
+
+        from fastmcp.client.transports import StreamableHttpTransport
+        server = next(s for s in self.AVAILABLE_SERVERS if s.name == "pipedream")
+        headers = self._pd_build_headers(
+            mode=mode,
+            app_slug=app_slug,
+            external_user_id=agent_key,
+            conversation_id=agent_key,
+        )
         transport = StreamableHttpTransport(url=server.url, headers=headers)
         client = Client(transport)
-        self._pd_agent_clients[agent_key] = client
-        # Auto-select default apps for this agent session so catalogs are available
-        apps_csv = (env.get("PIPEDREAM_DEFAULT_APPS") or "google_sheets").strip()
-        app_list = [a.strip() for a in apps_csv.split(',') if a.strip()]
-        if app_list:
-            try:
-                loop = self._ensure_event_loop()
-                loop.run_until_complete(self._pipedream_auto_select_apps(client, app_list))
-            except Exception as e:
-                logger.info(f"Pipedream select_apps init failed for agent {agent_key}: {e}")
+        self._pd_agent_clients[cache_key] = client
         return client
 
-    async def _pipedream_auto_select_apps(self, client: Client, apps: List[str]):
-        """Select default apps for a Pipedream client session.
-
-        This is internal bootstrap and not exposed to the agent (blacklist still blocks agent).
-        """
-        async with client:
-            await client.call_tool("select_apps", {"apps": apps})
+    # Note: no longer need select_apps; discovery is driven by app slug headers.
 
 
 # Global manager instance

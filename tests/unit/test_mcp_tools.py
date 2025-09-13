@@ -264,6 +264,9 @@ class MCPToolManagerTests(TestCase):
         
         mock_client = MagicMock()
         self.manager._clients = {"test": mock_client}
+        # Populate tools cache since legacy name fallback is removed
+        tool1 = MCPToolInfo("mcp_test_tool1", "test", "tool1", "Test tool 1", {})
+        self.manager._tools_cache = {"test": [tool1]}
         
         mock_result = MagicMock()
         mock_result.is_error = False
