@@ -254,7 +254,7 @@ def get_user_agent_limit(user) -> int:
 
         return plan["agent_limit"]
 
-def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIPE_TASK_METER_ID):
+def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIPE_TASK_METER_ID, idempotency_key: str | None = None):
     """
     Reports usage to Stripe by creating a UsageRecord.
 
@@ -309,7 +309,7 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
             )
 
             stripe.api_key = PaymentsHelper.get_stripe_key()
-            report_task_usage(subscription, quantity=quantity)
+            return report_task_usage(subscription, quantity=quantity, idempotency_key=idempotency_key)
 
             # usage_record = UsageRecord.create(
             #     subscription_item=customer.subscription_items.get(
@@ -325,7 +325,7 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
             logger.error(f"report_usage_to_stripe: Error reporting usage for user {user.id}: {str(e)}")
             raise
 
-def report_task_usage(subscription: Subscription, quantity: int = 1):
+def report_task_usage(subscription: Subscription, quantity: int = 1, idempotency_key: str | None = None):
     """
     Report task usage to Stripe for a given subscription.
 
@@ -346,10 +346,13 @@ def report_task_usage(subscription: Subscription, quantity: int = 1):
                 meter_event = stripe.billing.MeterEvent.create(
                     event_name=settings.STRIPE_TASK_METER_EVENT_NAME,
                     payload={"value": quantity, "stripe_customer_id": subscription.customer.id},
+                    idempotency_key=idempotency_key,
                 )
+                return meter_event
 
         except Exception as e:
             logger.error(f"report_task_usage: Error reporting task usage: {str(e)}")
+            raise
 
 def get_free_plan_users():
     """

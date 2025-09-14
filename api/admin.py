@@ -15,6 +15,7 @@ from .models import (
     PersistentAgentStep, CommsChannel, UserBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName,
+    MeteringBatch,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -269,6 +270,52 @@ class TaskCreditAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(reverse("admin:api_taskcredit_changelist"))
 
         return TemplateResponse(request, "admin/grant_plan_credits.html", context)
+
+
+@admin.register(MeteringBatch)
+class MeteringBatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "batch_key",
+        "user",
+        "rounded_quantity",
+        "total_credits",
+        "period_start",
+        "period_end",
+        "stripe_event_id",
+        "created_at",
+    )
+    search_fields = (
+        "batch_key",
+        "idempotency_key",
+        "stripe_event_id",
+        "user__email",
+        "user__id",
+    )
+    list_filter = ("period_start", "period_end", "created_at")
+    date_hierarchy = "created_at"
+    readonly_fields = ("id", "batch_key", "idempotency_key", "created_at", "updated_at", "usage_links")
+    raw_id_fields = ("user",)
+    ordering = ("-created_at",)
+
+    @admin.display(description="Usage Rows")
+    def usage_links(self, obj):
+        try:
+            tasks_count = BrowserUseAgentTask.objects.filter(meter_batch_key=obj.batch_key).count()
+            steps_count = PersistentAgentStep.objects.filter(meter_batch_key=obj.batch_key).count()
+        except Exception:
+            tasks_count = 0
+            steps_count = 0
+
+        tasks_url = (
+            reverse("admin:api_browseruseagenttask_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
+        )
+        steps_url = (
+            reverse("admin:api_browseruseagenttaskstep_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
+        )
+        return format_html(
+            '<a href="{}">Tasks: {}</a> &nbsp;|&nbsp; <a href="{}">Steps: {}</a>',
+            tasks_url, tasks_count, steps_url, steps_count
+        )
 
     def grant_by_user_ids_view(self, request):
         from django.template.response import TemplateResponse
@@ -611,7 +658,7 @@ class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
     change_list_template = "admin/browseruseagenttask_change_list.html"
 
     list_display = ('id', 'get_agent_name', 'get_user_email', 'status', 'credits_cost', 'display_task_result_summary', 'created_at', 'updated_at')
-    list_filter = ('status', 'user', 'agent')
+    list_filter = ('status', 'user', 'agent', 'meter_batch_key', 'metered')
     search_fields = ('id', 'agent__name', 'user__email')
     readonly_fields = ('id', 'created_at', 'updated_at', 'display_full_task_result', 'credits_cost') # Show charged credits
     raw_id_fields = ('agent', 'user')
@@ -694,7 +741,7 @@ class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
 @admin.register(BrowserUseAgentTaskStep)
 class BrowserUseAgentTaskStepAdmin(admin.ModelAdmin):
     list_display = ("id", "task", "step_number", "is_result", "created_at")
-    list_filter = ("is_result", "created_at")
+    list_filter = ("is_result", "created_at", "meter_batch_key", "metered")
     search_fields = ("task__id", "description")
     ordering = ("-created_at",)
 
@@ -1378,7 +1425,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     @admin.display(description='User Email')
     def user_email(self, obj):
         return obj.user.email
-
 
     @admin.display(description='Ownership')
     def ownership_scope(self, obj):

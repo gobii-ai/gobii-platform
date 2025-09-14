@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from celery import shared_task
 from datetime import datetime, timedelta, time as dt_time
+import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth import get_user_model
@@ -11,7 +12,7 @@ from django.utils import timezone
 
 from billing.services import BillingService
 from util.subscription_helper import get_active_subscription, report_task_usage_to_stripe
-from api.models import BrowserUseAgentTask, PersistentAgentStep
+from api.models import BrowserUseAgentTask, PersistentAgentStep, MeteringBatch
 
 import logging
 
@@ -73,71 +74,164 @@ def rollup_and_meter_usage_task(self) -> int:
             continue
 
         start_dt, end_dt = _period_bounds_for_user(user)
+        period_start_date, period_end_date = BillingService.get_current_billing_period_for_user(user)
 
-        # Collect unmetered usage within the period from both sources
-        buat_qs = BrowserUseAgentTask.objects.filter(
+        # Detect any existing pending batch for this user within this period
+        pending_task_keys = (
+            BrowserUseAgentTask.objects
+            .filter(
+                user_id=user.id,
+                metered=False,
+                meter_batch_key__isnull=False,
+                created_at__gte=start_dt,
+                created_at__lt=end_dt,
+            )
+            .values_list("meter_batch_key", flat=True)
+            .distinct()
+        )
+        pending_step_keys = (
+            PersistentAgentStep.objects
+            .filter(
+                agent__user_id=user.id,
+                metered=False,
+                meter_batch_key__isnull=False,
+                created_at__gte=start_dt,
+                created_at__lt=end_dt,
+            )
+            .values_list("meter_batch_key", flat=True)
+            .distinct()
+        )
+
+        pending_keys = {k for k in pending_task_keys if k} | {k for k in pending_step_keys if k}
+        batch_key = None
+
+        if pending_keys:
+            batch_key = sorted(pending_keys)[0]
+        else:
+            # Create a new batch by reserving unmetered rows
+            batch_key = uuid.uuid4().hex
+
+            candidate_tasks = BrowserUseAgentTask.objects.filter(
+                user_id=user.id,
+                metered=False,
+                meter_batch_key__isnull=True,
+                created_at__gte=start_dt,
+                created_at__lt=end_dt,
+            )
+            candidate_steps = PersistentAgentStep.objects.filter(
+                agent__user_id=user.id,
+                metered=False,
+                meter_batch_key__isnull=True,
+                created_at__gte=start_dt,
+                created_at__lt=end_dt,
+            )
+
+            buat_ids = list(candidate_tasks.values_list('id', flat=True))
+            step_ids = list(candidate_steps.values_list('id', flat=True))
+
+            if not buat_ids and not step_ids:
+                # Nothing to do for this user
+                continue
+
+            # Reserve rows for this batch
+            BrowserUseAgentTask.objects.filter(id__in=buat_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
+            PersistentAgentStep.objects.filter(id__in=step_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
+
+        # Compute totals for the reserved batch only
+        batch_tasks_qs = BrowserUseAgentTask.objects.filter(
             user_id=user.id,
             metered=False,
+            meter_batch_key=batch_key,
             created_at__gte=start_dt,
             created_at__lt=end_dt,
         )
-
-        step_qs = PersistentAgentStep.objects.filter(
+        batch_steps_qs = PersistentAgentStep.objects.filter(
             agent__user_id=user.id,
             metered=False,
+            meter_batch_key=batch_key,
             created_at__gte=start_dt,
             created_at__lt=end_dt,
         )
 
-        total_buat = buat_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
-        total_steps = step_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
+        total_buat = batch_tasks_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
+        total_steps = batch_steps_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
 
         total = (total_buat or Decimal("0")) + (total_steps or Decimal("0"))
-
-        # Round to nearest whole integer using half-up semantics
         rounded = int(Decimal(total).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
-
-        # Evaluate the querysets to get a fixed list of IDs
-        buat_ids = list(buat_qs.values_list('id', flat=True))
-        step_ids = list(step_qs.values_list('id', flat=True))
 
         try:
             if rounded > 0:
-                # Report a single meter event per user
-                report_task_usage_to_stripe(user, quantity=rounded)
+                # Report a single meter event per user with idempotency key tied to the reserved batch
+                idem_key = f"meter:{user.id}:{batch_key}"
 
-                # Mark all included rows as metered when we successfully bill a non-zero quantity
-                updated_tasks = BrowserUseAgentTask.objects.filter(id__in=buat_ids).update(metered=True)
-                updated_steps = PersistentAgentStep.objects.filter(id__in=step_ids).update(metered=True)
+                # Upsert metering batch record for audit
+                MeteringBatch.objects.update_or_create(
+                    batch_key=batch_key,
+                    defaults={
+                        'user_id': user.id,
+                        'idempotency_key': idem_key,
+                        'period_start': period_start_date,
+                        'period_end': period_end_date,
+                        'total_credits': total,
+                        'rounded_quantity': rounded,
+                    }
+                )
+
+                meter_event = report_task_usage_to_stripe(user, quantity=rounded, idempotency_key=idem_key)
+
+                # Record Stripe event id for audit
+                try:
+                    MeteringBatch.objects.filter(batch_key=batch_key).update(
+                        stripe_event_id=getattr(meter_event, 'id', None)
+                    )
+                except Exception:
+                    logger.exception("Failed to store Stripe meter event id for user %s batch %s", user.id, batch_key)
+
+                # Mark all rows in this reserved batch as metered, but preserve meter_batch_key for audit
+                updated_tasks = batch_tasks_qs.update(metered=True)
+                updated_steps = batch_steps_qs.update(metered=True)
 
                 logger.info(
-                    "Rollup metering user=%s total=%s rounded=%s updated_tasks=%s updated_steps=%s",
-                    user.id, str(total), rounded, updated_tasks, updated_steps,
+                    "Rollup metered user=%s batch=%s total=%s rounded=%s tasks=%s steps=%s",
+                    user.id, batch_key, str(total), rounded, updated_tasks, updated_steps,
                 )
                 processed_users += 1
             else:
-                # Carry forward: do not mark rows yet so they can accumulate on subsequent runs
-                # However, if we're at the last day of this user's billing period, finalize and mark
+                # No billable units yet. If last day of period, finalize and mark; else release reservation.
                 today = timezone.now().date()
-                _, period_end_date = BillingService.get_current_billing_period_for_user(user)
                 if today >= period_end_date:
-                    # Finalize the period with no billing event; mark rows as metered to avoid cross-period carryover
-                    updated_tasks = buat_qs.update(metered=True)
-                    updated_steps = step_qs.update(metered=True)
+                    # Upsert batch record noting finalize-zero
+                    idem_key = f"meter:{user.id}:{batch_key}"
+                    MeteringBatch.objects.update_or_create(
+                        batch_key=batch_key,
+                        defaults={
+                            'user_id': user.id,
+                            'idempotency_key': idem_key,
+                            'period_start': period_start_date,
+                            'period_end': period_end_date,
+                            'total_credits': total,
+                            'rounded_quantity': rounded,
+                        }
+                    )
+
+                    updated_tasks = batch_tasks_qs.update(metered=True)
+                    updated_steps = batch_steps_qs.update(metered=True)
                     logger.info(
-                        "Rollup finalize (zero) user=%s total=%s rounded=%s updated_tasks=%s updated_steps=%s",
-                        user.id, str(total), rounded, updated_tasks, updated_steps,
+                        "Rollup finalize (zero) user=%s batch=%s total=%s updated_tasks=%s updated_steps=%s",
+                        user.id, batch_key, str(total), updated_tasks, updated_steps,
                     )
                     processed_users += 1
                 else:
+                    # Release reservation to allow accumulation in later runs
+                    released_tasks = batch_tasks_qs.update(meter_batch_key=None)
+                    released_steps = batch_steps_qs.update(meter_batch_key=None)
                     logger.info(
-                        "Rollup carry-forward user=%s total=%s rounded=%s (nothing metered/marked)",
-                        user.id, str(total), rounded,
+                        "Rollup carry-forward user=%s batch=%s total=%s rounded=%s (released tasks=%s steps=%s)",
+                        user.id, batch_key, str(total), rounded, released_tasks, released_steps,
                     )
-                    # processed_users still counts attempt
                     processed_users += 1
         except Exception:
-            logger.exception("Failed rollup metering for user %s", user.id)
+            logger.exception("Failed rollup metering for user %s (batch=%s)", user.id, batch_key)
 
     logger.info("Rollup metering: finished processed_users=%s", processed_users)
     return processed_users
