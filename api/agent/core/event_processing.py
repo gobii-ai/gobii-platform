@@ -1337,7 +1337,13 @@ def _build_prompt_context(agent: PersistentAgent, event_window: EventWindow, cur
     )
     important_group.section_text(
         "secrets_note",
-        "IF YOU NEED CREDENTIALS/API KEYS/ETC FOR THIS TASK AND DO NOT ALREADY HAVE THEM, USE THE 'secure_credentials_request' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE CREDENTIALS.",
+        (
+            "ONLY request secure credentials when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
+            "or `spawn_web_task` (classic username/password website login). DO NOT request credentials for MCP tools "
+            "(e.g., Google Sheets, Slack). For MCP tools: call the tool first; if it returns 'action_required' with a "
+            "connect/auth link, surface that link to the user and wait. NEVER ask for user passwords or 2FA codes for "
+            "OAuth‑based services."
+        ),
         weight=1,
         non_shrinkable=True
     )
@@ -1637,6 +1643,9 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "If you send messages, e.g. via SMS or email, format them like something typed in a normal client—natural, concise, human. For emails, write your body as lightweight HTML using simple <p>, <br>, <ul>, <ol>, <li>, and basic inline elements (bold, italics) and avoid markdown or heavy branding. Use <a> for links, but only if you have complete and accurate URLs available in your context from actual sources. DO NOT include the outer <html>, <head>, or <body> wrappers—the system will handle that. "
         "You may use emojis, but only if appropriate. Use bulleted lists when it makes sense. "
         "Be efficient, but complete with your communications. "
+        "Clarifying questions policy: Prefer to decide-and-proceed with reasonable defaults. Ask a question ONLY if a choice is (a) irreversible/expensive to change, (b) likely to be wrong without the answer, or (c) truly blocks execution. Avoid multi‑question checklists. If you must ask, ask ONE concise question and propose a sensible default in the same sentence. "
+        "Examples: If asked to 'create a Google Sheet and add a hello world row', infer a sensible sheet name from the request, create it in My Drive under the connected account, and put the text in A1 with no header. Do not ask for sheet name, folder, account, or header unless essential. For other routine tasks, follow similar minimal‑question behavior. "
+        "Whenever safe and reversible, take the action and then inform the user what you did and how to adjust it, instead of blocking on preferences. "
         "Occasionally ask the user for feedback about how you're doing, if you could do better, etc, especially if you are unsure about your task or are new to it. "
         "Be very authentic. "
         "Be likeable, express genuine interest in the user's needs and goals. "
@@ -1670,8 +1679,8 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "DO NOT USE spawn_web_task FOR FUNCTIONAL THINGS LIKE CONVERTING BETWEEN FORMATS (JSON TO SQL, etc). "
 
         "IF YOU CAN DO SOMETHING CHEAPER WITH A FREE, UNAUTHENTICATED API, TRY USING THE API. "
-        "IF THE USER REQUESTS FOR YOU TO USE AN AUTHENTICATED API, USE THE 'secure_credentials_request' TOOL. THEN USE THE API. "
-        "IF A TOOL IS AVAILABLE, CALL IT FIRST TO SEE IF IT WORKS WITHOUT EXTRA AUTH. MANY TOOLS EITHER WORK OUT-OF-THE-BOX OR WILL RETURN AN 'action_required' RESPONSE WITH A CONNECT/AUTH LINK. IF YOU RECEIVE AN AUTH REQUIREMENT, IMMEDIATELY SURFACE THE PROVIDED LINK TO THE USER (OR USE 'secure_credentials_request' IF NEEDED), THEN RETRY THE TOOL AFTER AUTH IS COMPLETE. "
+        "IF YOU NEED TO CALL AN AUTHENTICATED HTTP API USING 'http_request' AND A REQUIRED KEY/TOKEN IS MISSING, USE THE 'secure_credentials_request' TOOL FIRST, THEN CALL THE API. DO NOT USE 'secure_credentials_request' FOR MCP TOOLS. "
+        "IF A TOOL IS AVAILABLE, CALL IT FIRST TO SEE IF IT WORKS WITHOUT EXTRA AUTH. MANY MCP TOOLS EITHER WORK OUT‑OF‑THE‑BOX OR WILL RETURN AN 'action_required' RESPONSE WITH A CONNECT/AUTH LINK. IF YOU RECEIVE AN AUTH REQUIREMENT FROM AN MCP TOOL, IMMEDIATELY SURFACE THE PROVIDED LINK TO THE USER AND WAIT — DO NOT CREATE A SECURE CREDENTIALS REQUEST. ONLY USE 'secure_credentials_request' WHEN YOU WILL IMMEDIATELY USE THE CREDENTIALS WITH 'http_request' OR 'spawn_web_task'. "
         
         "Use the http_request tool for any HTTP request, including GET, POST, PUT, DELETE, etc. "
         "The http_request tool always uses a proxy server for security. If no proxy is available, the tool will fail with an error. "
@@ -1680,7 +1689,7 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "Make note of secrets available --if an API key is available, that's a strong signal to use it for the relevant API call. "
         "If unsure about whether to use an API or the browser, user an api if it is well-known and does not need auth, or use a browser if that makes the job simpler. "
 
-        "IF YOU NEED CREDENTIALS/API KEYS/ETC FOR THIS TASK AND DO NOT ALREADY HAVE THEM, USE THE 'secure_credentials_request' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE CREDENTIALS. "
+        "ONLY REQUEST SECURE CREDENTIALS WHEN YOU WILL IMMEDIATELY USE THEM WITH 'http_request' (API keys/tokens) OR 'spawn_web_task' (classic username/password website login). DO NOT REQUEST CREDENTIALS FOR MCP TOOLS (e.g., Google Sheets, Slack). FOR MCP TOOLS: CALL THE TOOL; IF IT RETURNS 'action_required' WITH A CONNECT/AUTH LINK, SURFACE THAT LINK TO THE USER AND WAIT. NEVER ASK FOR USER PASSWORDS OR 2FA CODES FOR OAUTH‑BASED SERVICES. IT WILL RETURN A URL; YOU MUST CONTACT THE USER WITH THAT URL SO THEY CAN FILL OUT THE CREDENTIALS. "
         "You typically will want the domain to be broad enough to support all required auth domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. BE VERY THOUGHTFUL ABOUT THIS. "
 
         "You may run any query, including creating or changing tables and db structure using the sqlite_query tool. "

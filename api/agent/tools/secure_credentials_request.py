@@ -20,7 +20,13 @@ def get_secure_credentials_request_tool() -> dict:
         "type": "function",
         "function": {
             "name": "secure_credentials_request",
-            "description": "Request secure credentials from the user that are needed to complete a task. Creates credential requests that the user must fulfill before the agent can proceed. You typically will want the domain to be broad enough to support multiple login domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. IT WILL RETURN A URL, YOU MUST CONTACT THE USER WITH THAT URL SO THEY KNOW THE REQUEST HAS BEEN CREATED AND THEY CAN FILL IN THE SECRETS/CREDENTIALS. ",
+            "description": (
+                "Request secure credentials from the user ONLY when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
+                "or `spawn_web_task` (classic username/password website login). Do NOT use this tool for MCP tools (e.g., Google Sheets, Slack); "
+                "for MCP tools, call the tool first—if it returns 'action_required' with a connect/auth link, surface that link to the user and wait. "
+                "You typically will want the domain to be broad enough to support multiple login domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. "
+                "IT WILL RETURN A URL; YOU MUST CONTACT THE USER WITH THAT URL SO THEY KNOW THE REQUEST HAS BEEN CREATED AND THEY CAN FILL IN THE SECRETS/CREDENTIALS."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
