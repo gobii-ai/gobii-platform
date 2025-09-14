@@ -271,52 +271,6 @@ class TaskCreditAdmin(admin.ModelAdmin):
 
         return TemplateResponse(request, "admin/grant_plan_credits.html", context)
 
-
-@admin.register(MeteringBatch)
-class MeteringBatchAdmin(admin.ModelAdmin):
-    list_display = (
-        "batch_key",
-        "user",
-        "rounded_quantity",
-        "total_credits",
-        "period_start",
-        "period_end",
-        "stripe_event_id",
-        "created_at",
-    )
-    search_fields = (
-        "batch_key",
-        "idempotency_key",
-        "stripe_event_id",
-        "user__email",
-        "user__id",
-    )
-    list_filter = ("period_start", "period_end", "created_at")
-    date_hierarchy = "created_at"
-    readonly_fields = ("id", "batch_key", "idempotency_key", "created_at", "updated_at", "usage_links")
-    raw_id_fields = ("user",)
-    ordering = ("-created_at",)
-
-    @admin.display(description="Usage Rows")
-    def usage_links(self, obj):
-        try:
-            tasks_count = BrowserUseAgentTask.objects.filter(meter_batch_key=obj.batch_key).count()
-            steps_count = PersistentAgentStep.objects.filter(meter_batch_key=obj.batch_key).count()
-        except Exception:
-            tasks_count = 0
-            steps_count = 0
-
-        tasks_url = (
-            reverse("admin:api_browseruseagenttask_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
-        )
-        steps_url = (
-            reverse("admin:api_browseruseagenttaskstep_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
-        )
-        return format_html(
-            '<a href="{}">Tasks: {}</a> &nbsp;|&nbsp; <a href="{}">Steps: {}</a>',
-            tasks_url, tasks_count, steps_url, steps_count
-        )
-
     def grant_by_user_ids_view(self, request):
         from django.template.response import TemplateResponse
         from django.contrib import messages
@@ -439,6 +393,52 @@ class MeteringBatchAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(reverse("admin:api_taskcredit_changelist"))
 
         return TemplateResponse(request, "admin/grant_user_ids_credits.html", context)
+
+
+@admin.register(MeteringBatch)
+class MeteringBatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "batch_key",
+        "user",
+        "rounded_quantity",
+        "total_credits",
+        "period_start",
+        "period_end",
+        "stripe_event_id",
+        "created_at",
+    )
+    search_fields = (
+        "batch_key",
+        "idempotency_key",
+        "stripe_event_id",
+        "user__email",
+        "user__id",
+    )
+    list_filter = ("period_start", "period_end", "created_at")
+    date_hierarchy = "created_at"
+    readonly_fields = ("id", "batch_key", "idempotency_key", "created_at", "updated_at", "usage_links")
+    raw_id_fields = ("user",)
+    ordering = ("-created_at",)
+
+    @admin.display(description="Usage Rows")
+    def usage_links(self, obj):
+        try:
+            tasks_count = BrowserUseAgentTask.objects.filter(meter_batch_key=obj.batch_key).count()
+            steps_count = PersistentAgentStep.objects.filter(meter_batch_key=obj.batch_key).count()
+        except Exception:
+            tasks_count = 0
+            steps_count = 0
+
+        tasks_url = (
+            reverse("admin:api_browseruseagenttask_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
+        )
+        steps_url = (
+            reverse("admin:api_browseruseagenttaskstep_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
+        )
+        return format_html(
+            '<a href="{}">Tasks: {}</a> &nbsp;|&nbsp; <a href="{}">Steps: {}</a>',
+            tasks_url, tasks_count, steps_url, steps_count
+        )
 
 
 # Minimal admin for Organization to enable autocomplete/search
@@ -741,7 +741,7 @@ class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
 @admin.register(BrowserUseAgentTaskStep)
 class BrowserUseAgentTaskStepAdmin(admin.ModelAdmin):
     list_display = ("id", "task", "step_number", "is_result", "created_at")
-    list_filter = ("is_result", "created_at", "meter_batch_key", "metered")
+    list_filter = ("is_result", "created_at")
     search_fields = ("task__id", "description")
     ordering = ("-created_at",)
 
