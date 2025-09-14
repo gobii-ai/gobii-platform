@@ -179,10 +179,13 @@ def rollup_and_meter_usage_task(self) -> int:
 
                 meter_event = report_task_usage_to_stripe(user, quantity=rounded, idempotency_key=idem_key)
 
-                # Record Stripe event id for audit
+                # Record Stripe event id for audit (coerce to string to avoid expression resolution on mocks)
                 try:
+                    event_id = getattr(meter_event, 'id', None)
+                    if event_id is not None and not isinstance(event_id, (str, int)):
+                        event_id = str(event_id)
                     MeteringBatch.objects.filter(batch_key=batch_key).update(
-                        stripe_event_id=getattr(meter_event, 'id', None)
+                        stripe_event_id=event_id
                     )
                 except Exception:
                     logger.exception("Failed to store Stripe meter event id for user %s batch %s", user.id, batch_key)
