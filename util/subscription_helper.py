@@ -636,10 +636,13 @@ def calculate_extra_tasks_used_during_subscription_period(user):
             additional_task=True,  # Only count additional tasks
             voided=False,  # Exclude voided task credits
         )
-
-        addl_task_count = task_credits.count()
-
-        return addl_task_count
+        from django.db.models import Sum
+        total_used = task_credits.aggregate(total=Sum('credits_used'))['total'] or 0
+        try:
+            # Normalize to int for UI/percent calcs; current units are 1.0 per event
+            return int(total_used)
+        except Exception:
+            return 0
 
 def downgrade_user_to_free_plan(user):
     """
