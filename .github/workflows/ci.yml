@@ -123,8 +123,12 @@ jobs:
             tag: batch_event_llm
           - batch: event_processing
             tag: batch_event_processing
+          - batch: event_parallel
+            tag: batch_event_parallel
           - batch: mcp_tools
             tag: batch_mcp_tools
+          - batch: pipedream_connect
+            tag: pipedream_connect
           - batch: promptree
             tag: batch_promptree
           - batch: redis_leaks
