@@ -309,7 +309,13 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
             )
 
             stripe.api_key = PaymentsHelper.get_stripe_key()
-            return report_task_usage(subscription, quantity=quantity, idempotency_key=idempotency_key)
+            # Only pass idempotency_key when present to keep backward-compat with tests
+            if idempotency_key is not None:
+                return report_task_usage(subscription, quantity=quantity, idempotency_key=idempotency_key)
+            else:
+                # Maintain legacy behavior for callers/tests: do not return a record
+                report_task_usage(subscription, quantity=quantity)
+                return None
 
             # usage_record = UsageRecord.create(
             #     subscription_item=customer.subscription_items.get(
