@@ -186,7 +186,7 @@ class TaskCreditService:
                 credits_used=0,
                 expiration_date=expiration_date,
                 stripe_invoice_id=invoice_id,
-                granted_date=timezone.now(),
+                granted_date=grant_date,
                 plan=PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE,
                 grant_type=GrantTypeChoices.PLAN,
                 additional_task=False,  # This is a regular task credit, not an additional task
