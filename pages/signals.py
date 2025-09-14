@@ -144,9 +144,8 @@ def handle_subscription_event(event, **kwargs):
         logger.warning("Unexpected Stripe object in webhook: %s", payload.get("object"))
         return
 
-    # 2. Short-circuit hard-deleted payloads ─ they only contain id, object, customer, deleted
-    if payload.get("deleted"):
-        return
+    # Note: do not early-return on hard-deleted payloads; we still need to
+    # downgrade the user to the free plan when a subscription is deleted.
 
     stripe.api_key = PaymentsHelper.get_stripe_key()
     stripe_sub = None
