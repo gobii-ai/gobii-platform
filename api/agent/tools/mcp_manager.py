@@ -452,7 +452,7 @@ class MCPToolManager:
                         content = block.text
                         break
             
-            # Detect Pipedream Connect Link responses and surface clearly to the agent/user
+            # Detect Pipedream Connect Link responses and replace with our own Connect Link
             if server_name == "pipedream":
                 connect_url = None
                 if isinstance(content, dict):
@@ -465,11 +465,57 @@ class MCPToolManager:
                     connect_url = content
 
                 if connect_url:
-                    return {
-                        "status": "action_required",
-                        "result": f"Authorization required. Please connect your account via: {connect_url}",
-                        "connect_url": connect_url,
-                    }
+                    try:
+                        logger.info(
+                            "PD Connect: pass-through link detected for tool '%s' agent=%s",
+                            actual_tool_name, str(agent.id)
+                        )
+                        # Determine app slug: prefer ?app= from server URL, else parse from tool name
+                        app_slug = None
+                        try:
+                            from urllib.parse import urlparse, parse_qs
+                            qs = parse_qs(urlparse(connect_url).query or "")
+                            app_param = qs.get("app", [None])[0]
+                            if isinstance(app_param, str) and app_param.strip():
+                                app_slug = app_param.strip()
+                                logger.info(
+                                    "PD Connect: using app from server link app=%s",
+                                    app_slug
+                                )
+                        except Exception:
+                            app_slug = None
+                        if not app_slug:
+                            app_slug, _mode = self._pd_parse_tool(actual_tool_name)
+                            logger.info(
+                                "PD Connect: derived app from tool name tool=%s app=%s",
+                                actual_tool_name, app_slug or ""
+                            )
+
+                        # Create a first‑party Connect session + link
+                        from api.integrations.pipedream_connect import create_connect_session
+                        session, first_party_url = create_connect_session(agent, app_slug or "")
+                        logger.info(
+                            "PD Connect: created session id=%s app=%s agent=%s",
+                            getattr(session, 'id', None), app_slug or "", str(agent.id)
+                        )
+                        # Fall back to server‑provided URL if helper could not produce one
+                        final_url = first_party_url or connect_url
+                        logger.info(
+                            "PD Connect: surfacing connect link agent=%s app=%s using_first_party=%s",
+                            str(agent.id), app_slug or "", bool(first_party_url)
+                        )
+                        return {
+                            "status": "action_required",
+                            "result": f"Authorization required. Please connect your account via: {final_url}",
+                            "connect_url": final_url,
+                        }
+                    except Exception:
+                        logger.exception("PD Connect: failed to generate first-party link; falling back to server URL")
+                        return {
+                            "status": "action_required",
+                            "result": f"Authorization required. Please connect your account via: {connect_url}",
+                            "connect_url": connect_url,
+                        }
 
             return {"status": "success", "result": content or "Tool executed successfully"}
             

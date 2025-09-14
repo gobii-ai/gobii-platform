@@ -3096,6 +3096,53 @@ class OutboundMessageAttempt(models.Model):
         return f"Attempt<{self.provider}|{self.status}> {preview}..."
 
 
+class PipedreamConnectSession(models.Model):
+    """Tracks a Pipedream Connect token lifecycle for an agent."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCESS = "success", "Success"
+        ERROR = "error", "Error"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="pipedream_connect_sessions",
+    )
+
+    # Identity scoping used when creating the token
+    external_user_id = models.CharField(max_length=64)
+    conversation_id = models.CharField(max_length=64)
+
+    # App this session is intended to connect (e.g., google_sheets)
+    app_slug = models.CharField(max_length=64)
+
+    # Short‑lived token and link returned by Connect API
+    connect_token = models.CharField(max_length=128, unique=True, blank=True)
+    connect_link_url = models.TextField(blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    # Webhook correlation and security
+    webhook_secret = models.CharField(max_length=64)
+
+    # Outcome
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    account_id = models.CharField(max_length=64, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "status", "-created_at"], name="pd_connect_agent_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"PipedreamConnectSession<{self.app_slug}|{self.status}>"
+
+
 class UsageThresholdSent(models.Model):
     """
     One row per (user, calendar month, threshold) that has already triggered
