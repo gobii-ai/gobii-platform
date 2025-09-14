@@ -17,7 +17,7 @@ import logging
 import stripe
 
 from util.payments_helper import PaymentsHelper
-from util.subscription_helper import get_user_task_credit_limit, mark_user_billing_with_plan
+from util.subscription_helper import get_user_task_credit_limit, mark_user_billing_with_plan, downgrade_user_to_free_plan
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +176,27 @@ def handle_subscription_event(event, **kwargs):
         return
 
     user = customer.subscriber
+
+    # Handle explicit deletions (downgrade to free immediately)
+    try:
+        event_type = getattr(event, "type", "") or getattr(event, "event_type", "")
+    except Exception:
+        event_type = ""
+
+    if event_type == "customer.subscription.deleted" or getattr(sub, "status", "") == "canceled":
+        downgrade_user_to_free_plan(user)
+        try:
+            Analytics.track_event(
+                user_id=user.id,
+                event=AnalyticsEvent.SUBSCRIPTION_CANCELLED,
+                source=AnalyticsSource.WEB,
+                properties={
+                    'stripe.subscription_id': getattr(sub, 'id', None),
+                },
+            )
+        except Exception:
+            logger.exception("Failed to track subscription cancellation for user %s", user.id)
+        return
 
     # Prefer explicit Stripe retrieve when present; otherwise use dj-stripe's cached payload
     # from the Subscription row. This allows the normal sync_from_stripe_data path to work.
