@@ -99,57 +99,27 @@ def _cleanup_pipedream_sessions(agent_id: str, reason: str, meta: Optional[dict]
 AgentCleanupRegistry.register(_cleanup_pipedream_sessions)  # all reasons
 
 
-def _cleanup_pipedream_delete_account(agent_id: str, reason: str, meta: Optional[dict]) -> None:
-    """Delete the Pipedream Connect account for this external user (agent).
+def _cleanup_pipedream_delete_user(agent_id: str, reason: str, meta: Optional[dict]) -> None:
+    """Delete the Pipedream Connect external user (by agent_id) via shared helper.
 
-    Uses the Pipedream Connect API `DELETE /v1/connect/{project_id}/accounts/{external_user_id}`.
-    External user id is the agent ID. This is safe to call multiple times; a 404
-    (account not found) is treated as success for cleanup purposes.
+    Uses `api.integrations.pipedream_connect_gc.delete_external_user`, which already
+    handles auth, environment, retries, and idempotent semantics (204/404 as success).
     """
     try:
-        from django.conf import settings
-        from api.agent.tools.mcp_manager import get_mcp_manager
-        import requests
+        from api.integrations.pipedream_connect_gc import delete_external_user
 
-        project_id = getattr(settings, "PIPEDREAM_PROJECT_ID", "")
-        environment = getattr(settings, "PIPEDREAM_ENVIRONMENT", "development")
-        if not project_id:
-            logger.info("Pipedream cleanup skipped (no project id). agent=%s", agent_id)
-            return
-
-        mgr = get_mcp_manager()
-        token = mgr._get_pipedream_access_token() or ""
-        if not token:
-            logger.info("Pipedream cleanup skipped (no access token). agent=%s", agent_id)
-            return
-
-        url = f"https://api.pipedream.com/v1/connect/{project_id}/accounts/{agent_id}"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "x-pd-environment": environment,
-        }
-
-        resp = requests.delete(url, headers=headers, timeout=20)
-        if resp.status_code in (200, 202, 204):
-            logger.info("Pipedream account deleted agent=%s reason=%s", agent_id, reason)
-            return
-        if resp.status_code == 404:
-            logger.info("Pipedream account already absent agent=%s reason=%s", agent_id, reason)
-            return
-        try:
-            resp.raise_for_status()
-        except Exception:
-            logger.exception(
-                "Pipedream account delete failed agent=%s reason=%s status=%s body=%s",
-                agent_id, reason, resp.status_code, resp.text[:500]
-            )
+        ok, status, msg = delete_external_user(str(agent_id))
+        if ok:
+            logger.info("Pipedream external user deleted agent=%s reason=%s status=%s", agent_id, reason, status)
+        else:
+            logger.warning("Pipedream external user delete failed agent=%s status=%s msg=%s", agent_id, status, (msg or ""))
     except Exception:
-        logger.exception("Pipedream account cleanup error for agent %s", agent_id)
+        logger.exception("Pipedream external user cleanup error for agent %s", agent_id)
 
 
 # Register after definition so it runs after sessions cleanup. Limit to more
 # final shutdowns to avoid removing accounts on transient pauses.
 AgentCleanupRegistry.register(
-    _cleanup_pipedream_delete_account,
+    _cleanup_pipedream_delete_user,
     reasons=[AgentShutdownReason.HARD_DELETE, AgentShutdownReason.SOFT_EXPIRE],
 )
