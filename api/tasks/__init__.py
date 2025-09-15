@@ -47,3 +47,6 @@ from .billing_rollup import rollup_and_meter_usage_task
 # Without this, tasks under `api.agent.tasks.*` may not register on the worker
 # unless some other code imports them first (e.g., console views).
 import api.agent.tasks  # noqa: F401
+
+# Agent lifecycle cleanup task (one-stop shutdown cleanup)
+from .agent_lifecycle import agent_shutdown_cleanup_task  # noqa: F401
