@@ -39,6 +39,11 @@ COPY pyproject.toml poetry.lock* ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir .
 
+# Preinstall Bright Data MCP globally so containers do not fetch it on-the-fly.
+# Local dev (outside Docker) still uses npx to install on demand.
+RUN npm install -g @brightdata/mcp@2.5.0 && \
+    npm cache clean --force
+
 # ────────────────────────────────────────────────
 # builder stage – copy code, install editable, test
 # ────────────────────────────────────────────────
