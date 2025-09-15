@@ -67,9 +67,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         # Run a single loop iteration
         from api.agent.core import event_processing as ep
         with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
-            # event_window stub
-            ew = MagicMock(); ew.messages = []; ew.cron_triggers = []
-            result_usage = ep._run_agent_loop(self.agent, ew)
+            result_usage = ep._run_agent_loop(self.agent, is_first_run=False)
 
         # Validate DB records: 3 tool calls persisted and NO sleep step recorded
         calls = list(PersistentAgentToolCall.objects.all().order_by('step__created_at'))

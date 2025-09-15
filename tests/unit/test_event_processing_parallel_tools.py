@@ -61,11 +61,7 @@ class TestParallelToolCallsExecution(TestCase):
         # Run a single loop iteration by limiting MAX_AGENT_LOOP_ITERATIONS via patch
         from api.agent.core import event_processing as ep
         with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
-            # Event window: no new messages or cron - minimal needed structure
-            ew = MagicMock()
-            ew.messages = []
-            ew.cron_triggers = []
-            result_usage = ep._run_agent_loop(self.agent, ew)
+            result_usage = ep._run_agent_loop(self.agent, is_first_run=False)
 
         # Both executors should have been called once
         # Access the patched functions from the decorator order above
@@ -75,4 +71,3 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertTrue(execute_sms_called.called, "send_sms was not executed")
         self.assertEqual(execute_sqlite_called.call_count, 1)
         self.assertEqual(execute_sms_called.call_count, 1)
-

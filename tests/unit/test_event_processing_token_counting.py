@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
-from api.agent.core.event_processing import _run_agent_loop, _build_prompt_context, EventWindow
+from api.agent.core.event_processing import _run_agent_loop, _build_prompt_context
 from api.agent.core.llm_config import get_llm_config_with_failover
 from tests.utils.llm_seed import seed_persistent_basic
 from api.models import PersistentAgent, BrowserUseAgent, UserQuota
@@ -54,9 +54,6 @@ class TestEventProcessingTokenCounting(TestCase):
             "GOOGLE_API_KEY": "google-key",
         }, clear=True):
             
-            # Mock event window
-            event_window = MagicMock(spec=EventWindow)
-            
             # Mock _build_prompt_context to return specific fitted token count
             with patch('api.agent.core.event_processing._build_prompt_context') as mock_build_prompt:
                 # Return a token count in the small range (< 10000)
@@ -94,7 +91,7 @@ class TestEventProcessingTokenCounting(TestCase):
                         
                         # Run one iteration of the agent loop
                         try:
-                            _run_agent_loop(self.test_agent, event_window)
+                            _run_agent_loop(self.test_agent, is_first_run=False)
                         except Exception:
                             pass  # Ignore tool execution exceptions
                         
@@ -116,32 +113,24 @@ class TestEventProcessingTokenCounting(TestCase):
         """
         seed_persistent_basic(include_openrouter=True)
         with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "anthropic-key", 
+            "ANTHROPIC_API_KEY": "anthropic-key",
             "GOOGLE_API_KEY": "google-key",
         }, clear=True):
-            
-            # Test case: prompt building uses small token count (should get Anthropic model)
-            # but LLM selection uses different logic
-            
-            # Mock the event window
-            event_window = MagicMock(spec=EventWindow)
-            
-                    # Test _build_prompt_context with token_count=0 (gets default small config)
-        with patch('api.agent.core.event_processing.get_llm_config_with_failover') as mock_get_config:
-            mock_get_config.return_value = [("anthropic", "anthropic/claude-sonnet-4-20250514", {})]
-            
-            messages, fitted_token_count = _build_prompt_context(self.test_agent, event_window)
-            
-            # Verify it was called with token_count=0 for model selection
-            mock_get_config.assert_called_with(
-                agent_id=str(self.test_agent.id),
-                token_count=0
-            )
-            
-            self.assertIsInstance(messages, list)
-            self.assertEqual(len(messages), 2)  # system + user messages
-            self.assertIsInstance(fitted_token_count, int)
-            self.assertGreater(fitted_token_count, 0)
+            with patch('api.agent.core.event_processing.get_llm_config_with_failover') as mock_get_config:
+                mock_get_config.return_value = [("anthropic", "anthropic/claude-sonnet-4-20250514", {})]
+
+                messages, fitted_token_count = _build_prompt_context(self.test_agent)
+
+                # Verify it was called with token_count=0 for model selection
+                mock_get_config.assert_called_with(
+                    agent_id=str(self.test_agent.id),
+                    token_count=0
+                )
+
+                self.assertIsInstance(messages, list)
+                self.assertEqual(len(messages), 2)  # system + user messages
+                self.assertIsInstance(fitted_token_count, int)
+                self.assertGreater(fitted_token_count, 0)
 
     def test_get_llm_config_with_failover_small_range(self):
         """Test that small token ranges use token-based tier selection (GPT-5 not available without key)."""
