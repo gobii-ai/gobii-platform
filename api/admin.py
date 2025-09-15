@@ -811,6 +811,20 @@ class CustomUserAdmin(UserAdmin):
     # Remove the heavy TaskCredit inline and keep the agent inline only.
     inlines = [BrowserUseAgentInlineForUser]
 
+    actions = ['queue_rollup_for_selected_users']
+
+    @admin.action(description="Queue metering rollup for selected users")
+    def queue_rollup_for_selected_users(self, request, queryset):
+        from api.tasks.billing_rollup import rollup_usage_for_user
+        queued = 0
+        for user in queryset:
+            try:
+                rollup_usage_for_user.delay(user.id)
+                queued += 1
+            except Exception:
+                continue
+        self.message_user(request, f"Queued rollup for {queued} user(s).", level=messages.INFO)
+
     def get_queryset(self, request):
         """Annotate credit totals to avoid N+1 queries in the changelist."""
         qs = super().get_queryset(request)
