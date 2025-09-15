@@ -84,11 +84,17 @@ class MCPToolManager:
             display_name="Bright Data",
             description="Web scraping and data extraction tools with CAPTCHA bypass",
             command="npx",
-            args=["@brightdata/mcp@2.4.3"],
+            # Prefer a pinned version for reproducibility; npx will use the preinstalled
+            # global copy inside Docker, and fall back to on-the-fly install in local/dev.
+            args=["-y", "@brightdata/mcp@2.5.0"],
             env={
                 "API_TOKEN": os.getenv("BRIGHT_DATA_TOKEN", ""),
                 "NPM_CONFIG_CACHE": os.getenv("NPM_CONFIG_CACHE", "/tmp/.npm"),
-                "PRO_MODE": "true"
+                # Enable full tool catalog (costs may apply per Bright Data docs)
+                "PRO_MODE": "true",
+                # Optional: set the MCP server's WEB_UNLOCKER_ZONE from one env var.
+                # If BRIGHT_DATA_WEB_UNLOCKER_ZONE is empty/unset, the server default applies.
+                **({"WEB_UNLOCKER_ZONE": os.getenv("BRIGHT_DATA_WEB_UNLOCKER_ZONE")} if os.getenv("BRIGHT_DATA_WEB_UNLOCKER_ZONE") else {}),
             },
             enabled=True
         ),
