@@ -49,17 +49,17 @@ class PersistentAgentShutdownTriggersTests(TestCase):
                     agent.save(update_fields=["is_active"])
                 self.assertIn((str(agent.id), "PAUSE"), calls)
 
-            # 2) Cron disabled: schedule set -> None
-            calls.clear()
-            agent.refresh_from_db()
-            with transaction.atomic():
-                agent.schedule = None
-                agent.save(update_fields=["schedule"])
-            self.assertIn((str(agent.id), "CRON_DISABLED"), calls)
+                # 2) Cron disabled: schedule set -> None
+                calls.clear()
+                agent.refresh_from_db()
+                with transaction.atomic():
+                    agent.schedule = None
+                    agent.save(update_fields=["schedule"])
+                self.assertIn((str(agent.id), "CRON_DISABLED"), calls)
 
-            # 3) Soft expire: life_state ACTIVE -> EXPIRED
-            calls.clear()
-            with transaction.atomic():
-                agent.life_state = PersistentAgent.LifeState.EXPIRED
-                agent.save(update_fields=["life_state"])
-            self.assertIn((str(agent.id), "SOFT_EXPIRE"), calls)
+                # 3) Soft expire: life_state ACTIVE -> EXPIRED
+                calls.clear()
+                with transaction.atomic():
+                    agent.life_state = PersistentAgent.LifeState.EXPIRED
+                    agent.save(update_fields=["life_state"])
+                self.assertIn((str(agent.id), "SOFT_EXPIRE"), calls)
