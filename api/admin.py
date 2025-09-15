@@ -821,7 +821,8 @@ class CustomUserAdmin(UserAdmin):
             try:
                 rollup_usage_for_user.delay(user.id)
                 queued += 1
-            except Exception:
+            except Exception as e:
+                logging.error("Failed to queue rollup for user %s: %s", user.id, e)
                 continue
         self.message_user(request, f"Queued rollup for {queued} user(s).", level=messages.INFO)
 
