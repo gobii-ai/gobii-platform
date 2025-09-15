@@ -205,7 +205,7 @@ class MCPToolManager:
             if server.name == "pipedream":
                 # Build discovery headers in sub-agent mode with an initial app slug
                 # Some servers expect an app slug present during the initial handshake.
-                app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets")
+                app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse")
                 first_slug = next((s.strip() for s in app_csv.split(',') if s.strip()), "google_sheets")
                 headers = self._pd_build_headers(
                     mode="sub-agent",
@@ -263,7 +263,7 @@ class MCPToolManager:
                 mcp_tools = await client.list_tools()
                 tools.extend(self._convert_tools(server, mcp_tools))
             else:
-                app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets")
+                app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse")
                 prefetch = [s.strip() for s in app_csv.split(",") if s.strip()]
                 for app_slug in prefetch:
                     try:
