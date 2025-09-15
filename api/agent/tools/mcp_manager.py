@@ -952,7 +952,7 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
         # Oldest by (last_used_at NULLS FIRST, enabled_at ASC)
         oldest = (
             PersistentAgentEnabledTool.objects.filter(agent=agent)
-            .order_by("last_used_at", "enabled_at")
+            .order_by("last_used_at", "enabled_at", "id")
             [:overflow]
         )
         evicted_names = [o.tool_full_name for o in oldest]
@@ -1044,7 +1044,7 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
         oldest = (
             PersistentAgentEnabledTool.objects.filter(agent=agent)
             .exclude(tool_full_name=tool_name)
-            .order_by("last_used_at", "enabled_at")
+            .order_by("last_used_at", "enabled_at", "id")
             .first()
         )
         if oldest:
