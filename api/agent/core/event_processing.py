@@ -386,8 +386,8 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
                 "credit_check.tool_cost",
                 float(cost) if cost is not None else float(settings.CREDITS_PER_TASK),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to set span attribute 'credit_check.tool_cost': %s", e)
 
     if (
         available is not None
