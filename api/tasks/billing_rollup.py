@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from celery import shared_task
-from datetime import datetime, timedelta, time as dt_time
+from datetime import datetime, date as dt_date, timedelta, time as dt_time
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -9,6 +9,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime, parse_date
 
 from billing.services import BillingService
 from util.subscription_helper import get_active_subscription, report_task_usage_to_stripe
@@ -28,6 +29,41 @@ def _period_bounds_for_user(user) -> tuple[datetime, datetime]:
     return start_dt, end_exclusive
 
 
+def _to_aware_dt(value, *, as_start: bool) -> datetime | None:
+    """Try to coerce value to a timezone-aware datetime.
+
+    Returns None if value is not a supported type or cannot be parsed.
+
+    Supported:
+    - datetime: ensure tz-aware (assume current TZ if naive)
+    - date: convert to midnight start; for end bound, use next day's midnight (exclusive)
+    - str: try parse_datetime; if None, parse_date and convert similarly
+    """
+    tz = timezone.get_current_timezone()
+    dt: datetime | None = None
+
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, dt_date):
+        base = datetime.combine(value, dt_time.min)
+        dt = base if as_start else (base + timedelta(days=1))
+    elif isinstance(value, str):
+        parsed_dt = parse_datetime(value)
+        if parsed_dt is not None:
+            dt = parsed_dt
+        else:
+            parsed_d = parse_date(value)
+            if parsed_d is not None:
+                base = datetime.combine(parsed_d, dt_time.min)
+                dt = base if as_start else (base + timedelta(days=1))
+
+    if dt is None:
+        return None
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, tz)
+    return dt
+
+
 def _rollup_for_user(user) -> int:
     """Process metering rollup for a single user. Returns 1 if attempted, else 0."""
     # Only non-free (active subscription) users are billed
@@ -36,12 +72,18 @@ def _rollup_for_user(user) -> int:
         return 0
 
     # Use Stripe subscription period when available; otherwise fall back to local anchor bounds
+    use_stripe_bounds = False
     if getattr(sub, 'current_period_start', None) and getattr(sub, 'current_period_end', None):
-        start_dt = sub.current_period_start
-        end_dt = sub.current_period_end
-        period_start_date = start_dt.date()
-        period_end_date = end_dt.date()
+        start_dt = _to_aware_dt(sub.current_period_start, as_start=True)
+        end_dt = _to_aware_dt(sub.current_period_end, as_start=False)
+        if start_dt is not None and end_dt is not None:
+            use_stripe_bounds = True
+            period_start_date = start_dt.date()
+            period_end_date = end_dt.date()
     else:
+        start_dt = end_dt = None
+
+    if not use_stripe_bounds:
         start_dt, end_dt = _period_bounds_for_user(user)
         period_start_date, period_end_date = BillingService.get_current_billing_period_for_user(user)
 
@@ -171,7 +213,7 @@ def _rollup_for_user(user) -> int:
         else:
             # No billable units yet. If we've reached the end of Stripe period, finalize and mark; else release reservation.
             now_ts = timezone.now()
-            if now_ts >= end_dt:
+            if (use_stripe_bounds and now_ts >= end_dt) or ((not use_stripe_bounds) and (timezone.now().date() >= period_end_date)):
                 idem_key = f"meter:{user.id}:{batch_key}"
                 MeteringBatch.objects.update_or_create(
                     batch_key=batch_key,
