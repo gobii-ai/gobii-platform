@@ -1764,8 +1764,9 @@ class PersistentAgent(models.Model):
         # Also enqueue centralized cleanup as a HARD_DELETE reason
         try:
             from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
+            agent_id = self.id
 
-            transaction.on_commit(lambda: AgentLifecycleService.shutdown(str(self.id), AgentShutdownReason.HARD_DELETE, meta={
+            transaction.on_commit(lambda: AgentLifecycleService.shutdown(str(agent_id), AgentShutdownReason.HARD_DELETE, meta={
                 "source": "model.delete",
             }))
         except Exception:
