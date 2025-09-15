@@ -950,9 +950,10 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
     if total > MAX_MCP_TOOLS:
         overflow = total - MAX_MCP_TOOLS
         # Oldest by (last_used_at NULLS FIRST, enabled_at ASC)
+        from django.db.models import F
         oldest = (
             PersistentAgentEnabledTool.objects.filter(agent=agent)
-            .order_by("last_used_at", "enabled_at", "tool_full_name")
+            .order_by(F("last_used_at").asc(nulls_first=True), "enabled_at", "tool_full_name")
             [:overflow]
         )
         evicted_names = [o.tool_full_name for o in oldest]
@@ -1041,10 +1042,11 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     disabled_tool = None
     if total > MAX_MCP_TOOLS:
         # Exclude the just-added tool from eviction so we always keep it
+        from django.db.models import F
         oldest = (
             PersistentAgentEnabledTool.objects.filter(agent=agent)
             .exclude(tool_full_name=tool_name)
-            .order_by("last_used_at", "enabled_at", "tool_full_name")
+            .order_by(F("last_used_at").asc(nulls_first=True), "enabled_at", "tool_full_name")
             .first()
         )
         if oldest:
