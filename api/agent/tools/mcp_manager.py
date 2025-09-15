@@ -206,14 +206,16 @@ class MCPToolManager:
                 # Build discovery headers in sub-agent mode with an initial app slug
                 # Some servers expect an app slug present during the initial handshake.
                 app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse")
-                first_slug = next((s.strip() for s in app_csv.split(',') if s.strip()), "google_sheets")
+                # first_slug is temporarily disabled as multi-prefetch seems to work; it's undocumented by Pipedream
+                # but is shown in their examples. Leaving in case we have to revert
+                # first_slug = next((s.strip() for s in app_csv.split(',') if s.strip()), "google_sheets")
                 headers = self._pd_build_headers(
                     mode="sub-agent",
-                    app_slug=first_slug,
+                    app_slug=app_csv,
                     external_user_id="gobii-discovery",
                     conversation_id="discovery",
                 )
-                logger.info(f"Pipedream discovery initializing with app slug '{first_slug}' and sub-agent mode")
+                logger.info(f"Pipedream discovery initializing with app slug '{app_csv}' and sub-agent mode")
             transport = StreamableHttpTransport(url=server.url, headers=headers)
         elif server.command:
             # For stdio servers like npx
