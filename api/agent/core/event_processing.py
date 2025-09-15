@@ -358,7 +358,11 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
     # Determine tool cost up-front so we can gate on fractional balances
     try:
         cost = get_tool_credit_cost(tool_name)
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "Failed to get credit cost for tool '%s', falling back to default. Error: %s",
+            tool_name, e, exc_info=True
+        )
         # Fallback to default single-task cost when lookup fails
         cost = Decimal(getattr(settings, "CREDITS_PER_TASK", 1))
 
