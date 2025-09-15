@@ -242,7 +242,7 @@ class PersistentAgentToolCreditTests(TestCase):
 
         self.assertFalse(result)
         step = PersistentAgentStep.objects.get(agent=self.agent)
-        self.assertIn("credit consumption failure", step.description)
+        self.assertIn("insufficient credits", step.description)
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step=step,
@@ -251,7 +251,7 @@ class PersistentAgentToolCreditTests(TestCase):
         )
 
         span.add_event.assert_any_call("Credit consumption raised exception", {"error": "db down"})
-        span.add_event.assert_any_call("Tool skipped - credit consumption failure mid-loop")
+        span.add_event.assert_any_call("Tool skipped - insufficient credits during processing")
         span.set_attribute.assert_any_call("credit_check.error", "db down")
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)

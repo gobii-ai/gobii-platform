@@ -446,7 +446,7 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
             pass
     if not consumed or not consumed.get('success'):
         msg_desc = (
-            f"Skipped tool '{tool_name}' due to credit consumption failure mid-loop."
+            f"Skipped tool '{tool_name}' due to insufficient credits during processing."
         )
         step = PersistentAgentStep.objects.create(
             agent=agent,
@@ -459,11 +459,11 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         )
         if span is not None:
             try:
-                span.add_event("Tool skipped - credit consumption failure mid-loop")
+                span.add_event("Tool skipped - insufficient credits during processing")
             except Exception:
                 pass
         logger.warning(
-            "Agent %s credit consumption failed mid-loop; halting further processing.",
+            "Agent %s encountered insufficient credits during processing; halting further processing.",
             agent.id,
         )
         return False
