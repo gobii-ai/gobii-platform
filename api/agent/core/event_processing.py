@@ -352,7 +352,15 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         return True
 
     owner_user = agent.user
-    cost = None
+    cost: Decimal | None = None
+    consumed: dict | None = None
+
+    # Determine tool cost up-front so we can gate on fractional balances
+    try:
+        cost = get_tool_credit_cost(tool_name)
+    except Exception:
+        # Fallback to default single-task cost when lookup fails
+        cost = Decimal(getattr(settings, "CREDITS_PER_TASK", 1))
 
     try:
         available = TaskCreditService.get_user_task_credits_available(owner_user)
@@ -373,8 +381,20 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
             )
         except Exception:
             pass
+        try:
+            span.set_attribute(
+                "credit_check.tool_cost",
+                float(cost) if cost is not None else float(settings.CREDITS_PER_TASK),
+            )
+        except Exception:
+            pass
 
-    if available is not None and available != TASKS_UNLIMITED and available <= 0:
+    if (
+        available is not None
+        and available != TASKS_UNLIMITED
+        and cost is not None
+        and Decimal(available) < cost
+    ):
         msg_desc = (
             f"Skipped tool '{tool_name}' due to insufficient credits mid-loop."
         )
@@ -400,7 +420,6 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
 
     try:
         with transaction.atomic():
-            cost = get_tool_credit_cost(tool_name)
             consumed = TaskCreditService.check_and_consume_credit(owner_user, amount=cost)
     except Exception as e:
         logger.error(
@@ -409,14 +428,19 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
             owner_user.id,
             str(e),
         )
-        consumed = None
+        if span is not None:
+            try:
+                span.add_event("Credit consumption raised exception", {"error": str(e)})
+                span.set_attribute("credit_check.error", str(e))
+            except Exception:
+                pass
 
     if span is not None:
         try:
-            span.set_attribute("credit_check.consumed_in_loop", bool(consumed['success']))
+            span.set_attribute("credit_check.consumed_in_loop", bool(consumed and consumed.get('success')))
         except Exception:
             pass
-    if not consumed['success'] or consumed['success'] is False:
+    if not consumed or not consumed.get('success'):
         msg_desc = (
             f"Skipped tool '{tool_name}' due to credit consumption failure mid-loop."
         )
