@@ -10,10 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import math
-from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Iterable, List, Tuple, Union, Optional
+from typing import List, Tuple, Union, Optional
 from uuid import UUID
 
 import litellm
@@ -73,7 +72,6 @@ from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentCommsSnapshot,
-    PersistentAgentCronTrigger,
     PersistentAgentMessage,
     PersistentAgentSecret,
     PersistentAgentStep,
@@ -446,24 +444,6 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
 
 
 # --------------------------------------------------------------------------- #
-#  Helper dataclass returned by collect_event_window for easier testing
-# --------------------------------------------------------------------------- #
-@dataclass(slots=True)
-class EventWindow:
-    """Batch of agent events bounded by *cut_off* < *timestamp* ≤ *upper*."""
-
-    cut_off: datetime
-    upper: datetime
-    is_first_run: bool
-    messages: Iterable[PersistentAgentMessage]
-    cron_triggers: Iterable[PersistentAgentCronTrigger]
-
-    def __iter__(self):
-        yield from (self.cut_off, self.upper, self.messages, self.cron_triggers)
-
-
-
-# --------------------------------------------------------------------------- #
 #  Public API
 # --------------------------------------------------------------------------- #
 def process_agent_events(
@@ -732,26 +712,34 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         span.set_attribute('credit_check.error', str(e))
         return
 
-    event_window, sys_step = _prepare_event_window(persistent_agent_id)
+    # Determine whether this is the first processing run before recording the system step
+    is_first_run = not PersistentAgentSystemStep.objects.filter(
+        step__agent=agent,
+        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+    ).exists()
+
+    with transaction.atomic():
+        processing_step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description="Process events",
+        )
+        sys_step = PersistentAgentSystemStep.objects.create(
+            step=processing_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
 
     logger.info(
-        "Processing window %s → %s for agent '%s': %d new messages, %d cron triggers",
-        event_window.cut_off,
-        event_window.upper,
-        sys_step.step.agent.name,
-        len(event_window.messages),
-        len(event_window.cron_triggers),
+        "Processing agent %s (is_first_run=%s)",
+        agent.id,
+        is_first_run,
     )
-    span.set_attribute('event_window.cut_off', event_window.cut_off.isoformat())
-    span.set_attribute('event_window.upper', event_window.upper.isoformat())
-    span.set_attribute('event_window.is_first_run', event_window.is_first_run)
-    span.set_attribute('event_window.messages.count', len(event_window.messages))
-    span.set_attribute('event_window.cron_triggers.count', len(event_window.cron_triggers))
+    span.set_attribute('processing_step.id', str(processing_step.id))
+    span.set_attribute('processing.is_first_run', is_first_run)
 
-    cumulative_token_usage = _run_agent_loop(sys_step.step.agent, event_window)
+    cumulative_token_usage = _run_agent_loop(agent, is_first_run=is_first_run)
 
     # Update system step with cumulative token usage
-    sys_step.notes = f"{len(event_window.messages)} msgs, {len(event_window.cron_triggers)} cron"
+    sys_step.notes = "simplified"
     
     # Update the associated step with token usage (defensively handle mocks/expressions)
     # Tests may patch `_run_agent_loop` and return a MagicMock; avoid assigning those to DB fields.
@@ -792,7 +780,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
 
 @tracer.start_as_current_span("Agent Loop")
-def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
+def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
     """The core tool‑calling loop for a persistent agent.
     
     Returns:
@@ -857,10 +845,10 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     return cumulative_token_usage
             history, fitted_token_count = _build_prompt_context(
                 agent,
-                event_window,
                 current_iteration=i + 1,
                 max_iterations=MAX_AGENT_LOOP_ITERATIONS,
                 reasoning_only_streak=reasoning_only_streak,
+                is_first_run=is_first_run,
             )
             
             # Use the fitted token count from promptree for LLM selection
@@ -1231,14 +1219,21 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
 @tracer.start_as_current_span("Build Prompt Context")
 def _build_prompt_context(
     agent: PersistentAgent,
-    event_window: EventWindow,
     current_iteration: int = 1,
     max_iterations: int = MAX_AGENT_LOOP_ITERATIONS,
     reasoning_only_streak: int = 0,
+    is_first_run: bool = False,
 ) -> tuple[List[dict], int]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
     
+    Args:
+        agent: Persistent agent being processed.
+        current_iteration: 1-based iteration counter inside the loop.
+        max_iterations: Maximum iterations allowed for this processing cycle.
+        reasoning_only_streak: Number of consecutive iterations without tool calls.
+        is_first_run: Whether this is the very first processing cycle for the agent.
+
     Returns:
         Tuple of (messages, fitted_token_count) where fitted_token_count is the
         actual token count after promptree fitting for accurate LLM selection.
@@ -1279,10 +1274,10 @@ def _build_prompt_context(
     # System instruction (highest priority, never shrinks)
     system_prompt = _get_system_instruction(
         agent,
-        event_window,
-        current_iteration,
-        max_iterations,
+        current_iteration=current_iteration,
+        max_iterations=max_iterations,
         reasoning_only_streak=reasoning_only_streak,
+        is_first_run=is_first_run,
     )
     
     # Build the user content sections using promptree
@@ -1621,16 +1616,12 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
 
 def _get_system_instruction(
     agent: PersistentAgent,
-    event_window: EventWindow,
+    *,
     current_iteration: int = 1,
     max_iterations: int = MAX_AGENT_LOOP_ITERATIONS,
     reasoning_only_streak: int = 0,
+    is_first_run: bool = False,
 ) -> str:
-    trigger_reason = "a scheduled event"
-    if event_window.messages:
-        trigger_reason = "a new message"
-    elif not event_window.cron_triggers:
-        trigger_reason = "an unknown or manual trigger"
 
     # Budget/recursion context (global, not just this loop)
     budget_note = ""
@@ -1662,7 +1653,6 @@ def _get_system_instruction(
 
     base_prompt = (
         f"You are a persistent AI agent named '{agent.name}'. Use this name as your self identity when talking to the user. "
-        "You have been triggered by " + trigger_reason + ". "
         f"This is iteration {current_iteration} of {max_iterations} maximum iterations for this processing cycle. "
         + (budget_note or "") + (low_steps_note or "") +
         "Use your tools to perform the next logical step. "
@@ -1781,25 +1771,16 @@ def _get_system_instruction(
     if current_iteration / max_iterations > 0.8:
         base_prompt += "\n\nYOU ARE RUNNING OUT OF STEPS TO GET YOUR WORK DONE. MAKE SURE TO UPDATE YOUR SCHEDULE/CONTACT THE USER IF RELEVANT SO YOU CAN PICK UP YOUR WORK WHERE YOU LEFT OFF LATER"
     
-    if event_window.is_first_run:
-        # Only include the "first run / welcome" block if we have NOT
-        # already contacted the user during this processing window.
-        # This prevents the agent from repeatedly re-running onboarding
-        # instructions within the same loop after a welcome email is sent.
+    if is_first_run:
         try:
-            already_contacted = (
-                PersistentAgentMessage.objects.filter(
-                    owner_agent=agent,
-                    is_outbound=True,
-                    timestamp__gt=event_window.cut_off,
-                ).exists()
-            )
+            already_contacted = PersistentAgentMessage.objects.filter(
+                owner_agent=agent,
+                is_outbound=True,
+            ).exists()
         except Exception:
-            # Defensive default: if the check fails, assume we have not contacted yet
             already_contacted = False
 
         if not already_contacted:
-            # On true first contact, guide the agent to send a welcome message
             contact_endpoint = agent.preferred_contact_endpoint
             if contact_endpoint:
                 channel = contact_endpoint.channel
@@ -1891,7 +1872,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         PersistentAgentStep.objects.filter(
             agent=agent, created_at__gt=step_cutoff
         )
-        .select_related("tool_call")
+        .select_related("tool_call", "system_step")
         .order_by("-created_at")[:TOOL_CALL_HISTORY_LIMIT]
     )
     messages = list(
@@ -1922,6 +1903,9 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     # format steps (group meta/params/result components together)
     for s in steps:
         try:
+            system_step = getattr(s, "system_step", None)
+            if system_step is not None and system_step.code == PersistentAgentSystemStep.Code.PROCESS_EVENTS:
+                continue
             tc = s.tool_call
 
             # Exclude send_email and send_sms tool calls entirely from prompt history,
@@ -2110,54 +2094,7 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
 # --------------------------------------------------------------------------- #
 #  Event‑window
 # --------------------------------------------------------------------------- #
-def _prepare_event_window(persistent_agent_id: Union[str, UUID]) -> Tuple[EventWindow, PersistentAgentSystemStep]:
-    with transaction.atomic():
-        agent = PersistentAgent.objects.select_for_update().get(id=persistent_agent_id)
-
-        last_sys = (
-            PersistentAgentSystemStep.objects.filter(
-                step__agent=agent, code=PersistentAgentSystemStep.Code.PROCESS_EVENTS
-            )
-            .select_related("step")
-            .order_by("-step__created_at")
-            .first()
-        )
-
-        is_first_run = last_sys is None
-        cut_off = last_sys.step.created_at if last_sys else agent.created_at
-
-        step = PersistentAgentStep.objects.create(agent=agent, description="Process events")
-        sys_step = PersistentAgentSystemStep.objects.create(step=step, code=PersistentAgentSystemStep.Code.PROCESS_EVENTS)
-
-    upper = step.created_at
-    messages_qs = _fetch_messages(agent, cut_off, upper)
-    cron_qs = _fetch_cron_triggers(agent, cut_off, upper)
-
-    return EventWindow(cut_off, upper, is_first_run, messages_qs, cron_qs), sys_step
-
-
-def _fetch_messages(agent: PersistentAgent, start: datetime, end: datetime):
-    return (
-        PersistentAgentMessage.objects.filter(
-            owner_agent=agent,
-            is_outbound=False,  # Exclude outbound messages from event triggers
-            timestamp__gt=start,
-            timestamp__lte=end,
-        ).order_by("timestamp")
-    )
-
-
-def _fetch_cron_triggers(agent: PersistentAgent, start: datetime, end: datetime):
-    return (
-        PersistentAgentCronTrigger.objects.filter(
-            step__agent=agent, step__created_at__gt=start, step__created_at__lte=end
-        )
-        .select_related("step")
-        .order_by("step__created_at")
-    )
-
-
-__all__ = ["process_agent_events", "_prepare_event_window"]
+__all__ = ["process_agent_events"]
 
 def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
     """Add individual sections for each browser task to the provided promptree group."""

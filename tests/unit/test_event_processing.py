@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from unittest.mock import patch
 
-from api.agent.core.event_processing import _prepare_event_window, EventWindow, _build_prompt_context
+from api.agent.core.event_processing import _build_prompt_context
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
 from api.agent.tools.search_web import execute_search_web as _execute_search_web
 from api.agent.tools.http_request import execute_http_request as _execute_http_request
@@ -22,123 +22,6 @@ from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 
 User = get_user_model()
-
-
-@tag("batch_event_processing")
-class EventProcessingWindowTests(TestCase):
-    """Unit-tests for `_prepare_event_window` helper."""
-
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username="tester@example.com",
-            email="tester@example.com",
-            password="secret",
-        )
-        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="BA")
-        self.agent = PersistentAgent.objects.create(
-            user=self.user,
-            name="Persistent-1",
-            charter="do things",
-            browser_use_agent=self.browser_agent,
-            created_at=timezone.now(),  # explicit so we can reason about deltas
-        )
-        self.endpoint = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel="email",
-            address="tester@example.com",
-        )
-
-    # ------------------------------------------------------------------
-    #  Helper factories
-    # ------------------------------------------------------------------
-
-    def _make_message(self, ts):
-        # Generate a deterministic but unique 26-char ULID-like string
-        seq = f"TEST{int(ts.timestamp() * 1_000_000):022d}"[:26]
-
-        return PersistentAgentMessage.objects.create(
-            timestamp=ts,
-            seq=seq,
-            from_endpoint=self.endpoint,
-            to_endpoint=self.endpoint,
-            is_outbound=False,
-            owner_agent=self.agent,
-            body="test msg",
-        )
-
-    def _make_cron(self, ts):
-        step = PersistentAgentStep.objects.create(
-            agent=self.agent,
-            description="cron",
-            created_at=ts,
-        )
-        return PersistentAgentCronTrigger.objects.create(
-            step=step,
-            cron_expression="* * * * *",
-        )
-
-    # ------------------------------------------------------------------
-    #  Tests
-    # ------------------------------------------------------------------
-
-    def test_first_run_collects_since_agent_created(self):
-        """When no previous PROCESS_EVENTS marker exists, cut_off == agent.created_at."""
-        # msg occurs after agent created -> should be picked up
-        msg_ts = self.agent.created_at + timedelta(seconds=1)
-        self._make_message(msg_ts)
-
-        window, sys_step = _prepare_event_window(self.agent.id)
-
-        self.assertEqual(window.cut_off, self.agent.created_at)
-        self.assertTrue(all(ev.timestamp > window.cut_off for ev in window.messages))
-        self.assertEqual(len(window.messages), 1)
-        self.assertEqual(len(window.cron_triggers), 0)
-
-    def test_second_run_uses_previous_marker(self):
-        """Subsequent runs use last marker.step.created_at as cut_off."""
-        # First run – creates first marker
-        window1, sys1 = _prepare_event_window(self.agent.id)
-
-        # Now craft events *after* the first run
-        later = sys1.step.created_at + timedelta(seconds=1)
-        self._make_message(later)
-        self._make_cron(later + timedelta(seconds=1))
-
-        window2, _ = _prepare_event_window(self.agent.id)
-
-        # cut_off should equal first marker timestamp
-        self.assertEqual(window2.cut_off, sys1.step.created_at)
-        self.assertTrue(all(ev.timestamp > window2.cut_off for ev in window2.messages))
-        self.assertEqual(len(window2.messages), 1)
-        self.assertEqual(len(window2.cron_triggers), 1)
-
-    def test_lower_bound_exclusive_upper_inclusive(self):
-        """Messages/cron at cut_off are excluded; at upper are included."""
-        # First run
-        window1, sys1 = _prepare_event_window(self.agent.id)
-        cut_off = sys1.step.created_at
-
-        # Message at cut_off -> should be excluded
-        self._make_message(cut_off)
-
-        # Prepare a timestamp we will force to become the 'upper' bound of run2
-        upper_candidate = cut_off + timedelta(seconds=1)
-
-        # Cron trigger at upper_candidate should be included
-        self._make_cron(upper_candidate)
-
-        # Monkey-patch: create a step with created_at=upper_candidate via internal API
-        with self.settings(USE_TZ=True):
-            # ensure deterministic microseconds by slight delay not needed
-            pass  # placeholder
-
-        window2, sys2 = _prepare_event_window(self.agent.id)
-
-        # Verify exclusivity / inclusivity rules (lower bound exclusive, upper inclusive)
-        msg_timestamps = [m.timestamp for m in window2.messages]
-        cron_timestamps = [c.step.created_at for c in window2.cron_triggers]
-        self.assertNotIn(cut_off, msg_timestamps)
-        self.assertTrue(all(cut_off < ts <= window2.upper for ts in cron_timestamps))
 
 
 @tag("batch_event_processing")
@@ -180,18 +63,10 @@ class PromptContextBuilderTests(TestCase):
             body="Hello agent!",
             seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
         )
-        event_window = EventWindow(
-            cut_off=timezone.now() - timedelta(minutes=1),
-            upper=timezone.now(),
-            messages=[msg],
-            cron_triggers=[],
-            is_first_run=False,
-        )
-
         # Build the prompt context
         with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
              patch('api.agent.core.event_processing.ensure_comms_compacted'):
-            context, _ = _build_prompt_context(self.agent, event_window)
+            context, _ = _build_prompt_context(self.agent)
 
         # Find the user message in the context
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -217,17 +92,9 @@ class PromptContextBuilderTests(TestCase):
 
     def test_agent_name_in_system_prompt(self):
         """Test that the agent's name is included in the system prompt."""
-        event_window = EventWindow(
-            cut_off=timezone.now() - timedelta(minutes=1),
-            upper=timezone.now(),
-            messages=[],
-            cron_triggers=[],
-            is_first_run=False,
-        )
-
         with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
              patch('api.agent.core.event_processing.ensure_comms_compacted'):
-            context, _ = _build_prompt_context(self.agent, event_window)
+            context, _ = _build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
 
