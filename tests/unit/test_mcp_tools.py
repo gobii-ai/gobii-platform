@@ -236,6 +236,9 @@ class MCPToolManagerTests(TestCase):
         )
         # Enable via API to populate table
         from api.agent.tools.mcp_manager import enable_mcp_tool
+        # Ensure global manager doesn't auto-initialize during enable
+        from api.agent.tools import mcp_manager as mm
+        mm._mcp_manager._initialized = True
         with patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools') as mock_all:
             mock_all.return_value = [tool1]
             enable_mcp_tool(agent, "mcp_test_tool1")
@@ -480,32 +483,32 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_enable_mcp_tool_with_lru_eviction(self, mock_init, mock_get_tools):
         """Test LRU eviction when enabling beyond limit."""
-        # Create 21 tools (one more than the limit)
+        # Create 41 tools (one more than the new 40 limit)
         tools = [
             MCPToolInfo(f"mcp_test_tool{i}", "test", f"tool{i}", f"Test tool {i}", {})
-            for i in range(21)
+            for i in range(41)
         ]
         mock_get_tools.return_value = tools
         
-        # Enable 20 tools with different timestamps
-        for i in range(20):
+        # Enable 40 tools with different timestamps
+        for i in range(40):
             enable_mcp_tool(self.agent, f"mcp_test_tool{i}")
             row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name=f"mcp_test_tool{i}")
             from django.utils import timezone
-            row.last_used_at = timezone.now() - timezone.timedelta(seconds=(20 - i))
+            row.last_used_at = timezone.now() - timezone.timedelta(seconds=(40 - i))
             row.save(update_fields=["last_used_at"])
         
-        # Enable the 21st tool, should evict tool0 (oldest)
-        result = enable_mcp_tool(self.agent, "mcp_test_tool20")
+        # Enable the 41st tool, should evict tool0 (oldest)
+        result = enable_mcp_tool(self.agent, "mcp_test_tool40")
         
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["enabled"], "mcp_test_tool20")
+        self.assertEqual(result["enabled"], "mcp_test_tool40")
         self.assertEqual(result["disabled"], "mcp_test_tool0")
         
         names = set(PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list("tool_full_name", flat=True))
         self.assertNotIn("mcp_test_tool0", names)
-        self.assertIn("mcp_test_tool20", names)
-        self.assertEqual(len(names), 20)
+        self.assertIn("mcp_test_tool40", names)
+        self.assertEqual(len(names), 40)
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
@@ -638,21 +641,21 @@ class MCPToolIntegrationTests(TestCase):
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_lru_eviction_workflow(self, mock_init, mock_get_tools):
         """Test complete LRU eviction workflow."""
-        # Create exactly 20 tools
+        # Create exactly 40 tools
         tools = [
             MCPToolInfo(f"mcp_test_tool{i}", "test", f"tool{i}", f"Test tool {i}", {})
-            for i in range(21)
+            for i in range(41)
         ]
         mock_get_tools.return_value = tools
         
-        # Enable 20 tools
-        for i in range(20):
+        # Enable 40 tools
+        for i in range(40):
             result = enable_mcp_tool(self.agent, f"mcp_test_tool{i}")
             self.assertEqual(result["status"], "success")
             time.sleep(0.01)  # Small delay to ensure different timestamps
             
         self.assertEqual(
-            PersistentAgentEnabledTool.objects.filter(agent=self.agent).count(), 20
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent).count(), 40
         )
         
         # Use tool10 to make it more recent
@@ -661,8 +664,8 @@ class MCPToolIntegrationTests(TestCase):
         row10.last_used_at = timezone.now()
         row10.save(update_fields=["last_used_at"])
         
-        # Enable tool20, should evict tool0 (not tool10 since we just used it)
-        result = enable_mcp_tool(self.agent, "mcp_test_tool20")
+        # Enable tool40, should evict tool0 (not tool10 since we just used it)
+        result = enable_mcp_tool(self.agent, "mcp_test_tool40")
         
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["disabled"], "mcp_test_tool0")
@@ -672,7 +675,7 @@ class MCPToolIntegrationTests(TestCase):
         )
         self.assertIn("mcp_test_tool10", enabled_now)
         self.assertNotIn("mcp_test_tool0", enabled_now)
-        self.assertIn("mcp_test_tool20", enabled_now)
+        self.assertIn("mcp_test_tool40", enabled_now)
         
     @patch('api.agent.tools.mcp_manager.enable_mcp_tool')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
@@ -726,11 +729,11 @@ class MCPToolIntegrationTests(TestCase):
         # Populate the global cache used by enable_tools
         from api.agent.tools import mcp_manager as mm
         mm._mcp_manager._initialized = True
-        tools = [MCPToolInfo(f"mcp_t{i}", "test", f"t{i}", f"Tool {i}", {}) for i in range(25)]
+        tools = [MCPToolInfo(f"mcp_t{i}", "test", f"t{i}", f"Tool {i}", {}) for i in range(45)]
         mm._mcp_manager._tools_cache = {"test": tools}
 
-        # Pre-fill 18 tools so a batch of 5 causes 3 evictions
-        pre = [f"mcp_t{i}" for i in range(18)]
+        # Pre-fill 38 tools so a batch of 5 causes 3 evictions
+        pre = [f"mcp_t{i}" for i in range(38)]
         for i, name in enumerate(pre):
             enable_mcp_tool(agent, name)
             # Stagger usage to influence eviction
@@ -739,10 +742,10 @@ class MCPToolIntegrationTests(TestCase):
             row.last_used_at = timezone.now()
             row.save(update_fields=["last_used_at"])
 
-        result = enable_tools(agent, [f"mcp_t{i}" for i in range(18, 23)])  # 5 new
+        result = enable_tools(agent, [f"mcp_t{i}" for i in range(38, 43)])  # 5 new
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(len(result["enabled"]), 5)
         self.assertEqual(len(result["evicted"]), 3)
         agent.refresh_from_db()
-        self.assertEqual(PersistentAgentEnabledTool.objects.filter(agent=agent).count(), 20)
+        self.assertEqual(PersistentAgentEnabledTool.objects.filter(agent=agent).count(), 40)

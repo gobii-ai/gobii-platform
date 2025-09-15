@@ -7,7 +7,7 @@ for MCP servers, allowing agents to intelligently select tools from a large ecos
 Pipedream (remote MCP) integration goals:
 - Centralize headers + token handling
 - Discover action tools (sub-agent mode) so the full catalog is searchable
-- Enable only tools needed (20-cap enforced separately)
+ - Enable only tools needed (40-cap enforced separately)
 - Route execution automatically and surface Connect Links via action_required
 """
 
@@ -34,6 +34,9 @@ from ..core.llm_config import get_llm_config_with_failover
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+
+# Maximum number of MCP tools that can be enabled per agent
+MAX_MCP_TOOLS = 40
 
 
 @dataclass
@@ -892,13 +895,13 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
 
 
 def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any]:
-    """Enable multiple MCP tools for the agent with LRU eviction (cap=20).
+    """Enable multiple MCP tools for the agent with LRU eviction (cap=40).
 
     Blacklisted or non-existent tools are returned in `invalid` (no separate blacklist reporting).
     """
     import time
 
-    MAX_MCP_TOOLS = 20
+    # Use module-level MAX_MCP_TOOLS
 
     if not _mcp_manager._initialized:
         _mcp_manager.initialize()
@@ -942,7 +945,7 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
             logger.exception("Failed enabling tool %s", name)
             invalid.append(name)
 
-    # Enforce LRU cap of 20 after all insertions
+    # Enforce LRU cap after all insertions
     total = PersistentAgentEnabledTool.objects.filter(agent=agent).count()
     if total > MAX_MCP_TOOLS:
         overflow = total - MAX_MCP_TOOLS
@@ -957,7 +960,7 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
         evicted.extend(evicted_names)
         if evicted_names:
             logger.info(
-                "Evicted %d tool(s) for agent %s due to 20-tool cap: %s",
+                f"Evicted %d tool(s) for agent %s due to {MAX_MCP_TOOLS}-tool cap: %s",
                 len(evicted_names), agent.id, ", ".join(evicted_names)
             )
 
@@ -984,7 +987,7 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
 
 def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     """Enable an MCP tool for the agent with LRU eviction if over limit."""
-    MAX_MCP_TOOLS = 20
+    # Use module-level MAX_MCP_TOOLS
 
     if not _mcp_manager._initialized:
         _mcp_manager.initialize()
@@ -1057,7 +1060,7 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
         "disabled": disabled_tool,
     }
     if disabled_tool:
-        result["message"] += f" (disabled '{disabled_tool}' due to 20 tool limit)"
+        result["message"] += f" (disabled '{disabled_tool}' due to {MAX_MCP_TOOLS} tool limit)"
     return result
 
 
