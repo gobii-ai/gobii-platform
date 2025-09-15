@@ -1,7 +1,7 @@
 import json
 from unittest.mock import patch, MagicMock
 
-from django.test import TestCase, override_settings
+from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
 
 from api.models import PersistentAgent, BrowserUseAgent
@@ -31,6 +31,7 @@ def _mk_agent(user, *, life_state=PersistentAgent.LifeState.ACTIVE, is_active=Tr
     return ag
 
 
+@tag("pipedream_connect")
 @override_settings(
     PIPEDREAM_CLIENT_ID="cid",
     PIPEDREAM_CLIENT_SECRET="csec",
