@@ -1689,6 +1689,7 @@ class PersistentAgent(models.Model):
 
         # For updates, we need to check if schedule-related fields have changed.
         sync_needed = False
+        shutdown_reasons: list[str] = []
         if not is_new:
             try:
                 # Fetch the current state from the database before it's saved.
@@ -1696,6 +1697,26 @@ class PersistentAgent(models.Model):
                 if (old_instance.schedule != self.schedule or
                     old_instance.is_active != self.is_active):
                     sync_needed = True
+
+                # Detect shutdown‑adjacent transitions to trigger centralized cleanup
+                try:
+                    # is_active: True -> False (manual pause)
+                    if old_instance.is_active and not self.is_active:
+                        shutdown_reasons.append("PAUSE")
+                    # schedule: non‑empty -> empty/None (cron disabled)
+                    old_sched_truthy = bool(old_instance.schedule)
+                    new_sched_truthy = bool(self.schedule)
+                    if old_sched_truthy and not new_sched_truthy:
+                        shutdown_reasons.append("CRON_DISABLED")
+                    # life_state: ACTIVE -> EXPIRED (soft expire)
+                    if (
+                        getattr(old_instance, "life_state", None) == self.LifeState.ACTIVE
+                        and getattr(self, "life_state", None) == self.LifeState.EXPIRED
+                    ):
+                        shutdown_reasons.append("SOFT_EXPIRE")
+                except Exception:
+                    # Defensive: do not block save on detection errors
+                    logger.exception("Failed to compute shutdown reasons for agent %s", self.id)
             except PersistentAgent.DoesNotExist:
                 # If it doesn't exist in the DB yet, treat it as a new instance.
                 is_new = True
@@ -1708,10 +1729,40 @@ class PersistentAgent(models.Model):
         if is_new or sync_needed:
             transaction.on_commit(self._sync_celery_beat_task)
 
+        # If any shutdown reasons were detected, enqueue centralized cleanup
+        if shutdown_reasons:
+            def _enqueue_cleanup():
+                try:
+                    from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
+
+                    # Map raw strings to constants (same values) for readability
+                    reason_map = {
+                        "PAUSE": AgentShutdownReason.PAUSE,
+                        "CRON_DISABLED": AgentShutdownReason.CRON_DISABLED,
+                        "SOFT_EXPIRE": AgentShutdownReason.SOFT_EXPIRE,
+                    }
+                    for r in shutdown_reasons:
+                        AgentLifecycleService.shutdown(str(self.id), reason_map.get(r, r), meta={
+                            "source": "model.save",
+                        })
+                except Exception:
+                    logger.exception("Failed to enqueue agent cleanup for %s", self.id)
+
+            transaction.on_commit(_enqueue_cleanup)
+
     def delete(self, *args, **kwargs):
         # Schedule the removal of the Celery Beat task to happen only after
         # the database transaction that deletes this instance successfully commits.
         transaction.on_commit(self._remove_celery_beat_task)
+        # Also enqueue centralized cleanup as a HARD_DELETE reason
+        try:
+            from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
+
+            transaction.on_commit(lambda: AgentLifecycleService.shutdown(str(self.id), AgentShutdownReason.HARD_DELETE, meta={
+                "source": "model.delete",
+            }))
+        except Exception:
+            logger.exception("Failed to schedule agent HARD_DELETE cleanup for %s", self.id)
         return super().delete(*args, **kwargs)
 
 
