@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from api.models import PersistentAgent, BrowserUseAgent
 from api.services.agent_lifecycle import AgentCleanupRegistry
 from api.tasks.agent_lifecycle import agent_shutdown_cleanup_task
+from util.analytics import AnalyticsEvent
 
 
 def _create_browser_agent(user):
@@ -70,7 +71,8 @@ class AgentLifecycleRegistryTests(TestCase):
         AgentCleanupRegistry.register(blocked, reasons=["PAUSE"])       # not for delete
 
         # Act: run task for HARD_DELETE
-        agent_shutdown_cleanup_task(str(agent.id), "HARD_DELETE", {"foo": "bar"})
+        # Provide user_id in meta so code uses track_event (not anonymous)
+        agent_shutdown_cleanup_task(str(agent.id), "HARD_DELETE", {"foo": "bar", "user_id": user.id})
 
         # Assert only allowed handler ran
         self.assertEqual(len(calls), 1)
@@ -80,6 +82,6 @@ class AgentLifecycleRegistryTests(TestCase):
 
         # Analytics was emitted with shutdown event
         self.assertTrue(mock_track.called)
-        args, kwargs = mock_track.call_args
-        # args: user_id, event, properties, context
-        self.assertIn("Persistent Agent Shutdown", str(args[1]))
+        # Validate called with shutdown event (enum value string)
+        _, kwargs = mock_track.call_args
+        self.assertEqual(kwargs.get("event"), AnalyticsEvent.PERSISTENT_AGENT_SHUTDOWN)

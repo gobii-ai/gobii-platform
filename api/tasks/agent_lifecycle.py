@@ -52,17 +52,11 @@ def agent_shutdown_cleanup_task(agent_id: str, reason: str, meta: Optional[Dict]
             # Handlers should self‑contain their errors, but double‑guard here.
             logger.exception("Cleanup handler %s failed for agent=%s", getattr(h, "__name__", str(h)), agent_id)
 
-    # Analytics breadcrumb (best effort): include reason + meta
+    # Analytics breadcrumb (best effort): include reason + meta (no DB lookups)
     try:
         user_id = None
-        try:
-            # Try to attribute to the agent owner when the agent still exists
-            from api.models import PersistentAgent
-            agent = PersistentAgent.objects.filter(id=agent_id).only("user_id").first()
-            user_id = getattr(agent, "user_id", None)
-        except Exception:
-            pass
-
+        if meta and isinstance(meta, dict):
+            user_id = meta.get("user_id") or None
         props = {"agent_id": str(agent_id), "reason": str(reason)}
         if meta:
             # include a small, safe subset

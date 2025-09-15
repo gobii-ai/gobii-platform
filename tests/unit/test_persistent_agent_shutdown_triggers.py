@@ -40,17 +40,20 @@ class PersistentAgentShutdownTriggersTests(TestCase):
         def _mock_shutdown(agent_id, reason, meta=None):
             calls.append((str(agent_id), str(reason)))
 
-        with patch("api.services.agent_lifecycle.AgentLifecycleService.shutdown", side_effect=_mock_shutdown):
-            # 1) Pause: is_active True -> False
-            with transaction.atomic():
-                agent.is_active = False
-                agent.save(update_fields=["is_active"])
-            self.assertIn((str(agent.id), "PAUSE"), calls)
+        # Execute on_commit callbacks immediately so we can assert in‑test
+        with patch("django.db.transaction.on_commit", side_effect=lambda fn: fn()):
+            with patch("api.services.agent_lifecycle.AgentLifecycleService.shutdown", side_effect=_mock_shutdown):
+                # 1) Pause: is_active True -> False
+                with transaction.atomic():
+                    agent.is_active = False
+                    agent.save(update_fields=["is_active"])
+                self.assertIn((str(agent.id), "PAUSE"), calls)
 
-            # 2) Cron disabled: schedule set -> empty
+            # 2) Cron disabled: schedule set -> None
             calls.clear()
+            agent.refresh_from_db()
             with transaction.atomic():
-                agent.schedule = ""
+                agent.schedule = None
                 agent.save(update_fields=["schedule"])
             self.assertIn((str(agent.id), "CRON_DISABLED"), calls)
 
@@ -60,4 +63,3 @@ class PersistentAgentShutdownTriggersTests(TestCase):
                 agent.life_state = PersistentAgent.LifeState.EXPIRED
                 agent.save(update_fields=["life_state"])
             self.assertIn((str(agent.id), "SOFT_EXPIRE"), calls)
-
