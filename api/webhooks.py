@@ -539,6 +539,9 @@ def open_and_link_webhook(request):
                     locked_agent = PersistentAgent.objects.select_for_update().get(pk=agent.pk)
                     locked_agent.last_interaction_at = timezone.now()
                     locked_agent.save(update_fields=['last_interaction_at'])
+            else:
+                logger.warning("Email %s event attribution failed: no agent found. Searched for Message Id %s", record_type, provider_msg_id)
+
         except Exception as attr_err:
             logger.warning("Email %s event attribution failed: %s", record_type, attr_err)
 
