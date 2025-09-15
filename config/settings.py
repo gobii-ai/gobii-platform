@@ -643,6 +643,27 @@ PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default=_default_pipedream_
 # Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,greenhouse")
 PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,greenhouse")
 
+# Pipedream Connect GC (batch cleanup)
+PIPEDREAM_GC_ENABLED = env.bool(
+    "PIPEDREAM_GC_ENABLED",
+    default=bool(PIPEDREAM_CLIENT_ID and PIPEDREAM_CLIENT_SECRET and PIPEDREAM_PROJECT_ID),
+)
+PIPEDREAM_GC_DRY_RUN = env.bool(
+    "PIPEDREAM_GC_DRY_RUN",
+    default=(PIPEDREAM_ENVIRONMENT != "production"),
+)
+PIPEDREAM_GC_EXPIRED_RETENTION_DAYS = env.int("PIPEDREAM_GC_EXPIRED_RETENTION_DAYS", default=30)
+PIPEDREAM_GC_DEACTIVATED_RETENTION_DAYS = env.int("PIPEDREAM_GC_DEACTIVATED_RETENTION_DAYS", default=60)
+PIPEDREAM_GC_BATCH_SIZE = env.int("PIPEDREAM_GC_BATCH_SIZE", default=200)
+PIPEDREAM_GC_MAX_DELETES_PER_RUN = env.int("PIPEDREAM_GC_MAX_DELETES_PER_RUN", default=200)
+
+# Add GC beat schedule only when enabled
+if PIPEDREAM_GC_ENABLED:
+    CELERY_BEAT_SCHEDULE["pipedream-connect-gc-daily"] = {
+        "task": "api.tasks.pipedream_connect_gc.gc_orphaned_users",
+        "schedule": crontab(hour=4, minute=45),
+    }
+
 # File Handling
 
 # Maximum file size (in bytes) for downloads and inbound attachments
