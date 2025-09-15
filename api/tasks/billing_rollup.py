@@ -73,8 +73,15 @@ def rollup_and_meter_usage_task(self) -> int:
         if not sub:
             continue
 
-        start_dt, end_dt = _period_bounds_for_user(user)
-        period_start_date, period_end_date = BillingService.get_current_billing_period_for_user(user)
+        # Use Stripe subscription period when available; otherwise fall back to local anchor bounds
+        if getattr(sub, 'current_period_start', None) and getattr(sub, 'current_period_end', None):
+            start_dt = sub.current_period_start
+            end_dt = sub.current_period_end
+            period_start_date = start_dt.date()
+            period_end_date = end_dt.date()
+        else:
+            start_dt, end_dt = _period_bounds_for_user(user)
+            period_start_date, period_end_date = BillingService.get_current_billing_period_for_user(user)
 
         # Detect any existing pending batch for this user within this period
         pending_task_keys = (
@@ -201,8 +208,9 @@ def rollup_and_meter_usage_task(self) -> int:
                 processed_users += 1
             else:
                 # No billable units yet. If last day of period, finalize and mark; else release reservation.
-                today = timezone.now().date()
-                if today >= period_end_date:
+                # If we've reached or passed the end of Stripe period, finalize zero
+                now_ts = timezone.now()
+                if now_ts >= end_dt:
                     # Upsert batch record noting finalize-zero
                     idem_key = f"meter:{user.id}:{batch_key}"
                     MeteringBatch.objects.update_or_create(

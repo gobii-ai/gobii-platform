@@ -2104,6 +2104,43 @@ class UserBillingAdmin(admin.ModelAdmin):
     list_filter = ['subscription', 'user_id']
     search_fields = ['id', 'subscription', 'user__email', 'user__username']
     readonly_fields = ['id', 'user']
+    actions = [
+        'align_anchor_from_stripe',
+    ]
+
+    @admin.action(description="Align anchor day with Stripe period start")
+    def align_anchor_from_stripe(self, request, queryset):
+        """Admin action: for selected UserBilling rows, set billing_cycle_anchor
+        to the user's Stripe subscription current_period_start.day (when available).
+
+        Skips rows without an active Stripe subscription.
+        """
+        from util.subscription_helper import get_active_subscription
+
+        updated = 0
+        skipped = 0
+        errors = 0
+        for ub in queryset.select_related('user'):
+            try:
+                sub = get_active_subscription(ub.user)
+                if not sub or not getattr(sub, 'current_period_start', None):
+                    skipped += 1
+                    continue
+                new_day = sub.current_period_start.day
+                if ub.billing_cycle_anchor != new_day:
+                    ub.billing_cycle_anchor = new_day
+                    ub.save(update_fields=["billing_cycle_anchor"])
+                    updated += 1
+                else:
+                    skipped += 1
+            except Exception:
+                errors += 1
+
+        self.message_user(
+            request,
+            f"Anchor alignment complete: updated={updated}, skipped={skipped}, errors={errors}",
+            level=messages.INFO,
+        )
 
 
 @admin.action(description="Sync numbers from Twilio")

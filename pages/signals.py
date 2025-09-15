@@ -220,7 +220,7 @@ def handle_subscription_event(event, **kwargs):
 
         plan = get_plan_by_product_id(plan_id)
 
-        # Grant plan credits (idempotent via invoice_id when present) and mark user billing
+        # Grant plan credits (idempotent via invoice_id when present)
         invoice_id = source_data.get("latest_invoice")
         TaskCreditService.grant_subscription_credits(
             user,
@@ -234,8 +234,18 @@ def handle_subscription_event(event, **kwargs):
         except Exception:
             plan_value = PlanNamesChoices.FREE.value
 
-        # Update the user's billing plan and anchor day
-        mark_user_billing_with_plan(user, plan_value)
+        # Update the user's billing plan, preserving anchor until we set it from Stripe below
+        mark_user_billing_with_plan(user, plan_value, update_anchor=False)
+
+        # Align local anchor day with Stripe subscription period start for Pro
+        try:
+            from api.models import UserBilling
+            ub = UserBilling.objects.filter(user=user).first()
+            if ub and getattr(sub, 'current_period_start', None):
+                ub.billing_cycle_anchor = sub.current_period_start.day
+                ub.save(update_fields=["billing_cycle_anchor"])
+        except Exception as e:
+            logger.exception("Failed to align billing anchor with Stripe period for user %s: %s", user.id, e)
 
         # Analytics/identify for visibility
         Analytics.identify(user.id, {
