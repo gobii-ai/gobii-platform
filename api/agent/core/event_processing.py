@@ -1020,16 +1020,35 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     try:
                         raw_args = getattr(call.function, "arguments", "") or ""
                         tool_params = json.loads(raw_args)
-                    except Exception as arg_exc:
+                    except Exception:
+                        # Simple recovery: record a correction instruction and retry next iteration.
                         preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
-                        logger.exception(
-                            "Agent %s: failed to parse arguments for tool %s (preview=%s%s)",
+                        logger.warning(
+                            "Agent %s: invalid JSON for tool %s; prompting model to resend valid arguments (preview=%s%s)",
                             agent.id,
                             tool_name,
                             preview,
                             "…" if raw_args and len(raw_args) > len(preview) else "",
                         )
-                        raise
+                        try:
+                            step_text = (
+                                f"Tool call error: arguments for {tool_name} were not valid JSON. "
+                                "Re-send the SAME tool call immediately with valid JSON only. "
+                                "For HTML content, use single quotes for all attributes to avoid JSON conflicts."
+                            )
+                            step = PersistentAgentStep.objects.create(
+                                agent=agent,
+                                description=step_text,
+                            )
+                            logger.info(
+                                "Agent %s: added correction step_id=%s to request a retried tool call",
+                                agent.id,
+                                getattr(step, 'id', None),
+                            )
+                        except Exception:
+                            logger.debug("Failed to persist correction step", exc_info=True)
+                        # Abort remaining tool calls this iteration; retry next loop
+                        break
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 

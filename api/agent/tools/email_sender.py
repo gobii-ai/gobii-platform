@@ -28,7 +28,10 @@ def get_send_email_tool() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "send_email",
-            "description": "Sends an email to a recipient. Write the body as lightweight, mobile-first HTML (using simple <p>, <br>, <ul>, <ol>, <li>, etc.) that feels like it was typed in a normal email client, not a marketing blast. DO NOT include <html>, <head>, or <body> tags—the system will wrap your content. Avoid markdown formatting and heavy styling. Quote recent parts of the conversation when relevant.",
+            "description": (
+                "Sends an email to a recipient. Write the body as lightweight, mobile-first HTML (using simple <p>, <br>, <ul>, <ol>, <li>, etc.) that feels like it was typed in a normal email client, not a marketing blast. DO NOT include <html>, <head>, or <body> tags—the system will wrap your content. Avoid markdown formatting and heavy styling. Quote recent parts of the conversation when relevant. "
+                "IMPORTANT: Use single quotes for ALL HTML attributes (e.g., <a href='https://example.com'>link</a>) to keep the JSON arguments valid. Do NOT use double quotes in HTML attributes."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -42,7 +45,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "description": "List of CC email addresses (optional)"
                     },
                     "subject": {"type": "string", "description": "Email subject."},
-                    "mobile_first_html": {"type": "string", "description": "Email content as lightweight HTML, excluding <html>, <head>, and <body> tags. Links should use html links, e.g. <a href=\"https://news.ycombinator.com\">News</a>"},
+                    "mobile_first_html": {"type": "string", "description": "Email content as lightweight HTML, excluding <html>, <head>, and <body> tags. Use single quotes for attributes, e.g. <a href='https://news.ycombinator.com'>News</a>"},
                 },
                 "required": ["to_address", "subject", "mobile_first_html"],
             },
