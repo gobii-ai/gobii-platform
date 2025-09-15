@@ -1,6 +1,7 @@
 """
-Tests that a single LLM completion with multiple tool calls including a final
-sleep results in all tools executing in one iteration and then sleeping.
+Tests that when an LLM completion returns multiple tool calls including
+sleep_until_next_trigger, the sleep call is ignored if other tools are present
+so results can be processed in the next iteration.
 """
 from unittest.mock import patch, MagicMock
 
@@ -37,7 +38,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "queued"})
     @patch('api.agent.core.event_processing._build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_batch_of_tools_then_sleep_in_one_turn(self, mock_completion, mock_build_prompt, *_mocks):
+    def test_batch_of_tools_ignores_sleep_when_others_present(self, mock_completion, mock_build_prompt, *_mocks):
         # Minimal prompt context and token usage
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
 
@@ -70,16 +71,15 @@ class TestBatchToolCallsWithSleep(TestCase):
             ew = MagicMock(); ew.messages = []; ew.cron_triggers = []
             result_usage = ep._run_agent_loop(self.agent, ew)
 
-        # Validate DB records: 3 tool calls persisted + 1 sleep step (no tool_call relation)
+        # Validate DB records: 3 tool calls persisted and NO sleep step recorded
         calls = list(PersistentAgentToolCall.objects.all().order_by('step__created_at'))
         self.assertEqual(len(calls), 3)
         self.assertEqual([c.tool_name for c in calls], ['send_email', 'update_charter', 'sqlite_batch'])
 
-        # Ensure a distinct step exists for the sleep action
+        # Ensure no sleep step exists because sleep was ignored in mixed batch
         sleep_steps = PersistentAgentStep.objects.filter(description__icontains='sleep until next trigger')
-        self.assertTrue(sleep_steps.exists(), "Expected a sleep step recorded")
+        self.assertFalse(sleep_steps.exists(), "Sleep step should be ignored when other tools are present")
 
         # Assert token usage aggregated
         self.assertIn('total_tokens', result_usage)
         self.assertGreaterEqual(result_usage['total_tokens'], 15)
-

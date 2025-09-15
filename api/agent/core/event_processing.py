@@ -958,8 +958,20 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                 logger.debug("Tool call summary logging failed", exc_info=True)
 
             all_calls_sleep = True
-            sleep_requested = False  # sleep tool was included anywhere in this batch
+            sleep_requested = False  # set only when all calls are sleep
             executed_calls = 0
+            try:
+                has_non_sleep_calls = any(
+                    (
+                        getattr(getattr(c, "function", None), "name", None)
+                        or (c.get("function", {}).get("name") if isinstance(c, dict) else None)
+                    )
+                    != "sleep_until_next_trigger"
+                    for c in (tool_calls or [])
+                )
+            except Exception:
+                has_non_sleep_calls = True  # be safe: treat as having actionable tools
+
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
                     tool_span.set_attribute("persistent_agent.id", str(agent.id))
@@ -967,13 +979,19 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     tool_span.set_attribute("tool.name", tool_name)
                     logger.info("Agent %s executing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
-                    # Ensure credit is available and consume just-in-time
-                    credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
-                    if not credits_consumed:
-                        # Credit insufficient or consumption failed; halt processing
-                        return cumulative_token_usage
-
                     if tool_name == "sleep_until_next_trigger":
+                        # Ignore sleep tool if there are other actionable tools in this batch
+                        if has_non_sleep_calls:
+                            logger.info(
+                                "Agent %s: ignoring sleep_until_next_trigger because other tools are present in this batch.",
+                                agent.id,
+                            )
+                            # Do not consume credits or record a step for ignored sleep
+                            continue
+                        # All tool calls are sleep; consume credits once per call and record step
+                        credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
+                        if not credits_consumed:
+                            return cumulative_token_usage
                         # Create sleep step with token usage if available
                         step_kwargs = {
                             "agent": agent,
@@ -994,6 +1012,11 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                         continue
 
                     all_calls_sleep = False
+                    # Ensure credit is available and consume just-in-time for actionable tools
+                    credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
+                    if not credits_consumed:
+                        # Credit insufficient or consumption failed; halt processing
+                        return cumulative_token_usage
                     try:
                         raw_args = getattr(call.function, "arguments", "") or ""
                         tool_params = json.loads(raw_args)
@@ -1157,36 +1180,6 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                         )
                     except Exception:
                         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
-                return cumulative_token_usage
-            # If batch included any sleep tool call (even if not all), sleep after executing others
-            if sleep_requested:
-                logger.info("Agent %s: batch included sleep_until_next_trigger; sleeping after executing other tools.", agent.id)
-                if budget_ctx is not None:
-                    try:
-                        current_depth = (
-                            AgentBudgetManager.get_branch_depth(
-                                agent_id=budget_ctx.agent_id,
-                                branch_id=budget_ctx.branch_id,
-                            )
-                            or 0
-                        )
-                    except Exception:
-                        current_depth = getattr(budget_ctx, "depth", 0) or 0
-
-                    if current_depth > 0:
-                        logger.info(
-                            "Agent %s sleeping (batch) with %s outstanding child tasks; leaving cycle active.",
-                            agent.id,
-                            current_depth,
-                        )
-                        return cumulative_token_usage
-
-                    try:
-                        AgentBudgetManager.close_cycle(
-                            agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id
-                        )
-                    except Exception:
-                        logger.debug("Failed to close budget cycle on sleep (batch)", exc_info=True)
                 return cumulative_token_usage
             else:
                 logger.info(
