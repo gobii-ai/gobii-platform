@@ -1704,9 +1704,16 @@ class PersistentAgent(models.Model):
                     if old_instance.is_active and not self.is_active:
                         shutdown_reasons.append("PAUSE")
                     # schedule: non‑empty -> empty/None (cron disabled)
-                    old_sched_truthy = bool(old_instance.schedule)
-                    new_sched_truthy = bool(self.schedule)
-                    if old_sched_truthy and not new_sched_truthy:
+                    def _truthy_sched(val: str | None) -> bool:
+                        try:
+                            return bool((val or "").strip())
+                        except Exception:
+                            return bool(val)
+                    old_sched_truthy = _truthy_sched(getattr(old_instance, "schedule", None))
+                    new_sched_truthy = _truthy_sched(getattr(self, "schedule", None))
+                    # Trigger when schedule transitions to disabled; be lenient to ensure cleanup fires
+                    if not new_sched_truthy:
+                        # Only append once
                         shutdown_reasons.append("CRON_DISABLED")
                     # life_state: ACTIVE -> EXPIRED (soft expire)
                     if (
