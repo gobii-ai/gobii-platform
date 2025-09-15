@@ -11,8 +11,7 @@ from opentelemetry import trace
 
 from ...models import PersistentAgent
 from .mcp_manager import (
-    search_mcp_tools,
-    enable_mcp_tool,
+    search_tools,  # renamed from search_mcp_tools
     get_mcp_manager,
 )
 
@@ -26,7 +25,11 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "search_tools",
-            "description": "Search for available MCP tools that could help with a specific task or query. Returns relevant tool names with descriptions.",
+            "description": (
+                "Search for available MCP tools relevant to a query. "
+                "This call will automatically enable ALL relevant tools in one step (no separate enable calls). "
+                "Returns a short summary and which tools were enabled."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -36,27 +39,6 @@ def get_search_tools_tool() -> Dict[str, Any]:
                     }
                 },
                 "required": ["query"],
-            },
-        },
-    }
-
-
-def get_enable_tool_tool() -> Dict[str, Any]:
-    """Return the enable_tool tool definition for the LLM."""
-    return {
-        "type": "function",
-        "function": {
-            "name": "enable_tool",
-            "description": "Enable a specific MCP tool for use. Maximum of 20 MCP tools can be enabled at once. If the limit is reached, the least recently used tool will be automatically disabled. The tool must exist and be discovered through search_tools first.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "tool_name": {
-                        "type": "string",
-                        "description": "The full name of the tool to enable (e.g., 'mcp_brightdata_search_engine')",
-                    }
-                },
-                "required": ["tool_name"],
             },
         },
     }
@@ -77,54 +59,7 @@ def execute_search_tools(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     span.set_attribute("search.query", query)
     logger.info(f"Agent {agent.id} searching for tools: {query}")
     
-    result = search_mcp_tools(agent, query)
-    
-    # Format the result for the agent
-    if result["status"] == "success":
-        tools = result.get("tools", [])
-        if tools:
-            formatted_tools = "\n".join([
-                f"- {tool['name']}: {tool.get('relevance', 'Relevant to your query')}"
-                for tool in tools
-            ])
-            return {
-                "status": "success",
-                "message": f"Found {len(tools)} relevant tool(s):\n{formatted_tools}"
-            }
-        else:
-            return {
-                "status": "success",
-                "message": "No relevant tools found for your query."
-            }
-    else:
-        return result
-
-
-@tracer.start_as_current_span("AGENT TOOL Enable Tool")
-def execute_enable_tool(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Execute the enable_tool function to enable an MCP tool for the agent.
-    Implements LRU eviction if the 20 tool limit is exceeded.
-    """
-    span = trace.get_current_span()
-    span.set_attribute("persistent_agent.id", str(agent.id))
-    
-    tool_name = params.get("tool_name")
-    if not tool_name:
-        return {"status": "error", "message": "Missing required parameter: tool_name"}
-    
-    span.set_attribute("tool.name", tool_name)
-    logger.info(f"Agent {agent.id} enabling tool: {tool_name}")
-    
-    result = enable_mcp_tool(agent, tool_name)
-    
-    # Format message to include any disabled tool info
-    if result["status"] == "success":
-        message = f"Enabled tool '{result['enabled']}'"
-        if result.get("disabled"):
-            message += f". Disabled '{result['disabled']}' (least recently used) to stay within 20 tool limit"
-        result["message"] = message
-    
+    result = search_tools(agent, query)
     return result
 
 

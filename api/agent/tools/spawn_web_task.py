@@ -25,7 +25,14 @@ def get_spawn_web_task_tool() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "spawn_web_task",
-            "description": "Spawn a new web automation task that runs asynchronously. Returns immediately with task_id. Be very detailed and specific in your instructions. Give instructions an AI web browsing agent could realistically complete. If you need URLs, you will need to ask for them. If you mention secrets, mention them using their direct name, e.g. google_username, not <<<google_username>>>. File uploads and downloads are NOT currently supported!!! You will be automatically notified when the task completes and can see results in your context. Maximum 5 active tasks at once.",
+            "description": (
+                "Spawn a new web automation task that runs asynchronously. Returns immediately with task_id. Be very detailed and specific in your instructions. "
+                "Give instructions an AI web browsing agent could realistically complete. If you need URLs, you will need to ask for them. "
+                "If you mention secrets, mention them using their direct name, e.g. google_username, not <<<google_username>>>. "
+                "Use stored secrets for classic username/password logins only. Do NOT request or attempt to use OAuth credentials (Google, Slack, etc.); "
+                "those are handled via MCP tools using connect/auth links. File uploads and downloads are NOT currently supported!!! "
+                "You will be automatically notified when the task completes and can see results in your context. Maximum 5 active tasks at once."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -60,8 +60,8 @@ from ..tools.http_request import execute_http_request, get_http_request_tool
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
 from ..tools.request_contact_permission import execute_request_contact_permission, get_request_contact_permission_tool
 from ..tools.mcp_tools import (
-    get_search_tools_tool, get_enable_tool_tool,
-    execute_search_tools, execute_enable_tool, execute_mcp_tool
+    get_search_tools_tool,
+    execute_search_tools, execute_mcp_tool
 )
 from ..tools.mcp_manager import get_mcp_manager
 from ...models import (
@@ -91,6 +91,8 @@ tracer = trace.get_tracer("gobii.utils")
 MAX_AGENT_LOOP_ITERATIONS = 100
 MESSAGE_HISTORY_LIMIT = 15
 TOOL_CALL_HISTORY_LIMIT = 10
+ARG_LOG_MAX_CHARS = 500
+RESULT_LOG_MAX_CHARS = 500
 
 # Token budget for prompts using promptree
 PROMPT_TOKEN_BUDGET = 96000
@@ -232,11 +234,15 @@ def _completion_with_failover(
                 
                 # Respect endpoint tool-choice capability if provided via params hint
                 tool_choice_supported = params.pop("supports_tool_choice", True)
+                # Endpoint preference for parallel tool calling (caller hint)
+                use_parallel_tool_calls = params.pop("use_parallel_tool_calls", True)
                 if not tool_choice_supported:
                     response = litellm.completion(
                         model=model,
                         messages=messages,
                         tools=tools,
+                        parallel_tool_calls=bool(use_parallel_tool_calls),
+                        drop_params=True,
                         **params,
                     )
                 else:
@@ -245,6 +251,8 @@ def _completion_with_failover(
                         messages=messages,
                         tools=tools,
                         tool_choice="auto",
+                        parallel_tool_calls=bool(use_parallel_tool_calls),
+                        drop_params=True,
                         **params,
                     )
                 
@@ -880,6 +888,14 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     # Keep the last model and provider
                     cumulative_token_usage["model"] = token_usage.get("model")
                     cumulative_token_usage["provider"] = token_usage.get("provider")
+                    logger.info(
+                        "LLM usage: model=%s provider=%s pt=%s ct=%s tt=%s",
+                        token_usage.get("model"),
+                        token_usage.get("provider"),
+                        token_usage.get("prompt_tokens"),
+                        token_usage.get("completion_tokens"),
+                        token_usage.get("total_tokens"),
+                    )
                     
             except Exception as e:
                 current_span = trace.get_current_span()
@@ -889,7 +905,8 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
 
             msg = response.choices[0].message
 
-            if not getattr(msg, "tool_calls", None):
+            tool_calls = getattr(msg, "tool_calls", None)
+            if not tool_calls:
                 if msg.content:
                     logger.info("Agent %s reasoning: %s", agent.id, msg.content)
                     # Create a reasoning step with token usage
@@ -909,21 +926,72 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     PersistentAgentStep.objects.create(**step_kwargs)
                 continue
 
+            # Log high-level summary of tool calls
+            try:
+                logger.info(
+                    "Agent %s: model returned %d tool_call(s)",
+                    agent.id,
+                    len(tool_calls) if isinstance(tool_calls, list) else 0,
+                )
+                for idx, call in enumerate(list(tool_calls) or [], start=1):
+                    try:
+                        fn_name = getattr(getattr(call, "function", None), "name", None) or (
+                            call.get("function", {}).get("name") if isinstance(call, dict) else None
+                        )
+                        raw_args = getattr(getattr(call, "function", None), "arguments", None) or (
+                            call.get("function", {}).get("arguments") if isinstance(call, dict) else ""
+                        )
+                        call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
+                        arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
+                        logger.info(
+                            "Agent %s: tool_call %d: id=%s name=%s args=%s%s",
+                            agent.id,
+                            idx,
+                            call_id or "<none>",
+                            fn_name or "<unknown>",
+                            arg_preview,
+                            "…" if raw_args and len(raw_args) > len(arg_preview) else "",
+                        )
+                    except Exception:
+                        logger.info("Agent %s: failed to log one tool_call entry", agent.id)
+            except Exception:
+                logger.debug("Tool call summary logging failed", exc_info=True)
+
             all_calls_sleep = True
-            for call in msg.tool_calls:
+            sleep_requested = False  # set only when all calls are sleep
+            executed_calls = 0
+            try:
+                has_non_sleep_calls = any(
+                    (
+                        getattr(getattr(c, "function", None), "name", None)
+                        or (c.get("function", {}).get("name") if isinstance(c, dict) else None)
+                    )
+                    != "sleep_until_next_trigger"
+                    for c in (tool_calls or [])
+                )
+            except Exception:
+                has_non_sleep_calls = True  # be safe: treat as having actionable tools
+
+            for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
                     tool_span.set_attribute("persistent_agent.id", str(agent.id))
                     tool_name = call.function.name
                     tool_span.set_attribute("tool.name", tool_name)
-                    logger.info("Agent %s calling tool: %s", agent.id, tool_name)
-
-                    # Ensure credit is available and consume just-in-time
-                    credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
-                    if not credits_consumed:
-                        # Credit insufficient or consumption failed; halt processing
-                        return cumulative_token_usage
+                    logger.info("Agent %s executing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
                     if tool_name == "sleep_until_next_trigger":
+                        # Ignore sleep tool if there are other actionable tools in this batch
+                        if has_non_sleep_calls:
+                            logger.info(
+                                "Agent %s: ignoring sleep_until_next_trigger because other tools are present in this batch.",
+                                agent.id,
+                            )
+                            # Do not consume credits or record a step for ignored sleep
+                            continue
+                        # All tool calls are sleep; consume credits once per call and record step
+                        credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
+                        if not credits_consumed:
+                            return cumulative_token_usage
                         # Create sleep step with token usage if available
                         step_kwargs = {
                             "agent": agent,
@@ -939,15 +1007,36 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                                 "llm_provider": token_usage.get("provider"),
                             })
                         PersistentAgentStep.objects.create(**step_kwargs)
+                        sleep_requested = True
+                        logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
                         continue
 
                     all_calls_sleep = False
-                    tool_params = json.loads(call.function.arguments)
+                    # Ensure credit is available and consume just-in-time for actionable tools
+                    credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
+                    if not credits_consumed:
+                        # Credit insufficient or consumption failed; halt processing
+                        return cumulative_token_usage
+                    try:
+                        raw_args = getattr(call.function, "arguments", "") or ""
+                        tool_params = json.loads(raw_args)
+                    except Exception as arg_exc:
+                        preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
+                        logger.exception(
+                            "Agent %s: failed to parse arguments for tool %s (preview=%s%s)",
+                            agent.id,
+                            tool_name,
+                            preview,
+                            "…" if raw_args and len(raw_args) > len(preview) else "",
+                        )
+                        raise
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
+                    logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
                     # Ensure a fresh DB connection before tool execution and subsequent ORM writes
                     close_old_connections()
 
+                    logger.info("Agent %s: executing %s now", agent.id, tool_name)
                     if tool_name == "spawn_web_task":
                         # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
                         result = execute_spawn_web_task(agent, tool_params)
@@ -973,12 +1062,19 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                         result = execute_request_contact_permission(agent, tool_params)
                     elif tool_name == "search_tools":
                         result = execute_search_tools(agent, tool_params)
-                    elif tool_name == "enable_tool":
-                        result = execute_enable_tool(agent, tool_params)
-                        # After enabling/disabling a tool (via LRU), refresh the tools list for next iteration
+                        # After search_tools auto-enables relevant tools, refresh tool definitions
+                        before_count = len(tools)
                         tools = _get_agent_tools(agent)
-                    elif tool_name.startswith("mcp_"):
-                        # Handle dynamic MCP tool execution
+                        after_count = len(tools)
+                        logger.info(
+                            "Agent %s: refreshed tools after search_tools (before=%d after=%d)",
+                            agent.id,
+                            before_count,
+                            after_count,
+                        )
+                    # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
+                    elif get_mcp_manager().has_tool(tool_name):
+                        # Handle dynamic MCP tool execution (supports prefixed and unprefixed MCP tool names)
                         result = execute_mcp_tool(agent, tool_name, tool_params)
                     else:
                         result = {
@@ -987,6 +1083,20 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                         }
 
                     result_content = json.dumps(result)
+                    # Log result summary
+                    try:
+                        status = result.get("status") if isinstance(result, dict) else None
+                    except Exception:
+                        status = None
+                    result_preview = result_content[:RESULT_LOG_MAX_CHARS]
+                    logger.info(
+                        "Agent %s: %s completed status=%s result=%s%s",
+                        agent.id,
+                        tool_name,
+                        status or "",
+                        result_preview,
+                        "…" if len(result_content) > len(result_preview) else "",
+                    )
 
                     # Guard ORM writes against stale connections; retry once on OperationalError
                     close_old_connections()
@@ -1014,6 +1124,7 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                             tool_params=tool_params,
                             result=result_content,
                         )
+                        logger.info("Agent %s: persisted tool call step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
                     except OperationalError:
                         close_old_connections()
                         # Create step with token usage if available (retry)
@@ -1037,6 +1148,8 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                             tool_params=tool_params,
                             result=result_content,
                         )
+                        logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
+                    executed_calls += 1
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)
@@ -1068,6 +1181,13 @@ def _run_agent_loop(agent: PersistentAgent, event_window: EventWindow) -> dict:
                     except Exception:
                         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
                 return cumulative_token_usage
+            else:
+                logger.info(
+                    "Agent %s: executed %d/%d tool_call(s) this iteration",
+                    agent.id,
+                    executed_calls,
+                    len(tool_calls),
+                )
 
     else:
         logger.warning("Agent %s reached max iterations.", agent.id)
@@ -1210,7 +1330,13 @@ def _build_prompt_context(agent: PersistentAgent, event_window: EventWindow, cur
     )
     important_group.section_text(
         "secrets_note",
-        "IF YOU NEED CREDENTIALS/API KEYS/ETC FOR THIS TASK AND DO NOT ALREADY HAVE THEM, USE THE 'secure_credentials_request' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE CREDENTIALS.",
+        (
+            "ONLY request secure credentials when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
+            "or `spawn_web_task` (classic username/password website login). DO NOT request credentials for MCP tools "
+            "(e.g., Google Sheets, Slack). For MCP tools: call the tool first; if it returns 'action_required' with a "
+            "connect/auth link, surface that link to the user and wait. NEVER ask for user passwords or 2FA codes for "
+            "OAuth‑based services."
+        ),
         weight=1,
         non_shrinkable=True
     )
@@ -1510,6 +1636,9 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "If you send messages, e.g. via SMS or email, format them like something typed in a normal client—natural, concise, human. For emails, write your body as lightweight HTML using simple <p>, <br>, <ul>, <ol>, <li>, and basic inline elements (bold, italics) and avoid markdown or heavy branding. Use <a> for links, but only if you have complete and accurate URLs available in your context from actual sources. DO NOT include the outer <html>, <head>, or <body> wrappers—the system will handle that. "
         "You may use emojis, but only if appropriate. Use bulleted lists when it makes sense. "
         "Be efficient, but complete with your communications. "
+        "Clarifying questions policy: Prefer to decide-and-proceed with reasonable defaults. Ask a question ONLY if a choice is (a) irreversible/expensive to change, (b) likely to be wrong without the answer, or (c) truly blocks execution. Avoid multi‑question checklists. If you must ask, ask ONE concise question and propose a sensible default in the same sentence. "
+        "Examples: If asked to 'create a Google Sheet and add a hello world row', infer a sensible sheet name from the request, create it in My Drive under the connected account, and put the text in A1 with no header. Do not ask for sheet name, folder, account, or header unless essential. For other routine tasks, follow similar minimal‑question behavior. "
+        "Whenever safe and reversible, take the action and then inform the user what you did and how to adjust it, instead of blocking on preferences. "
         "Occasionally ask the user for feedback about how you're doing, if you could do better, etc, especially if you are unsure about your task or are new to it. "
         "Be very authentic. "
         "Be likeable, express genuine interest in the user's needs and goals. "
@@ -1543,7 +1672,8 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "DO NOT USE spawn_web_task FOR FUNCTIONAL THINGS LIKE CONVERTING BETWEEN FORMATS (JSON TO SQL, etc). "
 
         "IF YOU CAN DO SOMETHING CHEAPER WITH A FREE, UNAUTHENTICATED API, TRY USING THE API. "
-        "IF THE USER REQUESTS FOR YOU TO USE AN AUTHENTICATED API, USE THE 'secure_credentials_request' TOOL. THEN USE THE API. "
+        "IF YOU NEED TO CALL AN AUTHENTICATED HTTP API USING 'http_request' AND A REQUIRED KEY/TOKEN IS MISSING, USE THE 'secure_credentials_request' TOOL FIRST, THEN CALL THE API. DO NOT USE 'secure_credentials_request' FOR MCP TOOLS. "
+        "IF A TOOL IS AVAILABLE, CALL IT FIRST TO SEE IF IT WORKS WITHOUT EXTRA AUTH. MANY MCP TOOLS EITHER WORK OUT‑OF‑THE‑BOX OR WILL RETURN AN 'action_required' RESPONSE WITH A CONNECT/AUTH LINK. IF YOU RECEIVE AN AUTH REQUIREMENT FROM AN MCP TOOL, IMMEDIATELY SURFACE THE PROVIDED LINK TO THE USER AND WAIT — DO NOT CREATE A SECURE CREDENTIALS REQUEST. ONLY USE 'secure_credentials_request' WHEN YOU WILL IMMEDIATELY USE THE CREDENTIALS WITH 'http_request' OR 'spawn_web_task'. "
         
         "Use the http_request tool for any HTTP request, including GET, POST, PUT, DELETE, etc. "
         "The http_request tool always uses a proxy server for security. If no proxy is available, the tool will fail with an error. "
@@ -1552,7 +1682,7 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "Make note of secrets available --if an API key is available, that's a strong signal to use it for the relevant API call. "
         "If unsure about whether to use an API or the browser, user an api if it is well-known and does not need auth, or use a browser if that makes the job simpler. "
 
-        "IF YOU NEED CREDENTIALS/API KEYS/ETC FOR THIS TASK AND DO NOT ALREADY HAVE THEM, USE THE 'secure_credentials_request' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE CREDENTIALS. "
+        "ONLY REQUEST SECURE CREDENTIALS WHEN YOU WILL IMMEDIATELY USE THEM WITH 'http_request' (API keys/tokens) OR 'spawn_web_task' (classic username/password website login). DO NOT REQUEST CREDENTIALS FOR MCP TOOLS (e.g., Google Sheets, Slack). FOR MCP TOOLS: CALL THE TOOL; IF IT RETURNS 'action_required' WITH A CONNECT/AUTH LINK, SURFACE THAT LINK TO THE USER AND WAIT. NEVER ASK FOR USER PASSWORDS OR 2FA CODES FOR OAUTH‑BASED SERVICES. IT WILL RETURN A URL; YOU MUST CONTACT THE USER WITH THAT URL SO THEY CAN FILL OUT THE CREDENTIALS. "
         "You typically will want the domain to be broad enough to support all required auth domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. BE VERY THOUGHTFUL ABOUT THIS. "
 
         "You may run any query, including creating or changing tables and db structure using the sqlite_query tool. "
@@ -1564,13 +1694,16 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
         "Use mode=atomic when operations depend on each other (all-or-nothing); use mode=per_statement to continue past individual errors when operations are independent. "
         "Be very mindful to keep the db efficient and the total size no greater than 50MB of data. "
 
-        "You can use search_tools and enable_tool to search for additional tools that may be available to help you do your work. "
-        "In particular, if you need to access any specific services like Instagram, LinkedIn, Reddit, Zillow, Amazon, etc... you should call search_tools and see if there is a specific tool to help you with that service. "
+        "Use search_tools to search for additional tools; it will automatically enable all relevant tools in one step. "
+        "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
-        "Call just one tool at a time. Remember, you are in an infinite loop until you call sleep_until_next_trigger, so you have plenty of opporunity to make multiple tool calls."
+        "When multiple actions are independent, RETURN THEM AS MULTIPLE TOOL CALLS IN A SINGLE REPLY. Prefer batching related actions together to reduce latency. "
+        "If there is nothing else to do after your actions, include a final sleep_until_next_trigger tool call in the SAME reply. "
+        "Example: send_email(...), update_charter(...), sqlite_batch(...), sleep_until_next_trigger(). "
+        "If a later action depends on the output of an earlier tool call (true dependency), it is acceptable to wait for the next iteration before proceeding."
         "Sometimes your schedule will need to run more frequently than you need to contact the user. That is OK. You can, for example, set yourself to run every 1 hour, but only call send_email when you actually need to contact the user. This is your expected behavior. "
         
-        "When you are finished work for this cycle, or if there is no needed work, use sleep_until_next_trigger."
+        "When you are finished work for this cycle, or if there is no needed work, use sleep_until_next_trigger (ideally in the same reply after your other tool calls)."
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
@@ -1625,7 +1758,7 @@ def _get_system_instruction(agent: PersistentAgent, event_window: EventWindow, c
                     "3. If you know your charter at this ponit, set your charter using the 'update_charter' tool based on their request - this will be your working charter that you can evolve over time. BE DETAILED. "
                     "4. Inform the user they can contact you at any time to give new instructions, ask questions, or just chat. Hint or let them know that they can just reply to this message with anything they want. e.g. 'You can reply to this email now, or contact me at any time.' "
                     "This is your opportunity to decide what your personality and writing style will be --it could be anything-- you'll generally adapt this based on the user's initial request and what you know about them. THIS IS YOUR CHANCE to create a new and exciting personality. "
-                    "Immediately after sending your welcome message, call search_tools for the first time to find the best tools to efficiently and accurately complete your task with the most timely information. Then call enable_tool to enable the relevant tools. Remember you can search and enable more tools in the future as well as your job evolves. "
+                    "Immediately after sending your welcome message, call search_tools to find and automatically enable the best tools to efficiently and accurately complete your task with the most timely information. You can run search_tools again later as your job evolves. "
                     "Use phrasing like 'I'm your new agent' vs just 'I'm an agent' or 'I'm an assistant'."
                 )
                 return welcome_instruction + "\n\n" + base_prompt
@@ -1897,7 +2030,6 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_secure_credentials_request_tool(),
         # MCP management tools
         get_search_tools_tool(),
-        get_enable_tool_tool(),
         get_request_contact_permission_tool(),
     ]
 

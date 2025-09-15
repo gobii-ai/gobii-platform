@@ -189,6 +189,15 @@ def soft_expire_inactive_agents_task() -> int:
                 locked_agent.last_expired_at = now
                 locked_agent.save(update_fields=["schedule_snapshot", "schedule", "life_state", "last_expired_at"])
 
+                # Enqueue centralized cleanup for soft-expire (idempotent)
+                try:
+                    from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
+                    AgentLifecycleService.shutdown(str(locked_agent.id), AgentShutdownReason.SOFT_EXPIRE, meta={
+                        "source": "soft_expiration_task",
+                    })
+                except Exception as se:
+                    logger.error("Failed to enqueue lifecycle cleanup for agent %s: %s", locked_agent.id, se)
+
                 # Emit analytics event on successful soft-expiration (after commit)
                 try:
                     last_ts_eff = last_ts_locked

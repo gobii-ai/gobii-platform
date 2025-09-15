@@ -599,6 +599,13 @@ EXA_SEARCH_API_KEY = env("EXA_SEARCH_API_KEY", default="dummy-exa-search-api-key
 
 GOBII_RELEASE_ENV = env("GOBII_RELEASE_ENV", default="local")
 
+# In local/dev by default, simulate email delivery when no real provider is configured.
+# This avoids blocking first‑run UX. If SMTP is configured per agent or
+# POSTMARK_SERVER_TOKEN is set, real delivery is used instead.
+SIMULATE_EMAIL_DELIVERY = env.bool(
+    "SIMULATE_EMAIL_DELIVERY", default=(GOBII_RELEASE_ENV != "prod")
+)
+
 
 # Twilio
 TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID", default="")
@@ -617,6 +624,45 @@ SMS_MAX_BODY_LENGTH = env.int("SMS_MAX_BODY_LENGTH", default=1450)  # Max length
 
 # SMS Parsing
 EMAIL_STRIP_REPLIES = env.bool("EMAIL_STRIP_REPLIES", default=False)
+
+# ────────── Pipedream MCP (Remote) ──────────
+# These are optional; when set, Gobii will enable the Pipedream MCP server.
+PIPEDREAM_CLIENT_ID = env("PIPEDREAM_CLIENT_ID", default="")
+PIPEDREAM_CLIENT_SECRET = env("PIPEDREAM_CLIENT_SECRET", default="")
+PIPEDREAM_PROJECT_ID = env("PIPEDREAM_PROJECT_ID", default="")
+
+# Map Gobii release env → Pipedream Connect environment.
+# Pipedream supports only two environments: "development" and "production".
+def _default_pipedream_environment() -> str:
+    rel = os.getenv("GOBII_RELEASE_ENV", "local").lower()
+    # Treat only prod/production as production; everything else uses development.
+    return "production" if rel in ("prod", "production") else "development"
+
+PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default=_default_pipedream_environment())
+
+# Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,greenhouse")
+PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,greenhouse")
+
+# Pipedream Connect GC (batch cleanup)
+PIPEDREAM_GC_ENABLED = env.bool(
+    "PIPEDREAM_GC_ENABLED",
+    default=bool(PIPEDREAM_CLIENT_ID and PIPEDREAM_CLIENT_SECRET and PIPEDREAM_PROJECT_ID),
+)
+PIPEDREAM_GC_DRY_RUN = env.bool(
+    "PIPEDREAM_GC_DRY_RUN",
+    default=(PIPEDREAM_ENVIRONMENT != "production"),
+)
+PIPEDREAM_GC_EXPIRED_RETENTION_DAYS = env.int("PIPEDREAM_GC_EXPIRED_RETENTION_DAYS", default=30)
+PIPEDREAM_GC_DEACTIVATED_RETENTION_DAYS = env.int("PIPEDREAM_GC_DEACTIVATED_RETENTION_DAYS", default=60)
+PIPEDREAM_GC_BATCH_SIZE = env.int("PIPEDREAM_GC_BATCH_SIZE", default=200)
+PIPEDREAM_GC_MAX_DELETES_PER_RUN = env.int("PIPEDREAM_GC_MAX_DELETES_PER_RUN", default=200)
+
+# Add GC beat schedule only when enabled
+if PIPEDREAM_GC_ENABLED:
+    CELERY_BEAT_SCHEDULE["pipedream-connect-gc-daily"] = {
+        "task": "api.tasks.pipedream_connect_gc.gc_orphaned_users",
+        "schedule": crontab(hour=4, minute=45),
+    }
 
 # File Handling
 

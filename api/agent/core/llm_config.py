@@ -331,6 +331,11 @@ def get_llm_config_with_failover(
                 # Add tool-choice capability hint for callers (not passed to litellm)
                 params_with_hints = dict(params)
                 params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
+                # Expose whether the endpoint prefers parallel tool-calling. This is a caller hint.
+                try:
+                    params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
+                except Exception:
+                    params_with_hints["use_parallel_tool_calls"] = True
                 failover_configs.append((endpoint.key, endpoint.litellm_model, params_with_hints))
 
         if failover_configs:

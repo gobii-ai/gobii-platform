@@ -860,6 +860,7 @@ class PersistentModelEndpoint(models.Model):
     litellm_model = models.CharField(max_length=256)
     temperature_override = models.FloatField(null=True, blank=True)
     supports_tool_choice = models.BooleanField(default=True)
+    use_parallel_tool_calls = models.BooleanField(default=True)
     # For OpenAI-compatible endpoints via LiteLLM (model startswith 'openai/...')
     # provide the custom base URL used by your proxy (e.g., http://vllm-host:port/v1)
     api_base = models.CharField(max_length=256, blank=True)
@@ -1383,16 +1384,7 @@ class PersistentAgent(models.Model):
         related_name="preferred_by_agents",
         help_text="Communication endpoint (email/SMS/etc.) the agent should use by default to reach its owner user."
     )
-    enabled_mcp_tools = models.JSONField(
-        default=list,
-        blank=True,
-        help_text='List of enabled MCP tool names for this agent (e.g., ["mcp_brightdata_search_engine"])'
-    )
-    mcp_tool_usage = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text='Dictionary mapping MCP tool names to last usage timestamps for LRU tracking'
-    )
+    # NOTE: Enabled MCP tools are now tracked in PersistentAgentEnabledTool.
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1697,6 +1689,7 @@ class PersistentAgent(models.Model):
 
         # For updates, we need to check if schedule-related fields have changed.
         sync_needed = False
+        shutdown_reasons: list[str] = []
         if not is_new:
             try:
                 # Fetch the current state from the database before it's saved.
@@ -1704,6 +1697,33 @@ class PersistentAgent(models.Model):
                 if (old_instance.schedule != self.schedule or
                     old_instance.is_active != self.is_active):
                     sync_needed = True
+
+                # Detect shutdown‑adjacent transitions to trigger centralized cleanup
+                try:
+                    # is_active: True -> False (manual pause)
+                    if old_instance.is_active and not self.is_active:
+                        shutdown_reasons.append("PAUSE")
+                    # schedule: non‑empty -> empty/None (cron disabled)
+                    def _truthy_sched(val: str | None) -> bool:
+                        try:
+                            return bool((val or "").strip())
+                        except Exception:
+                            return bool(val)
+                    old_sched_truthy = _truthy_sched(getattr(old_instance, "schedule", None))
+                    new_sched_truthy = _truthy_sched(getattr(self, "schedule", None))
+                    # Trigger when schedule transitions to disabled; be lenient to ensure cleanup fires
+                    if not new_sched_truthy:
+                        # Only append once
+                        shutdown_reasons.append("CRON_DISABLED")
+                    # life_state: ACTIVE -> EXPIRED (soft expire)
+                    if (
+                        getattr(old_instance, "life_state", None) == self.LifeState.ACTIVE
+                        and getattr(self, "life_state", None) == self.LifeState.EXPIRED
+                    ):
+                        shutdown_reasons.append("SOFT_EXPIRE")
+                except Exception:
+                    # Defensive: do not block save on detection errors
+                    logger.exception("Failed to compute shutdown reasons for agent %s", self.id)
             except PersistentAgent.DoesNotExist:
                 # If it doesn't exist in the DB yet, treat it as a new instance.
                 is_new = True
@@ -1716,11 +1736,82 @@ class PersistentAgent(models.Model):
         if is_new or sync_needed:
             transaction.on_commit(self._sync_celery_beat_task)
 
+        # If any shutdown reasons were detected, enqueue centralized cleanup
+        if shutdown_reasons:
+            def _enqueue_cleanup():
+                try:
+                    from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
+
+                    # Map raw strings to constants (same values) for readability
+                    reason_map = {
+                        "PAUSE": AgentShutdownReason.PAUSE,
+                        "CRON_DISABLED": AgentShutdownReason.CRON_DISABLED,
+                        "SOFT_EXPIRE": AgentShutdownReason.SOFT_EXPIRE,
+                    }
+                    for r in shutdown_reasons:
+                        AgentLifecycleService.shutdown(str(self.id), reason_map.get(r, r), meta={
+                            "source": "model.save",
+                        })
+                except Exception:
+                    logger.exception("Failed to enqueue agent cleanup for %s", self.id)
+
+            transaction.on_commit(_enqueue_cleanup)
+
     def delete(self, *args, **kwargs):
         # Schedule the removal of the Celery Beat task to happen only after
         # the database transaction that deletes this instance successfully commits.
         transaction.on_commit(self._remove_celery_beat_task)
+        # Also enqueue centralized cleanup as a HARD_DELETE reason
+        try:
+            from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
+            agent_id = self.id
+
+            transaction.on_commit(lambda: AgentLifecycleService.shutdown(str(agent_id), AgentShutdownReason.HARD_DELETE, meta={
+                "source": "model.delete",
+            }))
+        except Exception:
+            logger.exception("Failed to schedule agent HARD_DELETE cleanup for %s", self.id)
         return super().delete(*args, **kwargs)
+
+
+class PersistentAgentEnabledTool(models.Model):
+    """Normalized record of a tool enabled for a persistent agent.
+
+    Replaces the old JSON fields on PersistentAgent:
+    - enabled_mcp_tools (list[str])
+    - mcp_tool_usage (dict[str -> last_used_epoch_seconds])
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="enabled_tools",
+    )
+    tool_full_name = models.CharField(max_length=256)
+    # Optional denormalization to aid analytics/routing
+    tool_server = models.CharField(max_length=64, blank=True)
+    tool_name = models.CharField(max_length=128, blank=True)
+
+    enabled_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    usage_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "tool_full_name"],
+                name="unique_agent_tool_full_name",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["agent", "last_used_at"], name="pa_en_tool_agent_lu_idx"),
+            models.Index(fields=["tool_full_name"], name="pa_en_tool_name_idx"),
+        ]
+        ordering = ["-last_used_at", "-enabled_at"]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"EnabledTool<{self.tool_full_name}> for {getattr(self.agent, 'name', 'agent')}"
 
 
 class PersistentAgentSecret(models.Model):
@@ -3062,6 +3153,53 @@ class OutboundMessageAttempt(models.Model):
     def __str__(self):
         preview = (self.error_message or "")[:40]
         return f"Attempt<{self.provider}|{self.status}> {preview}..."
+
+
+class PipedreamConnectSession(models.Model):
+    """Tracks a Pipedream Connect token lifecycle for an agent."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCESS = "success", "Success"
+        ERROR = "error", "Error"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="pipedream_connect_sessions",
+    )
+
+    # Identity scoping used when creating the token
+    external_user_id = models.CharField(max_length=64)
+    conversation_id = models.CharField(max_length=64)
+
+    # App this session is intended to connect (e.g., google_sheets)
+    app_slug = models.CharField(max_length=64)
+
+    # Short‑lived token and link returned by Connect API
+    connect_token = models.CharField(max_length=128, unique=True, blank=True)
+    connect_link_url = models.TextField(blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    # Webhook correlation and security
+    webhook_secret = models.CharField(max_length=64)
+
+    # Outcome
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    account_id = models.CharField(max_length=64, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "status", "-created_at"], name="pd_connect_agent_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"PipedreamConnectSession<{self.app_slug}|{self.status}>"
 
 
 class UsageThresholdSent(models.Model):

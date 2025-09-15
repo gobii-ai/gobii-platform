@@ -21,6 +21,7 @@ from util.subscription_helper import get_user_plan, get_active_subscription, rep
 
 from datetime import timedelta, datetime
 from django.apps import apps
+import os
 
 import logging
 logger = logging.getLogger(__name__)
@@ -43,6 +44,24 @@ THRESHOLDS = (75, 90, 100)
 # in the past and an expiration date in the future. This is the most common use case.
 class TaskCreditService:
     @staticmethod
+    def _is_community_unlimited() -> bool:
+        """Return True when running Community Edition with unlimited credits enabled.
+
+        Community Edition is the default (GOBII_PROPRIETARY_MODE=False). When
+        GOBII_ENABLE_COMMUNITY_UNLIMITED is True (default in config/settings.py),
+        all task‑credit checks should behave as unlimited to avoid low‑credit
+        warnings or gating.
+        """
+        try:
+            # Never enable unlimited mode during test runs
+            if 'test_settings' in os.environ.get('DJANGO_SETTINGS_MODULE', ''):
+                return False
+            return (not getattr(settings, "GOBII_PROPRIETARY_MODE", False)) and bool(
+                getattr(settings, "GOBII_ENABLE_COMMUNITY_UNLIMITED", False)
+            )
+        except Exception:
+            return False
+    @staticmethod
     @tracer.start_as_current_span("TaskCreditService Calculate Available Tasks")
     def calculate_available_tasks(user, task_credits: list | None = None) -> int:
         """
@@ -51,6 +70,10 @@ class TaskCreditService:
         available tasks = entitled - used
 
         """
+        # Community Edition unlimited mode: always unlimited
+        if TaskCreditService._is_community_unlimited():
+            return TASKS_UNLIMITED
+
         entitled = TaskCreditService.get_tasks_entitled(user)
 
         # If the user has unlimited tasks, return unlimited - we don't need to calculate anything else
@@ -312,6 +335,10 @@ class TaskCreditService:
         int
             The number of tasks the user is entitled to.
         """
+        # Community Edition unlimited mode short‑circuit
+        if TaskCreditService._is_community_unlimited():
+            return TASKS_UNLIMITED
+
         plan = get_user_plan(user)
 
         if plan is None or plan["id"] == PlanNames.FREE:
@@ -524,6 +551,10 @@ class TaskCreditService:
         Returns:
             int: The number of task credits available for the user.
         """
+        # Community Edition unlimited mode
+        if TaskCreditService._is_community_unlimited():
+            return TASKS_UNLIMITED
+
         TaskCredit = apps.get_model("api", "TaskCredit")
         entitled = TaskCreditService.get_tasks_entitled(user)
 
@@ -605,6 +636,10 @@ class TaskCreditService:
         Returns:
             float: The percentage of task credits used by the user.
         """
+        # Community Edition unlimited mode
+        if TaskCreditService._is_community_unlimited():
+            return 0.0
+
         total_entitled = TaskCreditService.get_tasks_entitled(user)
 
         if total_entitled == TASKS_UNLIMITED:
@@ -779,6 +814,10 @@ class TaskCreditService:
         Returns:
             float: The percentage of total tasks used by the user.
         """
+        # Community Edition unlimited mode
+        if TaskCreditService._is_community_unlimited():
+            return 0.0
+
         total_available = TaskCreditService.get_tasks_entitled(user)
 
         if total_available == TASKS_UNLIMITED:
@@ -851,6 +890,14 @@ class TaskCreditService:
         # Local imports to avoid circular dependencies
         from django.core.exceptions import ValidationError
         from util.subscription_helper import get_active_subscription, allow_and_has_extra_tasks
+
+        # Community Edition unlimited mode: always succeed without consuming
+        if TaskCreditService._is_community_unlimited():
+            return {
+                "success": True,
+                "credit": None,
+                "error_message": None,
+            }
 
         with tracer.start_as_current_span("CHECK User TaskCredit") as span:
             span.set_attribute("user.id", str(user.id))

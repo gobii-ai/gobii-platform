@@ -123,8 +123,12 @@ jobs:
             tag: batch_event_llm
           - batch: event_processing
             tag: batch_event_processing
+          - batch: event_parallel
+            tag: batch_event_parallel
           - batch: mcp_tools
             tag: batch_mcp_tools
+          - batch: pipedream_connect
+            tag: pipedream_connect
           - batch: promptree
             tag: batch_promptree
           - batch: redis_leaks
@@ -145,6 +149,10 @@ jobs:
             tag: batch_tool_costs
           - batch: billing_rollup
             tag: batch_billing_rollup
+          - batch: pa_shutdown_triggers
+            tag: batch_pa_shutdown_triggers
+          - batch: agent_lifecycle
+            tag: batch_agent_lifecycle
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

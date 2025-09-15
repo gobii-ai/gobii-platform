@@ -13,6 +13,7 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     OutboundMessageAttempt,
     DeliveryStatus,
+    PipedreamConnectSession,
 )
 from opentelemetry import trace
 import json
@@ -368,6 +369,117 @@ def email_webhook(request):
         return HttpResponse(status=400)
     except Exception as e:
         logger.error(f"Error processing inbound email open/email link click webhook: {e}", exc_info=True)
+        return HttpResponse(status=500)
+
+
+@csrf_exempt
+@require_POST
+@tracer.start_as_current_span("COMM pipedream_connect_webhook")
+def pipedream_connect_webhook(request, session_id):
+    """
+    Handle Pipedream Connect webhook callbacks for a one‑time Connect token session.
+    Security: requires query parameter t matching the stored webhook_secret.
+    """
+    # Validate one‑time secret
+    secret = request.GET.get("t", "").strip()
+    if not secret:
+        logger.warning("PD Connect: webhook missing secret session=%s", session_id)
+        return HttpResponse(status=400)
+
+    try:
+        session = PipedreamConnectSession.objects.select_related("agent").get(id=session_id)
+    except PipedreamConnectSession.DoesNotExist:
+        logger.warning("PD Connect: webhook unknown session=%s", session_id)
+        return HttpResponse(status=200)
+
+    if secret != session.webhook_secret:
+        logger.warning("PD Connect: webhook invalid secret for session=%s", session_id)
+        return HttpResponse(status=403)
+
+    # Idempotency: if already finalized, do nothing
+    if session.status in (PipedreamConnectSession.Status.SUCCESS, PipedreamConnectSession.Status.ERROR):
+        logger.info("PD Connect: webhook idempotent ignore session=%s status=%s", session_id, session.status)
+        return HttpResponse(status=200)
+
+    try:
+        payload_raw = request.body.decode("utf-8")
+        data = json.loads(payload_raw or "{}")
+        event = data.get("event")
+        connect_token = data.get("connect_token")
+        logger.info(
+            "PD Connect: webhook received session=%s agent=%s event=%s has_token=%s",
+            str(session.id), str(session.agent_id), event, bool(connect_token)
+        )
+
+        # Optional: verify connect_token correlates (if we have it)
+        if session.connect_token and connect_token and str(connect_token) != session.connect_token:
+            logger.warning("PD Connect: webhook token mismatch session=%s", session_id)
+            return HttpResponse(status=400)
+
+        if event == "CONNECTION_SUCCESS":
+            account = data.get("account") or {}
+            account_id = account.get("id") or ""
+
+            session.status = PipedreamConnectSession.Status.SUCCESS
+            session.account_id = account_id or ""
+            session.save(update_fields=["status", "account_id", "updated_at"])
+            logger.info(
+                "PD Connect: connection SUCCESS session=%s app=%s account=%s",
+                str(session.id), session.app_slug, account_id or ""
+            )
+
+            # Record a system step and trigger processing
+            try:
+                from api.models import PersistentAgentStep, PersistentAgentSystemStep
+                step = PersistentAgentStep.objects.create(
+                    agent=session.agent,
+                    description=(
+                        f"Pipedream connection SUCCESS for app '{session.app_slug}'"
+                        + (f"; account={account_id}" if account_id else "")
+                    ),
+                )
+                PersistentAgentSystemStep.objects.create(
+                    step=step,
+                    code=PersistentAgentSystemStep.Code.CREDENTIALS_PROVIDED,
+                    notes=f"pipedream_connect:{session.app_slug}:{account_id}",
+                )
+                from api.agent.tasks.process_events import process_agent_events_task
+                process_agent_events_task.delay(str(session.agent.id))
+            except Exception:
+                logger.exception("PD Connect: failed to record success step or trigger resume session=%s", str(session.id))
+
+            return HttpResponse(status=200)
+
+        elif event == "CONNECTION_ERROR":
+            err = data.get("error") or ""
+            session.status = PipedreamConnectSession.Status.ERROR
+            session.save(update_fields=["status", "updated_at"])
+            logger.info(
+                "PD Connect: connection ERROR session=%s app=%s error=%s",
+                str(session.id), session.app_slug, err
+            )
+
+            try:
+                from api.models import PersistentAgentStep, PersistentAgentSystemStep
+                step = PersistentAgentStep.objects.create(
+                    agent=session.agent,
+                    description=f"Pipedream connection ERROR for app '{session.app_slug}'",
+                )
+                PersistentAgentSystemStep.objects.create(
+                    step=step,
+                    code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                    notes=f"pipedream_connect_error:{session.app_slug}:{err}",
+                )
+            except Exception:
+                logger.exception("PD Connect: failed to record error step session=%s", str(session.id))
+            return HttpResponse(status=200)
+
+        else:
+            logger.info("PD Connect: webhook unknown/ignored event session=%s event=%s", str(session.id), event)
+            return HttpResponse(status=200)
+
+    except Exception as e:
+        logger.error("PD Connect: webhook processing failed session=%s error=%s", session_id, e, exc_info=True)
         return HttpResponse(status=500)
 
 @csrf_exempt

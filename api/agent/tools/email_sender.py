@@ -15,6 +15,8 @@ from ...models import (
     CommsChannel,
     DeliveryStatus,
 )
+from django.conf import settings
+import os
 from ..comms.outbound_delivery import deliver_agent_email
 
 logger = logging.getLogger(__name__)
@@ -81,7 +83,35 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             ).first()
         )
         if not from_endpoint:
-            return {"status": "error", "message": "Agent has no configured email endpoint to send from."}
+            # In local/dev, if simulation is enabled and no Postmark token is configured,
+            # auto-provision a temporary agent-owned email endpoint so we can simulate
+            # delivery and persist the outbound message for history/UX.
+            simulation_flag = getattr(settings, "SIMULATE_EMAIL_DELIVERY", False)
+            postmark_token = os.getenv("POSTMARK_SERVER_TOKEN")
+            if simulation_flag and not postmark_token:
+                try:
+                    # Create a simple local-from address for simulation purposes
+                    sim_address = f"agent-{agent.id}@localhost"
+                    from_endpoint = PersistentAgentCommsEndpoint.objects.create(
+                        owner_agent=agent,
+                        channel=CommsChannel.EMAIL,
+                        address=sim_address,
+                        is_primary=True,
+                    )
+                    logger.info(
+                        "Provisioned simulated from_endpoint %s for agent %s to enable local email simulation",
+                        sim_address,
+                        agent.id,
+                    )
+                except Exception as e:
+                    logger.exception(
+                        "Failed to provision simulated email endpoint for agent %s: %s",
+                        agent.id,
+                        e,
+                    )
+                    return {"status": "error", "message": "Agent has no configured email endpoint to send from."}
+            else:
+                return {"status": "error", "message": "Agent has no configured email endpoint to send from."}
 
         if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, to_address):
             return {"status": "error", "message": "Recipient address not allowed for this agent."}
