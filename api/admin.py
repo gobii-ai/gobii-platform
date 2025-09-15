@@ -2148,7 +2148,8 @@ class UserBillingAdmin(admin.ModelAdmin):
                     updated += 1
                 else:
                     skipped += 1
-            except Exception:
+            except Exception as e:
+                logging.error("Failed to align billing anchor for user %s: %s", ub.user.id, e)
                 errors += 1
 
         self.message_user(
