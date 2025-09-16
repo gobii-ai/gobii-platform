@@ -1,0 +1,294 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div
+  x-data="agentChat({
+      historyUrl: '{{ chat_history_url }}',
+      sendUrl: '{{ chat_send_url }}',
+      agentName: '{{ agent.name|escapejs }}'
+    })"
+  x-init="init()"
+  class="space-y-5 pb-6"
+>
+  <!-- Header -->
+  <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl border border-white/60 overflow-hidden">
+    <div class="px-6 py-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold text-gray-800">Chat with {{ agent.name }}</h1>
+        <p class="text-sm text-gray-500">Send real-time instructions, review updates, and follow every step your agent takes.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium"
+              :class="agentWorking ? 'bg-indigo-50 text-indigo-700' : 'bg-emerald-50 text-emerald-700'">
+          <svg x-show="agentWorking" class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke-width="4"></circle>
+            <path class="opacity-75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" fill="currentColor"></path>
+          </svg>
+          <svg x-show="!agentWorking" class="w-4 h-4 text-emerald-500" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="12" r="8"></circle>
+          </svg>
+          <span x-text="agentWorking ? 'Agent is working…' : 'Agent is idle'">Agent is idle</span>
+        </span>
+        <a href="{% url 'agent_detail' agent.id %}" class="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+          </svg>
+          Back to configuration
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat Panel -->
+  <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl border border-white/60 flex flex-col h-[calc(100vh-18rem)]">
+    <!-- Events -->
+    <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-4" x-ref="scroller">
+      <template x-if="isLoading">
+        <div class="flex justify-center py-12 text-gray-500">
+          <svg class="w-6 h-6 animate-spin mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke-width="4"></circle>
+            <path class="opacity-75" d="M4 12a8 8 0 018-8" stroke-width="4" stroke-linecap="round"></path>
+          </svg>
+          Loading conversation…
+        </div>
+      </template>
+
+      <template x-if="!isLoading && events.length === 0">
+        <div class="text-center py-16">
+          <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 mb-4">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M21 16a4 4 0 01-4 4H7l-4 4V6a4 4 0 014-4h10a4 4 0 014 4v10z" />
+            </svg>
+          </div>
+          <h2 class="text-lg font-semibold text-gray-800">Say hi to {{ agent.name }}</h2>
+          <p class="mt-2 text-sm text-gray-500">Send a message below and your agent will get to work immediately.</p>
+        </div>
+      </template>
+
+      <template x-for="event in events" :key="event.id + '-' + event.type + '-' + event.timestamp">
+        <div>
+          <template x-if="event.type === 'message'">
+            <div :class="event.author === 'agent' ? 'flex justify-end' : 'flex justify-start'" class="w-full">
+              <div class="max-w-xl">
+                <div class="flex items-center gap-2 text-xs text-gray-500 mb-1"
+                     :class="event.author === 'agent' ? 'justify-end' : 'justify-start'">
+                  <span x-text="event.author === 'agent' ? agentName : 'You'"></span>
+                  <span>•</span>
+                  <span x-text="formatTimestamp(event.timestamp)"></span>
+                  <template x-if="event.channel && event.channel !== 'web'">
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M3 5a2 2 0 012-2h14a2 2 0 012 2v14l-4-4H5a2 2 0 01-2-2V5z" />
+                      </svg>
+                      <span x-text="event.channel.toUpperCase()"></span>
+                    </span>
+                  </template>
+                </div>
+                <div :class="event.author === 'agent' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800'"
+                     class="rounded-2xl px-4 py-3 shadow-sm whitespace-pre-wrap break-words">
+                  <p x-text="event.body"></p>
+                </div>
+                <template x-if="event.attachments">
+                  <p class="mt-2 text-xs text-gray-400" x-text="event.attachments + ' attachment' + (event.attachments === 1 ? '' : 's')"></p>
+                </template>
+              </div>
+            </div>
+          </template>
+          <template x-if="event.type === 'step'">
+            <div class="flex">
+              <div class="flex-1 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3">
+                <div class="flex items-center justify-between">
+                  <div class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Agent Step
+                  </div>
+                  <span class="text-xs text-gray-400" x-text="formatTimestamp(event.timestamp)"></span>
+                </div>
+                <p class="mt-2 text-sm text-gray-700 whitespace-pre-wrap" x-text="event.description || 'No description provided.'"></p>
+                <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                  <template x-if="event.tool_name">
+                    <div class="text-xs bg-indigo-50 text-indigo-700 px-3 py-2 rounded-lg">
+                      <span class="font-semibold">Tool:</span>
+                      <span x-text="event.tool_name"></span>
+                    </div>
+                  </template>
+                  <template x-if="event.system_code">
+                    <div class="text-xs bg-slate-100 text-slate-600 px-3 py-2 rounded-lg">
+                      <span class="font-semibold">System:</span>
+                      <span x-text="event.system_code"></span>
+                    </div>
+                  </template>
+                </div>
+                <template x-if="event.tool_result">
+                  <div class="mt-3 bg-gray-950/90 text-gray-100 text-xs font-mono rounded-lg p-3 overflow-x-auto">
+                    <pre x-text="event.tool_result"></pre>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- Working indicator -->
+    <div x-show="agentWorking || isSending" class="border-t border-gray-100 bg-indigo-50 text-indigo-700 px-6 py-3 text-sm flex items-center gap-2">
+      <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke-width="4"></circle>
+        <path class="opacity-75" d="M4 12a8 8 0 018-8" stroke-width="4" stroke-linecap="round"></path>
+      </svg>
+      {{ agent.name }} is processing…
+    </div>
+
+    <!-- Composer -->
+    <form class="border-t border-gray-200 px-4 sm:px-6 py-4" x-on:submit.prevent="sendMessage">
+      <input type="hidden" x-ref="csrf" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+      <label class="text-sm font-medium text-gray-700">Message</label>
+      <textarea
+        rows="3"
+        x-model="input"
+        class="mt-2 block w-full resize-none rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-indigo-600 focus:ring-indigo-600 disabled:opacity-50"
+        placeholder="Share updates, ask questions, or give next steps…"
+      ></textarea>
+      <div class="mt-3 flex items-center justify-between">
+        <p class="text-xs text-gray-400">Press Enter to send. Shift + Enter for a new line.</p>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-gray-400" x-text="input.length + ' / 4000'">0 / 4000</span>
+          <button type="submit"
+                  class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="isSending || !input.trim()">
+            <svg x-show="!isSending" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7" />
+            </svg>
+            <svg x-show="isSending" class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke-width="4"></circle>
+              <path class="opacity-75" d="M4 12a8 8 0 018-8" stroke-width="4" stroke-linecap="round"></path>
+            </svg>
+            Send
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function agentChat(config) {
+  return {
+    historyUrl: config.historyUrl,
+    sendUrl: config.sendUrl,
+    agentName: config.agentName,
+    events: [],
+    isLoading: true,
+    isSending: false,
+    agentWorking: false,
+    pollTimer: null,
+    input: '',
+    csrfToken: '',
+    lastEventCount: 0,
+    init() {
+      if (this.$refs.csrf) {
+        this.csrfToken = this.$refs.csrf.value;
+      }
+      this.fetchHistory(true);
+      this.pollTimer = setInterval(() => this.fetchHistory(), 4000);
+      window.addEventListener('beforeunload', () => this.cleanup());
+    },
+    cleanup() {
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+    },
+    fetchHistory(forceScroll = false) {
+      fetch(this.historyUrl, { headers: { 'Accept': 'application/json' } })
+        .then(resp => resp.json())
+        .then(data => {
+          const hadNew = data.events.length > this.lastEventCount;
+          this.events = data.events;
+          this.lastEventCount = data.events.length;
+          this.agentWorking = Boolean(data.agent_working);
+          this.isLoading = false;
+          if (forceScroll || hadNew) {
+            this.$nextTick(() => this.scrollToBottom());
+          }
+        })
+        .catch(err => {
+          console.error('Failed to load chat history', err);
+        });
+    },
+    scrollToBottom() {
+      const el = this.$refs.scroller;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      }
+    },
+    formatTimestamp(ts) {
+      try {
+        const date = new Date(ts);
+        return date.toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit'
+        });
+      } catch (e) {
+        return ts;
+      }
+    },
+    sendMessage() {
+      if (!this.input.trim() || this.isSending) {
+        return;
+      }
+      const message = this.input.trim();
+      this.isSending = true;
+      this.agentWorking = true;
+      fetch(this.sendUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-CSRFToken': this.csrfToken
+        },
+        body: JSON.stringify({ body: message })
+      })
+        .then(async resp => {
+          const payload = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            throw new Error(payload.message || 'Failed to send message.');
+          }
+          return payload;
+        })
+        .then(payload => {
+          this.input = '';
+          if (payload.event) {
+            this.events.push(payload.event);
+            this.events.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            this.lastEventCount = this.events.length;
+            this.$nextTick(() => this.scrollToBottom());
+          }
+          this.agentWorking = payload.agent_working ?? this.agentWorking;
+          setTimeout(() => this.fetchHistory(), 1500);
+        })
+        .catch(err => {
+          console.error('Chat send failed', err);
+          this.$dispatch('toast', { type: 'error', message: err.message || 'Failed to send message.' });
+        })
+        .finally(() => {
+          this.isSending = false;
+        });
+    }
+  };
+}
+
+document.addEventListener('alpine:init', () => {
+  Alpine.data('agentChat', agentChat);
+});
+</script>
+{% endblock %}

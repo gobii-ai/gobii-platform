@@ -1,6 +1,7 @@
 import json
 
 import stripe
+from django.conf import settings
 from django.template.loader import render_to_string
 from django.core.mail import send_mail
 from django.utils.html import strip_tags
@@ -26,7 +27,9 @@ import uuid
 from agents.services import AgentService
 from api.models import ApiKey, UserBilling, PersistentAgent, BrowserUseAgent, PersistentAgentCommsEndpoint, \
     PersistentAgentEmailEndpoint, CommsChannel, PersistentAgentConversation, PersistentAgentMessage, \
-    PersistentAgentConversationParticipant, BrowserUseAgentTask, TaskCredit, PersistentAgentSmsEndpoint
+    PersistentAgentConversationParticipant, BrowserUseAgentTask, TaskCredit, PersistentAgentSmsEndpoint, \
+    PersistentAgentStep, PersistentAgentToolCall, PersistentAgentSystemStep, DeliveryStatus, \
+    build_web_user_address, build_web_agent_address
 
 from api.models import (
     ApiKey,
@@ -3222,6 +3225,369 @@ def handle_confirm_code(request, phone_number, verification_code):
         logger.warning(f"Failed to confirm verification code for user {request.user.id}: {str(e)}")
 
     return JsonResponse({'success': False, 'error': "Failed to confirm verification code. Please try again."})
+
+
+def _require_agent_access(user, agent_pk: uuid.UUID) -> PersistentAgent:
+    """Fetch agent ensuring the requesting user has access."""
+
+    agent = get_object_or_404(
+        PersistentAgent.objects.select_related("organization", "browser_use_agent"),
+        pk=agent_pk,
+    )
+
+    if agent.user_id == user.id:
+        return agent
+
+    if agent.organization_id:
+        if OrganizationMembership.objects.filter(
+            org=agent.organization,
+            user=user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).exists():
+            return agent
+
+    raise PermissionDenied
+
+
+def _ensure_agent_web_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint:
+    """Ensure the agent has a dedicated web chat endpoint."""
+
+    address = build_web_agent_address(agent.id)
+    endpoint, created = PersistentAgentCommsEndpoint.objects.get_or_create(
+        owner_agent=agent,
+        channel=CommsChannel.WEB,
+        defaults={
+            "address": address,
+            "is_primary": bool(
+                agent.preferred_contact_endpoint
+                and agent.preferred_contact_endpoint.channel == CommsChannel.WEB
+            ),
+        },
+    )
+
+    if not endpoint.address:
+        endpoint.address = address
+        endpoint.save(update_fields=["address"])
+
+    return endpoint
+
+
+def _ensure_user_web_endpoint(address: str) -> PersistentAgentCommsEndpoint:
+    """Ensure a user web chat endpoint exists."""
+
+    normalized = (address or "").strip()
+    endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=CommsChannel.WEB,
+        address=normalized,
+        defaults={"owner_agent": None},
+    )
+    return endpoint
+
+
+def _reactivate_agent(agent_id: uuid.UUID) -> None:
+    """Update agent lifecycle fields after a fresh interaction."""
+
+    from django.utils import timezone as dj_timezone
+
+    try:
+        with transaction.atomic():
+            locked = PersistentAgent.objects.select_for_update().get(id=agent_id)
+            updates = ["last_interaction_at"]
+            locked.last_interaction_at = dj_timezone.now()
+
+            if (
+                locked.life_state == PersistentAgent.LifeState.EXPIRED
+                and locked.is_active
+            ):
+                if locked.schedule_snapshot:
+                    locked.schedule = locked.schedule_snapshot
+                    updates.append("schedule")
+                locked.life_state = PersistentAgent.LifeState.ACTIVE
+                updates.append("life_state")
+            else:
+                locked.life_state = PersistentAgent.LifeState.ACTIVE
+                updates.append("life_state")
+
+            locked.save(update_fields=list(dict.fromkeys(updates)))
+    except PersistentAgent.DoesNotExist:
+        logger.warning("Attempted to reactivate missing agent %s", agent_id)
+    except Exception:
+        logger.exception("Failed to reactivate agent %s", agent_id)
+
+
+def _serialize_message_event(message: PersistentAgentMessage) -> dict:
+    event = {
+        "id": message.seq,
+        "type": "message",
+        "author": "agent" if message.is_outbound else "user",
+        "direction": "outbound" if message.is_outbound else "inbound",
+        "channel": None,
+        "body": message.body or "",
+        "status": message.latest_status,
+        "meta": message.raw_payload or {},
+        "attachments": getattr(message, "attachment_count", None),
+    }
+
+    if message.conversation_id and message.conversation:
+        event["channel"] = message.conversation.channel
+    elif message.from_endpoint_id and message.from_endpoint:
+        event["channel"] = message.from_endpoint.channel
+
+    if message.from_endpoint_id and message.from_endpoint:
+        event["from_address"] = message.from_endpoint.address
+    if message.to_endpoint_id and message.to_endpoint:
+        event["to_address"] = message.to_endpoint.address
+
+    if event["attachments"] is None:
+        try:
+            event["attachments"] = message.attachments.count()
+        except Exception:
+            event["attachments"] = 0
+
+    event["_ts"] = message.timestamp
+    event["_order"] = 0
+    return event
+
+
+def _truncate(value: str | None, limit: int = 1200) -> str | None:
+    if not value:
+        return value
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "…"
+
+
+def _serialize_step_event(step: PersistentAgentStep) -> dict:
+    event = {
+        "id": str(step.id),
+        "type": "step",
+        "description": step.description or "",
+        "prompt_tokens": step.prompt_tokens,
+        "completion_tokens": step.completion_tokens,
+        "total_tokens": step.total_tokens,
+        "cached_tokens": step.cached_tokens,
+        "llm_model": step.llm_model,
+        "llm_provider": step.llm_provider,
+        "credits_cost": step.credits_cost,
+    }
+
+    if getattr(step, "tool_call", None):
+        event["tool_name"] = step.tool_call.tool_name
+        event["tool_params"] = step.tool_call.tool_params
+        event["tool_result"] = _truncate(step.tool_call.result)
+
+    if getattr(step, "system_step", None):
+        event["system_code"] = step.system_step.code
+        event["system_notes"] = step.system_step.notes
+
+    event["_ts"] = step.created_at
+    event["_order"] = 1
+    return event
+
+
+def _sort_events(events: list[dict]) -> list[dict]:
+    return sorted(
+        events,
+        key=lambda evt: (evt.get("_ts"), evt.get("_order", 0), evt.get("id")),
+    )
+
+
+def _finalize_events(events: list[dict]) -> list[dict]:
+    finalized: list[dict] = []
+    for evt in events:
+        cleaned = {k: v for k, v in evt.items() if not k.startswith("_")}
+        ts = evt.get("_ts")
+        if ts is not None:
+            cleaned["timestamp"] = ts.isoformat()
+        finalized.append(cleaned)
+    return finalized
+
+
+def _collect_chat_events(agent: PersistentAgent, limit: int = 120) -> list[dict]:
+    limit = max(10, min(limit, 500))
+
+    message_qs = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent)
+        .select_related("from_endpoint", "to_endpoint", "conversation")
+        .annotate(attachment_count=models.Count("attachments"))
+        .order_by("-timestamp")[:limit]
+    )
+
+    step_qs = (
+        PersistentAgentStep.objects.filter(agent=agent)
+        .select_related("tool_call", "system_step")
+        .order_by("-created_at")[:limit]
+    )
+
+    events: list[dict] = []
+    for message in message_qs:
+        events.append(_serialize_message_event(message))
+    for step in step_qs:
+        events.append(_serialize_step_event(step))
+
+    return _sort_events(events)
+
+
+def _agent_working_status(agent: PersistentAgent, events: list[dict]) -> bool:
+    now = timezone.now()
+    recent_cutoff = now - timedelta(seconds=20)
+
+    recent_step = any(
+        evt.get("type") == "step" and evt.get("_ts") and evt["_ts"] >= recent_cutoff
+        for evt in events
+    )
+
+    active_tasks = False
+    try:
+        browser_agent = getattr(agent, "browser_use_agent", None)
+        if browser_agent:
+            active_tasks = BrowserUseAgentTask.objects.filter(
+                agent=browser_agent,
+                status__in=[
+                    BrowserUseAgentTask.StatusChoices.PENDING,
+                    BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+                ],
+            ).exists()
+    except Exception:
+        active_tasks = False
+
+    return recent_step or active_tasks
+
+
+class AgentChatView(LoginRequiredMixin, TemplateView):
+    """Web chat interface for talking to agents in real time."""
+
+    template_name = "console/agent_chat.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.agent = _require_agent_access(request.user, kwargs["pk"])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = self.agent
+        context["agent"] = agent
+        context["chat_history_url"] = reverse("agent_chat_history", args=[agent.id])
+        context["chat_send_url"] = reverse("agent_chat_send", args=[agent.id])
+        context["user_web_address"] = build_web_user_address(self.request.user.id, agent.id)
+        return context
+
+
+@login_required
+@require_http_methods(["GET"])
+def agent_chat_history(request, pk):
+    agent = _require_agent_access(request.user, pk)
+    limit = int(request.GET.get("limit", 120))
+    events_internal = _collect_chat_events(agent, limit=limit)
+    agent_working = _agent_working_status(agent, events_internal)
+    events_public = _finalize_events(events_internal)
+
+    return JsonResponse(
+        {
+            "events": events_public,
+            "agent": {"id": str(agent.id), "name": agent.name},
+            "agent_working": agent_working,
+            "server_time": timezone.now().isoformat(),
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def agent_chat_send(request, pk):
+    agent = _require_agent_access(request.user, pk)
+
+    try:
+        payload = json.loads(request.body or "{}") if request.body else {}
+    except json.JSONDecodeError:
+        payload = {}
+
+    body = payload.get("body") or request.POST.get("body")
+    body = (body or "").strip()
+
+    if not body:
+        return JsonResponse({"status": "error", "message": "Message body cannot be empty."}, status=400)
+
+    max_len = getattr(settings, "WEB_CHAT_MESSAGE_MAX_LENGTH", 4000)
+    if len(body) > max_len:
+        return JsonResponse(
+            {
+                "status": "error",
+                "message": f"Message is too long (limit {max_len} characters).",
+            },
+            status=400,
+        )
+
+    user_address = build_web_user_address(request.user.id, agent.id)
+
+    if not agent.is_sender_whitelisted(CommsChannel.WEB, user_address):
+        return JsonResponse({"status": "error", "message": "You are not allowed to message this agent."}, status=403)
+
+    try:
+        with transaction.atomic():
+            agent_endpoint = _ensure_agent_web_endpoint(agent)
+            user_endpoint = _ensure_user_web_endpoint(user_address)
+
+            conversation = _get_or_create_conversation(
+                CommsChannel.WEB,
+                user_address,
+                owner_agent=agent,
+            )
+
+            _ensure_participant(
+                conversation,
+                user_endpoint,
+                PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
+            )
+            _ensure_participant(
+                conversation,
+                agent_endpoint,
+                PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+            )
+
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=user_endpoint,
+                conversation=conversation,
+                is_outbound=False,
+                body=body,
+                raw_payload={
+                    "source": "web_chat_ui",
+                    "user_id": request.user.id,
+                },
+            )
+
+            now = timezone.now()
+            PersistentAgentMessage.objects.filter(pk=message.pk).update(
+                latest_status=DeliveryStatus.DELIVERED,
+                latest_delivered_at=now,
+                latest_sent_at=now,
+                latest_error_code="",
+                latest_error_message="",
+            )
+            message.latest_status = DeliveryStatus.DELIVERED
+            message.latest_delivered_at = now
+
+            _reactivate_agent(agent.id)
+
+            transaction.on_commit(
+                lambda: process_agent_events_task.delay(str(agent.id))
+            )
+
+    except Exception as exc:
+        logger.exception("Failed to send web chat message for agent %s", agent.id)
+        return JsonResponse({"status": "error", "message": str(exc)}, status=500)
+
+    event_public = _finalize_events([_serialize_message_event(message)])[0]
+
+    return JsonResponse(
+        {
+            "status": "ok",
+            "event": event_public,
+            "agent_working": True,
+        },
+        status=201,
+    )
 
 
 class OrganizationListView(WaffleFlagMixin, LoginRequiredMixin, TemplateView):

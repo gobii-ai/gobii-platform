@@ -1,4 +1,5 @@
-import hashlib, secrets, uuid, os, string
+import hashlib, secrets, uuid, os, string, re
+from typing import Optional, Tuple
 
 import ulid
 from django.conf import settings
@@ -53,6 +54,37 @@ def generate_ulid() -> str:
     """Return a 26-character, time-ordered ULID string."""
     return str(ulid.new())
 
+
+# ---------------------------------------------------------------------------
+#  Web chat addressing helpers
+# ---------------------------------------------------------------------------
+
+WEB_USER_ADDRESS_RE = re.compile(r"^web://user/(?P<user_id>\d+)/agent/(?P<agent_id>[0-9a-fA-F-]+)$")
+WEB_AGENT_ADDRESS_RE = re.compile(r"^web://agent/(?P<agent_id>[0-9a-fA-F-]+)$")
+
+
+def build_web_user_address(user_id: int, agent_id: uuid.UUID | str) -> str:
+    """Return canonical address for a user participating in web chat with an agent."""
+    return f"web://user/{user_id}/agent/{agent_id}"
+
+
+def build_web_agent_address(agent_id: uuid.UUID | str) -> str:
+    """Return canonical address for the agent's web chat identity."""
+    return f"web://agent/{agent_id}"
+
+
+def parse_web_user_address(address: str) -> Tuple[Optional[int], Optional[str]]:
+    """Parse a user web-chat address and return (user_id, agent_id) if valid."""
+    match = WEB_USER_ADDRESS_RE.match((address or "").strip())
+    if not match:
+        return None, None
+    try:
+        user_id = int(match.group("user_id"))
+    except (TypeError, ValueError):
+        return None, None
+    return user_id, match.group("agent_id")
+
+
 def _hash(raw: str) -> str:
     """Return SHA256 hexdigest for given raw string."""
     return hashlib.sha256(raw.encode()).hexdigest()
@@ -66,6 +98,7 @@ class CommsChannel(models.TextChoices):
     SMS = "sms", "SMS"
     SLACK = "slack", "Slack"
     DISCORD = "discord", "Discord"
+    WEB = "web", "Web Chat"
     OTHER = "other", "Other"
 
 
@@ -1434,9 +1467,12 @@ class PersistentAgent(models.Model):
 
         logger.info("Whitelist check for channel: %s, address: %s, policy=%s", channel_val, addr_lower, self.whitelist_policy)
 
-        if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS):
+        if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS, CommsChannel.WEB):
             logger.info("Whitelist check - Unsupported channel '%s'; defaulting to False", channel_val)
             return False
+
+        if channel_val == CommsChannel.WEB:
+            return self._is_allowed_web_address(addr, direction="inbound")
 
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
             return self._is_in_manual_allowlist(channel_val, addr, direction="inbound")
@@ -1449,7 +1485,7 @@ class PersistentAgent(models.Model):
         channel_val = channel.value if isinstance(channel, CommsChannel) else str(channel)
         addr = (address or "").strip()
 
-        if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS):
+        if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS, CommsChannel.WEB):
             return False
         
         # Block SMS for multi-player agents (org-owned only)
@@ -1458,6 +1494,9 @@ class PersistentAgent(models.Model):
             if self.organization_id is not None:
                 # Org-owned agents can only use email (group SMS not yet supported)
                 return False
+
+        if channel_val == CommsChannel.WEB:
+            return self._is_allowed_web_address(addr, direction="outbound")
 
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
             return self._is_in_manual_allowlist(channel_val, addr, direction="outbound")
@@ -1561,6 +1600,57 @@ class PersistentAgent(models.Model):
             )
             return False
 
+    def _is_allowed_web_address(self, address: str, direction: str = "both") -> bool:
+        """Return True if a web chat address is permitted for the requested direction."""
+        addr = (address or "").strip()
+        user_id, agent_id = parse_web_user_address(addr)
+
+        if agent_id != str(self.id) or user_id is None:
+            return False
+
+        # Owner is always allowed regardless of policy
+        if user_id == self.user_id:
+            return True
+
+        # Organization members are implicitly allowed
+        if self.organization_id:
+            from .models import OrganizationMembership
+
+            if OrganizationMembership.objects.filter(
+                org=self.organization,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                user_id=user_id,
+            ).exists():
+                return True
+
+        # Manual allowlist entries can extend access beyond owner/org members
+        if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
+            try:
+                query = CommsAllowlistEntry.objects.filter(
+                    agent=self,
+                    channel=CommsChannel.WEB,
+                    address=addr,
+                    is_active=True,
+                )
+
+                if direction == "inbound":
+                    query = query.filter(allow_inbound=True)
+                elif direction == "outbound":
+                    query = query.filter(allow_outbound=True)
+                else:
+                    query = query.filter(
+                        models.Q(allow_inbound=True) | models.Q(allow_outbound=True)
+                    )
+
+                if query.exists():
+                    return True
+            except Exception as exc:
+                logger.error(
+                    "Error checking web allowlist for agent %s: %s", self.id, exc, exc_info=True
+                )
+
+        return False
+
     def _is_allowed_default(self, channel_val: str, address: str) -> bool:
         """Default allow rules: owner-only for user-owned agents; org members for org-owned agents."""
         addr_raw = (address or "").strip()
@@ -1601,6 +1691,20 @@ class PersistentAgent(models.Model):
                 phone_number__iexact=address.strip(),
                 is_verified=True,
             ).exists()
+
+        if channel_val == CommsChannel.WEB:
+            user_id, agent_id = parse_web_user_address(addr_raw)
+            if agent_id != str(self.id) or user_id is None:
+                return False
+            if self.organization_id:
+                from .models import OrganizationMembership
+
+                return OrganizationMembership.objects.filter(
+                    org=self.organization,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                    user_id=user_id,
+                ).exists()
+            return user_id == self.user_id
 
         return False
 

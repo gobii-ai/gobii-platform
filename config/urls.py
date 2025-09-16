@@ -54,6 +54,9 @@ from console.views import (
     grant_credits,
     task_detail_view,
     AgentEmailSettingsView,
+    AgentChatView,
+    agent_chat_history,
+    agent_chat_send,
 )
 from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView
@@ -89,6 +92,9 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/enable-sms/", AgentEnableSmsView.as_view(), name="agent_enable_sms"),
     path("console/agents/<uuid:pk>/delete/", AgentDeleteView.as_view(), name="agent_delete"),
     path("console/agents/<uuid:pk>/email/", AgentEmailSettingsView.as_view(), name="agent_email_settings"),
+    path("console/agents/<uuid:pk>/chat/", AgentChatView.as_view(), name="agent_chat"),
+    path("console/agents/<uuid:pk>/chat/history/", agent_chat_history, name="agent_chat_history"),
+    path("console/agents/<uuid:pk>/chat/send/", agent_chat_send, name="agent_chat_send"),
     # Agent secrets management
     path("console/agents/<uuid:pk>/secrets/", AgentSecretsView.as_view(), name="agent_secrets"),
     path("console/agents/<uuid:pk>/secrets/add/", AgentSecretsAddView.as_view(), name="agent_secrets_add"),
