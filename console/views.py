@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 import stripe
 from django.template.loader import render_to_string
@@ -184,10 +185,23 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
                     total=Sum('credits'),
                     used=Sum('credits_used'),
                 )
-                org_tasks_available = (agg['avail'] or 0)
-                total = (agg['total'] or 0)
-                used = (agg['used'] or 0)
-                tasks_used_pct = 0.0 if total == 0 else min(100.0, (used / total) * 100.0)
+
+                def _to_decimal(value):
+                    if value is None:
+                        return Decimal("0")
+                    return value if isinstance(value, Decimal) else Decimal(value)
+
+                org_tasks_available = agg['avail'] if agg['avail'] is not None else Decimal("0")
+                total = _to_decimal(agg['total'])
+                used = _to_decimal(agg['used'])
+
+                if total == 0:
+                    tasks_used_pct = Decimal("0")
+                else:
+                    usage_pct = (used / total) * Decimal("100")
+                    tasks_used_pct = min(usage_pct, Decimal("100"))
+
+                tasks_used_pct = float(tasks_used_pct)
 
                 # Expose org metrics for dashboard rendering
                 context['org_tasks_available'] = org_tasks_available
