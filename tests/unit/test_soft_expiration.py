@@ -170,7 +170,7 @@ class SoftExpirationTaskTests(TestCase):
         agent.refresh_from_db()
         self.assertEqual(agent.life_state, PersistentAgent.LifeState.EXPIRED)
 
-
+@tag("batch_soft_expiration")
 class PersistentAgentInteractionResetTests(TestCase):
     def setUp(self):
         User = get_user_model()
