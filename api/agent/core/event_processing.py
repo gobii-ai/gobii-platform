@@ -50,7 +50,7 @@ from ..files.filesystem_prompt import get_agent_filesystem_prompt
 from ..tools.email_sender import execute_send_email, get_send_email_tool
 from ..tools.sms_sender import execute_send_sms, get_send_sms_tool
 from ..tools.search_web import execute_search_web, get_search_web_tool
-from ..tools.spawn_web_task import execute_spawn_web_task, get_spawn_web_task_tool
+from ..tools.spawn_web_task import execute_spawn_web_task
 from ..tools.schedule_updater import execute_update_schedule, get_update_schedule_tool
 from ..tools.charter_updater import execute_update_charter, get_update_charter_tool
 from ..tools.sqlite_query import execute_sqlite_query, get_sqlite_query_tool, get_sqlite_schema_prompt, set_sqlite_db_path, reset_sqlite_db_path, agent_sqlite_db
@@ -63,6 +63,10 @@ from ..tools.mcp_tools import (
     execute_search_tools, execute_mcp_tool
 )
 from ..tools.mcp_manager import get_mcp_manager
+from ..tools.builtin_registry import (
+    get_enabled_dynamic_builtin_definitions,
+    mark_dynamic_builtin_tool_used,
+)
 from ...models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -1100,6 +1104,9 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                             "message": f"Unknown tool '{tool_name}' called.",
                         }
 
+                    # Update usage metadata for dynamically-enabled built-in tools
+                    mark_dynamic_builtin_tool_used(agent, tool_name)
+
                     result_content = json.dumps(result)
                     # Log result summary
                     try:
@@ -2061,7 +2068,6 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_send_email_tool(),
         get_send_sms_tool(),
         get_search_web_tool(),
-        get_spawn_web_task_tool(),
         get_update_schedule_tool(),
         get_update_charter_tool(),
         get_sqlite_query_tool(),
@@ -2087,6 +2093,9 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         # Get tool definitions for enabled MCP tools
         mcp_tools = mcp_manager.get_enabled_tools_definitions(agent)
         static_tools.extend(mcp_tools)
+
+        # Append dynamically-enabled built-in tools (e.g., spawn_web_task)
+        static_tools.extend(get_enabled_dynamic_builtin_definitions(agent))
 
     return static_tools
 

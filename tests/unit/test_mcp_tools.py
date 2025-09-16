@@ -428,15 +428,52 @@ class MCPToolFunctionsTests(TestCase):
         kwargs = mock_completion.call_args.kwargs
         self.assertNotIn('use_parallel_tool_calls', kwargs)
 
+    @patch('api.agent.tools.mcp_manager.get_dynamic_builtin_catalog_entries', return_value=[])
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_search_tools_no_tools(self, mock_init, mock_get_tools):
+    def test_search_tools_no_tools(self, mock_init, mock_get_tools, mock_builtin_catalog):
         """search_tools when no tools are available returns a message."""
         mock_get_tools.return_value = []
         result = search_tools(self.agent, "any query")
         self.assertEqual(result["status"], "success")
-        self.assertIn("No MCP tools available", result["message"])
-        
+        self.assertIn("No tools available", result["message"])
+
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_enable_tools_supports_builtin_entries(self, mock_init, mock_get_tools):
+        """enable_tools should enable dynamic built-in tools alongside MCP tools."""
+        mock_get_tools.return_value = []
+
+        result = enable_tools(self.agent, ["spawn_web_task"])
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("spawn_web_task", result["enabled"])
+        row = PersistentAgentEnabledTool.objects.get(agent=self.agent)
+        self.assertEqual(row.tool_full_name, "builtin::spawn_web_task")
+        self.assertEqual(row.tool_server, "builtin")
+        self.assertEqual(row.tool_name, "spawn_web_task")
+
+    @patch('api.agent.core.event_processing.get_mcp_manager')
+    @patch('api.agent.tools.mcp_manager.ensure_default_tools_enabled')
+    def test_get_agent_tools_exposes_builtin_only_when_enabled(self, mock_ensure, mock_get_manager):
+        """_get_agent_tools should include spawn_web_task only after enabling it."""
+        from api.agent.core.event_processing import _get_agent_tools
+
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_enabled_tools_definitions.return_value = []
+        mock_get_manager.return_value = mock_manager
+
+        tools = _get_agent_tools(self.agent)
+        names = [t.get("function", {}).get("name") for t in tools if isinstance(t, dict)]
+        self.assertNotIn("spawn_web_task", names)
+
+        enable_tools(self.agent, ["spawn_web_task"])
+
+        tools_after = _get_agent_tools(self.agent)
+        names_after = [t.get("function", {}).get("name") for t in tools_after if isinstance(t, dict)]
+        self.assertIn("spawn_web_task", names_after)
+
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_enable_mcp_tool_success(self, mock_init, mock_get_tools):

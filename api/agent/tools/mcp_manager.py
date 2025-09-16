@@ -31,6 +31,12 @@ from django.conf import settings
 
 from ...models import PersistentAgent, PersistentAgentEnabledTool
 from ..core.llm_config import get_llm_config_with_failover
+from .builtin_registry import (
+    BUILTIN_TOOL_SERVER,
+    enable_dynamic_builtin_tools,
+    get_dynamic_builtin_catalog_entries,
+    list_dynamic_builtin_names,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -681,6 +687,7 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
     
     # Get all available tools
     all_tools = _mcp_manager.get_all_available_tools()
+    builtin_catalog = get_dynamic_builtin_catalog_entries()
     logger.info("search_tools: %d tools available across servers", len(all_tools))
     try:
         # Log the full set of discovered tool names (server/name)
@@ -688,12 +695,22 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
         logger.info("search_tools: available tool names: %s", ", ".join(names))
     except Exception:
         logger.exception("search_tools: failed to log available tool names")
-    
-    if not all_tools:
+
+    if builtin_catalog:
+        try:
+            builtin_names = ", ".join(entry["name"] for entry in builtin_catalog)
+            logger.info(
+                "search_tools: dynamic built-in tools available: %s",
+                builtin_names,
+            )
+        except Exception:
+            logger.exception("search_tools: failed to log dynamic built-in tool names")
+
+    if not all_tools and not builtin_catalog:
         return {
             "status": "success",
             "tools": [],
-            "message": "No MCP tools available"
+            "message": "No tools available"
         }
     
     # Prepare concise, plain‑text tool catalog for the LLM (save tokens)
@@ -729,6 +746,14 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
             return ""
 
     tools_lines: List[str] = []
+    for builtin in builtin_catalog:
+        desc = _strip_desc(builtin.get("summary", ""))
+        p = _summarize_params(builtin.get("params") or {})
+        line = f"- {builtin['name']} (builtin): {desc}" if desc else f"- {builtin['name']} (builtin)"
+        if p:
+            line += f" | params: {p}"
+        tools_lines.append(line)
+
     for tool in all_tools:
         desc = _strip_desc(tool.description or "")
         p = _summarize_params(tool.parameters or {})
@@ -752,10 +777,11 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
     
     # Prepare the search prompt with an internal tool-call to enable_tools
     system_prompt = (
-        "You are a concise tool discovery assistant. Given a user query and a list of available MCP tools "
-        "(names, brief descriptions, and summarized parameters), you MUST select ALL relevant tools and then "
-        "call the function enable_tools exactly once with the full tool names you selected. "
-        "If no tools are relevant, do not call the function and reply briefly explaining that none are relevant."
+        "You are a concise tool discovery assistant. Given a user query and a list of available tools "
+        "(including dynamic built-ins and MCP tools with brief descriptions and summarized parameters), "
+        "you MUST select ALL relevant tools and then call the function enable_tools exactly once with the full "
+        "tool names you selected. If no tools are relevant, do not call the function and reply briefly "
+        "explaining that none are relevant."
     )
 
     user_prompt = (
@@ -788,7 +814,7 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
                     "function": {
                         "name": "enable_tools",
                         "description": (
-                            "Enable multiple MCP tools in one call. Provide the exact full names "
+                            "Enable multiple tools in one call. Provide the exact full names "
                             "from the catalog above."
                         ),
                         "parameters": {
@@ -924,11 +950,23 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
 
     all_tools = _mcp_manager.get_all_available_tools()
     available = {t.full_name for t in all_tools}
+    builtin_names = set(list_dynamic_builtin_names())
 
     enabled: List[str] = []
     already_enabled: List[str] = []
     evicted: List[str] = []
     invalid: List[str] = []
+
+    # First handle dynamically-enabled built-in tools
+    builtin_requested = [name for name in requested if name in builtin_names]
+    if builtin_requested:
+        builtin_result = enable_dynamic_builtin_tools(agent, builtin_requested)
+        enabled.extend(builtin_result.get("enabled", []))
+        already_enabled.extend(builtin_result.get("already_enabled", []))
+        invalid.extend(builtin_result.get("invalid", []))
+
+    # Remaining requests are MCP tool names
+    requested = [name for name in requested if name not in builtin_names]
 
     # Enable or mark already-enabled
     for name in requested:
@@ -954,16 +992,18 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
             invalid.append(name)
 
     # Enforce LRU cap after all insertions
-    total = PersistentAgentEnabledTool.objects.filter(agent=agent).count()
+    from django.db.models import F
+
+    non_builtin_qs = PersistentAgentEnabledTool.objects.filter(agent=agent).exclude(
+        tool_server=BUILTIN_TOOL_SERVER
+    )
+    total = non_builtin_qs.count()
     if total > MAX_MCP_TOOLS:
         overflow = total - MAX_MCP_TOOLS
         # Oldest by (last_used_at NULLS FIRST, enabled_at ASC)
-        from django.db.models import F
-        oldest = (
-            PersistentAgentEnabledTool.objects.filter(agent=agent)
-            .order_by(F("last_used_at").asc(nulls_first=True), "enabled_at", "tool_full_name")
-            [:overflow]
-        )
+        oldest = non_builtin_qs.order_by(
+            F("last_used_at").asc(nulls_first=True), "enabled_at", "tool_full_name"
+        )[:overflow]
         evicted_names = [o.tool_full_name for o in oldest]
         PersistentAgentEnabledTool.objects.filter(id__in=[o.id for o in oldest]).delete()
         evicted.extend(evicted_names)
@@ -1046,13 +1086,16 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
         return {"status": "error", "message": str(e)}
 
     # Enforce cap
-    total = PersistentAgentEnabledTool.objects.filter(agent=agent).count()
+    non_builtin_qs = PersistentAgentEnabledTool.objects.filter(agent=agent).exclude(
+        tool_server=BUILTIN_TOOL_SERVER
+    )
+    total = non_builtin_qs.count()
     disabled_tool = None
     if total > MAX_MCP_TOOLS:
         # Exclude the just-added tool from eviction so we always keep it
         from django.db.models import F
         oldest = (
-            PersistentAgentEnabledTool.objects.filter(agent=agent)
+            non_builtin_qs
             .exclude(tool_full_name=tool_name)
             .order_by(F("last_used_at").asc(nulls_first=True), "enabled_at", "tool_full_name")
             .first()
