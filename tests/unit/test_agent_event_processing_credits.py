@@ -1,18 +1,22 @@
+from decimal import Decimal
+
 from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
+    PersistentAgentStep,
     PersistentAgentSystemStep,
     TaskCredit,
 )
 from django.contrib.auth import get_user_model
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import uuid
 from util.constants.task_constants import TASKS_UNLIMITED
+from api.agent.core.event_processing import _ensure_credit_for_tool
 
 
 class _DummySpan:
@@ -162,3 +166,109 @@ class PersistentAgentCreditGateTests(TestCase):
                 notes__icontains="credit_insufficient",
             ).exists()
         )
+
+
+@tag("batch_event_processing")
+class PersistentAgentToolCreditTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_user(
+            username=f"tool-user-{uuid.uuid4()}",
+            email=f"tool-user-{uuid.uuid4()}@example.com",
+            password="pass1234",
+        )
+
+        cls.browser_agent = BrowserUseAgent.objects.create(
+            user=cls.user,
+            name="Tool BA",
+        )
+
+        cls.agent = PersistentAgent.objects.create(
+            user=cls.user,
+            name="Tool Agent",
+            charter="Handle tool credits",
+            browser_use_agent=cls.browser_agent,
+        )
+
+    def tearDown(self):
+        PersistentAgentStep.objects.filter(agent=self.agent).delete()
+        PersistentAgentSystemStep.objects.filter(step__agent=self.agent).delete()
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
+    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available")
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.8"))
+    def test_mid_loop_insufficient_when_cost_exceeds_available(
+        self,
+        mock_cost,
+        mock_available,
+        mock_consume,
+    ):
+        mock_available.return_value = Decimal("0.4")
+        span = MagicMock()
+
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
+
+        self.assertFalse(result)
+        mock_consume.assert_not_called()
+
+        step = PersistentAgentStep.objects.get(agent=self.agent)
+        self.assertIn("insufficient credits", step.description)
+        self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step=step,
+                notes="credit_insufficient_mid_loop",
+            ).exists()
+        )
+
+        span.add_event.assert_any_call("Tool skipped - insufficient credits mid-loop")
+        span.set_attribute.assert_any_call("credit_check.tool_cost", 0.8)
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
+    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=Decimal("1.2"))
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.8"))
+    def test_mid_loop_consumption_exception_records_error(
+        self,
+        mock_cost,
+        _mock_available,
+        mock_consume,
+    ):
+        mock_consume.side_effect = Exception("db down")
+        span = MagicMock()
+
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
+
+        self.assertFalse(result)
+        step = PersistentAgentStep.objects.get(agent=self.agent)
+        self.assertIn("insufficient credits", step.description)
+        self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step=step,
+                notes="credit_consumption_failure_mid_loop",
+            ).exists()
+        )
+
+        span.add_event.assert_any_call("Credit consumption raised exception", {"error": "db down"})
+        span.add_event.assert_any_call("Tool skipped - insufficient credits during processing")
+        span.set_attribute.assert_any_call("credit_check.error", "db down")
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
+    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=TASKS_UNLIMITED)
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.8"))
+    def test_unlimited_skips_fractional_gate(
+        self,
+        mock_cost,
+        _mock_available,
+        mock_consume,
+    ):
+        mock_consume.return_value = {"success": True, "credit": object()}
+        span = MagicMock()
+
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
+
+        self.assertEqual(result, Decimal("0.8"))
+        mock_consume.assert_called_once()
+        span.set_attribute.assert_any_call("credit_check.consumed_in_loop", True)
