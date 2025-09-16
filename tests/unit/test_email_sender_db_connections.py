@@ -5,7 +5,14 @@ from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
 from django.db.utils import OperationalError
 
-from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentCommsEndpoint
+from django.utils import timezone
+
+from api.models import (
+    PersistentAgent,
+    BrowserUseAgent,
+    PersistentAgentCommsEndpoint,
+    DeliveryStatus,
+)
 from api.agent.tools.email_sender import execute_send_email
 
 
@@ -83,8 +90,22 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
                 raise OperationalError("simulated stale connection on create")
             return original_create_msg(*args, **kwargs)
 
-        with patch("api.agent.tools.email_sender.PersistentAgentCommsEndpoint.objects.get_or_create", side_effect=_flaky_get_or_create), \
-             patch("api.agent.tools.email_sender.PersistentAgentMessage.objects.create", side_effect=_flaky_create_msg):
+        def _simulate_delivery(message):
+            message.latest_status = DeliveryStatus.DELIVERED
+            message.latest_sent_at = timezone.now()
+            message.latest_error_message = ""
+            message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
+
+        with patch(
+            "api.agent.tools.email_sender.PersistentAgentCommsEndpoint.objects.get_or_create",
+            side_effect=_flaky_get_or_create,
+        ), patch(
+            "api.agent.tools.email_sender.PersistentAgentMessage.objects.create",
+            side_effect=_flaky_create_msg,
+        ), patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=_simulate_delivery,
+        ):
             result = execute_send_email(self.agent, params)
 
         self.assertEqual(result.get("status"), "ok")
