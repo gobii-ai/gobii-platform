@@ -7,7 +7,7 @@ import sqlite3
 
 from api.models import PersistentAgent, BrowserUseAgent
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
-from api.agent.tools.sqlite_query import set_sqlite_db_path, reset_sqlite_db_path
+from api.agent.tools.sqlite_state import set_sqlite_db_path, reset_sqlite_db_path
 
 
 @tag("batch_sqlite")
