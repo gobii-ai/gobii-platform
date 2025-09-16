@@ -22,37 +22,27 @@
       {% load waffle_tags %}
       {% flag "organizations" %}
         {% if request.user.is_authenticated %}
-          <div class="max-w-2xl mx-auto mb-6">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border border-indigo-100 rounded-xl px-4 py-3 shadow-sm">
-              <div>
-                <p class="text-sm font-medium text-gray-800">
-                  This agent will belong to
-                  {% if current_context.type == 'organization' %}
-                    <span class="text-indigo-600">{{ current_context.name }}</span>
-                  {% else %}
-                    <span class="text-indigo-600">your personal workspace</span>
-                  {% endif %}
-                  .
-                </p>
-                {% if current_context.type == 'organization' %}
-                  {% if show_org_permission_warning %}
-                    <p class="mt-1 text-sm text-red-600">You need to be an organization owner or admin to create agents here. Switch context to proceed.</p>
-                  {% else %}
-                    <p class="mt-1 text-sm text-gray-500">Use the context switcher in the header to create a personal agent instead.</p>
-                  {% endif %}
-                {% elif user_organizations %}
-                  <p class="mt-1 text-sm text-gray-500">Switch contexts in the header if you want to create an agent for an organization.</p>
-                {% endif %}
-              </div>
-              <div>
-                <button type="button" class="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 transition" data-open-context-switcher>
-                  Change context
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+          <div class="max-w-2xl mx-auto mb-6 bg-white border border-indigo-100 rounded-xl px-4 py-3 shadow-sm space-y-2">
+            <label for="agent-owner-selector-contact" class="text-sm font-medium text-gray-800">Choose the agent owner</label>
+            <select id="agent-owner-selector-contact" class="block w-full rounded-lg border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 py-2.5 px-3 bg-white">
+              <option value='{"type": "personal", "id": "{{ request.user.id }}", "name": "{{ request.user.get_full_name|default:request.user.username }}"}' {% if current_context.type != 'organization' %}selected{% endif %}>
+                Personal – {{ request.user.get_full_name|default:request.user.username }}
+              </option>
+              {% for membership in user_organizations %}
+                <option value='{"type": "organization", "id": "{{ membership.org.id }}", "name": "{{ membership.org.name }}"}' {% if current_context.type == 'organization' and current_context.id == membership.org.id|stringformat:"s" %}selected{% endif %}>
+                  Organization – {{ membership.org.name }}
+                </option>
+              {% endfor %}
+            </select>
+            {% if current_context.type == 'organization' %}
+              {% if show_org_permission_warning %}
+                <p class="text-sm text-red-600">You need to be an organization owner or admin to create agents here.</p>
+              {% else %}
+                <p class="text-sm text-gray-500">Switch to your personal workspace if you want this agent to be private.</p>
+              {% endif %}
+            {% elif user_organizations %}
+              <p class="text-sm text-gray-500">Want an org-owned agent? Pick the organization above before creating it.</p>
+            {% endif %}
           </div>
         {% endif %}
       {% endflag %}
@@ -249,15 +239,45 @@
 
 <script>
 (function () {
-  document.querySelectorAll('[data-open-context-switcher]').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      const switcher = document.querySelector('[x-data="contextSwitcher()"] button');
-      if (switcher) {
-        switcher.focus();
-        switcher.click();
+  const select = document.getElementById('agent-owner-selector-contact');
+  if (select) {
+    if (!window._postConsoleContextSwitch) {
+      window._postConsoleContextSwitch = async function (type, id, name) {
+        try {
+          const response = await fetch('{% url "switch_context" %}', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': (function () {
+                const match = document.cookie.match(new RegExp('(?:^|; )csrftoken=([^;]*)'));
+                return match ? decodeURIComponent(match[1]) : '';
+              })()
+            },
+            body: JSON.stringify({ type, id, name })
+          });
+
+          if (!response.ok) {
+            throw new Error('Context switch failed');
+          }
+
+          window.location.reload();
+        } catch (error) {
+          console.error(error);
+          window.location.reload();
+        }
+      };
+    }
+
+    select.addEventListener('change', async (event) => {
+      try {
+        const option = event.target.selectedOptions[0];
+        const payload = JSON.parse(option.value);
+        await window._postConsoleContextSwitch(payload.type, payload.id, payload.name);
+      } catch (error) {
+        console.error('Failed to parse agent owner selection', error);
       }
     });
-  });
+  }
 
   // Helper – enable or disable the SMS radio
   function syncCommOptions(selectSms, selectEmail) {

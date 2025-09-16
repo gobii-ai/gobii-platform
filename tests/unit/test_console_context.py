@@ -208,7 +208,7 @@ class ConsoleContextTests(TestCase):
         resp = self.client.get(reverse("agent_create_contact"))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertIn("This agent will belong to", html)
+        self.assertIn('id="agent-owner-selector-contact"', html)
         self.assertIn(self.org.name, html)
         self.assertNotIn('disabled aria-disabled="true"', html)
 
@@ -225,6 +225,7 @@ class ConsoleContextTests(TestCase):
         resp = self.client.get(reverse("agent_create_contact"))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
+        self.assertIn('id="agent-owner-selector-contact"', html)
         self.assertIn("You need to be an organization owner or admin", html)
         self.assertIn('disabled aria-disabled="true"', html)
 
