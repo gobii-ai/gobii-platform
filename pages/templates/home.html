@@ -59,15 +59,10 @@
       backdrop-filter: blur(1px);
     }
 
-    /* Enhanced glassmorphism effect for input areas */
-    .game-of-life-content .bg-white\/85 {
-      background: rgba(255, 255, 255, 0.9);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    /* Pure white background for input areas */
+    .game-of-life-content .bg-white {
+      background: #ffffff;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
     }
 
     /* Ensure crisp edges on rounded corners */
@@ -115,7 +110,7 @@
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
               <!-- Unified input + button container -->
-              <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white/85 backdrop-blur-md transition-colors duration-200">
+              <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white transition-colors duration-200">
                 <!-- Textarea -->
                 {{ agent_charter_form.charter }}
 
