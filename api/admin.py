@@ -433,7 +433,7 @@ class MeteringBatchAdmin(admin.ModelAdmin):
             reverse("admin:api_browseruseagenttask_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
         )
         steps_url = (
-            reverse("admin:api_browseruseagenttaskstep_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
+            reverse("admin:api_persistentagentstep_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
         )
         return format_html(
             '<a href="{}">Tasks: {}</a> &nbsp;|&nbsp; <a href="{}">Steps: {}</a>',
