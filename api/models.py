@@ -1354,6 +1354,10 @@ class PersistentAgent(models.Model):
     )
     last_expired_at = models.DateTimeField(null=True, blank=True)
     sleep_email_sent_at = models.DateTimeField(null=True, blank=True)
+    sent_expiration_email = models.BooleanField(
+        default=False,
+        help_text="Whether a soft-expiration notification has been sent for the current inactivity period.",
+    )
 
     class WhitelistPolicy(models.TextChoices):
         DEFAULT = "default", "Default (Owner or Org Members)"
@@ -1687,6 +1691,10 @@ class PersistentAgent(models.Model):
     def save(self, *args, **kwargs):
         is_new = self._state.adding
 
+        # Track whether we should reset the sent_expiration_email flag when the agent wakes up.
+        reset_sent_flag = False
+        update_fields = kwargs.get("update_fields")
+
         # For updates, we need to check if schedule-related fields have changed.
         sync_needed = False
         shutdown_reasons: list[str] = []
@@ -1697,6 +1705,12 @@ class PersistentAgent(models.Model):
                 if (old_instance.schedule != self.schedule or
                     old_instance.is_active != self.is_active):
                     sync_needed = True
+
+                consider_last_interaction = (
+                    update_fields is None or "last_interaction_at" in update_fields
+                )
+                if consider_last_interaction and old_instance.last_interaction_at != self.last_interaction_at:
+                    reset_sent_flag = old_instance.sent_expiration_email or self.sent_expiration_email
 
                 # Detect shutdown‑adjacent transitions to trigger centralized cleanup
                 try:
@@ -1727,6 +1741,13 @@ class PersistentAgent(models.Model):
             except PersistentAgent.DoesNotExist:
                 # If it doesn't exist in the DB yet, treat it as a new instance.
                 is_new = True
+
+        if reset_sent_flag:
+            self.sent_expiration_email = False
+            if update_fields is not None and "sent_expiration_email" not in update_fields:
+                update_fields_list = list(update_fields)
+                update_fields_list.append("sent_expiration_email")
+                kwargs["update_fields"] = update_fields_list
 
         # Proceed with the actual save operation. This is part of the transaction.
         super().save(*args, **kwargs)
