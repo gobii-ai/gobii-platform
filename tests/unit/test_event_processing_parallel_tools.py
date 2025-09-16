@@ -30,18 +30,18 @@ class TestParallelToolCallsExecution(TestCase):
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
     @patch('api.agent.core.event_processing.execute_send_sms', return_value={"status": "success"})
-    @patch('api.agent.core.event_processing.execute_sqlite_query', return_value={"status": "ok", "rows": []})
+    @patch('api.agent.core.event_processing.execute_sqlite_batch', return_value={"status": "ok"})
     @patch('api.agent.core.event_processing._build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
     def test_executes_all_tool_calls_in_one_turn(self, mock_completion, mock_build_prompt, *_mocks):
         # Make prompt builder return minimal content and a small token count
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
 
-        # Craft a response with two tool calls: sqlite_query then send_sms
+        # Craft a response with two tool calls: sqlite_batch then send_sms
         tc1 = MagicMock()
         tc1.function = MagicMock()
-        tc1.function.name = 'sqlite_query'
-        tc1.function.arguments = '{"sql": "select 1"}'
+        tc1.function.name = 'sqlite_batch'
+        tc1.function.arguments = '{"ops": [{"sql": "select 1"}]}'
 
         tc2 = MagicMock()
         tc2.function = MagicMock()
@@ -67,7 +67,7 @@ class TestParallelToolCallsExecution(TestCase):
         # Access the patched functions from the decorator order above
         execute_sqlite_called = _mocks[1]
         execute_sms_called = _mocks[0]
-        self.assertTrue(execute_sqlite_called.called, "sqlite_query was not executed")
+        self.assertTrue(execute_sqlite_called.called, "sqlite_batch was not executed")
         self.assertTrue(execute_sms_called.called, "send_sms was not executed")
         self.assertEqual(execute_sqlite_called.call_count, 1)
         self.assertEqual(execute_sms_called.call_count, 1)
