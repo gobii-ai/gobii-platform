@@ -441,7 +441,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ────────── Soft Expiration Settings ──────────
 # Number of days of inactivity before a free-plan agent is soft-expired
-AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS = env.int("AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS", default=7)
+AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS = env.int("AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS", default=60)
 # Hours of grace after a user downgrades to Free before expiration checks apply
 AGENT_SOFT_EXPIRATION_DOWNGRADE_GRACE_HOURS = env.int("AGENT_SOFT_EXPIRATION_DOWNGRADE_GRACE_HOURS", default=48)
 
