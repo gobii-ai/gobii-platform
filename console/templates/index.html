@@ -48,7 +48,7 @@
       </div>
       <div class="flex-grow flex items-center justify-center mt-auto">
         {% if current_context.type == 'organization' %}
-          <h3 class="text-3xl font-semibold text-slate-900">{{ org_tasks_available }}</h3>
+          <h3 class="text-3xl font-semibold text-slate-900">{{ org_tasks_available|floatformat:0 }}</h3>
         {% else %}
           <h3 class="text-3xl font-semibold text-slate-900">{% if account.usage.tasks_available >= 0 %}{{ account.usage.tasks_available|floatformat:0 }}{% else %}∞{% endif %}</h3>
         {% endif %}
