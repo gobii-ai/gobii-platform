@@ -138,6 +138,11 @@ def _send_sleep_notification(agent) -> None:
 @shared_task(name="gobii_platform.api.tasks.soft_expire_inactive_agents_task")
 def soft_expire_inactive_agents_task() -> int:
     """Scan for eligible agents and soft-expire them. Returns count expired."""
+
+    if settings.GOBII_RELEASE_ENV is not 'prod':
+        logger.info("Agent expiration skipped; disabled when not in production")
+        return 0
+
     if not switch_is_active(AGENT_SOFT_EXPIRATION):
         logger.info("Soft-expiration switch disabled; skipping run.")
         return 0
