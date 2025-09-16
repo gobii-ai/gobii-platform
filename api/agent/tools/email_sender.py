@@ -6,7 +6,7 @@ including tool definition and execution logic.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from ...models import (
     PersistentAgent,
@@ -20,6 +20,34 @@ import os
 from ..comms.outbound_delivery import deliver_agent_email
 
 logger = logging.getLogger(__name__)
+
+
+def _restore_truncated_unicode(text: Optional[str]) -> Optional[str]:
+    """Repair common smart punctuation that had its high byte stripped earlier."""
+    if not text:
+        return text
+
+    needs_fix = False
+    for ch in text:
+        code = ord(ch)
+        if 0 <= code < 32 and code not in (9, 10, 13):
+            needs_fix = True
+            break
+
+    if not needs_fix:
+        return text
+
+    fixed_chars = []
+    for ch in text:
+        code = ord(ch)
+        if 0 <= code < 32 and code not in (9, 10, 13):
+            fixed_chars.append(chr(code + 0x2000))
+        else:
+            fixed_chars.append(ch)
+
+    repaired = "".join(fixed_chars)
+    logger.debug("Repaired truncated unicode punctuation: %s -> %s", text[:50], repaired[:50])
+    return repaired
 
 
 def get_send_email_tool() -> Dict[str, Any]:
@@ -56,8 +84,8 @@ def get_send_email_tool() -> Dict[str, Any]:
 def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_email tool for a persistent agent."""
     to_address = params.get("to_address")
-    subject = params.get("subject")
-    mobile_first_html = params.get("mobile_first_html")
+    subject = _restore_truncated_unicode(params.get("subject"))
+    mobile_first_html = _restore_truncated_unicode(params.get("mobile_first_html"))
     cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
     
     if not all([to_address, subject, mobile_first_html]):

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from django.test import TransactionTestCase, tag
+from django.test import TransactionTestCase, tag, SimpleTestCase
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
 from django.db.utils import OperationalError
 
-from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentCommsEndpoint
-from api.agent.tools.email_sender import execute_send_email
+from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentCommsEndpoint, PersistentAgentMessage
+from api.agent.tools.email_sender import execute_send_email, _restore_truncated_unicode
 
 
 User = get_user_model()
@@ -88,3 +88,34 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             result = execute_send_email(self.agent, params)
 
         self.assertEqual(result.get("status"), "ok")
+
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_execute_send_email_restores_truncated_unicode(self, mock_deliver: MagicMock):
+        params = {
+            "to_address": self.user.email,
+            "subject": "Plan update I\x19m excited about",
+            "mobile_first_html": "<p>Ready\x14set\x14go\x04</p>",
+        }
+
+        result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        mock_deliver.assert_called_once()
+
+        message = PersistentAgentMessage.objects.order_by("-timestamp").first()
+        self.assertIsNotNone(message)
+        self.assertNotIn("\x19", message.raw_payload.get("subject", ""))
+        self.assertNotIn("\x14", message.body)
+        self.assertNotIn("\x04", message.body)
+        self.assertIn("I’m", message.raw_payload.get("subject", ""))
+        self.assertIn("—", message.body)
+        self.assertIn(" ", message.body)
+
+    def test_restore_returns_original_when_no_control_chars(self):
+        text = "Plain text"
+        self.assertEqual(_restore_truncated_unicode(text), text)
+
+    def test_restore_fixes_low_control_characters(self):
+        text = "I\x19m using\x14smart\x04punctuation"
+        repaired = _restore_truncated_unicode(text)
+        self.assertEqual(repaired, "I’m using—smart punctuation")
