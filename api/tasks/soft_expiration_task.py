@@ -131,9 +131,10 @@ def _send_sleep_notification(agent) -> None:
         logger.info("Agent %s preferred endpoint channel %s not supported for sleep notification.", agent.id, ep.channel)
         return
 
-    # Mark notification sent
+    # Mark notification sent for this inactivity window.
     agent.sleep_email_sent_at = now
-    agent.save(update_fields=["sleep_email_sent_at"])
+    agent.sent_expiration_email = True
+    agent.save(update_fields=["sleep_email_sent_at", "sent_expiration_email"])
 
 @shared_task(name="gobii_platform.api.tasks.soft_expire_inactive_agents_task")
 def soft_expire_inactive_agents_task() -> int:
@@ -224,11 +225,17 @@ def soft_expire_inactive_agents_task() -> int:
                 except Exception as ae:
                     logger.error("Failed to enqueue analytics event for agent %s soft-expire: %s", locked_agent.id, ae)
 
-                # Send notification (skip if manually paused)
-                try:
-                    _send_sleep_notification(locked_agent)
-                except Exception as ne:
-                    logger.error("Failed sending sleep notification for agent %s: %s", locked_agent.id, ne)
+                # Send notification (skip if manually paused or already sent)
+                if not locked_agent.sent_expiration_email:
+                    try:
+                        _send_sleep_notification(locked_agent)
+                    except Exception as ne:
+                        logger.error("Failed sending sleep notification for agent %s: %s", locked_agent.id, ne)
+                else:
+                    logger.info(
+                        "Skip sleep notification for agent %s; already sent in this inactivity window.",
+                        locked_agent.id,
+                    )
 
                 expired_count += 1
         except Exception as e:

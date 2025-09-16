@@ -22,12 +22,19 @@ class SoftExpirationTaskTests(TestCase):
         self.user = User.objects.create_user(
             username='soft-expire@example.com', email='soft-expire@example.com', password='password'
         )
+        # Ensure soft-expiration task runs by simulating production environment.
+        self._old_release_env = settings.GOBII_RELEASE_ENV
+        settings.GOBII_RELEASE_ENV = 'prod'
+        self.addCleanup(self._restore_release_env)
 
         # Ensure user has a high agent limit if quota is enforced elsewhere
         from api.models import UserQuota
         quota, _ = UserQuota.objects.get_or_create(user=self.user)
         quota.agent_limit = 100
         quota.save()
+
+    def _restore_release_env(self):
+        settings.GOBII_RELEASE_ENV = self._old_release_env
 
     @patch('api.tasks.soft_expiration_task.switch_is_active', return_value=True)
     @patch('api.tasks.soft_expiration_task._send_sleep_notification')
@@ -94,6 +101,38 @@ class SoftExpirationTaskTests(TestCase):
 
     @patch('api.tasks.soft_expiration_task.switch_is_active', return_value=True)
     @patch('api.tasks.soft_expiration_task._send_sleep_notification')
+    def test_soft_expire_skips_when_notification_already_sent(self, mock_notify: MagicMock, mock_switch):
+        from api.models import PersistentAgent
+        from api.tasks.soft_expiration_task import soft_expire_inactive_agents_task
+
+        browser = _create_browser_agent_without_proxy(self.user, "browser-d")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="already-notified",
+            charter="Test",
+            schedule="@daily",
+            is_active=True,
+            browser_use_agent=browser,
+        )
+
+        # Simulate prior notification sent from preview environment.
+        stale_ts = timezone.now() - timedelta(days=settings.AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS+2)
+        PersistentAgent.objects.filter(pk=agent.pk).update(
+            last_interaction_at=stale_ts,
+            sent_expiration_email=True,
+        )
+
+        expired = soft_expire_inactive_agents_task()
+
+        self.assertEqual(expired, 1)
+        mock_notify.assert_not_called()
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.life_state, PersistentAgent.LifeState.EXPIRED)
+        self.assertTrue(agent.sent_expiration_email)
+
+    @patch('api.tasks.soft_expiration_task.switch_is_active', return_value=True)
+    @patch('api.tasks.soft_expiration_task._send_sleep_notification')
     def test_downgrade_grace_applies(self, mock_notify: MagicMock, mock_switch):
         from api.models import PersistentAgent, UserBilling
         from api.tasks.soft_expiration_task import soft_expire_inactive_agents_task
@@ -130,3 +169,35 @@ class SoftExpirationTaskTests(TestCase):
         self.assertEqual(expired2, 1)
         agent.refresh_from_db()
         self.assertEqual(agent.life_state, PersistentAgent.LifeState.EXPIRED)
+
+
+class PersistentAgentInteractionResetTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username='reset-flag@example.com', email='reset-flag@example.com', password='password'
+        )
+
+    def test_last_interaction_reset_flag(self):
+        from api.models import PersistentAgent
+
+        browser = _create_browser_agent_without_proxy(self.user, "browser-reset")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="reset-agent",
+            charter="Test",
+            schedule="@daily",
+            is_active=True,
+            browser_use_agent=browser,
+        )
+
+        agent.sent_expiration_email = True
+        agent.save(update_fields=["sent_expiration_email"])
+
+        # Update last_interaction_at to simulate user waking the agent.
+        new_ts = timezone.now()
+        agent.last_interaction_at = new_ts
+        agent.save(update_fields=["last_interaction_at"])
+
+        agent.refresh_from_db()
+        self.assertFalse(agent.sent_expiration_email)
