@@ -16,6 +16,7 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 import logging
 import stripe
 
+from api.models import UserBilling
 from util.payments_helper import PaymentsHelper
 from util.subscription_helper import get_user_task_credit_limit, mark_user_billing_with_plan, downgrade_user_to_free_plan
 
@@ -237,13 +238,16 @@ def handle_subscription_event(event, **kwargs):
         # Update the user's billing plan, preserving anchor until we set it from Stripe below
         mark_user_billing_with_plan(user, plan_value, update_anchor=False)
 
-        # Align local anchor day with Stripe subscription period start for Pro
+        # Align local anchor day with the Stripe subscription period start for Pro
         try:
-            from api.models import UserBilling
-            ub = UserBilling.objects.filter(user=user).first()
-            if ub and getattr(sub, 'current_period_start', None):
-                ub.billing_cycle_anchor = sub.current_period_start.day
-                ub.save(update_fields=["billing_cycle_anchor"])
+            ub = user.billing
+            if getattr(sub, 'current_period_start', None):
+                new_day = sub.current_period_start.day
+                if ub.billing_cycle_anchor != new_day:
+                    ub.billing_cycle_anchor = new_day
+                    ub.save(update_fields=["billing_cycle_anchor"])
+        except UserBilling.DoesNotExist:
+            logger.exception("UserBilling record not found for user %s during anchor alignment.", user.id, e)
         except Exception as e:
             logger.exception("Failed to align billing anchor with Stripe period for user %s: %s", user.id, e)
 
@@ -251,6 +255,7 @@ def handle_subscription_event(event, **kwargs):
         Analytics.identify(user.id, {
             'plan': plan_value,
         })
+
         Analytics.track_event(
             user_id=user.id,
             event=AnalyticsEvent.SUBSCRIPTION_CREATED,
