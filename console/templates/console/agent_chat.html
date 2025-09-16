@@ -86,8 +86,8 @@
                   </template>
                 </div>
                 <div :class="event.author === 'agent' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800'"
-                     class="rounded-2xl px-4 py-3 shadow-sm whitespace-pre-wrap break-words">
-                  <p x-text="event.body"></p>
+                     class="rounded-2xl px-4 py-3 shadow-sm whitespace-pre-wrap break-words"
+                     x-html="renderedBody(event)">
                 </div>
                 <template x-if="event.attachments">
                   <p class="mt-2 text-xs text-gray-400" x-text="event.attachments + ' attachment' + (event.attachments === 1 ? '' : 's')"></p>
@@ -97,37 +97,71 @@
           </template>
           <template x-if="event.type === 'step'">
             <div class="flex">
-              <div class="flex-1 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3">
-                <div class="flex items-center justify-between">
-                  <div class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <div class="flex-1 bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3" x-data="{ open: false }">
+                <button type="button" @click="open = !open" class="w-full flex items-center justify-between text-left">
+                  <div class="flex items-center gap-2 text-sm font-semibold text-gray-700">
                     <svg class="w-4 h-4 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    Agent Step
+                    <span x-text="event.tool_name ? event.tool_name : 'Agent Step'"></span>
+                    <template x-if="event.description">
+                      <span class="hidden sm:inline text-xs font-normal text-gray-500 truncate max-w-[12rem]" x-text="event.description"></span>
+                    </template>
                   </div>
-                  <span class="text-xs text-gray-400" x-text="formatTimestamp(event.timestamp)"></span>
-                </div>
-                <p class="mt-2 text-sm text-gray-700 whitespace-pre-wrap" x-text="event.description || 'No description provided.'"></p>
-                <div class="mt-3 grid gap-2 sm:grid-cols-2">
-                  <template x-if="event.tool_name">
-                    <div class="text-xs bg-indigo-50 text-indigo-700 px-3 py-2 rounded-lg">
-                      <span class="font-semibold">Tool:</span>
-                      <span x-text="event.tool_name"></span>
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs text-gray-400" x-text="formatTimestamp(event.timestamp)"></span>
+                    <svg class="w-4 h-4 text-gray-400 transition-transform duration-150" :class="open ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </button>
+
+                <div x-show="open" x-transition class="mt-3 space-y-3 text-sm text-gray-700">
+                  <p class="whitespace-pre-wrap" x-text="event.description || 'No description provided.'"></p>
+
+                  <div class="flex flex-wrap gap-2 text-xs">
+                    <template x-if="event.tool_name">
+                      <span class="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg">
+                        <span class="font-semibold">Tool</span>
+                        <span x-text="event.tool_name"></span>
+                      </span>
+                    </template>
+                    <template x-if="event.system_code">
+                      <span class="inline-flex items-center gap-1 bg-slate-100 text-slate-600 px-3 py-1 rounded-lg">
+                        <span class="font-semibold">System</span>
+                        <span x-text="event.system_code"></span>
+                      </span>
+                    </template>
+                    <template x-if="event.total_tokens">
+                      <span class="inline-flex items-center gap-1 bg-gray-100 text-gray-600 px-3 py-1 rounded-lg">
+                        <span class="font-semibold">Tokens</span>
+                        <span x-text="formatTokenSummary(event)"></span>
+                      </span>
+                    </template>
+                  </div>
+
+                  <template x-if="event.tool_params">
+                    <div>
+                      <h3 class="text-xs uppercase tracking-wide text-gray-500 mb-1">Tool Parameters</h3>
+                      <pre class="bg-gray-950/90 text-gray-100 text-xs font-mono rounded-lg p-3 overflow-x-auto" x-text="formatToolParams(event)"></pre>
                     </div>
                   </template>
-                  <template x-if="event.system_code">
-                    <div class="text-xs bg-slate-100 text-slate-600 px-3 py-2 rounded-lg">
-                      <span class="font-semibold">System:</span>
-                      <span x-text="event.system_code"></span>
+
+                  <template x-if="event.tool_result">
+                    <div>
+                      <h3 class="text-xs uppercase tracking-wide text-gray-500 mb-1">Tool Result</h3>
+                      <pre class="bg-gray-950/90 text-gray-100 text-xs font-mono rounded-lg p-3 overflow-x-auto" x-text="formatToolResult(event)"></pre>
+                    </div>
+                  </template>
+
+                  <template x-if="event.system_notes">
+                    <div>
+                      <h3 class="text-xs uppercase tracking-wide text-gray-500 mb-1">System Notes</h3>
+                      <pre class="bg-slate-900/80 text-slate-100 text-xs font-mono rounded-lg p-3 overflow-x-auto" x-text="event.system_notes"></pre>
                     </div>
                   </template>
                 </div>
-                <template x-if="event.tool_result">
-                  <div class="mt-3 bg-gray-950/90 text-gray-100 text-xs font-mono rounded-lg p-3 overflow-x-auto">
-                    <pre x-text="event.tool_result"></pre>
-                  </div>
-                </template>
               </div>
             </div>
           </template>
@@ -283,6 +317,106 @@ function agentChat(config) {
         .finally(() => {
           this.isSending = false;
         });
+    },
+    renderedBody(event) {
+      return this.formatBody(event?.body || '');
+    },
+    formatTokenSummary(event) {
+      const parts = [];
+      if (event.prompt_tokens != null) {
+        parts.push(`prompt ${event.prompt_tokens}`);
+      }
+      if (event.completion_tokens != null) {
+        parts.push(`completion ${event.completion_tokens}`);
+      }
+      if (event.total_tokens != null) {
+        parts.push(`total ${event.total_tokens}`);
+      }
+      return parts.join(' • ');
+    },
+    formatToolParams(event) {
+      return this.formatAsJson(event.tool_params);
+    },
+    formatToolResult(event) {
+      const value = event.tool_result;
+      if (value == null) {
+        return '';
+      }
+      if (typeof value === 'object') {
+        return this.formatAsJson(value);
+      }
+      const stringValue = String(value);
+      const trimmed = stringValue.trim();
+      if (!trimmed) {
+        return '';
+      }
+      try {
+        const parsed = JSON.parse(trimmed);
+        return this.formatAsJson(parsed);
+      } catch (err) {
+        return stringValue;
+      }
+    },
+    formatAsJson(value) {
+      try {
+        if (value == null) {
+          return '';
+        }
+        if (typeof value === 'string') {
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return '';
+          }
+          return JSON.stringify(JSON.parse(trimmed), null, 2);
+        }
+        return JSON.stringify(value, null, 2);
+      } catch (err) {
+        return typeof value === 'string' ? value : String(value);
+      }
+    },
+    formatBody(raw) {
+      const value = raw || '';
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return '';
+      }
+      const looksLikeHtml = /<[a-z][\s\S]*>/i.test(trimmed);
+      if (looksLikeHtml) {
+        return this.sanitizeHtml(value);
+      }
+      return this.escapeHtml(value).replace(/\n/g, '<br>');
+    },
+    sanitizeHtml(html) {
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        doc.querySelectorAll('script,style,iframe,object,embed,link,meta').forEach((el) => el.remove());
+        doc.body.querySelectorAll('*').forEach((el) => {
+          for (const attr of Array.from(el.attributes)) {
+            const name = attr.name.toLowerCase();
+            const value = attr.value || '';
+            if (name.startsWith('on')) {
+              el.removeAttribute(attr.name);
+              continue;
+            }
+            if ((name === 'href' || name === 'src') && value.trim().toLowerCase().startsWith('javascript:')) {
+              el.removeAttribute(attr.name);
+            }
+          }
+        });
+        return doc.body.innerHTML || '';
+      } catch (err) {
+        console.warn('Failed to sanitize html', err);
+        return this.escapeHtml(html);
+      }
+    },
+    escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
   };
 }

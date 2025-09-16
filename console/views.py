@@ -3377,6 +3377,8 @@ def _serialize_step_event(step: PersistentAgentStep) -> dict:
         event["tool_result"] = _truncate(step.tool_call.result)
 
     if getattr(step, "system_step", None):
+        if step.system_step.code == PersistentAgentSystemStep.Code.PROCESS_EVENTS:
+            return {}
         event["system_code"] = step.system_step.code
         event["system_notes"] = step.system_step.notes
 
@@ -3423,7 +3425,9 @@ def _collect_chat_events(agent: PersistentAgent, limit: int = 120) -> list[dict]
     for message in message_qs:
         events.append(_serialize_message_event(message))
     for step in step_qs:
-        events.append(_serialize_step_event(step))
+        data = _serialize_step_event(step)
+        if data:
+            events.append(data)
 
     return _sort_events(events)
 
