@@ -45,6 +45,8 @@ from api.models import (
 from console.mixins import ConsoleViewMixin
 from observability import traced
 from pages.mixins import PhoneNumberMixin
+
+from .context_helpers import build_console_context
 from tasks.services import TaskCreditService
 from util import sms
 from util.payments_helper import PaymentsHelper
@@ -930,7 +932,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         return context
 
 
-class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
+class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
     """Step 2: Contact preferences for agent creation."""
     template_name = "console/agent_create_contact.html"
 
@@ -972,6 +974,21 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                     template.recommended_contact_channel
                 )
                 context['selected_ai_employee'] = template
+
+        current_context = context.get('current_context', {
+            'type': 'personal',
+            'name': self.request.user.get_full_name() or self.request.user.username,
+        })
+
+        if current_context.get('type') == 'organization':
+            context['agent_owner_label'] = current_context.get('name')
+        else:
+            context['agent_owner_label'] = self.request.user.get_full_name() or self.request.user.username
+
+        context.setdefault('can_manage_org_agents', True)
+        context['show_org_permission_warning'] = (
+            current_context.get('type') == 'organization' and not context['can_manage_org_agents']
+        )
 
         return context
 
@@ -1016,7 +1033,7 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
             return redirect('agents')
         
         form = PersistentAgentContactForm(request.POST)
-        
+
         if form.is_valid():
             initial_user_message = request.session.get('agent_charter')
             user_contact_email = form.cleaned_data['contact_endpoint_email']
@@ -1033,7 +1050,25 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
 
             try:
                 with transaction.atomic():
-                    # Generate a unique agent name
+                    resolved_context = build_console_context(request)
+                    organization = None
+                    if resolved_context.current_context.type == 'organization':
+                        membership = resolved_context.current_membership
+                        if membership is None:
+                            messages.error(
+                                request,
+                                "You no longer have access to that organization. Creating a personal agent instead.",
+                            )
+                        elif not resolved_context.can_manage_org_agents:
+                            form.add_error(
+                                None,
+                                "You need to be an organization owner or admin to create agents for this organization.",
+                            )
+                            return self.render_to_response(self.get_context_data(form=form))
+                        else:
+                            organization = membership.org
+
+                    # Generate a unique agent name after confirming permissions
                     agent_name = self._generate_unique_agent_name(request.user)
 
                     # Create the BrowserUseAgent first
@@ -1042,23 +1077,6 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                         name=agent_name
                     )
 
-                    # Get current context from session
-                    context_type = request.session.get('context_type', 'personal')
-                    context_id = request.session.get('context_id', str(request.user.id))
-                    
-                    # Set organization if in organization context
-                    organization = None
-                    if context_type == 'organization':
-                        try:
-                            membership = OrganizationMembership.objects.get(
-                                user=request.user,
-                                org_id=context_id,
-                                status=OrganizationMembership.OrgStatus.ACTIVE
-                            )
-                            organization = membership.org
-                        except OrganizationMembership.DoesNotExist:
-                            pass
-                    
                     # Then create the PersistentAgent with no initial charter
                     # The agent will set its own charter based on the user's message
                     persistent_agent = PersistentAgent.objects.create(

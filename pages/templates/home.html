@@ -109,6 +109,29 @@
             
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
+              {% flag "organizations" %}
+                {% if user.is_authenticated %}
+                  <div class="bg-white border border-indigo-100 rounded-xl px-4 py-3 shadow-sm">
+                    <p class="text-sm font-medium text-gray-800">
+                      This agent will belong to
+                      {% if current_context.type == 'organization' %}
+                        <span class="text-indigo-600">{{ current_context.name }}</span>
+                      {% else %}
+                        <span class="text-indigo-600">your personal workspace</span>
+                      {% endif %}.
+                    </p>
+                    {% if current_context.type == 'organization' %}
+                      {% if not can_manage_org_agents %}
+                        <p class="mt-1 text-sm text-red-600">You need to be an organization owner or admin to create agents for this organization.</p>
+                      {% else %}
+                        <p class="mt-1 text-sm text-gray-500">Switch contexts in the console header if you want to create a personal agent instead.</p>
+                      {% endif %}
+                    {% elif user_organizations %}
+                      <p class="mt-1 text-sm text-gray-500">Switch contexts in the console header to build agents for an organization you manage.</p>
+                    {% endif %}
+                  </div>
+                {% endif %}
+              {% endflag %}
               <!-- Unified input + button container -->
               <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white transition-colors duration-200">
                 <!-- Textarea -->

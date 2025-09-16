@@ -19,6 +19,44 @@
         <p class="text-gray-600">You will be able to talk to the agent using the communication methods you select:</p>
       </div>
 
+      {% load waffle_tags %}
+      {% flag "organizations" %}
+        {% if request.user.is_authenticated %}
+          <div class="max-w-2xl mx-auto mb-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border border-indigo-100 rounded-xl px-4 py-3 shadow-sm">
+              <div>
+                <p class="text-sm font-medium text-gray-800">
+                  This agent will belong to
+                  {% if current_context.type == 'organization' %}
+                    <span class="text-indigo-600">{{ current_context.name }}</span>
+                  {% else %}
+                    <span class="text-indigo-600">your personal workspace</span>
+                  {% endif %}
+                  .
+                </p>
+                {% if current_context.type == 'organization' %}
+                  {% if show_org_permission_warning %}
+                    <p class="mt-1 text-sm text-red-600">You need to be an organization owner or admin to create agents here. Switch context to proceed.</p>
+                  {% else %}
+                    <p class="mt-1 text-sm text-gray-500">Use the context switcher in the header to create a personal agent instead.</p>
+                  {% endif %}
+                {% elif user_organizations %}
+                  <p class="mt-1 text-sm text-gray-500">Switch contexts in the header if you want to create an agent for an organization.</p>
+                {% endif %}
+              </div>
+              <div>
+                <button type="button" class="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 transition" data-open-context-switcher>
+                  Change context
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+      {% endflag %}
+
       {% if selected_ai_employee %}
       <div class="max-w-2xl mx-auto mb-8">
         <div class="rounded-2xl border border-indigo-100 bg-indigo-50/60 px-6 py-5 text-left shadow-sm">
@@ -193,7 +231,8 @@
           <button
             type="submit"
             id="create-agent"
-            class="flex-1 inline-flex justify-center items-center gap-x-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-white font-semibold text-base px-5 py-3 shadow-md transition-colors disabled:bg-indigo-300 disabled:shadow-none disabled:text-white/70 disabled:cursor-not-allowed disabled:hover:bg-indigo-300">
+            class="flex-1 inline-flex justify-center items-center gap-x-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-white font-semibold text-base px-5 py-3 shadow-md transition-colors disabled:bg-indigo-300 disabled:shadow-none disabled:text-white/70 disabled:cursor-not-allowed disabled:hover:bg-indigo-300"
+            {% if show_org_permission_warning %}disabled aria-disabled="true"{% endif %}>
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
             </svg>
@@ -210,6 +249,16 @@
 
 <script>
 (function () {
+  document.querySelectorAll('[data-open-context-switcher]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      const switcher = document.querySelector('[x-data="contextSwitcher()"] button');
+      if (switcher) {
+        switcher.focus();
+        switcher.click();
+      }
+    });
+  });
+
   // Helper – enable or disable the SMS radio
   function syncCommOptions(selectSms, selectEmail) {
     const smsCheckbox = document.querySelector('input[type=checkbox][name="sms_enabled"]');

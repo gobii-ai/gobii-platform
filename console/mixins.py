@@ -1,5 +1,8 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
+
 from api.models import OrganizationMembership
+
+from .context_helpers import build_console_context
 
 
 class ConsoleContextMixin:
@@ -14,33 +17,18 @@ class ConsoleContextMixin:
                 user=self.request.user,
                 status=OrganizationMembership.OrgStatus.ACTIVE
             ).select_related('org').order_by('org__name')
-            
-            # Get current context from session or default to personal
-            context_type = self.request.session.get('context_type', 'personal')
-            context_id = self.request.session.get('context_id', str(self.request.user.id))
-            context_name = self.request.session.get('context_name', self.request.user.get_full_name() or self.request.user.username)
-            
+
+            resolved = build_console_context(self.request)
             context['current_context'] = {
-                'type': context_type,
-                'id': context_id,
-                'name': context_name
+                'type': resolved.current_context.type,
+                'id': resolved.current_context.id,
+                'name': resolved.current_context.name,
             }
-            
-            # If in organization context, add the membership for role checking
-            if context_type == 'organization':
-                try:
-                    context['current_membership'] = OrganizationMembership.objects.get(
-                        user=self.request.user,
-                        org_id=context_id,
-                        status=OrganizationMembership.OrgStatus.ACTIVE
-                    )
-                except OrganizationMembership.DoesNotExist:
-                    # Reset to personal context if membership doesn't exist
-                    context['current_context'] = {
-                        'type': 'personal',
-                        'id': str(self.request.user.id),
-                        'name': self.request.user.get_full_name() or self.request.user.username
-                    }
+
+            if resolved.current_membership is not None:
+                context['current_membership'] = resolved.current_membership
+
+            context['can_manage_org_agents'] = resolved.can_manage_org_agents
         
         return context
 

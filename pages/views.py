@@ -97,6 +97,19 @@ class HomePage(TemplateView):
             initial=initial
         )
 
+        if self.request.user.is_authenticated:
+            from console.context_helpers import build_console_context
+
+            resolved = build_console_context(self.request)
+            context['current_context'] = {
+                'type': resolved.current_context.type,
+                'id': resolved.current_context.id,
+                'name': resolved.current_context.name,
+            }
+            context['can_manage_org_agents'] = resolved.can_manage_org_agents
+            if resolved.current_membership is not None:
+                context['current_membership'] = resolved.current_membership
+
         # Examples data
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
