@@ -135,7 +135,7 @@ def _send_sleep_notification(agent) -> None:
     agent.sleep_email_sent_at = now
     agent.save(update_fields=["sleep_email_sent_at"])
 
-@shared_task(name="gobii_platform.api.tasks.soft_expire_inactive_agents")
+@shared_task(name="gobii_platform.api.tasks.soft_expire_inactive_agents_task")
 def soft_expire_inactive_agents_task() -> int:
     """Scan for eligible agents and soft-expire them. Returns count expired."""
     if not switch_is_active(AGENT_SOFT_EXPIRATION):
