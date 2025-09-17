@@ -12,7 +12,7 @@ from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
-    PersistentAgentStep, CommsChannel, UserBilling, SmsNumber, LinkShortener,
+    PersistentAgentStep, CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName,
     MeteringBatch,
@@ -2157,6 +2157,24 @@ class UserBillingAdmin(admin.ModelAdmin):
             f"Anchor alignment complete: updated={updated}, skipped={skipped}, errors={errors}",
             level=messages.INFO,
         )
+
+
+@admin.register(OrganizationBilling)
+class OrganizationBillingAdmin(admin.ModelAdmin):
+    list_display = [
+        'id',
+        'organization_id',
+        'organization',
+        'subscription',
+        'billing_cycle_anchor',
+        'stripe_customer_id',
+        'stripe_subscription_id',
+        'cancel_at',
+        'cancel_at_period_end',
+    ]
+    list_filter = ['subscription', 'cancel_at_period_end']
+    search_fields = ['id', 'organization__name', 'organization__id', 'stripe_customer_id', 'stripe_subscription_id']
+    readonly_fields = ['id', 'organization', 'created_at', 'updated_at']
 
 
 @admin.action(description="Sync numbers from Twilio")

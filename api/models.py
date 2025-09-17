@@ -1156,6 +1156,65 @@ class UserBilling(models.Model):
         verbose_name_plural = "User Billing"
 
 
+class OrganizationBilling(models.Model):
+    """Billing data for an organization (mirrors the user billing fields where applicable)."""
+
+    organization = models.OneToOneField(
+        'Organization',
+        on_delete=models.CASCADE,
+        related_name='billing',
+    )
+    subscription = models.CharField(
+        max_length=32,
+        choices=PlanNamesChoices.choices,
+        default=PlanNames.FREE,
+        help_text="The organization's subscription plan",
+    )
+    billing_cycle_anchor = models.IntegerField(
+        default=1,
+        help_text="Day of the month when billing cycle starts (1-31).",
+        validators=[
+            MinValueValidator(1),
+            MaxValueValidator(31),
+        ],
+    )
+    stripe_customer_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Stripe customer identifier for the organization",
+    )
+    stripe_subscription_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Stripe subscription identifier for the organization",
+    )
+    cancel_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the subscription is scheduled to cancel",
+    )
+    cancel_at_period_end = models.BooleanField(
+        default=False,
+        help_text="Whether the subscription will cancel at the end of the period",
+    )
+    downgraded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the organization was downgraded to free",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Billing for organization {self.organization_id}"
+
+    class Meta:
+        verbose_name = "Organization Billing"
+        verbose_name_plural = "Organization Billing"
+
+
 class UserPhoneNumber(models.Model):
     """Phone numbers associated with a user."""
 
@@ -4013,6 +4072,16 @@ class Organization(models.Model):
     def __str__(self) -> str:
         # Show human-friendly label in admin selects/lists
         return f"{self.name} ({self.id})"
+
+
+@receiver(post_save, sender=Organization)
+def initialize_organization_billing(sender, instance, created, **kwargs):
+    if created:
+        # Ensure every organization starts with a billing record so downstream code can rely on it.
+        OrganizationBilling.objects.get_or_create(
+            organization=instance,
+            defaults={'billing_cycle_anchor': timezone.now().day},
+        )
 
 class OrganizationMembership(models.Model):
     class OrgRole(models.TextChoices):
