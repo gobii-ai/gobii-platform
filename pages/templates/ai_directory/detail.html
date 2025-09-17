@@ -21,12 +21,11 @@
               {% if schedule_description and base_schedule and schedule_description != base_schedule %}
               <p class="mt-1 text-sm text-slate-400">Cron expression: {{ base_schedule }}</p>
               {% endif %}
-              <p class="mt-1 text-sm text-slate-500">Runs with ±{{ schedule_jitter_minutes }} minute jitter to avoid thundering herds.</p>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
-              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Recommended channel</p>
-              <p class="mt-2 text-base font-medium text-slate-800">{{ ai_employee.recommended_contact_channel|default:"Email"|title }}</p>
-              <p class="mt-1 text-sm text-slate-500">Change preferences during setup if you need a different handoff.</p>
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">How it keeps you in the loop</p>
+              <p class="mt-2 text-base font-medium text-slate-800">{{ contact_method_label }}</p>
+              <p class="mt-1 text-sm text-slate-500">You can switch to a different touchpoint during setup.</p>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
               <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Time to hire</p>
@@ -44,8 +43,9 @@
               <p class="mt-3 text-base leading-relaxed text-slate-600">{{ ai_employee.description }}</p>
             </section>
             <section>
-              <h2 class="text-xl font-semibold text-slate-900">Starting charter</h2>
-              <div class="mt-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-6 text-sm leading-relaxed text-slate-700 shadow-inner">
+              <h2 class="text-xl font-semibold text-slate-900">Launch playbook</h2>
+              <p class="mt-3 text-base leading-relaxed text-slate-600">These are the instructions the agent follows on day one.</p>
+              <div class="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-6 text-sm leading-relaxed text-slate-700 shadow-inner">
                 {{ ai_employee.charter|linebreaksbr }}
               </div>
             </section>
@@ -70,7 +70,7 @@
           <aside class="space-y-8">
             {% if default_tools %}
             <section class="rounded-2xl border border-slate-200 bg-white px-5 py-6 shadow-sm">
-              <h3 class="text-base font-semibold text-slate-900">Ready integrations</h3>
+              <h3 class="text-base font-semibold text-slate-900">Built-in integrations</h3>
               <p class="mt-2 text-sm text-slate-500">Enabled automatically when you hire.</p>
               <ul class="mt-4 space-y-2">
                 {% for tool in default_tools %}
@@ -81,7 +81,7 @@
             {% endif %}
             <section class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-500 to-blue-500 px-6 py-8 text-white shadow-lg">
               <h3 class="text-xl font-semibold">Hire this AI employee</h3>
-              <p class="mt-2 text-sm text-indigo-100 leading-relaxed">We’ll preload the charter, recommended schedule, and integrations. Next step is choosing how you want to be contacted.</p>
+              <p class="mt-2 text-sm text-indigo-100 leading-relaxed">We’ll preload the playbook, schedule, and integrations—then you choose how it reaches you.</p>
               <form method="post" action="{% url 'pages:ai_employee_hire' ai_employee.code %}" class="mt-6">
                 {% csrf_token %}
                 <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-indigo-600 font-semibold px-5 py-3 shadow-lg shadow-indigo-200 hover:text-indigo-700 transition">

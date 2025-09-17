@@ -1359,6 +1359,33 @@ class PersistentAgentTemplate(models.Model):
         return f"AIEmployeeTemplate<{self.display_name}>"
 
 
+class ToolFriendlyName(models.Model):
+    """Human-friendly labels for tool identifiers surfaced in templates."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tool_name = models.CharField(
+        max_length=128,
+        unique=True,
+        help_text="Internal tool identifier (e.g., 'google_sheets-add-single-row').",
+    )
+    display_name = models.CharField(
+        max_length=255,
+        help_text="User-facing label shown in the directory UI.",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Optional notes to help admins remember what the tool does.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tool_name"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return self.display_name
+
+
 class PersistentAgent(models.Model):
     """
     A persistent agent that runs automatically on a schedule.

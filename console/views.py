@@ -1044,6 +1044,8 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                     # Clear session data
                     if 'agent_charter' in request.session:
                         del request.session['agent_charter']
+                    if 'agent_charter_source' in request.session:
+                        del request.session['agent_charter_source']
                     if AIEmployeeTemplateService.TEMPLATE_SESSION_KEY in request.session:
                         del request.session[AIEmployeeTemplateService.TEMPLATE_SESSION_KEY]
 

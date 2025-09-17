@@ -14,7 +14,7 @@ from .models import (
     PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
     PersistentAgentStep, CommsChannel, UserBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
-    AgentEmailAccount,
+    AgentEmailAccount, ToolFriendlyName,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -2556,3 +2556,11 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
             'fields': ('created_at', 'updated_at')
         }),
     )
+
+
+@admin.register(ToolFriendlyName)
+class ToolFriendlyNameAdmin(admin.ModelAdmin):
+    list_display = ('tool_name', 'display_name', 'updated_at')
+    search_fields = ('tool_name', 'display_name')
+    ordering = ('tool_name',)
+    readonly_fields = ('created_at', 'updated_at')

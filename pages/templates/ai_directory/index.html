@@ -57,7 +57,7 @@
                   <span class="text-indigo-500 mt-0.5">🗓️</span>
                   <div>
                     <dt class="font-semibold text-slate-700">Cadence</dt>
-                    <dd>{{ employee.schedule_description|default:employee.base_schedule }} <span class="text-slate-400">±{{ employee.schedule_jitter_minutes }}m jitter</span></dd>
+                    <dd>{{ employee.schedule_description|default:employee.base_schedule }}</dd>
                   </div>
                 </div>
                 {% if employee.event_triggers %}
@@ -76,24 +76,24 @@
                   </div>
                 </div>
                 {% endif %}
-                {% if employee.default_tools %}
+                {% if employee.display_default_tools %}
                 <div class="flex items-start gap-3">
                   <span class="text-indigo-500 mt-0.5">🔧</span>
                   <div>
-                    <dt class="font-semibold text-slate-700">Ready integrations</dt>
+                    <dt class="font-semibold text-slate-700">Built-in integrations</dt>
                     <dd class="flex flex-wrap gap-2 mt-1">
-                      {% for tool in employee.default_tools|slice:":3" %}
+                      {% for tool in employee.display_default_tools|slice:":3" %}
                         <span class="px-3 py-1 rounded-full bg-slate-100 text-slate-600 font-medium">{{ tool }}</span>
                       {% endfor %}
-                      {% if employee.default_tools|length > 3 %}
-                        <span class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-600 font-medium">+{{ employee.default_tools|length|add:-3 }}</span>
+                      {% if employee.display_default_tools|length > 3 %}
+                        <span class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-600 font-medium">+{{ employee.display_default_tools|length|add:-3 }}</span>
                       {% endif %}
                     </dd>
                   </div>
                 </div>
                 {% endif %}
               </dl>
-              <div class="mt-8 flex flex-col gap-3">
+              <div class="mt-auto pt-6 flex flex-col gap-3">
                 <form method="post" action="{% url 'pages:ai_employee_hire' employee.code %}" class="contents">
                   {% csrf_token %}
                   <button type="submit" class="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-semibold rounded-xl shadow-md hover:shadow-lg hover:from-indigo-500 hover:to-blue-500 transition">

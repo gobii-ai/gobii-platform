@@ -50,6 +50,8 @@ class HomePage(TemplateView):
         if self.request.GET.get('spawn') == '1':
             if 'agent_charter' in self.request.session:
                 del self.request.session['agent_charter']
+            if 'agent_charter_source' in self.request.session:
+                del self.request.session['agent_charter_source']
             initial['charter'] = ''
         # If the GET parameter 'dc' (default charter) is present, use it in the initial data
         elif 'dc' in self.request.GET:
@@ -85,9 +87,10 @@ class HomePage(TemplateView):
                 initial['charter'] = ''
                 context['default_charter'] = ''
         elif 'agent_charter' in self.request.session:
-            initial['charter'] = self.request.session['agent_charter'].strip()
-            context['default_charter'] = initial['charter']
-            context['agent_charter_saved'] = True
+            if self.request.session.get('agent_charter_source') != 'template':
+                initial['charter'] = self.request.session['agent_charter'].strip()
+                context['default_charter'] = initial['charter']
+                context['agent_charter_saved'] = True
 
         context['agent_charter_form'] = PersistentAgentCharterForm(
             initial=initial
@@ -113,6 +116,7 @@ class HomeAgentSpawnView(TemplateView):
         if form.is_valid():
             # Store charter in session for later use
             request.session['agent_charter'] = form.cleaned_data['charter']
+            request.session['agent_charter_source'] = 'user'
             
             # Track analytics for home page agent creation start (only for authenticated users)
             if request.user.is_authenticated:
@@ -169,8 +173,19 @@ class AIEmployeeDirectoryView(TemplateView):
             )
 
         templates = list(templates_queryset)
+        tool_names = set()
+
         for template in templates:
             template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
+            tool_names.update(template.default_tools or [])
+
+        tool_display_map = AIEmployeeTemplateService.get_tool_display_map(tool_names)
+
+        for template in templates:
+            template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+                template.default_tools or [],
+                display_map=tool_display_map,
+            )
 
         all_categories = (
             AIEmployeeTemplateService.get_active_templates()
@@ -207,8 +222,15 @@ class AIEmployeeDetailView(TemplateView):
         context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
         context["base_schedule"] = self.employee.base_schedule
         context["schedule_description"] = AIEmployeeTemplateService.describe_schedule(self.employee.base_schedule)
+        display_map = AIEmployeeTemplateService.get_tool_display_map(self.employee.default_tools or [])
         context["event_triggers"] = self.employee.event_triggers or []
-        context["default_tools"] = self.employee.default_tools or []
+        context["default_tools"] = AIEmployeeTemplateService.get_tool_display_list(
+            self.employee.default_tools or [],
+            display_map=display_map,
+        )
+        context["contact_method_label"] = AIEmployeeTemplateService.describe_contact_channel(
+            self.employee.recommended_contact_channel
+        )
         return context
 
 
@@ -221,6 +243,7 @@ class AIEmployeeHireView(View):
 
         request.session['agent_charter'] = template.charter
         request.session[AIEmployeeTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        request.session['agent_charter_source'] = 'template'
         request.session.modified = True
 
         if request.user.is_authenticated:

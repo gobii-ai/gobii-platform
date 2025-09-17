@@ -1,6 +1,7 @@
 from django.apps import apps
 
 import random
+from typing import Dict, Iterable, Sequence
 
 from config.plans import AGENTS_UNLIMITED, MAX_AGENT_LIMIT
 from observability import trace
@@ -204,3 +205,53 @@ class AIEmployeeTemplateService:
             return AIEmployeeTemplateService._CRON_MACRO_MAP.get(macro)
 
         return expression
+
+    @staticmethod
+    def _fallback_tool_display(tool_name: str) -> str:
+        cleaned = (tool_name or "").replace("_", " ").replace("-", " ").strip()
+        if not cleaned:
+            return tool_name
+        return " ".join(part.capitalize() for part in cleaned.split())
+
+    @staticmethod
+    def get_tool_display_map(tool_names: Iterable[str]) -> Dict[str, str]:
+        tool_list = [name for name in tool_names if name]
+        if not tool_list:
+            return {}
+
+        ToolName = apps.get_model("api", "ToolFriendlyName")
+        entries = ToolName.objects.filter(tool_name__in=tool_list)
+        return {entry.tool_name: entry.display_name for entry in entries}
+
+    @classmethod
+    def get_tool_display_list(
+        cls,
+        tool_names: Sequence[str] | None,
+        display_map: Dict[str, str] | None = None,
+    ) -> list[str]:
+        if not tool_names:
+            return []
+
+        display_map = display_map or cls.get_tool_display_map(tool_names)
+        return [display_map.get(name, cls._fallback_tool_display(name)) for name in tool_names]
+
+    @staticmethod
+    def describe_contact_channel(channel: str | None) -> str:
+        mapping = {
+            "email": "Email updates",
+            "sms": "Text message",
+            "slack": "Slack message",
+            "pagerduty": "PagerDuty alert",
+        }
+
+        if not channel:
+            return mapping["email"]
+
+        normalized = channel.lower()
+        if normalized in mapping:
+            label = mapping[normalized]
+            if normalized == "sms":
+                return f"{label} (SMS)"
+            return label
+
+        return channel.replace("_", " ").upper() if normalized == "voice" else channel.replace("_", " ").title()
