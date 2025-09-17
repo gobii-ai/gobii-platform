@@ -136,7 +136,7 @@ class BillingServiceValidationTests(TestCase):
         mar_31 = BillingService.compute_next_billing_date(anchor, feb_29)
         self.assertEqual(mar_31, date(2024, 3, 31))
 
-
+@tag("batch_owner_billing")
 class BillingServiceOwnerTests(TestCase):
     def setUp(self):
         User = get_user_model()
