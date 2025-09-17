@@ -157,6 +157,8 @@ jobs:
             tag: batch_agent_lifecycle
           - batch: schedule
             tag: batch_schedule
+          - batch: billing
+            tag: batch_billing
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
