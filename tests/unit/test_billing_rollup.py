@@ -1,4 +1,6 @@
+from datetime import datetime, date, timezone as dt_timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 from django.test import TestCase, tag
@@ -6,10 +8,57 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from api.models import BrowserUseAgent, BrowserUseAgentTask, PersistentAgent, PersistentAgentStep, UserBilling
-from api.tasks.billing_rollup import rollup_and_meter_usage_task
+from api.tasks.billing_rollup import rollup_and_meter_usage_task, _to_aware_dt
 
 
 User = get_user_model()
+
+
+class ToAwareDtHelperTests(TestCase):
+    def test_returns_none_for_unsupported(self):
+        with timezone.override("UTC"):
+            self.assertIsNone(_to_aware_dt(None, as_start=True))
+            self.assertIsNone(_to_aware_dt("not-a-date", as_start=True))
+
+    def test_preserves_aware_datetime(self):
+        aware = timezone.make_aware(datetime(2025, 9, 16, 12, 0), timezone=dt_timezone.utc)
+        with timezone.override("America/New_York"):
+            result = _to_aware_dt(aware, as_start=True)
+        self.assertIs(result, aware)
+
+    def test_converts_naive_datetime_using_current_timezone(self):
+        naive = datetime(2025, 9, 16, 9, 30)
+        with timezone.override("America/New_York"):
+            result = _to_aware_dt(naive, as_start=True)
+            self.assertTrue(timezone.is_aware(result))
+            self.assertEqual(result.tzinfo, timezone.get_current_timezone())
+            self.assertEqual(result.hour, 9)
+            self.assertEqual(result.minute, 30)
+
+    def test_converts_date_boundaries(self):
+        with timezone.override("UTC"):
+            start = _to_aware_dt(date(2025, 9, 1), as_start=True)
+            end = _to_aware_dt(date(2025, 9, 1), as_start=False)
+
+        self.assertTrue(timezone.is_aware(start))
+        self.assertTrue(timezone.is_aware(end))
+        self.assertEqual(start.hour, 0)
+        self.assertEqual(start.day, 1)
+        self.assertEqual(end.hour, 0)
+        self.assertEqual(end.day, 2)
+
+    def test_parses_datetime_and_date_strings(self):
+        with timezone.override("UTC"):
+            iso_result = _to_aware_dt("2025-09-10T05:15:00Z", as_start=True)
+            date_result = _to_aware_dt("2025-09-10", as_start=False)
+
+        self.assertTrue(timezone.is_aware(iso_result))
+        self.assertEqual(iso_result.hour, 5)
+        self.assertEqual(iso_result.minute, 15)
+
+        self.assertTrue(timezone.is_aware(date_result))
+        self.assertEqual(date_result.day, 10)
+        self.assertEqual(date_result.hour, 0)
 
 
 @tag("batch_billing_rollup")
@@ -141,3 +190,89 @@ class BillingRollupTaskTests(TestCase):
         # All included rows now marked metered
         self.assertEqual(BrowserUseAgentTask.objects.filter(user=self.user, metered=True).count(), 2)
         self.assertEqual(PersistentAgentStep.objects.filter(agent=self.pa, metered=True).count(), 1)
+
+    def test_stripe_bounds_finalize_zero_usage(self):
+        with patch("api.models.TaskCreditService.check_and_consume_credit_for_owner") as mock_consume, \
+            patch("api.tasks.billing_rollup.get_active_subscription") as mock_get_sub, \
+            patch("api.tasks.billing_rollup.BillingService.get_current_billing_period_for_user") as mock_period, \
+            patch("api.tasks.billing_rollup.timezone.now") as mock_now, \
+            patch("api.tasks.billing_rollup.report_task_usage_to_stripe") as mock_report, \
+            patch("api.tasks.billing_rollup.logger.exception") as mock_log_exception:
+
+            mock_consume.return_value = {"success": True, "credit": None, "error_message": None}
+
+            naive_start = datetime(2025, 9, 1, 0, 0, 0)
+            naive_end = datetime(2025, 9, 30, 23, 59, 59)
+            sub = SimpleNamespace(current_period_start=naive_start, current_period_end=naive_end, status="active")
+            mock_get_sub.return_value = sub
+
+            with timezone.override("UTC"):
+                stripe_start = _to_aware_dt(naive_start, as_start=True)
+                stripe_end = _to_aware_dt(naive_end, as_start=False)
+                self.assertIsNotNone(stripe_start)
+                self.assertIsNotNone(stripe_end)
+                mock_now.return_value = timezone.make_aware(datetime(2025, 9, 15, 12, 0, 0), timezone=dt_timezone.utc)
+
+                BrowserUseAgentTask.objects.create(
+                    agent=self.agent,
+                    user=self.user,
+                    prompt="x",
+                    credits_cost=Decimal("0.2"),
+                )
+                PersistentAgentStep.objects.create(
+                    agent=self.pa,
+                    description="z",
+                    credits_cost=Decimal("0.2"),
+                )
+
+                mock_now.return_value = timezone.make_aware(datetime(2025, 10, 1, 0, 0, 0), timezone=dt_timezone.utc)
+
+                self.assertEqual(
+                    BrowserUseAgentTask.objects.filter(user=self.user, metered=False).count(),
+                    1,
+                )
+                self.assertEqual(
+                    PersistentAgentStep.objects.filter(agent=self.pa, metered=False).count(),
+                    1,
+                )
+
+                task = BrowserUseAgentTask.objects.get(user=self.user)
+                step = PersistentAgentStep.objects.get(agent=self.pa)
+                self.assertIsNone(task.meter_batch_key)
+                self.assertIsNone(step.meter_batch_key)
+                task_window_count = BrowserUseAgentTask.objects.filter(
+                    user=self.user,
+                    created_at__gte=stripe_start,
+                    created_at__lt=stripe_end,
+                    meter_batch_key__isnull=True,
+                    metered=False,
+                ).count()
+                step_window_count = PersistentAgentStep.objects.filter(
+                    agent__user=self.user,
+                    created_at__gte=stripe_start,
+                    created_at__lt=stripe_end,
+                    meter_batch_key__isnull=True,
+                    metered=False,
+                ).count()
+                self.assertGreater(
+                    task_window_count + step_window_count,
+                    0,
+                    f"stripe_start={stripe_start}, stripe_end={stripe_end}, task_created={task.created_at}, step_created={step.created_at}"
+                )
+
+                processed = rollup_and_meter_usage_task()
+
+            remaining_tasks = BrowserUseAgentTask.objects.filter(user=self.user, metered=False).count()
+            remaining_steps = PersistentAgentStep.objects.filter(agent=self.pa, metered=False).count()
+            self.assertEqual(
+                processed,
+                1,
+                f"mock_calls={mock_log_exception.call_args_list}, sub_calls={mock_get_sub.call_count}, remaining_tasks={remaining_tasks}, remaining_steps={remaining_steps}"
+            )
+            mock_report.assert_not_called()
+            mock_period.assert_not_called()
+            mock_log_exception.assert_not_called()
+            mock_get_sub.assert_called_once()
+
+            self.assertEqual(BrowserUseAgentTask.objects.filter(user=self.user, metered=True).count(), 1)
+            self.assertTrue(PersistentAgentStep.objects.filter(agent=self.pa, metered=True).exists())
