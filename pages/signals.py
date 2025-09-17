@@ -246,8 +246,8 @@ def handle_subscription_event(event, **kwargs):
                 if ub.billing_cycle_anchor != new_day:
                     ub.billing_cycle_anchor = new_day
                     ub.save(update_fields=["billing_cycle_anchor"])
-        except UserBilling.DoesNotExist:
-            logger.exception("UserBilling record not found for user %s during anchor alignment.", user.id, e)
+        except UserBilling.DoesNotExist as ue:
+            logger.exception("UserBilling record not found for user %s during anchor alignment: %s", user.id, ue)
         except Exception as e:
             logger.exception("Failed to align billing anchor with Stripe period for user %s: %s", user.id, e)
 
