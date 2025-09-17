@@ -17,8 +17,9 @@ from django.db.models import F, Q
 from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
-from api.models import PaidPlanIntent
+from api.models import PaidPlanIntent, PersistentAgent
 from agents.services import AIEmployeeTemplateService
+from waffle import flag_is_active
 
 import stripe
 from djstripe.models import Customer, Subscription, Price
@@ -99,6 +100,42 @@ class HomePage(TemplateView):
         # Examples data
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
+
+        if self.request.user.is_authenticated:
+            recent_agents_qs = PersistentAgent.objects.filter(user_id=self.request.user.id)
+            total_agents = recent_agents_qs.count()
+            recent_agents = list(recent_agents_qs.order_by('-updated_at')[:3])
+
+            for agent in recent_agents:
+                schedule_text = None
+                if agent.schedule:
+                    schedule_text = AIEmployeeTemplateService.describe_schedule(agent.schedule)
+                    if not schedule_text:
+                        schedule_text = agent.schedule
+                agent.display_schedule = schedule_text
+
+                charter_text = (agent.charter or "").strip()
+                if charter_text and len(charter_text) > 140:
+                    charter_text = charter_text[:140].rstrip() + "…"
+                agent.charter_preview = charter_text
+
+                if getattr(agent, "life_state", "active") == PersistentAgent.LifeState.EXPIRED:
+                    agent.status_label = "Expired"
+                    agent.status_class = "text-slate-500 bg-slate-100"
+                else:
+                    agent.status_label = "Active"
+                    agent.status_class = "text-emerald-600 bg-emerald-50"
+
+            context['recent_agents'] = recent_agents
+
+            fallback_total = total_agents
+            if fallback_total == 0:
+                account = context.get('account')
+                usage = getattr(account, 'usage', None)
+                fallback_total = getattr(usage, 'agents_in_use', 0) if usage else 0
+
+            context['recent_agents_remaining'] = max(fallback_total - len(recent_agents), 0)
+            context['recent_agents_total'] = fallback_total
 
         return context
 
