@@ -40,7 +40,7 @@ jobs:
 
       - name: Compute short SHA
         id: vars
-        run: echo "short_sha=$(echo \"$PR_HEAD_SHA\" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+        run: echo "short_sha=$(echo $PR_HEAD_SHA | cut -c1-7)" >> "$GITHUB_OUTPUT"
         env:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
