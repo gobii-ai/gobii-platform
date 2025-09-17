@@ -20,7 +20,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from api.models import PaidPlanIntent, PersistentAgent
 from agents.services import AIEmployeeTemplateService
 from waffle import flag_is_active
-from api.models import PaidPlanIntent, OrganizationMembership
+from api.models import OrganizationMembership
 
 import stripe
 from djstripe.models import Customer, Subscription, Price
