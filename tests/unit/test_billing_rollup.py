@@ -13,7 +13,7 @@ from api.tasks.billing_rollup import rollup_and_meter_usage_task, _to_aware_dt
 
 User = get_user_model()
 
-
+@tag("batch_billing_rollup")
 class ToAwareDtHelperTests(TestCase):
     def test_returns_none_for_unsupported(self):
         with timezone.override("UTC"):
