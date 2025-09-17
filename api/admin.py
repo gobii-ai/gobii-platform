@@ -15,6 +15,7 @@ from .models import (
     PersistentAgentStep, CommsChannel, UserBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName,
+    MeteringBatch,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -394,6 +395,52 @@ class TaskCreditAdmin(admin.ModelAdmin):
         return TemplateResponse(request, "admin/grant_user_ids_credits.html", context)
 
 
+@admin.register(MeteringBatch)
+class MeteringBatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "batch_key",
+        "user",
+        "rounded_quantity",
+        "total_credits",
+        "period_start",
+        "period_end",
+        "stripe_event_id",
+        "created_at",
+    )
+    search_fields = (
+        "batch_key",
+        "idempotency_key",
+        "stripe_event_id",
+        "user__email",
+        "user__id",
+    )
+    list_filter = ("period_start", "period_end", "created_at")
+    date_hierarchy = "created_at"
+    readonly_fields = ("id", "batch_key", "idempotency_key", "created_at", "updated_at", "usage_links")
+    raw_id_fields = ("user",)
+    ordering = ("-created_at",)
+
+    @admin.display(description="Usage Rows")
+    def usage_links(self, obj):
+        try:
+            tasks_count = BrowserUseAgentTask.objects.filter(meter_batch_key=obj.batch_key).count()
+            steps_count = PersistentAgentStep.objects.filter(meter_batch_key=obj.batch_key).count()
+        except Exception:
+            tasks_count = 0
+            steps_count = 0
+
+        tasks_url = (
+            reverse("admin:api_browseruseagenttask_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
+        )
+        steps_url = (
+            reverse("admin:api_persistentagentstep_changelist") + f"?meter_batch_key__exact={obj.batch_key}"
+        )
+        return format_html(
+            '<a href="{}">Tasks: {}</a> &nbsp;|&nbsp; <a href="{}">Steps: {}</a>',
+            tasks_url, tasks_count, steps_url, steps_count
+        )
+
+
 # Minimal admin for Organization to enable autocomplete/search
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
@@ -611,7 +658,7 @@ class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
     change_list_template = "admin/browseruseagenttask_change_list.html"
 
     list_display = ('id', 'get_agent_name', 'get_user_email', 'status', 'credits_cost', 'display_task_result_summary', 'created_at', 'updated_at')
-    list_filter = ('status', 'user', 'agent')
+    list_filter = ('status', 'user', 'agent', 'meter_batch_key', 'metered')
     search_fields = ('id', 'agent__name', 'user__email')
     readonly_fields = ('id', 'created_at', 'updated_at', 'display_full_task_result', 'credits_cost') # Show charged credits
     raw_id_fields = ('agent', 'user')
@@ -763,6 +810,21 @@ if admin.site.is_registered(User):
 class CustomUserAdmin(UserAdmin):
     # Remove the heavy TaskCredit inline and keep the agent inline only.
     inlines = [BrowserUseAgentInlineForUser]
+
+    actions = ['queue_rollup_for_selected_users']
+
+    @admin.action(description="Queue metering rollup for selected users")
+    def queue_rollup_for_selected_users(self, request, queryset):
+        from api.tasks.billing_rollup import rollup_usage_for_user
+        queued = 0
+        for user in queryset:
+            try:
+                rollup_usage_for_user.delay(user.id)
+                queued += 1
+            except Exception as e:
+                logging.error("Failed to queue rollup for user %s: %s", user.id, e)
+                continue
+        self.message_user(request, f"Queued rollup for {queued} user(s).", level=messages.INFO)
 
     def get_queryset(self, request):
         """Annotate credit totals to avoid N+1 queries in the changelist."""
@@ -1378,7 +1440,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     @admin.display(description='User Email')
     def user_email(self, obj):
         return obj.user.email
-
 
     @admin.display(description='Ownership')
     def ownership_scope(self, obj):
@@ -2058,6 +2119,44 @@ class UserBillingAdmin(admin.ModelAdmin):
     list_filter = ['subscription', 'user_id']
     search_fields = ['id', 'subscription', 'user__email', 'user__username']
     readonly_fields = ['id', 'user']
+    actions = [
+        'align_anchor_from_stripe',
+    ]
+
+    @admin.action(description="Align anchor day with Stripe period start")
+    def align_anchor_from_stripe(self, request, queryset):
+        """Admin action: for selected UserBilling rows, set billing_cycle_anchor
+        to the user's Stripe subscription current_period_start.day (when available).
+
+        Skips rows without an active Stripe subscription.
+        """
+        from util.subscription_helper import get_active_subscription
+
+        updated = 0
+        skipped = 0
+        errors = 0
+        for ub in queryset.select_related('user'):
+            try:
+                sub = get_active_subscription(ub.user)
+                if not sub or not getattr(sub, 'current_period_start', None):
+                    skipped += 1
+                    continue
+                new_day = sub.current_period_start.day
+                if ub.billing_cycle_anchor != new_day:
+                    ub.billing_cycle_anchor = new_day
+                    ub.save(update_fields=["billing_cycle_anchor"])
+                    updated += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                logging.error("Failed to align billing anchor for user %s: %s", ub.user.id, e)
+                errors += 1
+
+        self.message_user(
+            request,
+            f"Anchor alignment complete: updated={updated}, skipped={skipped}, errors={errors}",
+            level=messages.INFO,
+        )
 
 
 @admin.action(description="Sync numbers from Twilio")

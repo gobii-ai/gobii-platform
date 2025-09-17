@@ -186,7 +186,7 @@ class TaskCreditService:
                 credits_used=0,
                 expiration_date=expiration_date,
                 stripe_invoice_id=invoice_id,
-                granted_date=timezone.now(),
+                granted_date=grant_date,
                 plan=PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE,
                 grant_type=GrantTypeChoices.PLAN,
                 additional_task=False,  # This is a regular task credit, not an additional task
@@ -663,10 +663,11 @@ class TaskCreditService:
     @tracer.start_as_current_span("TaskCreditService Get User Additional Tasks Used")
     def get_user_additional_tasks_used(user: User, task_credits: list | None = None) -> int:
         """
-        Gets the number of additional tasks used by a user.
+        Gets the number of additional tasks used by a user (sum of credits_used).
 
-        This function retrieves the user's additional task limit based on their subscription plan
-        and calculates the available additional tasks.
+        Currently, additional-task credits are granted as 1.0 units per event, so this
+        is equivalent to counting events. Summing credits_used keeps behavior robust if
+        the per-event unit changes in the future.
 
         Parameters:
             user (User): The user for whom the additional tasks available are being calculated.
@@ -680,14 +681,13 @@ class TaskCreditService:
         if task_credits is None:
             task_credits = TaskCreditService.get_current_task_credit(user)
 
-        # Fetch the task credits for the user in the current range
-        task_credits = task_credits.filter(
-            additional_task=True,
-            voided=False,
+        # Sum the credits_used across additional-task blocks in the current window
+        total_used = (
+            task_credits
+            .filter(additional_task=True, voided=False)
+            .aggregate(total_used=Sum('credits_used'))['total_used'] or 0
         )
-
-        total_used = task_credits.aggregate(total_used=Sum('credits_used'))['total_used'] or 0
-        return total_used
+        return int(total_used)
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Get User Additional Tasks Available")

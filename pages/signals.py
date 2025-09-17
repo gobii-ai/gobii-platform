@@ -16,8 +16,9 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 import logging
 import stripe
 
+from api.models import UserBilling
 from util.payments_helper import PaymentsHelper
-from util.subscription_helper import get_user_task_credit_limit, mark_user_billing_with_plan
+from util.subscription_helper import get_user_task_credit_limit, mark_user_billing_with_plan, downgrade_user_to_free_plan
 
 logger = logging.getLogger(__name__)
 
@@ -144,9 +145,8 @@ def handle_subscription_event(event, **kwargs):
         logger.warning("Unexpected Stripe object in webhook: %s", payload.get("object"))
         return
 
-    # 2. Short-circuit hard-deleted payloads ─ they only contain id, object, customer, deleted
-    if payload.get("deleted"):
-        return
+    # Note: do not early-return on hard-deleted payloads; we still need to
+    # downgrade the user to the free plan when a subscription is deleted.
 
     stripe.api_key = PaymentsHelper.get_stripe_key()
     stripe_sub = None
@@ -177,39 +177,91 @@ def handle_subscription_event(event, **kwargs):
 
     user = customer.subscriber
 
-    # Find in stripe_sub the items, and then the one that is usage_type = "licensed". That is the one we care about, as
-    # it is the one the base plan - not the add-on tasks.
-    if stripe_sub and stripe_sub["items"]["data"][0]["plan"]["usage_type"] == "licensed" and stripe_sub["status"] == "active":
-        plan_id = stripe_sub["items"]["data"][0]["price"]["product"]
-        plan = get_plan_by_product_id(plan_id)
+    # Handle explicit deletions (downgrade to free immediately)
+    try:
+        event_type = getattr(event, "type", "") or getattr(event, "event_type", "")
+    except Exception:
+        event_type = ""
 
-        # If active subscription, fill the task credits for the user. If the user has no subscription, we don't need to
-        # add any credits. Existing credits would expire on their own, but leave them as is as we dont void them on
-        # subscription cancellation.
-        if sub.status == 'active':
-            TaskCreditService.grant_subscription_credits(
-                user,
-                plan=plan,
-                invoice_id=stripe_sub["latest_invoice"]
-            )
-
-            try:
-                plan_choice = PlanNamesChoices(plan["id"])
-                plan_value = plan_choice.value  # This explicitly gets the string value
-            except ValueError:
-                plan_value = PlanNamesChoices.FREE.value
-
-            mark_user_billing_with_plan(user, plan_value)
-
-            Analytics.identify(user.id, {
-                'plan': plan_value,
-            })
+    if event_type == "customer.subscription.deleted" or getattr(sub, "status", "") == "canceled":
+        downgrade_user_to_free_plan(user)
+        try:
             Analytics.track_event(
                 user_id=user.id,
-                event=AnalyticsEvent.SUBSCRIPTION_CREATED,
+                event=AnalyticsEvent.SUBSCRIPTION_CANCELLED,
                 source=AnalyticsSource.WEB,
                 properties={
-                    'plan': plan_value,
-                    'stripe.invoice_id': stripe_sub["latest_invoice"]
-                }
+                    'stripe.subscription_id': getattr(sub, 'id', None),
+                },
             )
+        except Exception:
+            logger.exception("Failed to track subscription cancellation for user %s", user.id)
+        return
+
+    # Prefer explicit Stripe retrieve when present; otherwise use dj-stripe's cached payload
+    # from the Subscription row. This allows the normal sync_from_stripe_data path to work.
+    source_data = stripe_sub if stripe_sub is not None else (getattr(sub, "stripe_data", {}) or {})
+
+    # Locate the licensed (base plan) item among subscription items
+    licensed_item = None
+    try:
+        for item in source_data.get("items", {}).get("data", []) or []:
+            if item.get("plan", {}).get("usage_type") == "licensed":
+                licensed_item = item
+                break
+    except Exception as e:
+        logger.warning("Webhook: failed to inspect subscription items for %s: %s", sub.id, e)
+
+    # Proceed only when subscription is active and we found a licensed item
+    if sub.status == 'active' and licensed_item is not None:
+        plan_id = (licensed_item.get("price", {}) or {}).get("product")
+        if not plan_id:
+            logger.warning("Webhook: missing product on licensed item for subscription %s", sub.id)
+            return
+
+        plan = get_plan_by_product_id(plan_id)
+
+        # Grant plan credits (idempotent via invoice_id when present)
+        invoice_id = source_data.get("latest_invoice")
+        TaskCreditService.grant_subscription_credits(
+            user,
+            plan=plan,
+            invoice_id=invoice_id or ""
+        )
+
+        try:
+            plan_choice = PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE
+            plan_value = plan_choice.value  # explicit string value
+        except Exception:
+            plan_value = PlanNamesChoices.FREE.value
+
+        # Update the user's billing plan, preserving anchor until we set it from Stripe below
+        mark_user_billing_with_plan(user, plan_value, update_anchor=False)
+
+        # Align local anchor day with the Stripe subscription period start for Pro
+        try:
+            ub = user.billing
+            if getattr(sub, 'current_period_start', None):
+                new_day = sub.current_period_start.day
+                if ub.billing_cycle_anchor != new_day:
+                    ub.billing_cycle_anchor = new_day
+                    ub.save(update_fields=["billing_cycle_anchor"])
+        except UserBilling.DoesNotExist as ue:
+            logger.exception("UserBilling record not found for user %s during anchor alignment: %s", user.id, ue)
+        except Exception as e:
+            logger.exception("Failed to align billing anchor with Stripe period for user %s: %s", user.id, e)
+
+        # Analytics/identify for visibility
+        Analytics.identify(user.id, {
+            'plan': plan_value,
+        })
+
+        Analytics.track_event(
+            user_id=user.id,
+            event=AnalyticsEvent.SUBSCRIPTION_CREATED,
+            source=AnalyticsSource.WEB,
+            properties={
+                'plan': plan_value,
+                'stripe.invoice_id': invoice_id,
+            }
+        )

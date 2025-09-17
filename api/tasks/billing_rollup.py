@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from celery import shared_task
-from datetime import datetime, timedelta, time as dt_time
+from datetime import datetime, date as dt_date, timedelta, time as dt_time
+import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth import get_user_model
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime, parse_date
 
 from billing.services import BillingService
 from util.subscription_helper import get_active_subscription, report_task_usage_to_stripe
-from api.models import BrowserUseAgentTask, PersistentAgentStep
+from api.models import BrowserUseAgentTask, PersistentAgentStep, MeteringBatch
 
 import logging
 
@@ -25,6 +27,225 @@ def _period_bounds_for_user(user) -> tuple[datetime, datetime]:
     start_dt = timezone.make_aware(datetime.combine(start_date, dt_time.min), tz)
     end_exclusive = timezone.make_aware(datetime.combine(end_date + timedelta(days=1), dt_time.min), tz)
     return start_dt, end_exclusive
+
+
+def _to_aware_dt(value, *, as_start: bool) -> datetime | None:
+    """Try to coerce value to a timezone-aware datetime.
+
+    Returns None if value is not a supported type or cannot be parsed.
+
+    Supported:
+    - datetime: ensure tz-aware (assume current TZ if naive)
+    - date: convert to midnight start; for end bound, use next day's midnight (exclusive)
+    - str: try parse_datetime; if None, parse_date and convert similarly
+    """
+    tz = timezone.get_current_timezone()
+    dt: datetime | None = None
+
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, dt_date):
+        base = datetime.combine(value, dt_time.min)
+        dt = base if as_start else (base + timedelta(days=1))
+    elif isinstance(value, str):
+        parsed_dt = parse_datetime(value)
+        if parsed_dt is not None:
+            dt = parsed_dt
+        else:
+            parsed_d = parse_date(value)
+            if parsed_d is not None:
+                base = datetime.combine(parsed_d, dt_time.min)
+                dt = base if as_start else (base + timedelta(days=1))
+
+    if dt is None:
+        return None
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, tz)
+    return dt
+
+
+def _rollup_for_user(user) -> int:
+    """Process metering rollup for a single user. Returns 1 if attempted, else 0."""
+    # Only non-free (active subscription) users are billed
+    sub = get_active_subscription(user)
+    if not sub:
+        return 0
+
+    # Use Stripe subscription period when available; otherwise fall back to local anchor bounds
+    use_stripe_bounds = False
+    if getattr(sub, 'current_period_start', None) and getattr(sub, 'current_period_end', None):
+        start_dt = _to_aware_dt(sub.current_period_start, as_start=True)
+        end_dt = _to_aware_dt(sub.current_period_end, as_start=False)
+        if start_dt is not None and end_dt is not None:
+            use_stripe_bounds = True
+            period_start_date = start_dt.date()
+            period_end_date = end_dt.date()
+    else:
+        start_dt = end_dt = None
+
+    if not use_stripe_bounds:
+        start_dt, end_dt = _period_bounds_for_user(user)
+        period_start_date, period_end_date = BillingService.get_current_billing_period_for_user(user)
+
+    # Detect any existing pending batch for this user within this period
+    pending_task_keys = (
+        BrowserUseAgentTask.objects
+        .filter(
+            user_id=user.id,
+            metered=False,
+            meter_batch_key__isnull=False,
+            created_at__gte=start_dt,
+            created_at__lt=end_dt,
+        )
+        .values_list("meter_batch_key", flat=True)
+        .distinct()
+    )
+    pending_step_keys = (
+        PersistentAgentStep.objects
+        .filter(
+            agent__user_id=user.id,
+            metered=False,
+            meter_batch_key__isnull=False,
+            created_at__gte=start_dt,
+            created_at__lt=end_dt,
+        )
+        .values_list("meter_batch_key", flat=True)
+        .distinct()
+    )
+
+    pending_keys = {k for k in pending_task_keys if k} | {k for k in pending_step_keys if k}
+    batch_key = None
+
+    if pending_keys:
+        batch_key = sorted(pending_keys)[0]
+    else:
+        # Create a new batch by reserving unmetered rows
+        batch_key = uuid.uuid4().hex
+
+        candidate_tasks = BrowserUseAgentTask.objects.filter(
+            user_id=user.id,
+            metered=False,
+            meter_batch_key__isnull=True,
+            created_at__gte=start_dt,
+            created_at__lt=end_dt,
+        )
+        candidate_steps = PersistentAgentStep.objects.filter(
+            agent__user_id=user.id,
+            metered=False,
+            meter_batch_key__isnull=True,
+            created_at__gte=start_dt,
+            created_at__lt=end_dt,
+        )
+
+        buat_ids = list(candidate_tasks.values_list('id', flat=True))
+        step_ids = list(candidate_steps.values_list('id', flat=True))
+
+        if not buat_ids and not step_ids:
+            # Nothing to do for this user
+            return 0
+
+        # Reserve rows for this batch
+        BrowserUseAgentTask.objects.filter(id__in=buat_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
+        PersistentAgentStep.objects.filter(id__in=step_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
+
+    # Compute totals for the reserved batch only
+    batch_tasks_qs = BrowserUseAgentTask.objects.filter(
+        user_id=user.id,
+        metered=False,
+        meter_batch_key=batch_key,
+        created_at__gte=start_dt,
+        created_at__lt=end_dt,
+    )
+    batch_steps_qs = PersistentAgentStep.objects.filter(
+        agent__user_id=user.id,
+        metered=False,
+        meter_batch_key=batch_key,
+        created_at__gte=start_dt,
+        created_at__lt=end_dt,
+    )
+
+    total_buat = batch_tasks_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
+    total_steps = batch_steps_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
+
+    total = (total_buat or Decimal("0")) + (total_steps or Decimal("0"))
+    rounded = int(Decimal(total).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+    try:
+        if rounded > 0:
+            # Report a single meter event per user with idempotency key tied to the reserved batch
+            idem_key = f"meter:{user.id}:{batch_key}"
+
+            # Upsert metering batch record for audit
+            MeteringBatch.objects.update_or_create(
+                batch_key=batch_key,
+                defaults={
+                    'user_id': user.id,
+                    'idempotency_key': idem_key,
+                    'period_start': period_start_date,
+                    'period_end': period_end_date,
+                    'total_credits': total,
+                    'rounded_quantity': rounded,
+                }
+            )
+
+            meter_event = report_task_usage_to_stripe(user, quantity=rounded, idempotency_key=idem_key)
+
+            # Record Stripe event id for audit (coerce to string to avoid expression resolution on mocks)
+            try:
+                event_id = getattr(meter_event, 'id', None)
+                if event_id is not None and not isinstance(event_id, (str, int)):
+                    event_id = str(event_id)
+                MeteringBatch.objects.filter(batch_key=batch_key).update(
+                    stripe_event_id=event_id
+                )
+            except Exception:
+                logger.exception("Failed to store Stripe meter event id for user %s batch %s", user.id, batch_key)
+
+            # Mark all rows in this reserved batch as metered, but preserve meter_batch_key for audit
+            batch_tasks_qs.update(metered=True)
+            batch_steps_qs.update(metered=True)
+
+            logger.info(
+                "Rollup metered user=%s batch=%s total=%s rounded=%s",
+                user.id, batch_key, str(total), rounded,
+            )
+            return 1
+        else:
+            # No billable units yet. If we've reached the end of Stripe period, finalize and mark; else release reservation.
+            now_ts = timezone.now()
+            if (use_stripe_bounds and now_ts >= end_dt) or ((not use_stripe_bounds) and (timezone.now().date() >= period_end_date)):
+                idem_key = f"meter:{user.id}:{batch_key}"
+                MeteringBatch.objects.update_or_create(
+                    batch_key=batch_key,
+                    defaults={
+                        'user_id': user.id,
+                        'idempotency_key': idem_key,
+                        'period_start': period_start_date,
+                        'period_end': period_end_date,
+                        'total_credits': total,
+                        'rounded_quantity': rounded,
+                    }
+                )
+
+                batch_tasks_qs.update(metered=True)
+                batch_steps_qs.update(metered=True)
+                logger.info(
+                    "Rollup finalize (zero) user=%s batch=%s total=%s",
+                    user.id, batch_key, str(total),
+                )
+                return 1
+            else:
+                # Release reservation to allow accumulation in later runs
+                batch_tasks_qs.update(meter_batch_key=None)
+                batch_steps_qs.update(meter_batch_key=None)
+                logger.info(
+                    "Rollup carry-forward user=%s batch=%s total=%s rounded=%s",
+                    user.id, batch_key, str(total), rounded,
+                )
+                return 1
+    except Exception:
+        logger.exception("Failed rollup metering for user %s (batch=%s)", user.id, batch_key)
+        return 0
 
 
 @shared_task(bind=True, ignore_result=True, name="gobii_platform.api.tasks.rollup_and_meter_usage")
@@ -64,80 +285,21 @@ def rollup_and_meter_usage_task(self) -> int:
         return 0
 
     processed_users = 0
-
     users = User.objects.filter(id__in=user_ids)
     for user in users:
-        # Only non-free (active subscription) users are billed
-        sub = get_active_subscription(user)
-        if not sub:
-            continue
-
-        start_dt, end_dt = _period_bounds_for_user(user)
-
-        # Collect unmetered usage within the period from both sources
-        buat_qs = BrowserUseAgentTask.objects.filter(
-            user_id=user.id,
-            metered=False,
-            created_at__gte=start_dt,
-            created_at__lt=end_dt,
-        )
-
-        step_qs = PersistentAgentStep.objects.filter(
-            agent__user_id=user.id,
-            metered=False,
-            created_at__gte=start_dt,
-            created_at__lt=end_dt,
-        )
-
-        total_buat = buat_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
-        total_steps = step_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
-
-        total = (total_buat or Decimal("0")) + (total_steps or Decimal("0"))
-
-        # Round to nearest whole integer using half-up semantics
-        rounded = int(Decimal(total).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
-
-        # Evaluate the querysets to get a fixed list of IDs
-        buat_ids = list(buat_qs.values_list('id', flat=True))
-        step_ids = list(step_qs.values_list('id', flat=True))
-
-        try:
-            if rounded > 0:
-                # Report a single meter event per user
-                report_task_usage_to_stripe(user, quantity=rounded)
-
-                # Mark all included rows as metered when we successfully bill a non-zero quantity
-                updated_tasks = BrowserUseAgentTask.objects.filter(id__in=buat_ids).update(metered=True)
-                updated_steps = PersistentAgentStep.objects.filter(id__in=step_ids).update(metered=True)
-
-                logger.info(
-                    "Rollup metering user=%s total=%s rounded=%s updated_tasks=%s updated_steps=%s",
-                    user.id, str(total), rounded, updated_tasks, updated_steps,
-                )
-                processed_users += 1
-            else:
-                # Carry forward: do not mark rows yet so they can accumulate on subsequent runs
-                # However, if we're at the last day of this user's billing period, finalize and mark
-                today = timezone.now().date()
-                _, period_end_date = BillingService.get_current_billing_period_for_user(user)
-                if today >= period_end_date:
-                    # Finalize the period with no billing event; mark rows as metered to avoid cross-period carryover
-                    updated_tasks = buat_qs.update(metered=True)
-                    updated_steps = step_qs.update(metered=True)
-                    logger.info(
-                        "Rollup finalize (zero) user=%s total=%s rounded=%s updated_tasks=%s updated_steps=%s",
-                        user.id, str(total), rounded, updated_tasks, updated_steps,
-                    )
-                    processed_users += 1
-                else:
-                    logger.info(
-                        "Rollup carry-forward user=%s total=%s rounded=%s (nothing metered/marked)",
-                        user.id, str(total), rounded,
-                    )
-                    # processed_users still counts attempt
-                    processed_users += 1
-        except Exception:
-            logger.exception("Failed rollup metering for user %s", user.id)
+        processed_users += _rollup_for_user(user)
 
     logger.info("Rollup metering: finished processed_users=%s", processed_users)
     return processed_users
+
+
+@shared_task(bind=True, ignore_result=True, name="gobii_platform.api.tasks.rollup_usage_for_user")
+def rollup_usage_for_user(self, user_id: int) -> int:
+    """Run metering rollup for a single user id (admin/testing helper)."""
+    User = get_user_model()
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        logger.info("Rollup per-user: user %s not found", user_id)
+        return 0
+    return _rollup_for_user(user)

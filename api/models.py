@@ -508,6 +508,8 @@ class BrowserUseAgentTask(models.Model):
 
     # Billing rollup flag: has this task been included in a Stripe meter rollup?
     metered = models.BooleanField(default=False, db_index=True, help_text="Marked true once included in Stripe metering rollup.")
+    # Temporary batch key used to reserve rows for an idempotent metering batch
+    meter_batch_key = models.CharField(max_length=64, null=True, blank=True, db_index=True)
 
     objects = BrowserUseAgentTaskQuerySet.as_manager()
 
@@ -1195,6 +1197,37 @@ class UserPhoneNumber(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id}:{self.phone_number}"
+
+class MeteringBatch(models.Model):
+    """Audit record linking a batch of reserved usage to a Stripe meter event.
+
+    Each batch corresponds to a unique meter_batch_key reserved on usage rows.
+    We also persist the idempotency key used with Stripe for exactly-once semantics.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="metering_batches",
+    )
+    batch_key = models.CharField(max_length=64, unique=True, db_index=True)
+    idempotency_key = models.CharField(max_length=128, unique=True, db_index=True)
+    period_start = models.DateField()
+    period_end = models.DateField()
+    total_credits = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    rounded_quantity = models.IntegerField(default=0)
+    stripe_event_id = models.CharField(max_length=128, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "created_at"], name="meter_batch_user_ts_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"MeteringBatch({self.batch_key}) user={self.user_id} qty={self.rounded_quantity}"
 
 class ProxyHealthCheckSpec(models.Model):
     """Specification for proxy health check tests"""
@@ -2999,6 +3032,8 @@ class PersistentAgentStep(models.Model):
 
     # Billing rollup flag: has this step been included in a Stripe meter rollup?
     metered = models.BooleanField(default=False, db_index=True, help_text="Marked true once included in Stripe metering rollup.")
+    # Temporary batch key used to reserve rows for an idempotent metering batch
+    meter_batch_key = models.CharField(max_length=64, null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]
