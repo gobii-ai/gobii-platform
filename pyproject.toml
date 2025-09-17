@@ -30,7 +30,7 @@ dependencies = [
   "google-cloud-storage~=3.1.0",
   "gunicorn==23.0.0",
   "zstandard~=0.23.0",
-  "json-schema-to-pydantic~=0.2.5",
+  "json-schema-to-pydantic~=0.4.1",
   "litellm~=1.73.7",
   "markdown~=3.8",
   "psycopg[binary]~=3.1",
