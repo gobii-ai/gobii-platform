@@ -7,6 +7,9 @@ from observability import trace
 
 import logging
 
+from cron_descriptor import get_description, Options
+from cron_descriptor.Exception import FormatError
+
 from util.subscription_helper import has_unlimited_agents
 
 logger = logging.getLogger(__name__)
@@ -109,6 +112,15 @@ class AIEmployeeTemplateService:
     """Utilities for working with curated AI employee templates."""
 
     TEMPLATE_SESSION_KEY = "ai_employee_template_code"
+    _CRON_MACRO_MAP = {
+        "@yearly": "0 0 1 1 *",
+        "@annually": "0 0 1 1 *",
+        "@monthly": "0 0 1 * *",
+        "@weekly": "0 0 * * 0",
+        "@daily": "0 0 * * *",
+        "@midnight": "0 0 * * *",
+        "@hourly": "0 * * * *",
+    }
 
     @staticmethod
     def get_active_templates():
@@ -158,3 +170,37 @@ class AIEmployeeTemplateService:
         jittered_hour, jittered_minute = divmod(total_minutes, 60)
 
         return f"{jittered_minute} {jittered_hour} {day_of_month} {month} {day_of_week}"
+
+    @staticmethod
+    def describe_schedule(base_schedule: str | None) -> str | None:
+        """Return a human readable description of a cron schedule."""
+        if not base_schedule:
+            return None
+
+        expression = AIEmployeeTemplateService._normalize_cron_expression(base_schedule)
+        if not expression:
+            return base_schedule
+
+        options = Options()
+        options.verbose = True
+
+        try:
+            return get_description(expression, options)
+        except FormatError:
+            logger.warning("Unable to parse cron expression for description: %s", base_schedule)
+        except Exception:  # pragma: no cover - defensive logging only
+            logger.exception("Unexpected error while describing cron expression: %s", base_schedule)
+
+        return base_schedule
+
+    @staticmethod
+    def _normalize_cron_expression(expression: str) -> str | None:
+        expression = (expression or "").strip()
+        if not expression:
+            return None
+
+        if expression.startswith("@"):
+            macro = expression.lower()
+            return AIEmployeeTemplateService._CRON_MACRO_MAP.get(macro)
+
+        return expression

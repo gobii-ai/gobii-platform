@@ -17,7 +17,10 @@
           <div class="mt-8 grid gap-6 md:grid-cols-3">
             <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
               <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Cadence</p>
-              <p class="mt-2 text-base font-medium text-slate-800">{{ base_schedule }}</p>
+              <p class="mt-2 text-base font-medium text-slate-800">{{ schedule_description|default:base_schedule }}</p>
+              {% if schedule_description and base_schedule and schedule_description != base_schedule %}
+              <p class="mt-1 text-sm text-slate-400">Cron expression: {{ base_schedule }}</p>
+              {% endif %}
               <p class="mt-1 text-sm text-slate-500">Runs with ±{{ schedule_jitter_minutes }} minute jitter to avoid thundering herds.</p>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">

@@ -57,7 +57,7 @@
                   <span class="text-indigo-500 mt-0.5">🗓️</span>
                   <div>
                     <dt class="font-semibold text-slate-700">Cadence</dt>
-                    <dd>{{ employee.base_schedule }} <span class="text-slate-400">±{{ employee.schedule_jitter_minutes }}m jitter</span></dd>
+                    <dd>{{ employee.schedule_description|default:employee.base_schedule }} <span class="text-slate-400">±{{ employee.schedule_jitter_minutes }}m jitter</span></dd>
                   </div>
                 </div>
                 {% if employee.event_triggers %}

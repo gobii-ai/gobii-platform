@@ -153,20 +153,24 @@ class AIEmployeeDirectoryView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        templates = AIEmployeeTemplateService.get_active_templates()
+        templates_queryset = AIEmployeeTemplateService.get_active_templates()
 
         category = self.request.GET.get('category', '').strip()
         search = self.request.GET.get('q', '').strip()
 
         if category:
-            templates = templates.filter(category__iexact=category)
+            templates_queryset = templates_queryset.filter(category__iexact=category)
 
         if search:
-            templates = templates.filter(
+            templates_queryset = templates_queryset.filter(
                 Q(display_name__icontains=search)
                 | Q(tagline__icontains=search)
                 | Q(description__icontains=search)
             )
+
+        templates = list(templates_queryset)
+        for template in templates:
+            template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
 
         all_categories = (
             AIEmployeeTemplateService.get_active_templates()
@@ -202,6 +206,7 @@ class AIEmployeeDetailView(TemplateView):
         context["ai_employee"] = self.employee
         context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
         context["base_schedule"] = self.employee.base_schedule
+        context["schedule_description"] = AIEmployeeTemplateService.describe_schedule(self.employee.base_schedule)
         context["event_triggers"] = self.employee.event_triggers or []
         context["default_tools"] = self.employee.default_tools or []
         return context

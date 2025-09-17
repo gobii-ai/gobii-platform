@@ -32,6 +32,7 @@ class AIEmployeeDirectoryTests(TestCase):
         response = self.client.get(reverse('pages:ai_employee_directory'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.template.display_name)
+        self.assertContains(response, "At 10:00 AM")
 
     def test_hire_view_sets_session_for_anonymous_user(self):
         response = self.client.post(
@@ -52,3 +53,8 @@ class AIEmployeeDirectoryTests(TestCase):
     def test_schedule_jitter_no_change_when_disabled(self):
         unchanged = AIEmployeeTemplateService.compute_schedule_with_jitter("15 9 * * MON-FRI", 0)
         self.assertEqual(unchanged, "15 9 * * MON-FRI")
+
+    def test_detail_view_shows_human_schedule_description(self):
+        response = self.client.get(reverse('pages:ai_employee_detail', args=[self.template.code]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "At 10:00 AM")

@@ -801,6 +801,7 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
             template = AIEmployeeTemplateService.get_template_by_code(template_code) if template_code else None
 
             if template:
+                template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
                 context['selected_ai_employee'] = template
                 preferred = (template.recommended_contact_channel or '').lower()
                 valid_choices = {choice for choice, _ in PersistentAgentContactForm.CONTACT_METHOD_CHOICES}
@@ -812,6 +813,7 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
             template_code = self.request.session.get(AIEmployeeTemplateService.TEMPLATE_SESSION_KEY)
             template = AIEmployeeTemplateService.get_template_by_code(template_code) if template_code else None
             if template:
+                template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
                 context['selected_ai_employee'] = template
 
         return context
