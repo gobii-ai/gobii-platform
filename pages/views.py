@@ -20,6 +20,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from api.models import PaidPlanIntent, PersistentAgent
 from agents.services import AIEmployeeTemplateService
 from waffle import flag_is_active
+from api.models import OrganizationMembership
 
 import stripe
 from djstripe.models import Customer, Subscription, Price
@@ -97,6 +98,28 @@ class HomePage(TemplateView):
             initial=initial
         )
 
+        if self.request.user.is_authenticated:
+            from console.context_helpers import build_console_context
+
+            resolved = build_console_context(self.request)
+            context['current_context'] = {
+                'type': resolved.current_context.type,
+                'id': resolved.current_context.id,
+                'name': resolved.current_context.name,
+            }
+            context['can_manage_org_agents'] = resolved.can_manage_org_agents
+            if resolved.current_membership is not None:
+                context['current_membership'] = resolved.current_membership
+
+            context['user_organizations'] = (
+                OrganizationMembership.objects.filter(
+                    user=self.request.user,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                )
+                .select_related('org')
+                .order_by('org__name')
+            )
+
         # Examples data
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
@@ -154,7 +177,7 @@ class HomeAgentSpawnView(TemplateView):
             # Store charter in session for later use
             request.session['agent_charter'] = form.cleaned_data['charter']
             request.session['agent_charter_source'] = 'user'
-            
+
             # Track analytics for home page agent creation start (only for authenticated users)
             if request.user.is_authenticated:
                 Analytics.track_event(

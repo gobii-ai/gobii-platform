@@ -49,7 +49,7 @@
             </p>
           {% else %}
             <p class="mb-4">
-              <span class="font-medium">You have {{ account.usage.task_credits_available }} task credits remaining.</span>
+              <span class="font-medium">You have {{ account.usage.task_credits_available|floatformat:0 }} task credits remaining.</span>
               To prevent service interruption, please take action soon.
             </p>
           {% endif %}

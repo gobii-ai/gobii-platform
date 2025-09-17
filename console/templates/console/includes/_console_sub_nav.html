@@ -3,8 +3,15 @@
 
 <!-- Console Sub-Navigation Panel - Visible on medium and large screens -->
 <aside class="hidden md:block sticky top-20 self-start min-w-64 w-64 flex-shrink-0 bg-white/80 backdrop-blur-sm border border-white/60 p-4 mx-4 my-4 rounded-xl shadow-xl overflow-y-auto">
+  <!-- Context Switcher -->
+  {% flag "organizations" %}
+  <div class="mb-4">
+    {% include "console/includes/_context_switcher.html" %}
+  </div>
+  {% endflag %}
+
   <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Console Menu</h3>
-  <nav class="space-y-1">
+  <nav class="space-y-1" x-data="navigationMenu()">
     <a href="{% url 'console-home' %}" 
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-home' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
       <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"
@@ -37,24 +44,28 @@
       </svg>
       API Keys
     </a>
-    {% flag "organizations" %}
-    <a href="{% url 'organizations' %}"
-       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'organizations' or request.resolver_match.url_name == 'organization_detail' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'organizations' or request.resolver_match.url_name == 'organization_detail' %}text-blue-600{% else %}text-gray-500{% endif %}" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      Organizations
-    </a>
-    {% endflag %}
-    <a href="{% url 'profile' %}"
-       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'profile' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'profile' %}text-blue-600{% else %}text-gray-500{% endif %}"
-           xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" height="24" width="24" fill="currentColor" stroke="currentColor">
-        <!--!Font Awesome Free v7.0.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2025 Fonticons, Inc.-->
-       <path d="M240 192C240 147.8 275.8 112 320 112C364.2 112 400 147.8 400 192C400 236.2 364.2 272 320 272C275.8 272 240 236.2 240 192zM448 192C448 121.3 390.7 64 320 64C249.3 64 192 121.3 192 192C192 262.7 249.3 320 320 320C390.7 320 448 262.7 448 192zM144 544C144 473.3 201.3 416 272 416L368 416C438.7 416 496 473.3 496 544L496 552C496 565.3 506.7 576 520 576C533.3 576 544 565.3 544 552L544 544C544 446.8 465.2 368 368 368L272 368C174.8 368 96 446.8 96 544L96 552C96 565.3 106.7 576 120 576C133.3 576 144 565.3 144 552L144 544z"/>
-      </svg>
-      Profile
-    </a>
+    {% if current_context.type == 'organization' and current_context.id %}
+      <a href="{% url 'organization_detail' org_id=current_context.id %}"
+         class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'organization_detail' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+        <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'organization_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"
+             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 21h16.5M4.5 21V4.875A.375.375 0 0 1 4.875 4.5h14.25a.375.375 0 0 1 .375.375V21M9 7.5h6M9 10.5h6M9 13.5h6M9 16.5h6" />
+        </svg>
+        Organization
+      </a>
+    {% else %}
+      <a href="{% url 'profile' %}"
+         class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'profile' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+        <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'profile' %}text-blue-600{% else %}text-gray-500{% endif %}"
+             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 7.5A3.75 3.75 0 1 1 12 3.75 3.75 3.75 0 0 1 15.75 7.5zM4.5 20.25a7.5 7.5 0 0 1 15 0" />
+        </svg>
+        Profile
+      </a>
+    {% endif %}
     {% if settings.GOBII_PROPRIETARY_MODE %}
       <a href="{% url 'billing' %}"
+         x-show="showBilling"
          class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
         <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'billing' %}text-blue-600{% else %}text-gray-500{% endif %}"
              xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -85,3 +96,38 @@
     <!-- Add other console-specific links here -->
   </nav>
 </aside>
+
+<script>
+function navigationMenu() {
+  return {
+    showBilling: false,
+    userRole: null,
+    
+    init() {
+      // Get current context from localStorage
+      const contextType = localStorage.getItem('contextType') || 'personal';
+      const contextId = localStorage.getItem('contextId') || '{{ user.id }}';
+      
+      // Set billing visibility based on context and role
+      if (contextType === 'personal') {
+        // Personal account always shows billing
+        this.showBilling = true;
+      } else {
+        // For organizations, check user role
+        this.checkOrganizationRole(contextId);
+      }
+    },
+    
+    checkOrganizationRole(orgId) {
+      // Get user's role in the organization from backend data
+      {% for membership in user_organizations %}
+      if ('{{ membership.org.id }}' === orgId) {
+        this.userRole = '{{ membership.role }}';
+        // Show billing only for owners, admins, and billing admins
+        this.showBilling = ['owner', 'admin', 'billing_admin'].includes(this.userRole);
+      }
+      {% endfor %}
+    }
+  }
+}
+</script>

@@ -109,6 +109,28 @@
             
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
+              {% flag "organizations" %}
+                {% if user.is_authenticated and user_organizations %}
+                  <div class="bg-white border border-indigo-100 rounded-xl px-4 py-3 shadow-sm space-y-2">
+                    <label for="agent-owner-selector" class="text-sm font-medium text-gray-800">
+                      Choose the agent owner
+                    </label>
+                    <select id="agent-owner-selector" class="block w-full rounded-lg border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 py-2.5 px-3 bg-white" data-current-name="{{ current_context.name }}">
+                      <option value='{"type": "personal", "id": "{{ user.id }}", "name": "{{ user.get_full_name|default:user.username }}"}' {% if current_context.type != 'organization' %}selected{% endif %}>
+                        Personal – {{ user.get_full_name|default:user.username }}
+                      </option>
+                      {% for membership in user_organizations %}
+                        <option value='{"type": "organization", "id": "{{ membership.org.id }}", "name": "{{ membership.org.name }}"}' {% if current_context.type == 'organization' and current_context.id == membership.org.id|stringformat:"s" %}selected{% endif %}>
+                          Organization – {{ membership.org.name }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                    {% if current_context.type == 'organization' and not can_manage_org_agents %}
+                      <p class="text-sm text-red-600">You need to be an organization owner or admin to create agents for this organization.</p>
+                    {% endif %}
+                  </div>
+                {% endif %}
+              {% endflag %}
               <!-- Unified input + button container -->
               <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white transition-colors duration-200">
                 <!-- Textarea -->
@@ -116,6 +138,21 @@
 
                 <!-- Button row -->
                 <div class="flex flex-col sm:flex-row sm:justify-end items-stretch sm:items-center gap-3 p-3">
+                  {% if user.is_authenticated %}
+                    {% load waffle_tags %}
+                    {% flag "persistent_agents" %}
+                      {% if account.usage.agents_in_use > 0 %}
+                        <a href="{% url 'agents' %}" class="py-3 px-4 inline-flex items-center justify-center gap-x-2 text-sm font-medium rounded-lg border border-blue-600 bg-white text-blue-600 hover:bg-blue-50 focus:outline-none focus:bg-blue-50 transition-colors duration-200">
+                          <span class="hidden sm:inline">Manage your {{ account.usage.agents_in_use }} always-on agent{{ account.usage.agents_in_use|pluralize }}</span>
+                          <span class="sm:hidden">Manage {{ account.usage.agents_in_use }} agent{{ account.usage.agents_in_use|pluralize }}</span>
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                          </svg>
+                        </a>
+                      {% endif %}
+                    {% endflag %}
+                  {% endif %}
+                  
                   <button
                     type="submit"
                     class="group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 border border-transparent text-white text-sm font-semibold rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
@@ -540,12 +577,58 @@
     })();
   </script>
 
-  <script>
-    function setPrompt(promptText) {
-        const textarea = document.querySelector('textarea[name="charter"]');
-        if (textarea) {
-            textarea.value = promptText;
-            textarea.focus();
+      <script>
+        (function () {
+          const select = document.getElementById('agent-owner-selector');
+          if (!select) {
+            return;
+          }
+
+          if (!window._postConsoleContextSwitch) {
+            window._postConsoleContextSwitch = async function (type, id, name) {
+              try {
+                const response = await fetch('{% url "switch_context" %}', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': (function () {
+                      const match = document.cookie.match(new RegExp('(?:^|; )csrftoken=([^;]*)'));
+                      return match ? decodeURIComponent(match[1]) : '';
+                    })()
+                  },
+                  body: JSON.stringify({ type, id, name })
+                });
+
+                if (!response.ok) {
+                  throw new Error('Context switch failed');
+                }
+
+                window.location.reload();
+              } catch (error) {
+                console.error(error);
+                window.location.reload();
+              }
+            };
+          }
+
+          select.addEventListener('change', async (event) => {
+            try {
+              const option = event.target.selectedOptions[0];
+              const payload = JSON.parse(option.value);
+              await window._postConsoleContextSwitch(payload.type, payload.id, payload.name);
+            } catch (error) {
+              console.error('Failed to parse agent owner selection', error);
+            }
+          });
+        })();
+      </script>
+
+      <script>
+        function setPrompt(promptText) {
+            const textarea = document.querySelector('textarea[name="charter"]');
+            if (textarea) {
+                textarea.value = promptText;
+                textarea.focus();
             textareaAutoResize(textarea);
         }
 
