@@ -19,14 +19,19 @@
           {% if can_manage_members %}
           <form method="post" action="{% url 'org_member_role_update_org' org.id member.user.id %}" class="flex items-center gap-2">
             {% csrf_token %}
-            <select name="role" class="text-sm border-gray-300 rounded-md"
+            <div class="flex rounded-md shadow-sm">
+              <select name="role" class="text-sm border-gray-300 rounded-l-md rounded-r-none focus:z-10"
               {% if is_org_admin and member.role == 'owner' %}disabled{% endif %}>
               {% for value,label in allowed_role_choices %}
                 <option value="{{ value }}" {% if member.role == value %}selected{% endif %}
                   {% if is_org_admin and value == 'owner' %}disabled{% endif %}>{{ label }}</option>
               {% endfor %}
-            </select>
-            <button type="submit" class="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Update</button>
+              </select>
+              <button type="submit"
+                      class="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-l-0 border-gray-300 rounded-r-md hover:bg-gray-50 focus:z-10">
+                Update
+              </button>
+            </div>
           </form>
           {% endif %}
           {% if can_manage_members and member.user.id != request.user.id %}
