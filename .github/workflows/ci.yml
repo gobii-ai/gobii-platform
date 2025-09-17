@@ -153,8 +153,6 @@ jobs:
             tag: batch_pa_shutdown_triggers
           - batch: agent_lifecycle
             tag: batch_agent_lifecycle
-          - batch: directory
-            tag: batch_directory
           - batch: schedule
             tag: batch_schedule
     env:
