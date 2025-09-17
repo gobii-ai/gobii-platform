@@ -1,5 +1,7 @@
 from django.apps import apps
 
+import random
+
 from config.plans import AGENTS_UNLIMITED, MAX_AGENT_LIMIT
 from observability import trace
 
@@ -101,3 +103,58 @@ class AgentService:
         """
         # -1 is unlimited, so we just check if not 0
         return AgentService.get_agents_available(user) > 0 or has_unlimited_agents(user)
+
+
+class AIEmployeeTemplateService:
+    """Utilities for working with curated AI employee templates."""
+
+    TEMPLATE_SESSION_KEY = "ai_employee_template_code"
+
+    @staticmethod
+    def get_active_templates():
+        Template = apps.get_model("api", "PersistentAgentTemplate")
+        return Template.objects.filter(is_active=True).order_by("priority", "display_name")
+
+    @staticmethod
+    def get_template_by_code(code: str):
+        if not code:
+            return None
+        Template = apps.get_model("api", "PersistentAgentTemplate")
+        try:
+            return Template.objects.get(code=code, is_active=True)
+        except Template.DoesNotExist:
+            return None
+
+    @staticmethod
+    def compute_schedule_with_jitter(base_schedule: str | None, jitter_minutes: int | None) -> str | None:
+        """Return a cron schedule string with jitter applied to minutes/hours."""
+        if not base_schedule:
+            return None
+
+        jitter = max(int(jitter_minutes or 0), 0)
+        if jitter == 0:
+            return base_schedule
+
+        if base_schedule.startswith("@"):
+            # Unsupported shortcut format – best effort by returning original.
+            return base_schedule
+
+        parts = base_schedule.split()
+        if len(parts) != 5:
+            return base_schedule
+
+        minute, hour, day_of_month, month, day_of_week = parts
+
+        if not (minute.isdigit() and hour.isdigit()):
+            return base_schedule
+
+        minute_val = int(minute)
+        hour_val = int(hour)
+
+        total_minutes = hour_val * 60 + minute_val
+        offset = random.randint(-jitter, jitter)
+        total_minutes = (total_minutes + offset) % (24 * 60)
+
+        jittered_hour, jittered_minute = divmod(total_minutes, 60)
+
+        return f"{jittered_minute} {jittered_hour} {day_of_month} {month} {day_of_week}"

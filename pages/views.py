@@ -13,11 +13,12 @@ from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.http import HttpResponseRedirect
-from django.db.models import F
+from django.db.models import F, Q
 from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from api.models import PaidPlanIntent
+from agents.services import AIEmployeeTemplateService
 
 import stripe
 from djstripe.models import Customer, Subscription, Price
@@ -145,6 +146,111 @@ class HomeAgentSpawnView(TemplateView):
         homepage_view = HomePage()
         homepage_view.request = self.request
         return homepage_view.get_context_data(**kwargs)
+
+
+class AIEmployeeDirectoryView(TemplateView):
+    template_name = "ai_directory/index.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        templates = AIEmployeeTemplateService.get_active_templates()
+
+        category = self.request.GET.get('category', '').strip()
+        search = self.request.GET.get('q', '').strip()
+
+        if category:
+            templates = templates.filter(category__iexact=category)
+
+        if search:
+            templates = templates.filter(
+                Q(display_name__icontains=search)
+                | Q(tagline__icontains=search)
+                | Q(description__icontains=search)
+            )
+
+        all_categories = (
+            AIEmployeeTemplateService.get_active_templates()
+            .exclude(category__isnull=True)
+            .exclude(category__exact="")
+            .values_list('category', flat=True)
+            .distinct()
+            .order_by('category')
+        )
+
+        context.update(
+            {
+                "ai_employees": templates,
+                "categories": list(all_categories),
+                "selected_category": category,
+                "search_term": search,
+            }
+        )
+        return context
+
+
+class AIEmployeeDetailView(TemplateView):
+    template_name = "ai_directory/detail.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.employee = AIEmployeeTemplateService.get_template_by_code(kwargs.get('slug'))
+        if not self.employee:
+            raise Http404("This AI employee is no longer available.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["ai_employee"] = self.employee
+        context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
+        context["base_schedule"] = self.employee.base_schedule
+        context["event_triggers"] = self.employee.event_triggers or []
+        context["default_tools"] = self.employee.default_tools or []
+        return context
+
+
+class AIEmployeeHireView(View):
+    def post(self, request, *args, **kwargs):
+        code = kwargs.get('slug')
+        template = AIEmployeeTemplateService.get_template_by_code(code)
+        if not template:
+            raise Http404("This AI employee is no longer available.")
+
+        request.session['agent_charter'] = template.charter
+        request.session[AIEmployeeTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        request.session.modified = True
+
+        if request.user.is_authenticated:
+            Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+                source=AnalyticsSource.WEB,
+                properties={
+                    "source_page": "ai_employee_directory",
+                    "template_code": template.code,
+                },
+            )
+            return redirect('agent_create_contact')
+
+        # Track anonymous interest
+        session_key = request.session.session_key
+        if not session_key:
+            request.session.save()
+            session_key = request.session.session_key
+        Analytics.track_event_anonymous(
+            anonymous_id=str(session_key),
+            event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+            source=AnalyticsSource.WEB,
+            properties={
+                "source_page": "ai_employee_directory",
+                "template_code": template.code,
+            },
+        )
+
+        from django.contrib.auth.views import redirect_to_login
+
+        return redirect_to_login(
+            next=reverse('agent_create_contact'),
+            login_url=settings.LOGIN_URL,
+        )
 
 
 def health_check(request):

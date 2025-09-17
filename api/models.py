@@ -1297,6 +1297,68 @@ class ProxyHealthCheckResult(models.Model):
 
 # Persistent Agents Models
 
+class PersistentAgentTemplate(models.Model):
+    """Curated template for pre-configured always-on AI employees."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.SlugField(
+        max_length=64,
+        unique=True,
+        help_text="Internal identifier for referencing this template in code and analytics.",
+    )
+    display_name = models.CharField(max_length=255)
+    tagline = models.CharField(max_length=255)
+    description = models.TextField()
+    charter = models.TextField(help_text="Pre-built charter the agent will start with.")
+    base_schedule = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Cron-like schedule expression or interval guideline (e.g., '@daily').",
+    )
+    schedule_jitter_minutes = models.PositiveIntegerField(
+        default=0,
+        help_text="Maximum minutes of jitter to apply to the base schedule when instancing.",
+    )
+    event_triggers = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of event trigger definitions (webhook names, keywords, etc.).",
+    )
+    default_tools = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="MCP tool identifiers to enable automatically when hired.",
+    )
+    recommended_contact_channel = models.CharField(
+        max_length=16,
+        blank=True,
+        help_text="Default contact preference (e.g., 'email', 'sms').",
+    )
+    category = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Grouping label used for UI filtering (e.g., 'Research', 'Operations').",
+    )
+    hero_image_path = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Optional static asset path used for UI illustration.",
+    )
+    priority = models.PositiveIntegerField(
+        default=100,
+        help_text="Lower numbers appear first in the directory UI.",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["priority", "display_name"]
+
+    def __str__(self) -> str:  # pragma: no cover - simple repr
+        return f"AIEmployeeTemplate<{self.display_name}>"
+
+
 class PersistentAgent(models.Model):
     """
     A persistent agent that runs automatically on a schedule.

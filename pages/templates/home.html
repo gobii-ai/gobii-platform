@@ -240,16 +240,24 @@
   </section>
 
   <!-- Employee Directory Section -->
-  <section class="relative pt-8 pb-16">
-    <div class="max-w-3xl mx-auto px-6 text-center">
-      <h2 class="text-3xl sm:text-4xl font-light text-gray-700 leading-relaxed">
-        <a href="#" class="group hover:text-gray-900 transition-colors duration-200 inline-flex items-center gap-3">
-          Or hire an existing one
-          <svg class="w-6 h-6 text-gray-400 group-hover:text-gray-600 group-hover:translate-x-1 transition-all duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
+  <section class="relative pt-12 pb-16">
+    <div class="max-w-4xl mx-auto px-6 text-center">
+      <h2 class="text-3xl sm:text-4xl font-semibold text-gray-900">Or hire an existing one</h2>
+      <p class="mt-4 text-lg text-gray-600">Browse our AI employee directory for pre-built agents with production-ready charters, schedules, and triggers.</p>
+      <div class="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+        <a href="{% url 'pages:ai_employee_directory' %}" class="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:from-blue-500 hover:to-indigo-500 transition-all duration-200">
+          Explore the directory
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 8l4 4m0 0l-4 4m4-4H3" />
           </svg>
         </a>
-      </h2>
+        <a href="{% url 'pages:ai_employee_detail' 'competitor-intelligence-analyst' %}" class="inline-flex items-center justify-center gap-2 px-5 py-3 border border-transparent text-blue-600 font-semibold rounded-xl hover:border-blue-200 hover:bg-blue-50 transition-all duration-200">
+          See a sample playbook
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7" />
+          </svg>
+        </a>
+      </div>
     </div>
   </section>
 
