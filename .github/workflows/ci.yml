@@ -153,6 +153,8 @@ jobs:
             tag: batch_pa_shutdown_triggers
           - batch: agent_lifecycle
             tag: batch_agent_lifecycle
+          - batch: schedule
+            tag: batch_schedule
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

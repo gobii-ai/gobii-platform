@@ -23,7 +23,7 @@ from django.utils.text import slugify
 from datetime import timedelta
 import uuid
 
-from agents.services import AgentService
+from agents.services import AgentService, AIEmployeeTemplateService
 from api.models import ApiKey, UserBilling, PersistentAgent, BrowserUseAgent, PersistentAgentCommsEndpoint, \
     PersistentAgentEmailEndpoint, CommsChannel, PersistentAgentConversation, PersistentAgentMessage, \
     PersistentAgentConversationParticipant, BrowserUseAgentTask, TaskCredit, PersistentAgentSmsEndpoint
@@ -71,6 +71,7 @@ from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from agent_namer import AgentNameGenerator
 from opentelemetry import trace, baggage, context
+from api.agent.tools.mcp_manager import enable_mcp_tool
 from api.agent.tasks import process_agent_events_task
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
@@ -795,7 +796,37 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
         # Pre-populate with user's email and SMS if verified
         if 'form' not in kwargs:
             initial_data = {'contact_endpoint_email': self.request.user.email}
+
+            template_code = self.request.session.get(AIEmployeeTemplateService.TEMPLATE_SESSION_KEY)
+            template = AIEmployeeTemplateService.get_template_by_code(template_code) if template_code else None
+
+            if template:
+                template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
+                template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+                    template.default_tools or []
+                )
+                template.contact_method_label = AIEmployeeTemplateService.describe_contact_channel(
+                    template.recommended_contact_channel
+                )
+                context['selected_ai_employee'] = template
+                preferred = (template.recommended_contact_channel or '').lower()
+                valid_choices = {choice for choice, _ in PersistentAgentContactForm.CONTACT_METHOD_CHOICES}
+                if preferred in valid_choices:
+                    initial_data['preferred_contact_method'] = preferred
+
             context['form'] = PersistentAgentContactForm(initial=initial_data)
+        else:
+            template_code = self.request.session.get(AIEmployeeTemplateService.TEMPLATE_SESSION_KEY)
+            template = AIEmployeeTemplateService.get_template_by_code(template_code) if template_code else None
+            if template:
+                template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
+                template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+                    template.default_tools or []
+                )
+                template.contact_method_label = AIEmployeeTemplateService.describe_contact_channel(
+                    template.recommended_contact_channel
+                )
+                context['selected_ai_employee'] = template
 
         return context
 
@@ -851,6 +882,10 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
 
             sms_preferred = preferred_contact_method == "sms"
 
+            template_code = request.session.get(AIEmployeeTemplateService.TEMPLATE_SESSION_KEY)
+            selected_template = AIEmployeeTemplateService.get_template_by_code(template_code) if template_code else None
+            applied_schedule = None
+
             try:
                 with transaction.atomic():
                     # Generate a unique agent name
@@ -872,6 +907,25 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                         browser_use_agent=browser_agent,
                         preferred_contact_endpoint=None  # Temporary until we set it below
                     )
+
+                    if selected_template:
+                        fields_to_update = []
+                        if selected_template.charter:
+                            persistent_agent.charter = selected_template.charter
+                            fields_to_update.append("charter")
+
+                        applied_schedule = AIEmployeeTemplateService.compute_schedule_with_jitter(
+                            selected_template.base_schedule,
+                            selected_template.schedule_jitter_minutes,
+                        )
+
+                        if applied_schedule:
+                            persistent_agent.schedule = applied_schedule
+                            persistent_agent.schedule_snapshot = selected_template.base_schedule
+                            fields_to_update.extend(["schedule", "schedule_snapshot"])
+
+                        if fields_to_update:
+                            persistent_agent.save(update_fields=fields_to_update)
                     
                     # Generate a unique email for the agent itself
                     user_contact = None
@@ -984,12 +1038,28 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                         owner_agent=persistent_agent,
                     )
 
+                    if selected_template and selected_template.default_tools:
+                        for tool_name in selected_template.default_tools:
+                            try:
+                                enable_mcp_tool(persistent_agent, tool_name)
+                            except Exception as exc:
+                                logger.warning(
+                                    "Failed to enable MCP tool '%s' for agent %s: %s",
+                                    tool_name,
+                                    persistent_agent.id,
+                                    exc,
+                                )
+
                     # Trigger the first event processing run after commit
                     transaction.on_commit(lambda: process_agent_events_task.delay(str(persistent_agent.id)))
                     
                     # Clear session data
                     if 'agent_charter' in request.session:
                         del request.session['agent_charter']
+                    if 'agent_charter_source' in request.session:
+                        del request.session['agent_charter_source']
+                    if AIEmployeeTemplateService.TEMPLATE_SESSION_KEY in request.session:
+                        del request.session[AIEmployeeTemplateService.TEMPLATE_SESSION_KEY]
 
                     transaction.on_commit(lambda:  Analytics.track_event(
                         user_id=request.user.id,
@@ -1003,6 +1073,8 @@ class AgentCreateContactView(LoginRequiredMixin, PhoneNumberMixin, TemplateView)
                             'initial_message': initial_user_message,
                             'charter': initial_user_message if initial_user_message else '',
                             'preferred_contact_method': preferred_contact_method,
+                            'template_code': selected_template.code if selected_template else '',
+                            'template_schedule_applied': applied_schedule or '',
                         }
                     ))
 

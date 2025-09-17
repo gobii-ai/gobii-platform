@@ -323,8 +323,16 @@ AUTHENTICATION_BACKENDS = (
 )
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+# Mailgun credentials only exist in hosted/prod environments; local proprietary
+# runs typically omit them. Use that to decide whether to enforce email
+# verification, while still allowing an explicit override via ENV.
+MAILGUN_API_KEY = env("MAILGUN_API_KEY", default=None)
+
 # Community Edition disables email verification by default to avoid external email providers
-ACCOUNT_EMAIL_VERIFICATION = "mandatory" if GOBII_PROPRIETARY_MODE else "none"
+ACCOUNT_EMAIL_VERIFICATION = env(
+    "ACCOUNT_EMAIL_VERIFICATION",
+    default="mandatory" if GOBII_PROPRIETARY_MODE and MAILGUN_API_KEY else "none",
+)
 ACCOUNT_LOGOUT_ON_GET = True
 
 # TODO: Test the removal of this; got deprecation warning
@@ -352,7 +360,13 @@ if TURNSTILE_ENABLED:
 
 # Optional: allow using dummy keys in dev; override in env for prod
 TURNSTILE_SITEKEY = env("TURNSTILE_SITEKEY", default="1x00000000000000000000AA")
-TURNSTILE_SECRET = env("TURNSTILE_SECRET", default="1x00000000000000000000AA")
+# Cloudflare's published Turnstile test secret is longer than the sitekey; using
+# the shorter value caused server-side verification to fail even for the dummy
+# widget. Keep the documented secret as the default so local proprietary mode
+# logins succeed without extra configuration.
+TURNSTILE_SECRET = env(
+    "TURNSTILE_SECRET", default="1x0000000000000000000000000000000AA"
+)
 
 # Cloudflare Turnstile widget defaults (light theme, normal size)
 TURNSTILE_DEFAULT_CONFIG = {
@@ -505,14 +519,17 @@ BROWSER_HEADLESS = env.bool("BROWSER_HEADLESS", default=False)
 
 SOCIALACCOUNT_LOGIN_ON_GET = True
 
+# Proprietary mode uses Mailgun in production, but devs often run locally without
+# credentials. Fall back to the console backend when no API key is configured so
+# login/signup flows do not hard-error while still exercising the email code.
 EMAIL_BACKEND = (
     "anymail.backends.mailgun.EmailBackend"
-    if GOBII_PROPRIETARY_MODE
+    if GOBII_PROPRIETARY_MODE and MAILGUN_API_KEY
     else "django.core.mail.backends.console.EmailBackend"
 )
 
 ANYMAIL = {
-    "MAILGUN_API_KEY": os.getenv("MAILGUN_API_KEY"),
+    "MAILGUN_API_KEY": MAILGUN_API_KEY,
     "MAILGUN_SENDER_DOMAIN": os.getenv(
         "MAILGUN_SENDER_DOMAIN", "mg.getgobii.com"
     ),  # Changed from MAILGUN_DOMAIN to MAILGUN_SENDER_DOMAIN as per Anymail's common setting.

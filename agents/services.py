@@ -1,9 +1,15 @@
 from django.apps import apps
 
+import random
+from typing import Dict, Iterable, Sequence
+
 from config.plans import AGENTS_UNLIMITED, MAX_AGENT_LIMIT
 from observability import trace
 
 import logging
+
+from cron_descriptor import get_description, Options
+from cron_descriptor.Exception import FormatError
 
 from util.subscription_helper import has_unlimited_agents
 
@@ -101,3 +107,151 @@ class AgentService:
         """
         # -1 is unlimited, so we just check if not 0
         return AgentService.get_agents_available(user) > 0 or has_unlimited_agents(user)
+
+
+class AIEmployeeTemplateService:
+    """Utilities for working with curated AI employee templates."""
+
+    TEMPLATE_SESSION_KEY = "ai_employee_template_code"
+    _CRON_MACRO_MAP = {
+        "@yearly": "0 0 1 1 *",
+        "@annually": "0 0 1 1 *",
+        "@monthly": "0 0 1 * *",
+        "@weekly": "0 0 * * 0",
+        "@daily": "0 0 * * *",
+        "@midnight": "0 0 * * *",
+        "@hourly": "0 * * * *",
+    }
+
+    @staticmethod
+    def get_active_templates():
+        Template = apps.get_model("api", "PersistentAgentTemplate")
+        return Template.objects.filter(is_active=True).order_by("priority", "display_name")
+
+    @staticmethod
+    def get_template_by_code(code: str):
+        if not code:
+            return None
+        Template = apps.get_model("api", "PersistentAgentTemplate")
+        try:
+            return Template.objects.get(code=code, is_active=True)
+        except Template.DoesNotExist:
+            return None
+
+    @staticmethod
+    def compute_schedule_with_jitter(base_schedule: str | None, jitter_minutes: int | None) -> str | None:
+        """Return a cron schedule string with jitter applied to minutes/hours."""
+        if not base_schedule:
+            return None
+
+        jitter = max(int(jitter_minutes or 0), 0)
+        if jitter == 0:
+            return base_schedule
+
+        if base_schedule.startswith("@"):
+            # Unsupported shortcut format – best effort by returning original.
+            return base_schedule
+
+        parts = base_schedule.split()
+        if len(parts) != 5:
+            return base_schedule
+
+        minute, hour, day_of_month, month, day_of_week = parts
+
+        if not (minute.isdigit() and hour.isdigit()):
+            return base_schedule
+
+        minute_val = int(minute)
+        hour_val = int(hour)
+
+        total_minutes = hour_val * 60 + minute_val
+        offset = random.randint(-jitter, jitter)
+        total_minutes = (total_minutes + offset) % (24 * 60)
+
+        jittered_hour, jittered_minute = divmod(total_minutes, 60)
+
+        return f"{jittered_minute} {jittered_hour} {day_of_month} {month} {day_of_week}"
+
+    @staticmethod
+    def describe_schedule(base_schedule: str | None) -> str | None:
+        """Return a human readable description of a cron schedule."""
+        if not base_schedule:
+            return None
+
+        expression = AIEmployeeTemplateService._normalize_cron_expression(base_schedule)
+        if not expression:
+            return base_schedule
+
+        options = Options()
+        options.verbose = True
+
+        try:
+            return get_description(expression, options)
+        except FormatError:
+            logger.warning("Unable to parse cron expression for description: %s", base_schedule)
+        except Exception:  # pragma: no cover - defensive logging only
+            logger.exception("Unexpected error while describing cron expression: %s", base_schedule)
+
+        return base_schedule
+
+    @staticmethod
+    def _normalize_cron_expression(expression: str) -> str | None:
+        expression = (expression or "").strip()
+        if not expression:
+            return None
+
+        if expression.startswith("@"):
+            macro = expression.lower()
+            return AIEmployeeTemplateService._CRON_MACRO_MAP.get(macro)
+
+        return expression
+
+    @staticmethod
+    def _fallback_tool_display(tool_name: str) -> str:
+        cleaned = (tool_name or "").replace("_", " ").replace("-", " ").strip()
+        if not cleaned:
+            return tool_name
+        return " ".join(part.capitalize() for part in cleaned.split())
+
+    @staticmethod
+    def get_tool_display_map(tool_names: Iterable[str]) -> Dict[str, str]:
+        tool_list = [name for name in tool_names if name]
+        if not tool_list:
+            return {}
+
+        ToolName = apps.get_model("api", "ToolFriendlyName")
+        entries = ToolName.objects.filter(tool_name__in=tool_list)
+        return {entry.tool_name: entry.display_name for entry in entries}
+
+    @classmethod
+    def get_tool_display_list(
+        cls,
+        tool_names: Sequence[str] | None,
+        display_map: Dict[str, str] | None = None,
+    ) -> list[str]:
+        if not tool_names:
+            return []
+
+        display_map = display_map or cls.get_tool_display_map(tool_names)
+        return [display_map.get(name, cls._fallback_tool_display(name)) for name in tool_names]
+
+    @staticmethod
+    def describe_contact_channel(channel: str | None) -> str:
+        mapping = {
+            "email": "Email updates",
+            "sms": "Text message",
+            "slack": "Slack message",
+            "pagerduty": "PagerDuty alert",
+        }
+
+        if not channel:
+            return mapping["email"]
+
+        normalized = channel.lower()
+        if normalized in mapping:
+            label = mapping[normalized]
+            if normalized == "sms":
+                return f"{label} (SMS)"
+            return label
+
+        return channel.replace("_", " ").upper() if normalized == "voice" else channel.replace("_", " ").title()

@@ -19,6 +19,43 @@
         <p class="text-gray-600">You will be able to talk to the agent using the communication methods you select:</p>
       </div>
 
+      {% if selected_ai_employee %}
+      <div class="max-w-2xl mx-auto mb-8">
+        <div class="rounded-2xl border border-indigo-100 bg-indigo-50/60 px-6 py-5 text-left shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-wide text-indigo-600">AI employee selected</p>
+          <h3 class="mt-2 text-xl font-semibold text-slate-900">{{ selected_ai_employee.display_name }}</h3>
+          <p class="mt-1 text-sm text-slate-600">{{ selected_ai_employee.tagline }}</p>
+          <div class="mt-4 grid gap-3 sm:grid-cols-3 text-sm text-slate-600">
+            <div class="flex items-start gap-2">
+              <span class="text-indigo-500 mt-0.5">🗓️</span>
+              <div>
+                <p class="font-semibold text-slate-700">Cadence</p>
+                <p>{{ selected_ai_employee.schedule_description|default:selected_ai_employee.base_schedule }} <span class="text-slate-400">±{{ selected_ai_employee.schedule_jitter_minutes }}m</span></p>
+              </div>
+            </div>
+            {% if selected_ai_employee.contact_method_label %}
+            <div class="flex items-start gap-2">
+              <span class="text-indigo-500 mt-0.5">📮</span>
+              <div>
+                <p class="font-semibold text-slate-700">How it keeps you in the loop</p>
+                <p>{{ selected_ai_employee.contact_method_label }}</p>
+              </div>
+            </div>
+            {% endif %}
+            {% if selected_ai_employee.display_default_tools %}
+            <div class="flex items-start gap-2">
+              <span class="text-indigo-500 mt-0.5">🔧</span>
+              <div>
+                <p class="font-semibold text-slate-700">Integrations</p>
+                <p>{{ selected_ai_employee.display_default_tools|slice:":2"|join:", " }}{% if selected_ai_employee.display_default_tools|length > 2 %}<span class="text-indigo-500"> +{{ selected_ai_employee.display_default_tools|length|add:-2 }} more</span>{% endif %}</p>
+              </div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       <!-- Form Fields -->
       <div class="max-w-2xl mx-auto space-y-4">
 

@@ -13,11 +13,13 @@ from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.http import HttpResponseRedirect
-from django.db.models import F
+from django.db.models import F, Q
 from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
-from api.models import PaidPlanIntent
+from api.models import PaidPlanIntent, PersistentAgent
+from agents.services import AIEmployeeTemplateService
+from waffle import flag_is_active
 
 import stripe
 from djstripe.models import Customer, Subscription, Price
@@ -49,6 +51,8 @@ class HomePage(TemplateView):
         if self.request.GET.get('spawn') == '1':
             if 'agent_charter' in self.request.session:
                 del self.request.session['agent_charter']
+            if 'agent_charter_source' in self.request.session:
+                del self.request.session['agent_charter_source']
             initial['charter'] = ''
         # If the GET parameter 'dc' (default charter) is present, use it in the initial data
         elif 'dc' in self.request.GET:
@@ -84,9 +88,10 @@ class HomePage(TemplateView):
                 initial['charter'] = ''
                 context['default_charter'] = ''
         elif 'agent_charter' in self.request.session:
-            initial['charter'] = self.request.session['agent_charter'].strip()
-            context['default_charter'] = initial['charter']
-            context['agent_charter_saved'] = True
+            if self.request.session.get('agent_charter_source') != 'template':
+                initial['charter'] = self.request.session['agent_charter'].strip()
+                context['default_charter'] = initial['charter']
+                context['agent_charter_saved'] = True
 
         context['agent_charter_form'] = PersistentAgentCharterForm(
             initial=initial
@@ -95,6 +100,42 @@ class HomePage(TemplateView):
         # Examples data
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
+
+        if self.request.user.is_authenticated:
+            recent_agents_qs = PersistentAgent.objects.filter(user_id=self.request.user.id)
+            total_agents = recent_agents_qs.count()
+            recent_agents = list(recent_agents_qs.order_by('-updated_at')[:3])
+
+            for agent in recent_agents:
+                schedule_text = None
+                if agent.schedule:
+                    schedule_text = AIEmployeeTemplateService.describe_schedule(agent.schedule)
+                    if not schedule_text:
+                        schedule_text = agent.schedule
+                agent.display_schedule = schedule_text
+
+                charter_text = (agent.charter or "").strip()
+                if charter_text and len(charter_text) > 140:
+                    charter_text = charter_text[:140].rstrip() + "…"
+                agent.charter_preview = charter_text
+
+                if getattr(agent, "life_state", "active") == PersistentAgent.LifeState.EXPIRED:
+                    agent.status_label = "Expired"
+                    agent.status_class = "text-slate-500 bg-slate-100"
+                else:
+                    agent.status_label = "Active"
+                    agent.status_class = "text-emerald-600 bg-emerald-50"
+
+            context['recent_agents'] = recent_agents
+
+            fallback_total = total_agents
+            if fallback_total == 0:
+                account = context.get('account')
+                usage = getattr(account, 'usage', None)
+                fallback_total = getattr(usage, 'agents_in_use', 0) if usage else 0
+
+            context['recent_agents_remaining'] = max(fallback_total - len(recent_agents), 0)
+            context['recent_agents_total'] = fallback_total
 
         return context
 
@@ -112,6 +153,7 @@ class HomeAgentSpawnView(TemplateView):
         if form.is_valid():
             # Store charter in session for later use
             request.session['agent_charter'] = form.cleaned_data['charter']
+            request.session['agent_charter_source'] = 'user'
             
             # Track analytics for home page agent creation start (only for authenticated users)
             if request.user.is_authenticated:
@@ -145,6 +187,135 @@ class HomeAgentSpawnView(TemplateView):
         homepage_view = HomePage()
         homepage_view.request = self.request
         return homepage_view.get_context_data(**kwargs)
+
+
+class AIEmployeeDirectoryView(TemplateView):
+    template_name = "ai_directory/index.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        templates_queryset = AIEmployeeTemplateService.get_active_templates()
+
+        category = self.request.GET.get('category', '').strip()
+        search = self.request.GET.get('q', '').strip()
+
+        if category:
+            templates_queryset = templates_queryset.filter(category__iexact=category)
+
+        if search:
+            templates_queryset = templates_queryset.filter(
+                Q(display_name__icontains=search)
+                | Q(tagline__icontains=search)
+                | Q(description__icontains=search)
+            )
+
+        templates = list(templates_queryset)
+        tool_names = set()
+
+        for template in templates:
+            template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
+            tool_names.update(template.default_tools or [])
+
+        tool_display_map = AIEmployeeTemplateService.get_tool_display_map(tool_names)
+
+        for template in templates:
+            template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+                template.default_tools or [],
+                display_map=tool_display_map,
+            )
+
+        all_categories = (
+            AIEmployeeTemplateService.get_active_templates()
+            .exclude(category__isnull=True)
+            .exclude(category__exact="")
+            .values_list('category', flat=True)
+            .distinct()
+            .order_by('category')
+        )
+
+        context.update(
+            {
+                "ai_employees": templates,
+                "categories": list(all_categories),
+                "selected_category": category,
+                "search_term": search,
+            }
+        )
+        return context
+
+
+class AIEmployeeDetailView(TemplateView):
+    template_name = "ai_directory/detail.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.employee = AIEmployeeTemplateService.get_template_by_code(kwargs.get('slug'))
+        if not self.employee:
+            raise Http404("This AI employee is no longer available.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["ai_employee"] = self.employee
+        context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
+        context["base_schedule"] = self.employee.base_schedule
+        context["schedule_description"] = AIEmployeeTemplateService.describe_schedule(self.employee.base_schedule)
+        display_map = AIEmployeeTemplateService.get_tool_display_map(self.employee.default_tools or [])
+        context["event_triggers"] = self.employee.event_triggers or []
+        context["default_tools"] = AIEmployeeTemplateService.get_tool_display_list(
+            self.employee.default_tools or [],
+            display_map=display_map,
+        )
+        context["contact_method_label"] = AIEmployeeTemplateService.describe_contact_channel(
+            self.employee.recommended_contact_channel
+        )
+        return context
+
+
+class AIEmployeeHireView(View):
+    def post(self, request, *args, **kwargs):
+        code = kwargs.get('slug')
+        template = AIEmployeeTemplateService.get_template_by_code(code)
+        if not template:
+            raise Http404("This AI employee is no longer available.")
+
+        request.session['agent_charter'] = template.charter
+        request.session[AIEmployeeTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        request.session['agent_charter_source'] = 'template'
+        request.session.modified = True
+
+        if request.user.is_authenticated:
+            Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+                source=AnalyticsSource.WEB,
+                properties={
+                    "source_page": "ai_employee_directory",
+                    "template_code": template.code,
+                },
+            )
+            return redirect('agent_create_contact')
+
+        # Track anonymous interest
+        session_key = request.session.session_key
+        if not session_key:
+            request.session.save()
+            session_key = request.session.session_key
+        Analytics.track_event_anonymous(
+            anonymous_id=str(session_key),
+            event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+            source=AnalyticsSource.WEB,
+            properties={
+                "source_page": "ai_employee_directory",
+                "template_code": template.code,
+            },
+        )
+
+        from django.contrib.auth.views import redirect_to_login
+
+        return redirect_to_login(
+            next=reverse('agent_create_contact'),
+            login_url=settings.LOGIN_URL,
+        )
 
 
 def health_check(request):

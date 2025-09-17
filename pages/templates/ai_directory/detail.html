@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{{ ai_employee.display_name }} – AI Employee Directory{% endblock %}
+{% block content %}
+<div class="bg-gradient-to-b from-white via-indigo-50/40 to-white">
+  <section class="max-w-5xl mx-auto px-6 pt-16 pb-6">
+    <a href="{% url 'pages:ai_employee_directory' %}" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
+      ← Back to directory
+    </a>
+    <div class="mt-6 rounded-3xl border border-slate-200 bg-white/80 backdrop-blur shadow-xl overflow-hidden">
+      <div class="relative p-10">
+        <div class="absolute inset-x-0 -top-40 h-80 bg-gradient-to-br from-indigo-200/40 via-transparent to-blue-200/40 blur-3xl pointer-events-none"></div>
+        <div class="relative">
+          <p class="inline-flex items-center text-xs font-semibold uppercase tracking-wide text-indigo-500 bg-indigo-50 rounded-full px-3 py-1">{{ ai_employee.category|default:"General" }}</p>
+          <h1 class="mt-6 text-4xl sm:text-5xl font-semibold text-slate-900">{{ ai_employee.display_name }}</h1>
+          <p class="mt-4 text-lg text-slate-600 max-w-3xl">{{ ai_employee.tagline }}</p>
+          <div class="mt-8 grid gap-6 md:grid-cols-3">
+            <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Cadence</p>
+              <p class="mt-2 text-base font-medium text-slate-800">{{ schedule_description|default:base_schedule }}</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">How it keeps you in the loop</p>
+              <p class="mt-2 text-base font-medium text-slate-800">{{ contact_method_label }}</p>
+              <p class="mt-1 text-sm text-slate-500">You can switch to a different touchpoint during setup.</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Time to hire</p>
+              <p class="mt-2 text-base font-medium text-slate-800">Under 2 minutes</p>
+              <p class="mt-1 text-sm text-slate-500">We automatically load the charter, integrations, and schedule defaults.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="border-t border-slate-100 bg-white/90">
+        <div class="px-10 py-10 grid gap-10 lg:grid-cols-3">
+          <div class="lg:col-span-2 space-y-8">
+            <section>
+              <h2 class="text-xl font-semibold text-slate-900">What this AI employee does</h2>
+              <p class="mt-3 text-base leading-relaxed text-slate-600">{{ ai_employee.description }}</p>
+            </section>
+            <section>
+              <h2 class="text-xl font-semibold text-slate-900">Launch playbook</h2>
+              <p class="mt-3 text-base leading-relaxed text-slate-600">These are the instructions the agent follows on day one.</p>
+              <div class="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-6 text-sm leading-relaxed text-slate-700 shadow-inner">
+                {{ ai_employee.charter|linebreaksbr }}
+              </div>
+            </section>
+            {% if event_triggers %}
+            <section>
+              <h2 class="text-xl font-semibold text-slate-900">Event triggers</h2>
+              <ul class="mt-3 space-y-3">
+                {% for trigger in event_triggers %}
+                <li class="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                    <span class="inline-flex size-2 rounded-full bg-indigo-400"></span>{{ trigger.name|default:trigger.type|capfirst }}
+                  </p>
+                  {% if trigger.description %}
+                  <p class="mt-1 text-sm text-slate-600">{{ trigger.description }}</p>
+                  {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </section>
+            {% endif %}
+          </div>
+          <aside class="space-y-8">
+            {% if default_tools %}
+            <section class="rounded-2xl border border-slate-200 bg-white px-5 py-6 shadow-sm">
+              <h3 class="text-base font-semibold text-slate-900">Built-in integrations</h3>
+              <p class="mt-2 text-sm text-slate-500">Enabled automatically when you hire.</p>
+              <ul class="mt-4 space-y-2">
+                {% for tool in default_tools %}
+                <li class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">{{ tool }}</li>
+                {% endfor %}
+              </ul>
+            </section>
+            {% endif %}
+            <section class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-500 to-blue-500 px-6 py-8 text-white shadow-lg">
+              <h3 class="text-xl font-semibold">Hire this AI employee</h3>
+              <p class="mt-2 text-sm text-indigo-100 leading-relaxed">We’ll preload the playbook, schedule, and integrations—then you choose how it reaches you.</p>
+              <form method="post" action="{% url 'pages:ai_employee_hire' ai_employee.code %}" class="mt-6">
+                {% csrf_token %}
+                <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-indigo-600 font-semibold px-5 py-3 shadow-lg shadow-indigo-200 hover:text-indigo-700 transition">
+                  Hire now
+                  <span aria-hidden="true">→</span>
+                </button>
+              </form>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

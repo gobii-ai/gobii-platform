@@ -119,6 +119,7 @@ dependencies = [
   "fastmcp>=2.11.3",
   # IMAP IDLE helper for simple, reliable IDLE sessions
   "imapclient~=2.3",
+  "cron-descriptor>=2.0.6",
 ]
 
 [build-system]

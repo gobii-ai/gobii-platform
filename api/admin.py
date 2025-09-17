@@ -11,10 +11,10 @@ from .admin_forms import TestSmsForm, GrantPlanCreditsForm, GrantCreditsByUserId
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, ProxyHealthCheckSpec, ProxyHealthCheckResult,
-    PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
+    PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
     PersistentAgentStep, CommsChannel, UserBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
-    AgentEmailAccount,
+    AgentEmailAccount, ToolFriendlyName,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -1374,10 +1374,11 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             ),
         ]
         return custom_urls + urls
-    
+
     @admin.display(description='User Email')
     def user_email(self, obj):
         return obj.user.email
+
 
     @admin.display(description='Ownership')
     def ownership_scope(self, obj):
@@ -2525,3 +2526,41 @@ class AgentFsNodeAdmin(admin.ModelAdmin):
         except Exception as e:
             self.message_user(request, f'Error streaming file: {e}', messages.ERROR)
             return HttpResponseRedirect(reverse('admin:api_agentfsnode_change', args=[object_id]))
+
+
+@admin.register(PersistentAgentTemplate)
+class PersistentAgentTemplateAdmin(admin.ModelAdmin):
+    list_display = (
+        'display_name', 'category', 'recommended_contact_channel', 'base_schedule',
+        'schedule_jitter_minutes', 'priority', 'is_active', 'updated_at'
+    )
+    list_filter = ('category', 'recommended_contact_channel', 'is_active')
+    search_fields = ('display_name', 'tagline', 'description', 'code')
+    ordering = ('priority', 'display_name')
+    readonly_fields = ('created_at', 'updated_at')
+    prepopulated_fields = {"code": ("display_name",)}
+    fieldsets = (
+        ('Identity', {
+            'fields': ('code', 'display_name', 'tagline', 'category', 'priority', 'is_active')
+        }),
+        ('Narrative', {
+            'fields': ('description', 'charter')
+        }),
+        ('Cadence & Triggers', {
+            'fields': ('base_schedule', 'schedule_jitter_minutes', 'event_triggers')
+        }),
+        ('Tools & Communication', {
+            'fields': ('default_tools', 'recommended_contact_channel', 'hero_image_path')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at')
+        }),
+    )
+
+
+@admin.register(ToolFriendlyName)
+class ToolFriendlyNameAdmin(admin.ModelAdmin):
+    list_display = ('tool_name', 'display_name', 'updated_at')
+    search_fields = ('tool_name', 'display_name')
+    ordering = ('tool_name',)
+    readonly_fields = ('created_at', 'updated_at')

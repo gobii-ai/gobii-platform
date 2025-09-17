@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}AI Employee Directory – Gobii{% endblock %}
+{% block content %}
+<div class="relative bg-gradient-to-b from-white via-indigo-50/30 to-white">
+  <section class="max-w-6xl mx-auto px-6 pt-20 pb-12 text-center">
+    <p class="inline-flex items-center text-xs sm:text-sm font-semibold tracking-[0.25em] uppercase text-indigo-500/80 bg-indigo-50 rounded-full px-4 py-1.5">Always-on agents</p>
+    <h1 class="mt-5 text-4xl sm:text-5xl font-light text-slate-900">Hire a pre-trained AI employee</h1>
+    <p class="mt-3 max-w-3xl mx-auto text-base sm:text-lg text-slate-500">Browse curated agents with ready-to-run charters, cadences, and triggers. Each AI employee is designed to slot into real workflows the moment you click hire.</p>
+  </section>
+
+  <section class="max-w-6xl mx-auto px-6 pb-8">
+    <form method="get" class="grid gap-4 lg:grid-cols-6 items-end bg-white/70 backdrop-blur rounded-2xl shadow-lg p-6 border border-slate-100">
+      <div class="lg:col-span-4 text-left">
+        <label for="directory-search" class="block text-sm font-medium text-slate-500">Search</label>
+        <div class="mt-2 relative">
+          <input id="directory-search" name="q" type="search" value="{{ search_term }}" placeholder="Search skills, focus areas, workflows…" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" />
+          {% if search_term %}
+          <a href="{% url 'pages:ai_employee_directory' %}" class="absolute inset-y-0 right-3 flex items-center text-sm text-indigo-600 hover:text-indigo-700">Clear</a>
+          {% endif %}
+        </div>
+      </div>
+      <div class="lg:col-span-2 text-left">
+        <label for="directory-category" class="block text-sm font-medium text-slate-500">Category</label>
+        <div class="mt-2 relative">
+          <select id="directory-category" name="category" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none">
+            <option value="">All categories</option>
+            {% for category in categories %}
+              <option value="{{ category }}" {% if selected_category == category %}selected{% endif %}>{{ category }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="lg:col-span-6 flex justify-end">
+        <button type="submit" class="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 text-white font-medium shadow-lg shadow-indigo-200 hover:bg-indigo-500 transition">Update results</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="max-w-6xl mx-auto px-6 pb-24">
+    {% if ai_employees %}
+      <div class="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+        {% for employee in ai_employees %}
+          <article class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white/80 backdrop-blur shadow-lg transition hover:-translate-y-1 hover:shadow-xl">
+            <div class="absolute inset-0 pointer-events-none bg-gradient-to-br from-indigo-50/40 via-transparent to-blue-50/50 opacity-0 group-hover:opacity-100 transition"></div>
+            <div class="p-6 flex flex-col h-full relative z-10">
+              <div class="flex items-center justify-between text-sm text-slate-500">
+                <span class="inline-flex items-center gap-2 font-medium text-indigo-600">
+                  <span class="size-2 rounded-full bg-indigo-400"></span>{{ employee.category|default:"General" }}
+                </span>
+                <a href="{% url 'pages:ai_employee_detail' employee.code %}" class="text-indigo-500 hover:text-indigo-600 transition text-sm">View details →</a>
+              </div>
+              <h2 class="mt-4 text-2xl font-medium text-slate-900">{{ employee.display_name }}</h2>
+              <p class="mt-3 text-base text-slate-600 leading-relaxed">{{ employee.tagline }}</p>
+              <dl class="mt-6 space-y-3 text-sm text-slate-500">
+                <div class="flex items-start gap-3">
+                  <span class="text-indigo-500 mt-0.5">🗓️</span>
+                  <div>
+                    <dt class="font-semibold text-slate-700">Cadence</dt>
+                    <dd>{{ employee.schedule_description|default:employee.base_schedule }}</dd>
+                  </div>
+                </div>
+                {% if employee.event_triggers %}
+                <div class="flex items-start gap-3">
+                  <span class="text-indigo-500 mt-0.5">⚡</span>
+                  <div>
+                    <dt class="font-semibold text-slate-700">Event triggers</dt>
+                    <dd class="space-y-1">
+                      {% for trigger in employee.event_triggers|slice:":2" %}
+                        <p>{{ trigger.name|default:trigger.type|capfirst }}</p>
+                      {% endfor %}
+                      {% if employee.event_triggers|length > 2 %}
+                        <p class="text-indigo-500">+{{ employee.event_triggers|length|add:-2 }} more</p>
+                      {% endif %}
+                    </dd>
+                  </div>
+                </div>
+                {% endif %}
+                {% if employee.display_default_tools %}
+                <div class="flex items-start gap-3">
+                  <span class="text-indigo-500 mt-0.5">🔧</span>
+                  <div>
+                    <dt class="font-semibold text-slate-700">Built-in integrations</dt>
+                    <dd class="flex flex-wrap gap-2 mt-1">
+                      {% for tool in employee.display_default_tools|slice:":3" %}
+                        <span class="px-3 py-1 rounded-full bg-slate-100 text-slate-600 font-medium">{{ tool }}</span>
+                      {% endfor %}
+                      {% if employee.display_default_tools|length > 3 %}
+                        <span class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-600 font-medium">+{{ employee.display_default_tools|length|add:-3 }}</span>
+                      {% endif %}
+                    </dd>
+                  </div>
+                </div>
+                {% endif %}
+              </dl>
+              <div class="mt-auto pt-6 flex flex-col gap-3">
+                <form method="post" action="{% url 'pages:ai_employee_hire' employee.code %}" class="contents">
+                  {% csrf_token %}
+                  <button type="submit" class="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-semibold rounded-xl shadow-md hover:shadow-lg hover:from-indigo-500 hover:to-blue-500 transition">
+                    Hire this AI employee
+                    <span aria-hidden="true">→</span>
+                  </button>
+                </form>
+                <a href="{% url 'pages:ai_employee_detail' employee.code %}" class="inline-flex items-center justify-center gap-2 px-5 py-3 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition">Preview playbook</a>
+              </div>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-12 text-center shadow-sm">
+        <h2 class="text-2xl font-medium text-slate-900">No AI employees match those filters yet.</h2>
+        <p class="mt-3 text-slate-600">Reset your filters to explore the full directory or reach out to support for a tailored playbook.</p>
+        <a href="{% url 'pages:ai_employee_directory' %}" class="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow hover:bg-indigo-500 transition">Clear filters</a>
+      </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
