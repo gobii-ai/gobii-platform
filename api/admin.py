@@ -2161,6 +2161,7 @@ class UserBillingAdmin(admin.ModelAdmin):
 
 @admin.register(OrganizationBilling)
 class OrganizationBillingAdmin(admin.ModelAdmin):
+    list_select_related = ('organization',)
     list_display = [
         'id',
         'organization_id',
