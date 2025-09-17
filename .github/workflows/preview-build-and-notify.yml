@@ -38,6 +38,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute short SHA
+        id: vars
+        run: echo "short_sha=$(echo $PR_HEAD_SHA | cut -c1-7)" >> "$GITHUB_OUTPUT"
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
       - name: Build and push PR image (head SHA)
         id: build
         uses: docker/build-push-action@v6
@@ -47,6 +53,7 @@ jobs:
           push: true
           tags: |
             ghcr.io/gobii-ai/gobii-platform:sha-${{ github.event.pull_request.head.sha }}
+            ghcr.io/gobii-ai/gobii-platform:sha-${{ steps.vars.outputs.short_sha }}
             ghcr.io/gobii-ai/gobii-platform:pr-${{ github.event.pull_request.number }}
           # Keep it single-arch for speed
           platforms: linux/amd64
@@ -76,6 +83,6 @@ jobs:
               "repo": "${{ github.event.repository.name }}",
               "pr_number": ${{ github.event.pull_request.number }},
               "head_sha": "${{ github.event.pull_request.head.sha }}",
-              "image_tag": "sha-${{ github.event.pull_request.head.sha }}",
+              "image_tag": "sha-${{ steps.vars.outputs.short_sha }}",
               "html_url": "${{ github.event.pull_request.html_url }}"
             }
