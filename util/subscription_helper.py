@@ -11,6 +11,7 @@ from constants.plans import PlanNames
 from datetime import datetime, timedelta, date, time
 from django.utils import timezone
 import logging
+from typing import Literal, Tuple, Any
 
 from observability import traced, trace
 from util.constants.task_constants import TASKS_UNLIMITED
@@ -32,67 +33,104 @@ except Exception:  # pragma: no cover - optional dependency
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
+BillingOwnerType = Literal["user", "organization"]
 
-def get_stripe_customer(user) -> Customer | None:
-    """
-    Retrieves a Stripe Customer object associated with a specific user. If the user
-    does not have an associated Stripe Customer, None is returned.
 
-    Parameters
-    ----------
-    user : User
-        The user for whom the Stripe Customer object should be retrieved.
+def _resolve_owner_type(owner: Any) -> BillingOwnerType:
+    """Return whether the provided owner is a user or organization."""
+    if owner is None:
+        raise ValueError("Owner instance is required")
 
-    Returns
-    -------
-    Customer | None
-        The Stripe Customer object associated with the user if it exists, otherwise
-        None.
-    """
+    UserModel = get_user_model()
+    Organization = apps.get_model("api", "Organization")
+
+    if isinstance(owner, UserModel):
+        return "user"
+    if isinstance(owner, Organization):
+        return "organization"
+
+    raise TypeError(f"Unsupported owner type: {owner.__class__.__name__}")
+
+
+def _get_billing_model_and_filters(owner: Any) -> Tuple[Any, dict[str, Any], BillingOwnerType]:
+    """Return the billing model, filter kwargs, and owner type for the owner."""
+    owner_type = _resolve_owner_type(owner)
+
+    if owner_type == "user":
+        BillingModel = apps.get_model("api", "UserBilling")
+        filters = {"user": owner}
+    else:
+        BillingModel = apps.get_model("api", "OrganizationBilling")
+        filters = {"organization": owner}
+
+    return BillingModel, filters, owner_type
+
+
+def _get_billing_record(owner: Any):
+    BillingModel, filters, _ = _get_billing_model_and_filters(owner)
+    return BillingModel.objects.filter(**filters).first()
+
+
+def _get_or_create_billing_record(owner: Any, defaults: dict[str, Any] | None = None):
+    BillingModel, filters, owner_type = _get_billing_model_and_filters(owner)
+    defaults = defaults.copy() if defaults else {}
+
+    if owner_type == "organization" and "billing_cycle_anchor" not in defaults:
+        defaults.setdefault("billing_cycle_anchor", timezone.now().day)
+
+    return BillingModel.objects.get_or_create(**filters, defaults=defaults)
+
+def get_stripe_customer(owner) -> Customer | None:
+    """Return the Stripe customer associated with a user or organization owner."""
     with traced("SUBSCRIPTION - Get Stripe Customer"):
-        try:
-            return Customer.objects.get(subscriber=user)
-        except Customer.DoesNotExist:
+        owner_type = _resolve_owner_type(owner)
+
+        if owner_type == "user":
+            try:
+                return Customer.objects.get(subscriber=owner)
+            except Customer.DoesNotExist:
+                return None
+
+        billing = _get_billing_record(owner)
+        if not billing or not getattr(billing, "stripe_customer_id", None):
             return None
 
+        try:
+            return Customer.objects.get(id=billing.stripe_customer_id)
+        except Customer.DoesNotExist:
+            logger.warning(
+                "Stripe customer %s referenced by organization %s is missing locally",
+                billing.stripe_customer_id,
+                getattr(owner, "id", "unknown"),
+            )
+            return None
 
-def get_active_subscription(user) -> Subscription | None:
-    """
-    Fetch the first active licensed subscription for a given user.
-
-    This function tries to retrieve the Stripe customer associated with the provided
-    user. If found, it filters the customer's active subscriptions to find those with
-    a plan usage type marked as 'licensed'. If no subscriptions or customers are found,
-    it returns None. The licensed check is so additional metered uses (extra tasks) do
-    not show as having an active subscription.
-
-    Parameters:
-    user: User
-        The user whose active licensed subscription needs to be fetched.
-
-    Returns:
-    Subscription or None
-        Returns the first active licensed subscription if such a subscription exists,
-        otherwise returns None.
-    """
+def get_active_subscription(owner) -> Subscription | None:
+    """Fetch the first active licensed subscription for a user or organization."""
     with traced("SUBSCRIPTION - Get Active Subscription") as span:
-        span.set_attribute("user.id", user.id)
-        customer = get_stripe_customer(user)
-        logger.debug(f"get_active_subscription {user.id}: {customer}")
+        owner_type = _resolve_owner_type(owner)
+        owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
+        span.set_attribute("owner.type", owner_type)
+        if owner_id is not None:
+            span.set_attribute("owner.id", str(owner_id))
+
+        customer = get_stripe_customer(owner)
+        logger.debug("get_active_subscription %s %s: %s", owner_type, owner_id, customer)
 
         if not customer:
-            logger.debug(f"get_active_subscription {user.id}: No customer found")
-            span.set_attribute("user.customer", "")
+            span.set_attribute("owner.customer", "")
             return None
-        else:
-            span.set_attribute("user.customer.id", str(customer.id))
-            logger.debug(f"get_active_subscription {user.id} subscriptions: {customer.active_subscriptions}")
 
-        # @var customer.active_subscriptions: QuerySet
+        span.set_attribute("owner.customer.id", str(customer.id))
+        logger.debug(
+            "get_active_subscription %s %s subscriptions: %s",
+            owner_type,
+            owner_id,
+            customer.active_subscriptions,
+        )
+
         licensed_subs = customer.active_subscriptions.order_by("cancel_at_period_end")
-
         return licensed_subs.first() if licensed_subs else None
-
 
 def user_has_active_subscription(user) -> bool:
     """
@@ -110,52 +148,43 @@ def user_has_active_subscription(user) -> bool:
     """
     return get_active_subscription(user) is not None
 
+def get_owner_plan(owner) -> dict[str, int | str]:
+    """Return plan configuration for a user or organization owner."""
+    with traced("SUBSCRIPTION Get Owner Plan"):
+        owner_type = _resolve_owner_type(owner)
+        owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
 
-def get_user_plan(user) -> dict[str, int | str]:
-    """
-    Fetches the user plan based on the active subscription associated with a user.
-
-    This function checks if the user has an active subscription. If not, or if the
-    active subscription does not have a valid plan or product associated with it,
-    it defaults to returning a free plan configuration. Otherwise, it fetches and
-    returns the plan derived from the product ID associated with the user's active
-    subscription.
-
-    Parameters:
-    user (User): The user object whose plan is being retrieved.
-
-    Returns:
-    dict[str, int | str]: A dictionary representing the plan configuration for the
-    user. Defaults to the free plan if no valid subscription or plan is found.
-    """
-    with traced("SUBSCRIPTION Get User Plan"):
-        subscription = get_active_subscription(user)
-
-        logger.debug(f"get_user_plan {user.id}: {subscription}")
+        subscription = get_active_subscription(owner)
+        logger.debug("get_owner_plan %s %s: %s", owner_type, owner_id, subscription)
 
         if not subscription:
-            logger.debug(f"get_user_plan {user.id}: No active subscription found")
+            logger.debug("get_owner_plan %s %s: No active subscription found", owner_type, owner_id)
             return PLAN_CONFIG[PlanNames.FREE]
 
-        # Absolutely ridiculous but this is how dj-stripe works
         stripe_sub = subscription.stripe_data
 
         product_id = None
         for item_data in stripe_sub.get("items", {}).get("data", []):
             if item_data.get("plan", {}).get("usage_type") == "licensed":
                 product_id = item_data.get("price", {}).get("product")
-                break  # Found the licensed item, no need to check further
+                break
 
-        logger.debug(f"get_user_plan {user.id} product_id: {product_id}")
+        logger.debug("get_owner_plan %s %s product_id: %s", owner_type, owner_id, product_id)
 
         if not product_id:
-            logger.warning(f"get_user_plan {user.id}: Subscription product is None")
+            logger.warning("get_owner_plan %s %s: Subscription product is None", owner_type, owner_id)
             return PLAN_CONFIG[PlanNames.FREE]
 
         plan = get_plan_by_product_id(product_id)
-
         return plan if plan else PLAN_CONFIG[PlanNames.FREE]
 
+
+def get_user_plan(user) -> dict[str, int | str]:
+    return get_owner_plan(user)
+
+
+def get_organization_plan(organization) -> dict[str, int | str]:
+    return get_owner_plan(organization)
 
 def get_user_task_credit_limit(user) -> int:
     """
@@ -184,39 +213,55 @@ def get_user_task_credit_limit(user) -> int:
 
         return plan["monthly_task_credits"]
 
-
-def get_or_create_stripe_customer(user) -> Customer:
-    """
-    Retrieves an existing Stripe customer associated with the given user or creates
-    a new Stripe customer if none exists. Synchronizes the created Stripe customer's
-    data with the application's database.
-
-    Parameters:
-    user : User
-        The user instance for whom the Stripe customer is to be retrieved or created.
-
-    Returns:
-    Customer
-        An instance of the Customer model representing the associated Stripe customer.
-    """
+def get_or_create_stripe_customer(owner) -> Customer:
+    """Return an existing Stripe customer for the owner or create a new one."""
     with traced("SUBSCRIPTION Get or Create Stripe Customer"):
-        customer = Customer.objects.filter(subscriber=user).first()
+        owner_type = _resolve_owner_type(owner)
+
+        if owner_type == "user":
+            customer = Customer.objects.filter(subscriber=owner).first()
+            billing = None
+        else:
+            billing, _ = _get_or_create_billing_record(owner)
+            customer = None
+            if billing.stripe_customer_id:
+                customer = Customer.objects.filter(id=billing.stripe_customer_id).first()
+
         if customer:
             return customer
 
-        # Create the customer on Stripe
+        metadata: dict[str, Any] = {"owner_type": owner_type}
+
+        if owner_type == "user":
+            email = getattr(owner, "email", None)
+            name = getattr(owner, "get_full_name", lambda: None)() or getattr(owner, "username", None)
+            metadata["user_id"] = owner.pk
+        else:
+            email = getattr(owner, "billing_email", None)
+            if not email:
+                creator = getattr(owner, "created_by", None)
+                email = getattr(creator, "email", None)
+            name = getattr(owner, "name", None)
+            metadata["organization_id"] = str(owner.pk)
+
         with traced("STRIPE Create Customer"):
             stripe_customer = stripe.Customer.create(
-                email=user.email,
-                metadata={"user_id": user.pk},  # helpful for later troubleshooting
+                email=email,
+                name=name,
+                metadata={k: v for k, v in metadata.items() if v is not None},
             )
 
-        # Write the dj-stripe row and attach it
         customer = Customer.sync_from_stripe_data(stripe_customer)
-        customer.subscriber = user
-        customer.save(update_fields=["subscriber"])
-        return customer
 
+        if owner_type == "user":
+            customer.subscriber = owner
+            customer.save(update_fields=["subscriber"])
+        else:
+            # Persist the Stripe ID on the organization billing record for quick lookups
+            billing.stripe_customer_id = customer.id
+            billing.save(update_fields=["stripe_customer_id"])
+
+        return customer
 
 def get_user_api_rate_limit(user) -> int:
     """
@@ -240,7 +285,6 @@ def get_user_api_rate_limit(user) -> int:
 
         return plan["api_rate_limit"]
 
-
 def get_user_agent_limit(user) -> int:
     """
     Determines the user agent limit based on their subscribed plan. If the user does
@@ -263,9 +307,7 @@ def get_user_agent_limit(user) -> int:
 
         return plan["agent_limit"]
 
-
-def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIPE_TASK_METER_ID,
-                                idempotency_key: str | None = None):
+def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIPE_TASK_METER_ID, idempotency_key: str | None = None):
     """
     Reports usage to Stripe by creating a UsageRecord.
 
@@ -407,7 +449,6 @@ def report_task_usage(subscription: Subscription, quantity: int = 1, idempotency
             logger.error(f"report_task_usage: Error reporting task usage: {str(e)}")
             raise
 
-
 def get_free_plan_users():
     """
     Retrieves all users who are currently on the free plan.
@@ -433,7 +474,6 @@ def get_free_plan_users():
         users_without_active_sub = users.objects.exclude(id__in=active_subscriber_ids)
 
         return users_without_active_sub
-
 
 def get_users_due_for_monthly_grant(days=1):
     """
@@ -474,7 +514,6 @@ def get_users_due_for_monthly_grant(days=1):
 
         return users_to_grant
 
-
 # Take a list of users, and return only the ones without an active subscription
 def filter_users_without_active_subscription(users):
     """
@@ -496,78 +535,61 @@ def filter_users_without_active_subscription(users):
     with traced("SUBSCRIPTION Filter Users Without Active Subscription"):
         return [user for user in users if not get_active_subscription(user)]
 
+def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = True):
+    """Persist the selected plan on the owner billing record (user or organization)."""
+    with traced("SUBSCRIPTION Mark Billing with Plan") as span:
+        owner_type = _resolve_owner_type(owner)
+        owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
+        span.set_attribute("owner.type", owner_type)
+        if owner_id is not None:
+            span.set_attribute("owner.id", str(owner_id))
+        span.set_attribute("update_anchor", str(update_anchor))
 
-def mark_user_billing_with_plan(user, plan_name: str, update_anchor: bool = True):
-    """
-    Marks a user as having a specific billing plan.
-
-    This function updates the user's billing information to reflect the specified plan.
-    It is typically used when a user subscribes to a new plan or changes their existing plan.
-
-    Parameters:
-    ----------
-    user : User
-        The user whose billing information is being updated.
-    plan_name : str
-        A string representing the name of the plan to be associated with the user.
-
-    update_anchor : bool, optional
-        A boolean indicating whether to update the billing cycle anchor to the current day.
-
-    Returns:
-    -------
-    None
-        This function does not return any value.
-    """
-    with traced("SUBSCRIPTION Mark User Billing with Plan") as span:
-        UserBilling = apps.get_model("api", "UserBilling")
-
-        defaults = {
-            'subscription': plan_name,
-        }
-
-        span.set_attribute('update_anchor', str(update_anchor))
-
+        defaults = {"subscription": plan_name}
         if update_anchor:
-            defaults['billing_cycle_anchor'] = timezone.now().day
+            defaults["billing_cycle_anchor"] = timezone.now().day
 
-        billing_record, created = UserBilling.objects.get_or_create(
-            user=user,
-            defaults=defaults
-        )
-        prev_plan = billing_record.subscription if not created else None
-        if not created:
-            # If the record already existed, update it with the new values from defaults.
-            for key, value in defaults.items():
-                setattr(billing_record, key, value)
-            # Set downgrade timestamp if moving to free; clear otherwise
-            from constants.plans import PlanNames
-            if prev_plan and prev_plan != PlanNames.FREE and plan_name == PlanNames.FREE:
-                billing_record.downgraded_at = timezone.now()
-            elif plan_name != PlanNames.FREE:
-                billing_record.downgraded_at = None
-            update_fields = list(defaults.keys()) + ["downgraded_at"]
-            billing_record.save(update_fields=update_fields)
-        else:
-            # New record; initialize downgrade timestamp if free
-            from constants.plans import PlanNames
+        billing_record, created = _get_or_create_billing_record(owner, defaults=defaults)
+        prev_plan = None if created else billing_record.subscription
+
+        updates: list[str] = []
+        if created:
             if plan_name == PlanNames.FREE:
                 billing_record.downgraded_at = timezone.now()
                 billing_record.save(update_fields=["downgraded_at"])
+            return billing_record
 
-        span.add_event('Subscription - Updated', {
-            'user.id': user.id,
-            'plan.name': plan_name
-        })
+        for key, value in defaults.items():
+            if getattr(billing_record, key) != value:
+                setattr(billing_record, key, value)
+                updates.append(key)
 
-        # If upgrading to a paid plan, restore any soft-expired agent schedules
-        try:
-            from constants.plans import PlanNames
-            if plan_name != PlanNames.FREE:
+        if prev_plan and prev_plan != PlanNames.FREE and plan_name == PlanNames.FREE:
+            billing_record.downgraded_at = timezone.now()
+            updates.append("downgraded_at")
+        elif plan_name != PlanNames.FREE and getattr(billing_record, "downgraded_at", None):
+            billing_record.downgraded_at = None
+            updates.append("downgraded_at")
+
+        if updates:
+            billing_record.save(update_fields=updates)
+
+        span.add_event(
+            "Subscription - Updated",
+            {
+                "owner.type": owner_type,
+                "owner.id": str(owner_id) if owner_id is not None else "",
+                "plan.name": plan_name,
+            },
+        )
+
+        if owner_type == "user" and plan_name != PlanNames.FREE:
+            try:
                 from api.models import PersistentAgent
+
                 agents = (
                     PersistentAgent.objects
-                    .filter(user=user, life_state=PersistentAgent.LifeState.EXPIRED)
+                    .filter(user=owner, life_state=PersistentAgent.LifeState.EXPIRED)
                     .exclude(schedule__isnull=True)
                     .exclude(schedule="")
                 )
@@ -576,9 +598,24 @@ def mark_user_billing_with_plan(user, plan_name: str, update_anchor: bool = True
                     agent.life_state = PersistentAgent.LifeState.ACTIVE
                     agent.save(update_fields=["life_state"])
                     from django.db import transaction
+
                     transaction.on_commit(agent._sync_celery_beat_task)
-        except Exception as e:
-            logger.error("Failed restoring agent schedules on upgrade for user %s: %s", user.id, e)
+            except Exception as e:
+                logger.error(
+                    "Failed restoring agent schedules on upgrade for user %s: %s",
+                    getattr(owner, "id", "unknown"),
+                    e,
+                )
+
+        return billing_record
+
+
+def mark_user_billing_with_plan(user, plan_name: str, update_anchor: bool = True):
+    return mark_owner_billing_with_plan(user, plan_name, update_anchor)
+
+
+def mark_organization_billing_with_plan(organization, plan_name: str, update_anchor: bool = True):
+    return mark_owner_billing_with_plan(organization, plan_name, update_anchor)
 
 
 # ------------------------------------------------------------------------------
@@ -760,7 +797,6 @@ def get_user_extra_task_limit(user) -> int:
             logger.warning(f"get_user_extra_task_limit {user.id}: No UserBilling found, defaulting to 0")
             return 0
 
-
 def allow_user_extra_tasks(user) -> bool:
     """
     Determines if a user is allowed to have extra tasks beyond their plan limits.
@@ -784,7 +820,6 @@ def allow_user_extra_tasks(user) -> bool:
         allow_based_on_subscription_status = not sub.cancel_at_period_end
 
         return (task_limit > 0 or task_limit == TASKS_UNLIMITED) and allow_based_on_subscription_status
-
 
 def allow_and_has_extra_tasks(user) -> bool:
     """
@@ -811,7 +846,6 @@ def allow_and_has_extra_tasks(user) -> bool:
             return True
 
         return False
-
 
 def calculate_extra_tasks_used_during_subscription_period(user):
     """
@@ -853,28 +887,18 @@ def calculate_extra_tasks_used_during_subscription_period(user):
         except Exception:
             return 0
 
+def downgrade_owner_to_free_plan(owner):
+    """Helper to mark any owner (user or organization) as free."""
+    with traced("SUBSCRIPTION Downgrade Owner to Free Plan"):
+        mark_owner_billing_with_plan(owner, PlanNames.FREE, False)
+
 
 def downgrade_user_to_free_plan(user):
-    """
-    Downgrades the user's plan to the free plan.
+    downgrade_owner_to_free_plan(user)
 
-    This function updates the user's billing information to reflect the free plan.
-    It is typically used when a user cancels their subscription or downgrades to
-    a free tier.
 
-    Parameters:
-    ----------
-    user : User
-        The user whose plan is being downgraded.
-
-    Returns:
-    -------
-    None
-        This function does not return any value.
-    """
-    with traced("SUBSCRIPTION Downgrade User to Free Plan") as span:
-        mark_user_billing_with_plan(user, PlanNames.FREE, False)  # Downgrade to free plan
-
+def downgrade_organization_to_free_plan(organization):
+    downgrade_owner_to_free_plan(organization)
 
 def has_unlimited_agents(user) -> bool:
     """
@@ -915,8 +939,7 @@ def get_user_max_contacts_per_agent(user) -> int:
         if quota and quota.max_agent_contacts is not None and quota.max_agent_contacts > 0:
             return int(quota.max_agent_contacts)
     except Exception as e:
-        logger.error("get_user_max_contacts_per_agent: quota lookup failed for user %s: %s", getattr(user, 'id', 'n/a'),
-                     e)
+        logger.error("get_user_max_contacts_per_agent: quota lookup failed for user %s: %s", getattr(user, 'id', 'n/a'), e)
 
     # Fallback to plan default
     plan = get_user_plan(user)

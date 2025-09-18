@@ -1,12 +1,16 @@
-from datetime import datetime
+from datetime import datetime, timezone as datetime_timezone
 
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import patch
 
-from api.models import UserBilling
+from api.models import UserBilling, Organization, OrganizationBilling
 from constants.plans import PlanNames
-from util.subscription_helper import mark_user_billing_with_plan
+from util.subscription_helper import (
+    mark_user_billing_with_plan,
+    mark_organization_billing_with_plan,
+    downgrade_organization_to_free_plan,
+)
 
 
 User = get_user_model()
@@ -73,3 +77,53 @@ class MarkUserBillingWithPlanTests(TestCase):
         billing.refresh_from_db()
         self.assertEqual(billing.subscription, PlanNames.STARTUP)
         self.assertEqual(billing.billing_cycle_anchor, 5)
+
+
+@tag("batch_subscription")
+class MarkOrganizationBillingWithPlanTests(TestCase):
+    """Ensure organization billing records are synced with plan updates."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username="owner@example.com",
+            email="owner@example.com",
+            password="ownerpass123",
+        )
+        self.organization = Organization.objects.create(
+            name="Acme Corp",
+            slug="acme-corp",
+            created_by=self.owner,
+        )
+
+    def test_creates_and_updates_billing_record(self):
+        OrganizationBilling.objects.filter(organization=self.organization).delete()
+
+        with patch("util.subscription_helper.timezone.now") as mock_now:
+            mock_now.return_value = datetime(2025, 3, 15, tzinfo=datetime_timezone.utc)
+            mark_organization_billing_with_plan(self.organization, PlanNames.STARTUP)
+
+        billing = OrganizationBilling.objects.get(organization=self.organization)
+        self.assertEqual(billing.subscription, PlanNames.STARTUP)
+        self.assertEqual(billing.billing_cycle_anchor, 15)
+
+        with patch("util.subscription_helper.timezone.now") as mock_now:
+            mock_now.return_value = datetime(2025, 4, 2, tzinfo=datetime_timezone.utc)
+            mark_organization_billing_with_plan(self.organization, PlanNames.STARTUP, update_anchor=False)
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.subscription, PlanNames.STARTUP)
+        self.assertEqual(billing.billing_cycle_anchor, 15)
+
+    def test_downgrade_sets_timestamp(self):
+        with patch("util.subscription_helper.timezone.now") as mock_now:
+            mock_now.return_value = datetime(2025, 5, 5, tzinfo=datetime_timezone.utc)
+            mark_organization_billing_with_plan(self.organization, PlanNames.STARTUP)
+
+        with patch("util.subscription_helper.timezone.now") as mock_now:
+            mock_now.return_value = datetime(2025, 6, 1, tzinfo=datetime_timezone.utc)
+            downgrade_organization_to_free_plan(self.organization)
+
+        billing = OrganizationBilling.objects.get(organization=self.organization)
+        self.assertEqual(billing.subscription, PlanNames.FREE)
+        self.assertEqual(billing.billing_cycle_anchor, 5)
+        self.assertEqual(billing.downgraded_at, datetime(2025, 6, 1, tzinfo=datetime_timezone.utc))
