@@ -3,8 +3,11 @@ from datetime import date
 
 from django.test import TestCase, tag
 from dateutil.relativedelta import relativedelta
+from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from billing.services import BillingService
+from api.models import Organization, UserBilling
 
 
 @tag("batch_billing")
@@ -132,3 +135,51 @@ class BillingServiceValidationTests(TestCase):
 
         mar_31 = BillingService.compute_next_billing_date(anchor, feb_29)
         self.assertEqual(mar_31, date(2024, 3, 31))
+
+@tag("batch_owner_billing")
+class BillingServiceOwnerTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username="owner@example.com",
+            email="owner@example.com",
+            password="password123",
+        )
+
+    def test_user_owner_uses_user_billing_record(self):
+        billing = UserBilling.objects.get(user=self.user)
+        billing.billing_cycle_anchor = 15
+        billing.save(update_fields=["billing_cycle_anchor"])
+
+        today = timezone.now().date()
+        expected = BillingService.get_current_billing_period_from_day(15, today)
+        start, end = BillingService.get_current_billing_period_for_owner(self.user)
+
+        self.assertEqual((start, end), expected)
+
+    def test_org_owner_uses_org_billing_record(self):
+        org = Organization.objects.create(
+            name="Acme Co",
+            slug="acme-co",
+            plan="free",
+            created_by=self.user,
+        )
+
+        org_billing = org.billing
+        org_billing.billing_cycle_anchor = 9
+        org_billing.save(update_fields=["billing_cycle_anchor"])
+
+        today = timezone.now().date()
+        expected = BillingService.get_current_billing_period_from_day(9, today)
+        start, end = BillingService.get_current_billing_period_for_owner(org)
+
+        self.assertEqual((start, end), expected)
+
+    def test_missing_billing_record_defaults_to_day_one(self):
+        UserBilling.objects.filter(user=self.user).delete()
+
+        today = timezone.now().date()
+        expected = BillingService.get_current_billing_period_from_day(1, today)
+        start, end = BillingService.get_current_billing_period_for_owner(self.user)
+
+        self.assertEqual((start, end), expected)

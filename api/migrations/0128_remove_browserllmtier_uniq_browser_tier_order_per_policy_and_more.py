@@ -3,6 +3,8 @@
 import uuid
 from django.db import migrations, models
 
+from ._helpers import SafeAddIndex
+
 
 class Migration(migrations.Migration):
 
@@ -134,39 +136,39 @@ class Migration(migrations.Migration):
             name='persistenttierendpoint',
             unique_together={('tier', 'endpoint')},
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='browsermodelendpoint',
             index=models.Index(fields=['key'], name='api_browser_key_241b29_idx'),
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='browsermodelendpoint',
             index=models.Index(fields=['enabled'], name='api_browser_enabled_a7c777_idx'),
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='browsermodelendpoint',
             index=models.Index(fields=['provider'], name='api_browser_provide_4675f8_idx'),
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='llmprovider',
             index=models.Index(fields=['key'], name='api_llmprov_key_2c3b10_idx'),
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='llmprovider',
             index=models.Index(fields=['enabled'], name='api_llmprov_enabled_5c6260_idx'),
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='persistentmodelendpoint',
             index=models.Index(fields=['key'], name='api_persist_key_c20ecf_idx'),
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='persistentmodelendpoint',
             index=models.Index(fields=['enabled'], name='api_persist_enabled_13251a_idx'),
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='persistentmodelendpoint',
             index=models.Index(fields=['provider'], name='api_persist_provide_cf7c97_idx'),
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='persistenttokenrange',
             index=models.Index(fields=['min_tokens', 'max_tokens'], name='api_persist_min_tok_644cd1_idx'),
         ),

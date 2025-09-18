@@ -15,6 +15,22 @@ class BillingService:
     """
 
     @staticmethod
+    def _get_billing_record_for_owner(owner):
+        """Return the billing record (user or organization) for the provided owner."""
+        if owner is None:
+            return None, "unknown"
+
+        OrgModel = apps.get_model("api", "Organization")
+        if isinstance(owner, OrgModel):
+            OrgBilling = apps.get_model("api", "OrganizationBilling")
+            record = OrgBilling.objects.filter(organization_id=owner.id).first()
+            return record, "organization"
+
+        UserBilling = apps.get_model("api", "UserBilling")
+        record = UserBilling.objects.filter(user_id=owner.id).first()
+        return record, "user"
+
+    @staticmethod
     @tracer.start_as_current_span("BillingService validate_billing_day")
     def validate_billing_day(billing_day: int):
         if not (1 <= billing_day <= 31):
@@ -93,32 +109,29 @@ class BillingService:
     @staticmethod
     @tracer.start_as_current_span("BillingService get_current_billing_period_for_user")
     def get_current_billing_period_for_user(user) -> tuple[date, date]:
-        """
-        Get the current billing period based on the billing day set in the service.
+        """Backward-compatible wrapper around owner-aware billing period lookup."""
+        return BillingService.get_current_billing_period_for_owner(user)
 
-        This method assumes a default billing day of 1 if not set.
-
-        Args:
-        -----
-            user: The user object for whom the billing period is being calculated.
-
-        Returns:
-        -----
-            tuple[date, date]: A tuple containing the start and end dates of the current billing period.
-        """
+    @staticmethod
+    @tracer.start_as_current_span("BillingService get_current_billing_period_for_owner")
+    def get_current_billing_period_for_owner(owner) -> tuple[date, date]:
+        """Return (start, end) for the billing period tied to a user or organization owner."""
         span = trace.get_current_span()
         today = timezone.now().date()
 
-        UserBilling = apps.get_model("api", "UserBilling")
+        record, owner_type = BillingService._get_billing_record_for_owner(owner)
 
-        # Assuming the UserBilling model has a foreign key to User and a billing_day field
-        user_billing = UserBilling.objects.filter(user_id=user.id).first()
-
-        if user_billing is not None:
-            billing_day = user_billing.billing_cycle_anchor
+        if record is not None:
+            billing_day = record.billing_cycle_anchor
+            span.set_attribute("billing.owner_type", owner_type)
+            span.set_attribute("billing.owner_id", getattr(owner, "id", None))
             return BillingService.get_current_billing_period_from_day(billing_day, today)
 
-        logger.warning(f"UserBilling not found for user_id: {user.id}; using default billing day 1.")
-        span.add_event("UserBilling not found, using default billing day 1")
+        span.add_event("Billing record not found; defaulting to day 1", {"owner_type": owner_type})
+        logger.warning(
+            "Billing record not found for owner_id=%s owner_type=%s; using default billing day 1.",
+            getattr(owner, "id", None),
+            owner_type,
+        )
 
         return BillingService.get_current_billing_period_from_day(1, today)
