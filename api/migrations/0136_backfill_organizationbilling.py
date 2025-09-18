@@ -24,7 +24,7 @@ def backfill_organization_billing(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0134_organizationbilling"),
+        ("api", "0135_organizationbilling"),
     ]
 
     operations = [
