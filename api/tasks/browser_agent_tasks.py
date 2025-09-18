@@ -621,7 +621,7 @@ async def _run_agent(
                 timeout=30_000,
                 no_viewport=True,
                 accept_downloads=accept_downloads,
-                auto_download_pdfs=True,
+                auto_download_pdfs=False,
                 proxy=proxy_settings,
                 custom_context={'available_file_paths': available_file_paths},
             )
