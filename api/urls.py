@@ -5,7 +5,8 @@ from rest_framework.routers import SimpleRouter
 from .views import (
     ping,
     BrowserUseAgentViewSet,
-    BrowserUseAgentTaskViewSet
+    BrowserUseAgentTaskViewSet,
+    PersistentAgentEventStreamView,
 )
 from .webhooks import sms_webhook, sms_status_webhook, email_webhook, open_and_link_webhook, pipedream_connect_webhook
 
@@ -21,6 +22,12 @@ urlpatterns = [
     
     # Include the router URLs for agents
     *router.urls,
+
+    path(
+        "agents/<uuid:agent_id>/events/",
+        PersistentAgentEventStreamView.as_view(),
+        name="agent-events-stream",
+    ),
     
     # Task endpoints - explicit paths for clean URL naming
     # Agent-specific task endpoints

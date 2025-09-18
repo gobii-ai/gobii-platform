@@ -1,11 +1,14 @@
+import json
+
 from rest_framework import status, viewsets, serializers, mixins
+from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.http import HttpResponseRedirect, Http404
+from django.http import HttpResponseRedirect, Http404, StreamingHttpResponse
 from django.views import View
 
 from observability import traced, dict_to_attributes
@@ -16,6 +19,8 @@ from .models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     LinkShortener,
+    PersistentAgent,
+    OrganizationMembership,
 )
 from .serializers import (
     BrowserUseAgentSerializer,
@@ -32,6 +37,8 @@ import logging
 
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from config.redis_client import get_redis_client
+from api.agent.events import get_agent_event_stream_key
 
 # Import extend_schema from drf-spectacular with minimal dependencies
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
@@ -513,3 +520,87 @@ class LinkShortenerRedirectView(View):
 
         link.increment_hits()
         return HttpResponseRedirect(url)
+
+
+class PersistentAgentEventStreamView(APIView):
+    """Server-Sent Events stream for persistent agent change notifications."""
+
+    permission_classes = [IsAuthenticated]
+    heartbeat_comment = ": heartbeat\n\n"
+
+    def get(self, request, agent_id):  # noqa: ANN001 - DRF handles typing
+        agent = get_object_or_404(
+            PersistentAgent.objects.select_related("organization", "user"),
+            id=agent_id,
+        )
+
+        if not self._user_has_access(request.user, agent):
+            raise Http404
+
+        last_event_id = (
+            request.META.get("HTTP_LAST_EVENT_ID")
+            or request.GET.get("last_event_id")
+            or request.GET.get("cursor")
+        )
+
+        stream_key = get_agent_event_stream_key(agent_id)
+
+        response = StreamingHttpResponse(
+            self._event_stream(stream_key, last_event_id),
+            content_type="text/event-stream",
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
+    @staticmethod
+    def _user_has_access(user, agent: PersistentAgent) -> bool:
+        if not getattr(user, "is_authenticated", False):
+            return False
+        if getattr(user, "is_staff", False):
+            return True
+        if agent.user_id == user.id:
+            return True
+        if agent.organization_id:
+            return OrganizationMembership.objects.filter(
+                org=agent.organization,
+                user=user,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists()
+        return False
+
+    def _event_stream(self, stream_key: str, last_event_id: str | None):
+        redis = get_redis_client()
+        cursor = last_event_id or "$"
+
+        while True:
+            try:
+                records = redis.xread({stream_key: cursor}, count=10, block=15000)
+            except Exception:
+                logger.exception("Error reading agent event stream", extra={"stream": stream_key})
+                yield ": error\n\n"
+                return
+
+            if not records:
+                yield self.heartbeat_comment
+                continue
+
+            for _, entries in records:
+                for entry_id, fields in entries:
+                    cursor = entry_id
+                    kind = fields.get("kind", "change")
+                    payload = {
+                        "agent_id": fields.get("agent_id"),
+                        "kind": kind,
+                        "resource_id": fields.get("resource_id"),
+                        "timestamp": fields.get("timestamp"),
+                    }
+                    payload_raw = fields.get("payload")
+                    if payload_raw:
+                        try:
+                            payload["payload"] = json.loads(payload_raw)
+                        except json.JSONDecodeError:
+                            payload["payload"] = payload_raw
+
+                    data = json.dumps({k: v for k, v in payload.items() if v is not None}, separators=(",", ":"))
+                    yield f"id: {entry_id}\nevent: {kind}\ndata: {data}\n\n"

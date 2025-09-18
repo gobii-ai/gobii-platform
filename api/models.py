@@ -31,6 +31,7 @@ from observability import traced
 from email.utils import parseaddr
 
 from tasks.services import TaskCreditService
+from api.agent.events import publish_agent_event_on_commit
 
 from util.subscription_helper import (
     get_active_subscription, )
@@ -2235,6 +2236,8 @@ class PersistentAgent(models.Model):
 
         # For updates, we need to check if schedule-related fields have changed.
         sync_needed = False
+        state_changes: dict[str, object] = {}
+        tracked_state_fields = ("is_active", "life_state")
         shutdown_reasons: list[str] = []
         if not is_new:
             try:
@@ -2276,6 +2279,11 @@ class PersistentAgent(models.Model):
                 except Exception:
                     # Defensive: do not block save on detection errors
                     logger.exception("Failed to compute shutdown reasons for agent %s", self.id)
+                for field_name in tracked_state_fields:
+                    old_value = getattr(old_instance, field_name, None)
+                    new_value = getattr(self, field_name, None)
+                    if old_value != new_value:
+                        state_changes[field_name] = new_value
             except PersistentAgent.DoesNotExist:
                 # If it doesn't exist in the DB yet, treat it as a new instance.
                 is_new = True
@@ -2294,6 +2302,14 @@ class PersistentAgent(models.Model):
         # Redis side-effect to run only after a successful DB commit.
         if is_new or sync_needed:
             transaction.on_commit(self._sync_celery_beat_task)
+
+        if not is_new and state_changes:
+            publish_agent_event_on_commit(
+                self.id,
+                kind="agent.status_changed",
+                resource_id=self.id,
+                payload={k: getattr(self, k) for k in tracked_state_fields if k in state_changes},
+            )
 
         # If any shutdown reasons were detected, enqueue centralized cleanup
         if shutdown_reasons:
@@ -3345,6 +3361,25 @@ class PersistentAgentMessage(models.Model):
         Sequence (`seq`) is now generated automatically via ULID default, so we
         only need to ensure the owner_agent back-reference is set.
         """
+        is_new = self._state.adding
+        status_changed = False
+        update_fields = kwargs.get("update_fields")
+
+        if not is_new and self.pk:
+            monitor_status = update_fields is None or "latest_status" in update_fields
+            if monitor_status:
+                try:
+                    previous_status = (
+                        type(self)
+                        .objects
+                        .filter(pk=self.pk)
+                        .values_list("latest_status", flat=True)
+                        .first()
+                    )
+                except Exception:
+                    previous_status = None
+                if previous_status is not None and previous_status != self.latest_status:
+                    status_changed = True
 
         # Auto-populate owner_agent if missing for denormalization & index use
         if self.owner_agent_id is None:
@@ -3354,6 +3389,23 @@ class PersistentAgentMessage(models.Model):
                 self.owner_agent = self.from_endpoint.owner_agent
 
         super().save(*args, **kwargs)
+
+        agent_id = self.owner_agent_id
+
+        if agent_id and is_new:
+            publish_agent_event_on_commit(
+                agent_id,
+                kind="message.created",
+                resource_id=self.id,
+            )
+
+        if agent_id and status_changed:
+            publish_agent_event_on_commit(
+                agent_id,
+                kind="message.status_changed",
+                resource_id=self.id,
+                payload={"latest_status": self.latest_status},
+            )
 
 
 class PersistentAgentMessageAttachment(models.Model):
@@ -3471,8 +3523,10 @@ class PersistentAgentStep(models.Model):
         return f"Step {preview}..."
 
     def save(self, *args, **kwargs):
+        is_new = self._state.adding
+
         # On creation, optionally consume credits for chargeable steps only.
-        if self._state.adding:
+        if is_new:
             from django.core.exceptions import ValidationError
             from django.conf import settings as dj_settings
             # Determine owner: organization if agent is org-owned; otherwise the agent's user
@@ -3502,7 +3556,16 @@ class PersistentAgentStep(models.Model):
                 if self.credits_cost is None:
                     self.credits_cost = amount
 
-        return super().save(*args, **kwargs)
+        saved = super().save(*args, **kwargs)
+
+        if is_new and self.agent_id:
+            publish_agent_event_on_commit(
+                self.agent_id,
+                kind="step.created",
+                resource_id=self.id,
+            )
+
+        return saved
 
 
 class PersistentAgentToolCall(models.Model):
