@@ -115,7 +115,7 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         params = {
             "to_address": self.user.email,
             "subject": "Hello Team",
-            "mobile_first_html": "<p>Hi\u0019 there</p>",
+            "mobile_first_html": "<p>It\u0019s great to chat</p>",
             "cc_addresses": [self.user.email],
         }
 
@@ -129,6 +129,7 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
 
         message = PersistentAgentMessage.objects.get(owner_agent=self.agent)
         self.assertNotIn("\u0019", message.body)
+        self.assertIn("It's", message.body)
         self.assertEqual(message.raw_payload.get("subject", ""), params["subject"])
         self.assertEqual(message.to_endpoint.address, params["to_address"])
         self.assertListEqual(

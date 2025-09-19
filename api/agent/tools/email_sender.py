@@ -23,14 +23,16 @@ from ..comms.outbound_delivery import deliver_agent_email
 logger = logging.getLogger(__name__)
 
 _ALLOWABLE_CONTROL_CHARS = {"\n", "\r", "\t"}
+_CONTROL_CHAR_SUBSTITUTIONS = {"\u0019": "'"}
 
 
 def _strip_control_chars(value: str | None) -> str:
     """Remove all control characters except basic whitespace from the string."""
     if not isinstance(value, str):
         return ""
+    text = value.translate(str.maketrans(_CONTROL_CHAR_SUBSTITUTIONS))
     return "".join(
-        ch for ch in value
+        ch for ch in text
         if (unicodedata.category(ch)[0] != "C") or ch in _ALLOWABLE_CONTROL_CHARS
     )
 
