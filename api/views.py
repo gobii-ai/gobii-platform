@@ -1,7 +1,6 @@
 import json
 
 from rest_framework import status, viewsets, serializers, mixins
-from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -10,6 +9,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.http import HttpResponseRedirect, Http404, StreamingHttpResponse
 from django.views import View
+from django.contrib.auth.mixins import LoginRequiredMixin
 
 from observability import traced, dict_to_attributes
 from util.constants.task_constants import TASKS_UNLIMITED
@@ -522,10 +522,9 @@ class LinkShortenerRedirectView(View):
         return HttpResponseRedirect(url)
 
 
-class PersistentAgentEventStreamView(APIView):
+class PersistentAgentEventStreamView(LoginRequiredMixin, View):
     """Server-Sent Events stream for persistent agent change notifications."""
 
-    permission_classes = [IsAuthenticated]
     heartbeat_comment = ": heartbeat\n\n"
 
     def get(self, request, agent_id):  # noqa: ANN001 - DRF handles typing
@@ -544,6 +543,17 @@ class PersistentAgentEventStreamView(APIView):
         )
 
         stream_key = get_agent_event_stream_key(agent_id)
+
+        logger.info(
+            "SSE subscribe",
+            extra=
+            {
+                "agent_id": str(agent_id),
+                "user_id": getattr(request.user, "id", None),
+                "accept": request.META.get("HTTP_ACCEPT"),
+                "last_event_id": last_event_id,
+            },
+        )
 
         response = StreamingHttpResponse(
             self._event_stream(stream_key, last_event_id),
@@ -582,6 +592,7 @@ class PersistentAgentEventStreamView(APIView):
                 return
 
             if not records:
+                logger.debug("SSE heartbeat", extra={"stream": stream_key})
                 yield self.heartbeat_comment
                 continue
 
@@ -602,5 +613,13 @@ class PersistentAgentEventStreamView(APIView):
                         except json.JSONDecodeError:
                             payload["payload"] = payload_raw
 
+                    logger.debug(
+                        "SSE event",
+                        extra={
+                            "stream": stream_key,
+                            "entry_id": entry_id,
+                            "kind": kind,
+                        },
+                    )
                     data = json.dumps({k: v for k, v in payload.items() if v is not None}, separators=(",", ":"))
                     yield f"id: {entry_id}\nevent: {kind}\ndata: {data}\n\n"

@@ -5,9 +5,9 @@
 
 {% block head_extras %}
 <script>
- if (window.analytics) {
-   analytics.track('{{ analytics.events.PLAN_INTEREST }}');
- }
+ if (window.analytics?.track) {
+   window.analytics.track('{{ analytics.events.PLAN_INTEREST }}');
+}
 </script>
 {% endblock %}
 

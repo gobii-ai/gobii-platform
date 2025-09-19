@@ -94,37 +94,44 @@
   <!-- Segment -->
   <script>
     !function(){var i="analytics",analytics=window[i]=window[i]||[];if(!analytics.initialize)if(analytics.invoked)window.console&&console.error&&console.error("Segment snippet included twice.");else{analytics.invoked=!0;analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","screen","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware","register"];analytics.factory=function(e){return function(){if(window[i].initialized)return window[i][e].apply(window[i],arguments);var n=Array.prototype.slice.call(arguments);if(["track","screen","alias","group","page","identify"].indexOf(e)>-1){var c=document.querySelector("link[rel='canonical']");n.push({__t:"bpc",c:c&&c.getAttribute("href")||void 0,p:location.pathname,u:location.href,s:location.search,t:document.title,r:document.referrer})}n.unshift(e);analytics.push(n);return analytics}};for(var n=0;n<analytics.methods.length;n++){var key=analytics.methods[n];analytics[key]=analytics.factory(key)}analytics.load=function(key,n){var t=document.createElement("script");t.type="text/javascript";t.async=!0;t.setAttribute("data-global-segment-analytics-key",i);t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";var r=document.getElementsByTagName("script")[0];r.parentNode.insertBefore(t,r);analytics._loadOptions=n};analytics.SNIPPET_VERSION="5.2.0";} }();
-    analytics.load("{{ settings.SEGMENT_WEB_WRITE_KEY }}");
+    const analyticsClient = window.analytics;
 
-    // Add a source middleware to set the medium for web events
-    analytics.addSourceMiddleware(({ payload, next }) => {
-      const { properties } = payload.obj;
+    if (!analyticsClient) {
+      console.warn('[analytics] Segment snippet unavailable; analytics disabled.');
+    } else {
+      analyticsClient.load("{{ settings.SEGMENT_WEB_WRITE_KEY }}");
 
-      if (!properties) {
-        payload.obj.properties = {};
-      }
+      // Add a source middleware to set the medium for web events
+      analyticsClient.addSourceMiddleware(({ payload, next }) => {
+        const { properties } = payload.obj;
 
-      properties.medium = 'Web';
-      properties.frontend = true;
+        if (!properties) {
+          payload.obj.properties = {};
+        }
 
-      next(payload)
-    });
+        properties.medium = 'Web';
+        properties.frontend = true;
+
+        next(payload)
+      });
+    }
 
     (function () {
       if (!{{ user.is_authenticated|yesno:"true,false" }}) return;
-      if (typeof window.analytics === 'undefined') return; //Snippet blocked
+      const analyticsClient = window.analytics;
+      if (!analyticsClient) return; //Snippet blocked
       // Check if user method exists before calling it (may not be loaded on localhost)
-      if (analytics?.user && typeof analytics.user === 'function') {
-        if (analytics.user()?.id() === "{{ user.id }}") return;
+      if (analyticsClient?.user && typeof analyticsClient.user === 'function') {
+        if (analyticsClient.user()?.id() === "{{ user.id }}") return;
       }
 
-      analytics.identify("{{ user.id }}", {
+      analyticsClient?.identify?.("{{ user.id }}", {
         email : "{{ user.email }}",
       });
     })();
 
     {% if landing_code %}
-      analytics.page('Landing Page', {
+      window.analytics?.page?.('Landing Page', {
         landing_code: '{{ landing_code|escapejs }}',
         landing_hero_text: '{{ landing_hero_text|escapejs|default:"" }}',
         landing_preview_image: '{{ landing_preview_image|escapejs|default:"" }}',
@@ -133,7 +140,7 @@
       });
     {% else %}
       {% get_page_meta request.path as page_meta %}   {# ← call the tag, store result #}
-      analytics.page(
+      window.analytics?.page?.(
         {% if page_meta %}
           "{{ page_meta.0|escapejs }}",   // category
           "{{ page_meta.1|escapejs }}"    // name
@@ -237,8 +244,10 @@
 
   {% endif %}
 
-  <!-- Tailwind Play CDN -->
+  {% if not environment.is_production %}
+  <!-- Tailwind Play CDN (development only) -->
   <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
+  {% endif %}
   
   <!-- Custom Fonts -->
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
@@ -400,8 +409,9 @@
       }
     });
 
-    if (analytics && analytics.identify && Object.keys(props).length > 0) {
-      analytics.identify("{{ user.id }}", props);
+    const analyticsClient = window.analytics;
+    if (analyticsClient?.identify && Object.keys(props).length > 0) {
+      analyticsClient.identify("{{ user.id }}", props);
     }
   </script>
   {% endif %}
@@ -428,6 +438,16 @@
   {% block head_extras %}{% endblock %}
 
   {% htmx_script %}
+  <script>
+    if (typeof window.htmx === 'undefined') {
+      console.warn('[global] htmx not present after primary include; loading fallback');
+      const fallback = document.createElement('script');
+      fallback.src = 'https://unpkg.com/htmx.org@1.9.12';
+      fallback.crossOrigin = 'anonymous';
+      fallback.onload = () => console.debug('[global] htmx fallback loaded');
+      document.head.appendChild(fallback);
+    }
+  </script>
 </head>
 <body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
   {% include "includes/_unified_header_nav.html" %}
@@ -465,5 +485,7 @@
     {# Global footer #}
     {% include "includes/_footer.html" %}
   </div>
+
+  {% block extra_js %}{% endblock %}
 </body>
 </html>
