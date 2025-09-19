@@ -27,11 +27,11 @@
     </div>
   </header>
 
-  <section class="relative flex-1 min-h-0 rounded-lg border border-slate-200 bg-white shadow-sm">
-    <div id="timeline-load-older" class="flex justify-center border-b border-slate-100 py-2 text-xs text-slate-500">
+  <section class="relative flex-1 min-h-0">
+    <div id="timeline-load-older" class="flex justify-center py-2 text-xs text-slate-500">
       {% if timeline_window.has_more_older %}
         <button
-          class="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+          class="inline-flex items-center gap-2 rounded-full border border-slate-300/80 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-100"
           hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
           hx-target="#timeline-events"
           hx-swap="afterbegin">
@@ -42,7 +42,7 @@
       {% endif %}
     </div>
 
-    <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto px-4 py-4">
+    <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto px-2 pb-6">
       {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events %}
     </div>
 
@@ -53,7 +53,7 @@
          data-has-more-newer="{{ timeline_window.has_more_newer|yesno:'true,false' }}"></div>
 
     <button id="jump-to-latest"
-            class="hidden absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded border border-indigo-200 bg-white px-3 py-1 text-xs font-semibold text-indigo-600 shadow"
+            class="hidden absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs font-semibold text-indigo-600 shadow-sm"
             type="button">
       Jump to latest
     </button>
@@ -80,6 +80,12 @@
 {% block extra_js %}
 <script>
 (function () {
+  if (window.__agentWorkspaceInitialized) {
+    console.debug('[agent-workspace] script already initialized; skipping');
+    return;
+  }
+  window.__agentWorkspaceInitialized = true;
+
   const root = document.getElementById('agent-workspace-root');
   const log = (...args) => console.debug('[agent-workspace]', ...args);
 
@@ -320,7 +326,7 @@
       requestNewer('auto-newer');
     };
 
-    source.onmessage = handleMessage;
+    source.addEventListener('message', handleMessage);
     source.addEventListener('step.created', handleMessage);
     source.addEventListener('message.created', handleMessage);
     source.onerror = (err) => {
