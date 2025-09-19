@@ -16,9 +16,13 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 import logging
 import stripe
 
-from api.models import UserBilling
+from api.models import UserBilling, OrganizationBilling
 from util.payments_helper import PaymentsHelper
-from util.subscription_helper import get_user_task_credit_limit, mark_user_billing_with_plan, downgrade_user_to_free_plan
+from util.subscription_helper import (
+    mark_owner_billing_with_plan,
+    mark_user_billing_with_plan,
+    downgrade_owner_to_free_plan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,11 +175,30 @@ def handle_subscription_event(event, **kwargs):
             raise
 
     customer: Customer | None = sub.customer
-    if not customer or not customer.subscriber:
-        logger.debug("Subscription %s has no linked user; nothing to do.", sub.id)
+    if not customer:
+        logger.debug("Subscription %s has no linked customer; nothing to do.", sub.id)
         return
 
-    user = customer.subscriber
+    owner = None
+    owner_type = ""
+    organization_billing: OrganizationBilling | None = None
+
+    if customer.subscriber:
+        owner = customer.subscriber
+        owner_type = "user"
+    else:
+        organization_billing = (
+            OrganizationBilling.objects.select_related("organization")
+            .filter(stripe_customer_id=customer.id)
+            .first()
+        )
+        if organization_billing and organization_billing.organization:
+            owner = organization_billing.organization
+            owner_type = "organization"
+
+    if not owner:
+        logger.debug("Subscription %s has no linked billing owner; nothing to do.", sub.id)
+        return
 
     # Handle explicit deletions (downgrade to free immediately)
     try:
@@ -184,18 +207,35 @@ def handle_subscription_event(event, **kwargs):
         event_type = ""
 
     if event_type == "customer.subscription.deleted" or getattr(sub, "status", "") == "canceled":
-        downgrade_user_to_free_plan(user)
-        try:
-            Analytics.track_event(
-                user_id=user.id,
-                event=AnalyticsEvent.SUBSCRIPTION_CANCELLED,
-                source=AnalyticsSource.WEB,
-                properties={
-                    'stripe.subscription_id': getattr(sub, 'id', None),
-                },
-            )
-        except Exception:
-            logger.exception("Failed to track subscription cancellation for user %s", user.id)
+        downgrade_owner_to_free_plan(owner)
+
+        if owner_type == "user":
+            try:
+                Analytics.track_event(
+                    user_id=owner.id,
+                    event=AnalyticsEvent.SUBSCRIPTION_CANCELLED,
+                    source=AnalyticsSource.WEB,
+                    properties={
+                        'stripe.subscription_id': getattr(sub, 'id', None),
+                    },
+                )
+            except Exception:
+                logger.exception("Failed to track subscription cancellation for user %s", owner.id)
+        else:
+            billing = organization_billing
+            if billing:
+                updates: list[str] = []
+                if getattr(billing, "stripe_subscription_id", None):
+                    billing.stripe_subscription_id = None
+                    updates.append("stripe_subscription_id")
+                if getattr(billing, "cancel_at", None):
+                    billing.cancel_at = None
+                    updates.append("cancel_at")
+                if getattr(billing, "cancel_at_period_end", False):
+                    billing.cancel_at_period_end = False
+                    updates.append("cancel_at_period_end")
+                if updates:
+                    billing.save(update_fields=updates)
         return
 
     # Prefer explicit Stripe retrieve when present; otherwise use dj-stripe's cached payload
@@ -221,47 +261,73 @@ def handle_subscription_event(event, **kwargs):
 
         plan = get_plan_by_product_id(plan_id)
 
-        # Grant plan credits (idempotent via invoice_id when present)
         invoice_id = source_data.get("latest_invoice")
-        TaskCreditService.grant_subscription_credits(
-            user,
-            plan=plan,
-            invoice_id=invoice_id or ""
-        )
 
         try:
             plan_choice = PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE
-            plan_value = plan_choice.value  # explicit string value
+            plan_value = plan_choice.value
         except Exception:
             plan_value = PlanNamesChoices.FREE.value
 
-        # Update the user's billing plan, preserving anchor until we set it from Stripe below
-        mark_user_billing_with_plan(user, plan_value, update_anchor=False)
+        if owner_type == "user":
+            mark_user_billing_with_plan(owner, plan_value, update_anchor=False)
+            TaskCreditService.grant_subscription_credits(
+                owner,
+                plan=plan,
+                invoice_id=invoice_id or ""
+            )
 
-        # Align local anchor day with the Stripe subscription period start for Pro
-        try:
-            ub = user.billing
-            if getattr(sub, 'current_period_start', None):
-                new_day = sub.current_period_start.day
-                if ub.billing_cycle_anchor != new_day:
-                    ub.billing_cycle_anchor = new_day
-                    ub.save(update_fields=["billing_cycle_anchor"])
-        except UserBilling.DoesNotExist as ue:
-            logger.exception("UserBilling record not found for user %s during anchor alignment: %s", user.id, ue)
-        except Exception as e:
-            logger.exception("Failed to align billing anchor with Stripe period for user %s: %s", user.id, e)
+            try:
+                ub = owner.billing
+                if getattr(sub, 'current_period_start', None):
+                    new_day = sub.current_period_start.day
+                    if ub.billing_cycle_anchor != new_day:
+                        ub.billing_cycle_anchor = new_day
+                        ub.save(update_fields=["billing_cycle_anchor"])
+            except UserBilling.DoesNotExist as ue:
+                logger.exception("UserBilling record not found for user %s during anchor alignment: %s", owner.id, ue)
+            except Exception as e:
+                logger.exception("Failed to align billing anchor with Stripe period for user %s: %s", owner.id, e)
 
-        # Analytics/identify for visibility
-        Analytics.identify(user.id, {
-            'plan': plan_value,
-        })
-
-        Analytics.track_event(
-            user_id=user.id,
-            event=AnalyticsEvent.SUBSCRIPTION_CREATED,
-            source=AnalyticsSource.WEB,
-            properties={
+            Analytics.identify(owner.id, {
                 'plan': plan_value,
-                'stripe.invoice_id': invoice_id,
-            }
-        )
+            })
+
+            Analytics.track_event(
+                user_id=owner.id,
+                event=AnalyticsEvent.SUBSCRIPTION_CREATED,
+                source=AnalyticsSource.WEB,
+                properties={
+                    'plan': plan_value,
+                    'stripe.invoice_id': invoice_id,
+                }
+            )
+        else:
+            billing = mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
+            if billing:
+                updates: list[str] = []
+                if getattr(sub, 'current_period_start', None):
+                    new_day = sub.current_period_start.day
+                    if billing.billing_cycle_anchor != new_day:
+                        billing.billing_cycle_anchor = new_day
+                        updates.append("billing_cycle_anchor")
+
+                new_subscription_id = getattr(sub, 'id', None)
+                if getattr(billing, 'stripe_subscription_id', None) != new_subscription_id:
+                    billing.stripe_subscription_id = new_subscription_id
+                    updates.append("stripe_subscription_id")
+
+                if hasattr(billing, 'cancel_at'):
+                    cancel_at = getattr(sub, 'cancel_at', None)
+                    if billing.cancel_at != cancel_at:
+                        billing.cancel_at = cancel_at
+                        updates.append("cancel_at")
+
+                if hasattr(billing, 'cancel_at_period_end'):
+                    cancel_end = getattr(sub, 'cancel_at_period_end', None)
+                    if cancel_end is not None and billing.cancel_at_period_end != cancel_end:
+                        billing.cancel_at_period_end = cancel_end
+                        updates.append("cancel_at_period_end")
+
+                if updates:
+                    billing.save(update_fields=updates)
