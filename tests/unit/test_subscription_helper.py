@@ -100,24 +100,24 @@ class MarkOrganizationBillingWithPlanTests(TestCase):
 
         with patch("util.subscription_helper.timezone.now") as mock_now:
             mock_now.return_value = datetime(2025, 3, 15, tzinfo=datetime_timezone.utc)
-            mark_organization_billing_with_plan(self.organization, PlanNames.STARTUP)
+            mark_organization_billing_with_plan(self.organization, PlanNames.ORG_TEAM)
 
         billing = OrganizationBilling.objects.get(organization=self.organization)
-        self.assertEqual(billing.subscription, PlanNames.STARTUP)
+        self.assertEqual(billing.subscription, PlanNames.ORG_TEAM)
         self.assertEqual(billing.billing_cycle_anchor, 15)
 
         with patch("util.subscription_helper.timezone.now") as mock_now:
             mock_now.return_value = datetime(2025, 4, 2, tzinfo=datetime_timezone.utc)
-            mark_organization_billing_with_plan(self.organization, PlanNames.STARTUP, update_anchor=False)
+            mark_organization_billing_with_plan(self.organization, PlanNames.ORG_TEAM, update_anchor=False)
 
         billing.refresh_from_db()
-        self.assertEqual(billing.subscription, PlanNames.STARTUP)
+        self.assertEqual(billing.subscription, PlanNames.ORG_TEAM)
         self.assertEqual(billing.billing_cycle_anchor, 15)
 
     def test_downgrade_sets_timestamp(self):
         with patch("util.subscription_helper.timezone.now") as mock_now:
             mock_now.return_value = datetime(2025, 5, 5, tzinfo=datetime_timezone.utc)
-            mark_organization_billing_with_plan(self.organization, PlanNames.STARTUP)
+            mark_organization_billing_with_plan(self.organization, PlanNames.ORG_TEAM)
 
         with patch("util.subscription_helper.timezone.now") as mock_now:
             mock_now.return_value = datetime(2025, 6, 1, tzinfo=datetime_timezone.utc)
