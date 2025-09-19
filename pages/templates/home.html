@@ -633,13 +633,13 @@
         }
 
         // Analytics CTA
-        if (window.analytics && analytics.track) {
+        if (window.analytics?.track) {
           var properties = {
             {% if user.is_authenticated %}user_id: "{{ user }}", {% endif %}
             charter: promptText,
             medium: 'Web',
           }
-          analytics.track('{{ analytics.cta.CTA_EXAMPLE_AGENT_CLICKED.value }}', properties);
+          window.analytics.track('{{ analytics.cta.CTA_EXAMPLE_AGENT_CLICKED.value }}', properties);
         }
     }
 
@@ -674,14 +674,14 @@
       if (form) {
         form.addEventListener('submit', function (e) {
           // Optional: fire analytics before submit
-          if (window.analytics && analytics.track) {
+          if (window.analytics?.track) {
             var properties = {
               {% if user.is_authenticated %}user_id: "{{ user.id }}", {% endif %}
               charter: document.querySelector('textarea[name="charter"]').value,
               medium: 'Web'
             };
 
-            analytics.track('{{ analytics.cta.CTA_CREATE_AGENT_CLICKED.value }}', properties);
+            window.analytics.track('{{ analytics.cta.CTA_CREATE_AGENT_CLICKED.value }}', properties);
           }
         });
       }
