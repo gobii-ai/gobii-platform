@@ -1,0 +1,122 @@
+{% load agent_extras %}
+{% load humanize %}
+{% load tz %}
+
+{% with step_desc=step.description|default:'' step_desc_lower=step_desc|lower tool=step.tool_call %}
+  {% comment %}Skip all housekeeping steps{% endcomment %}
+  {% if 'process' in step_desc_lower and 'events' in step_desc_lower %}
+    {# skip any step with "process" and "events" in description #}
+  {% elif 'sleep' in step_desc_lower and 'trigger' in step_desc_lower %}
+    {# skip any step with "sleep" and "trigger" in description #}
+  {% comment %}Skip redundant tool calls when we have corresponding messages{% endcomment %}
+  {% elif tool and tool.tool_name == 'send_email' %}
+    {# skip redundant send_email #}
+  {% elif tool and tool.tool_name == 'send_sms' %}
+    {# skip redundant send_sms #}
+  {% comment %}Show all other steps{% endcomment %}
+  {% else %}
+    <article class="timeline-event rounded-3xl border border-white/25 bg-white/70 px-5 py-5 backdrop-blur-xl shadow-xl" data-cursor="{{ event.cursor }}">
+      {% if tool %}
+        {% with tool_name=tool.tool_name %}
+          {% if tool_name == 'update_charter' %}
+            <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
+              <div class="flex-1 space-y-3">
+                <div class="flex items-center gap-2">
+                  <div class="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100/80 backdrop-blur-sm">
+                    <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                  </div>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-indigo-100/80 backdrop-blur-sm px-3 py-1 text-xs font-semibold text-indigo-700 shadow-sm">Agent assignment updated</span>
+                </div>
+                {% if tool.tool_params.new_charter %}
+                  <div class="rounded-2xl border border-indigo-100/60 bg-gradient-to-br from-indigo-50/80 to-white/90 backdrop-blur-sm p-4 text-sm text-slate-700 shadow-sm">
+                    <div class="prose prose-sm prose-slate max-w-none">
+                      {{ tool.tool_params.new_charter|linebreaksbr }}
+                    </div>
+                  </div>
+                {% elif tool.tool_params.charter %}
+                  <div class="rounded-2xl border border-indigo-100/60 bg-gradient-to-br from-indigo-50/80 to-white/90 backdrop-blur-sm p-4 text-sm text-slate-700 shadow-sm">
+                    <div class="prose prose-sm prose-slate max-w-none">
+                      {{ tool.tool_params.charter|linebreaksbr }}
+                    </div>
+                  </div>
+                {% endif %}
+              </div>
+              <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400 flex-shrink-0">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
+            </header>
+            {% include "console/partials/_timeline_step_details.html" with step=step summary="See technical details" %}
+          {% elif tool_name == 'search_tools' %}
+            <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <div class="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100/80 backdrop-blur-sm">
+                    <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+                    </svg>
+                  </div>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-blue-100/80 backdrop-blur-sm px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm">Agent tool discovery</span>
+                </div>
+                <p class="mt-2 text-sm text-slate-500">The agent explored available integrations for this request.</p>
+              </div>
+              <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400 flex-shrink-0">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
+            </header>
+            {% include "console/partials/_timeline_step_details.html" with step=step summary="See tools reviewed" %}
+          {% elif tool_name == 'sqlite_batch' %}
+            <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <div class="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100/80 backdrop-blur-sm">
+                    <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
+                    </svg>
+                  </div>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-emerald-100/80 backdrop-blur-sm px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm">Database query</span>
+                </div>
+                <p class="mt-2 text-sm text-slate-500">Agent updated its workspace database.</p>
+              </div>
+              <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400 flex-shrink-0">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
+            </header>
+            {% include "console/partials/_timeline_step_details.html" with step=step summary="See SQL details" show_sql=True %}
+          {% else %}
+            <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <div class="flex items-center justify-center w-8 h-8 rounded-full bg-slate-100/80 backdrop-blur-sm">
+                    <svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                  </div>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-slate-100/80 backdrop-blur-sm px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">Agent activity</span>
+                </div>
+                {% if step_desc %}
+                  <p class="mt-2 text-sm text-slate-500">{{ step_desc }}</p>
+                {% endif %}
+              </div>
+              <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400 flex-shrink-0">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
+            </header>
+            {% include "console/partials/_timeline_step_details.html" with step=step %}
+          {% endif %}
+        {% endwith %}
+      {% else %}
+        <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
+          <div class="flex-1">
+            <div class="flex items-center gap-2">
+              <div class="flex items-center justify-center w-8 h-8 rounded-full bg-slate-100/80 backdrop-blur-sm">
+                <svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+              </div>
+              <span class="inline-flex items-center gap-1 rounded-full bg-slate-100/80 backdrop-blur-sm px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">Agent update</span>
+            </div>
+            {% if step_desc %}
+              <p class="mt-2 text-sm text-slate-500">{{ step_desc }}</p>
+            {% endif %}
+          </div>
+          <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400 flex-shrink-0">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
+        </header>
+        {% include "console/partials/_timeline_step_details.html" with step=step %}
+      {% endif %}
+    </article>
+  {% endif %}
+{% endwith %}

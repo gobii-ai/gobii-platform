@@ -1,0 +1,87 @@
+{% load agent_extras %}
+{% load humanize %}
+{% load tz %}
+
+{% with endpoint=message.to_endpoint|default:message.from_endpoint channel_label=endpoint.channel|channel_label channel_lower=channel_label|lower %}
+<article class="timeline-event rounded-3xl border border-white/25 bg-white/70 px-5 py-5 backdrop-blur-xl shadow-xl" data-cursor="{{ event.cursor }}">
+  <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700 shadow-sm">{{ channel_label }}</span>
+      {% if message.is_outbound %}
+        {% if channel_lower == 'email' %}
+          <span class="flex items-center gap-1">Agent sent an email{% if message.to_endpoint.address %} <span class="text-slate-400">to</span> <span class="truncate max-w-[180px] text-slate-700" title="{{ message.to_endpoint.address }}">{{ message.to_endpoint.address }}</span>{% endif %}</span>
+        {% elif channel_lower == 'sms' %}
+          <span class="flex items-center gap-1">Agent sent a text message{% if message.to_endpoint.address %} <span class="text-slate-400">to</span> <span class="truncate max-w-[160px] text-slate-700" title="{{ message.to_endpoint.address }}">{{ message.to_endpoint.address }}</span>{% endif %}</span>
+        {% else %}
+          <span>Agent sent a message via {{ channel_label|lower }}</span>
+        {% endif %}
+      {% else %}
+        {% if channel_lower == 'email' %}
+          <span class="flex items-center gap-1">New email from{% if message.from_endpoint.address %}<span class="truncate max-w-[180px] text-slate-700" title="{{ message.from_endpoint.address }}">{{ message.from_endpoint.address }}</span>{% endif %}</span>
+        {% elif channel_lower == 'sms' %}
+          <span class="flex items-center gap-1">New text message{% if message.from_endpoint.address %}<span class="text-slate-400">from</span><span class="truncate max-w-[160px] text-slate-700" title="{{ message.from_endpoint.address }}">{{ message.from_endpoint.address }}</span>{% endif %}</span>
+        {% else %}
+          <span>New message on {{ channel_label|lower }}</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
+  </header>
+
+  <div class="mt-3 prose prose-sm max-w-none text-slate-800 leading-relaxed">
+    {{ message.body|agent_message_html }}
+  </div>
+
+  {% with attachments=message.attachments.all %}
+    {% if attachments %}
+      <div class="mt-4 space-y-2">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Attachments</p>
+        <div class="flex flex-wrap gap-2">
+          {% for attachment in attachments %}
+            <a href="{{ attachment.file.url }}" target="_blank" rel="noopener"
+               class="inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/80 px-3 py-1.5 text-xs text-slate-700 shadow-sm hover:bg-white">
+              <svg class="h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
+              </svg>
+              <span class="truncate max-w-[160px]" title="{{ attachment.filename }}">{{ attachment.filename }}</span>
+              <span class="text-slate-400">{{ attachment.file_size|filesizeformat }}</span>
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <div class="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+    {% with status=message.latest_status|default:"pending"|lower %}
+      <span class="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 font-semibold uppercase tracking-wide text-slate-600">
+        {% if status == 'delivered' %}
+          <svg class="h-3 w-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        {% elif status == 'queued' %}
+          <svg class="h-3 w-3 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3"/></svg>
+        {% elif status == 'failed' %}
+          <svg class="h-3 w-3 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.121 19h13.758c1.54 0 2.502-1.667 1.732-3L13.732 5c-.77-1.333-2.694-1.333-3.464 0L3.39 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        {% endif %}
+        {{ status|title }}
+      </span>
+    {% endwith %}
+
+    <details class="group ml-auto w-full sm:w-auto">
+      <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition hover:text-slate-700">
+        <span>Message details</span>
+        <svg class="h-3 w-3 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </summary>
+      <div class="mt-2 space-y-2 rounded-xl border border-white/40 bg-white/90 p-3 text-[11px] text-slate-500 shadow-inner">
+        <div><span class="font-semibold text-slate-600">Channel:</span> {{ channel_label }}</div>
+        <div><span class="font-semibold text-slate-600">Direction:</span> {% if message.is_outbound %}Outbound{% else %}Inbound{% endif %}</div>
+        {% if message.subject %}<div><span class="font-semibold text-slate-600">Subject:</span> {{ message.subject }}</div>{% endif %}
+        {% if message.latest_sent_at %}<div><span class="font-semibold text-slate-600">Sent:</span> {{ message.latest_sent_at|date:"M j, g:i a" }}</div>{% endif %}
+        {% if message.latest_delivered_at %}<div><span class="font-semibold text-slate-600">Delivered:</span> {{ message.latest_delivered_at|date:"M j, g:i a" }}</div>{% endif %}
+        {% if message.latest_error_message %}<div class="text-rose-500"><span class="font-semibold">Last error:</span> {{ message.latest_error_message }}</div>{% endif %}
+      </div>
+    </details>
+  </div>
+</article>
+{% endwith %}
