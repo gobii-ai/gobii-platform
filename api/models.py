@@ -20,7 +20,12 @@ from agents.services import AgentService
 from config.plans import PLAN_CONFIG
 from config.settings import INITIAL_TASK_CREDIT_EXPIRATION_DAYS
 from constants.grant_types import GrantTypeChoices
-from constants.plans import PlanNames, PlanNamesChoices
+from constants.plans import (
+    PlanNames,
+    PlanNamesChoices,
+    UserPlanNamesChoices,
+    OrganizationPlanNamesChoices,
+)
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
 from email.utils import parseaddr
@@ -1125,7 +1130,7 @@ class UserBilling(models.Model):
     )
     subscription = models.CharField(
         max_length=32,
-        choices=PlanNamesChoices.choices,
+        choices=UserPlanNamesChoices.choices,
         default=PlanNames.FREE,
         help_text="The user's subscription plan"
     )
@@ -1166,7 +1171,7 @@ class OrganizationBilling(models.Model):
     )
     subscription = models.CharField(
         max_length=32,
-        choices=PlanNamesChoices.choices,
+        choices=OrganizationPlanNamesChoices.choices,
         default=PlanNames.FREE,
         help_text="The organization's subscription plan",
     )
@@ -1204,11 +1209,80 @@ class OrganizationBilling(models.Model):
         blank=True,
         help_text="Timestamp when the organization was downgraded to free",
     )
+    purchased_seats = models.PositiveIntegerField(
+        default=1,
+        help_text="Number of seats purchased for this organization (must cover active members + pending invites).",
+    )
+    max_extra_tasks = models.IntegerField(
+        default=0,
+        help_text="Maximum number of additional tasks the org can buy beyond included credits. 0 means disabled; -1 is unlimited.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Billing for organization {self.organization_id}"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        from django.utils import timezone
+
+        super().clean()
+
+        if self.organization_id is None:
+            return
+
+        now = timezone.now()
+
+        active_members = OrganizationMembership.objects.filter(
+            org_id=self.organization_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).count()
+        pending_invites = OrganizationInvite.objects.filter(
+            org_id=self.organization_id,
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+            expires_at__gte=now,
+        ).count()
+
+        seats_required = active_members + pending_invites
+
+        if self.purchased_seats < seats_required:
+            raise ValidationError({
+                "purchased_seats": (
+                    "Cannot set purchased seats below the number currently reserved ("
+                    f"{seats_required}). Increase seats or remove members/invites first."
+                )
+            })
+
+    @property
+    def seats_reserved(self) -> int:
+        from django.utils import timezone
+
+        if self.organization_id is None:
+            return 0
+
+        now = timezone.now()
+
+        active_members = OrganizationMembership.objects.filter(
+            org_id=self.organization_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).count()
+        pending_invites = OrganizationInvite.objects.filter(
+            org_id=self.organization_id,
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+            expires_at__gte=now,
+        ).count()
+        return active_members + pending_invites
+
+    @property
+    def seats_available(self) -> int:
+        return max(self.purchased_seats - self.seats_reserved, 0)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     class Meta:
         verbose_name = "Organization Billing"
@@ -1268,6 +1342,15 @@ class MeteringBatch(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="metering_batches",
+        null=True,
+        blank=True,
+    )
+    organization = models.ForeignKey(
+        'Organization',
+        on_delete=models.CASCADE,
+        related_name='metering_batches',
+        null=True,
+        blank=True,
     )
     batch_key = models.CharField(max_length=64, unique=True, db_index=True)
     idempotency_key = models.CharField(max_length=128, unique=True, db_index=True)
@@ -1283,10 +1366,24 @@ class MeteringBatch(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["user", "created_at"], name="meter_batch_user_ts_idx"),
+            models.Index(fields=["organization", "created_at"], name="meter_batch_org_ts_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                name="metering_batch_owner_xor",
+                check=(
+                    (
+                        models.Q(user__isnull=False, organization__isnull=True)
+                    ) | (
+                        models.Q(user__isnull=True, organization__isnull=False)
+                    )
+                ),
+            )
         ]
 
     def __str__(self) -> str:
-        return f"MeteringBatch({self.batch_key}) user={self.user_id} qty={self.rounded_quantity}"
+        owner = self.user_id or self.organization_id
+        return f"MeteringBatch({self.batch_key}) owner={owner} qty={self.rounded_quantity}"
 
 class ProxyHealthCheckSpec(models.Model):
     """Specification for proxy health check tests"""
@@ -4112,3 +4209,52 @@ class OrganizationInvite(models.Model):
     invited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     accepted_at = models.DateTimeField(null=True, blank=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        from django.utils import timezone
+
+        super().clean()
+
+        if self.org_id is None:
+            return
+
+        billing = getattr(self.org, "billing", None)
+        if billing is None:
+            raise ValidationError({"org": "Organization is missing billing configuration."})
+
+        now = timezone.now()
+
+        active_members = OrganizationMembership.objects.filter(
+            org_id=self.org_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).count()
+
+        pending_invites_qs = OrganizationInvite.objects.filter(
+            org_id=self.org_id,
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+            expires_at__gte=now,
+        )
+
+        if self.pk:
+            pending_invites_qs = pending_invites_qs.exclude(pk=self.pk)
+
+        pending_invites = pending_invites_qs.count()
+
+        will_reserve_seat = (
+            self.accepted_at is None
+            and self.revoked_at is None
+            and (self.expires_at or now) >= now
+        )
+
+        seats_required = active_members + pending_invites + (1 if will_reserve_seat else 0)
+
+        if seats_required > billing.purchased_seats:
+            raise ValidationError({
+                "org": "No seats available for this invitation. Increase seat count or revoke existing invites.",
+            })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)

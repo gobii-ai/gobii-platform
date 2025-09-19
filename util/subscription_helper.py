@@ -8,7 +8,7 @@ from constants.grant_types import GrantTypeChoices
 from config import settings
 from config.plans import PLAN_CONFIG, get_plan_by_product_id, AGENTS_UNLIMITED
 from constants.plans import PlanNames
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time
 from django.utils import timezone
 import logging
 
@@ -17,6 +17,7 @@ from util.constants.task_constants import TASKS_UNLIMITED
 from util.payments_helper import PaymentsHelper
 from djstripe.enums import SubscriptionStatus
 from django.apps import apps
+from dateutil.relativedelta import relativedelta
 
 try:
     import stripe
@@ -331,6 +332,40 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
             logger.error(f"report_usage_to_stripe: Error reporting usage for user {user.id}: {str(e)}")
             raise
 
+
+def report_organization_task_usage_to_stripe(organization, quantity: int = 1, meter_id=settings.STRIPE_ORG_TASK_METER_ID, idempotency_key: str | None = None):
+    """Report additional task usage for an organization via Stripe metering."""
+    with traced("SUBSCRIPTION Report Org Task Usage"):
+        billing = getattr(organization, "billing", None)
+        if not billing or not getattr(billing, "stripe_customer_id", None):
+            logger.debug(
+                "report_org_usage_to_stripe: Organization %s missing Stripe customer, skipping",
+                getattr(organization, "id", "n/a"),
+            )
+            return None
+
+        # TODO: Overhaul this to use the properties we will define for orgs and their tasks (since org plans have their own
+        # task meters)
+        if meter_id is None:
+            meter_id = settings.STRIPE_TASK_METER_ID
+
+        try:
+            stripe.api_key = PaymentsHelper.get_stripe_key()
+            meter_event = stripe.billing.MeterEvent.create(
+                event_name=settings.STRIPE_TASK_METER_EVENT_NAME,
+                payload={"value": quantity, "stripe_customer_id": billing.stripe_customer_id},
+                idempotency_key=idempotency_key,
+            )
+            return meter_event
+        except Exception as e:
+            logger.error(
+                "report_org_usage_to_stripe: Error reporting usage for organization %s: %s",
+                getattr(organization, "id", "n/a"),
+                str(e),
+            )
+            raise
+
+
 def report_task_usage(subscription: Subscription, quantity: int = 1, idempotency_key: str | None = None):
     """
     Report task usage to Stripe for a given subscription.
@@ -528,6 +563,160 @@ def mark_user_billing_with_plan(user, plan_name: str, update_anchor: bool = True
                     transaction.on_commit(agent._sync_celery_beat_task)
         except Exception as e:
             logger.error("Failed restoring agent schedules on upgrade for user %s: %s", user.id, e)
+
+
+# ------------------------------------------------------------------------------
+# Organization subscription helpers
+# ------------------------------------------------------------------------------
+
+def get_organization_plan(organization) -> dict[str, int | str]:
+    """Return the plan configuration dictionary for an organization."""
+    with traced("SUBSCRIPTION Get Organization Plan"):
+        billing = getattr(organization, "billing", None)
+
+        plan_key: str | None = None
+        if billing and getattr(billing, "subscription", None):
+            plan_key = billing.subscription
+        elif getattr(organization, "plan", None):
+            plan_key = organization.plan
+
+        if not plan_key:
+            plan_key = PlanNames.FREE
+
+        plan_key = str(plan_key).lower()
+        plan = PLAN_CONFIG.get(plan_key)
+
+        if not plan:
+            logger.warning(
+                "get_organization_plan %s: Unknown plan '%s', defaulting to free",
+                getattr(organization, "id", "n/a"),
+                plan_key,
+            )
+            return PLAN_CONFIG[PlanNames.FREE]
+
+        return plan
+
+
+def get_organization_task_credit_limit(organization) -> int:
+    """Return included monthly task credits for an organization (seats * credits)."""
+    with traced("CREDITS Get Organization Task Credit Limit"):
+        plan = get_organization_plan(organization)
+        billing = getattr(organization, "billing", None)
+
+        seats = 0
+        if billing and getattr(billing, "purchased_seats", None):
+            try:
+                seats = int(billing.purchased_seats)
+            except (TypeError, ValueError):
+                seats = 0
+
+        if seats <= 0:
+            return 0
+
+        credits_per_seat = plan.get("credits_per_seat")
+        if credits_per_seat is not None:
+            return int(credits_per_seat) * seats
+
+        monthly = plan.get("monthly_task_credits") or 0
+        return int(monthly)
+
+
+def get_organization_extra_task_limit(organization) -> int:
+    """Return the configured limit of additional tasks for an organization."""
+    with traced("CREDITS Get Organization Extra Task Limit"):
+        billing = getattr(organization, "billing", None)
+        if not billing:
+            logger.warning(
+                "get_organization_extra_task_limit %s: Missing billing record; defaulting to 0",
+                getattr(organization, "id", "n/a"),
+            )
+            return 0
+        return getattr(billing, "max_extra_tasks", 0) or 0
+
+
+def allow_organization_extra_tasks(organization) -> bool:
+    """Return True when overage purchasing is enabled and subscription active."""
+    with traced("CREDITS Allow Organization Extra Tasks"):
+        limit = get_organization_extra_task_limit(organization)
+        if limit <= 0 and limit != TASKS_UNLIMITED:
+            return False
+
+        billing = getattr(organization, "billing", None)
+        if not billing:
+            return False
+
+        cancel_at_period_end = getattr(billing, "cancel_at_period_end", False)
+        return not cancel_at_period_end
+
+
+def _get_org_billing_period(organization, today: date | None = None) -> tuple[date, date]:
+    """Compute the current billing period (start, end) for an organization."""
+    billing = getattr(organization, "billing", None)
+    billing_day = 1
+    if billing and getattr(billing, "billing_cycle_anchor", None):
+        try:
+            billing_day = int(billing.billing_cycle_anchor)
+        except (TypeError, ValueError):
+            billing_day = 1
+
+    billing_day = min(max(billing_day, 1), 31)
+
+    if today is None:
+        today = timezone.now().date()
+
+    this_month_candidate = today + relativedelta(day=billing_day)
+    if this_month_candidate <= today:
+        period_start = this_month_candidate
+    else:
+        period_start = (today - relativedelta(months=1)) + relativedelta(day=billing_day)
+
+    next_period_start = period_start + relativedelta(months=1, day=billing_day)
+    period_end = next_period_start - timedelta(days=1)
+    return period_start, period_end
+
+
+def calculate_org_extra_tasks_used_during_subscription_period(organization) -> int:
+    """Return number of additional-task credits consumed in current billing period."""
+    with traced("CREDITS Org Extra Tasks Used"):
+        period_start, period_end = _get_org_billing_period(organization)
+        tz = timezone.get_current_timezone()
+
+        start_dt = timezone.make_aware(datetime.combine(period_start, time.min), tz)
+        end_exclusive = timezone.make_aware(
+            datetime.combine(period_end + timedelta(days=1), time.min), tz
+        )
+
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        task_credits = TaskCredit.objects.filter(
+            organization=organization,
+            granted_date__gte=start_dt,
+            granted_date__lt=end_exclusive,
+            additional_task=True,
+            voided=False,
+        )
+
+        from django.db.models import Sum
+
+        total_used = task_credits.aggregate(total=Sum('credits_used'))['total'] or 0
+        try:
+            return int(total_used)
+        except Exception:
+            return 0
+
+
+def allow_and_has_extra_tasks_for_organization(organization) -> bool:
+    """Return True if the organization may consume an additional-task credit now."""
+    with traced("CREDITS Allow And Has Org Extra Tasks"):
+        limit = get_organization_extra_task_limit(organization)
+
+        if limit == TASKS_UNLIMITED:
+            return allow_organization_extra_tasks(organization)
+
+        if limit <= 0:
+            return False
+
+        used = calculate_org_extra_tasks_used_during_subscription_period(organization)
+        return used < limit and allow_organization_extra_tasks(organization)
 
 def get_user_extra_task_limit(user) -> int:
     """

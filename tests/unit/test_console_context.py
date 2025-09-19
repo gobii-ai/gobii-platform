@@ -50,6 +50,9 @@ class ConsoleContextTests(TestCase):
             role=OrganizationMembership.OrgRole.OWNER,
             status=OrganizationMembership.OrgStatus.ACTIVE,
         )
+        billing = self.org.billing
+        billing.purchased_seats = 3
+        billing.save(update_fields=["purchased_seats"])
 
         # Agents
         self.personal_browser = BrowserUseAgent.objects.create(user=self.owner, name="Personal Agent")

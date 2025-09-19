@@ -15,3 +15,13 @@ class PlanNamesChoices(models.TextChoices):
 
     # Org Plans
     ORG_TEAM = PlanNames.ORG_TEAM, "Team"
+
+
+class UserPlanNamesChoices(models.TextChoices):
+    FREE = PlanNames.FREE, "Free"
+    STARTUP = PlanNames.STARTUP, "Startup"
+
+
+class OrganizationPlanNamesChoices(models.TextChoices):
+    FREE = PlanNames.FREE, "Free"
+    ORG_TEAM = PlanNames.ORG_TEAM, "Team"

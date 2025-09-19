@@ -1,4 +1,4 @@
-from datetime import datetime, date, timezone as dt_timezone
+from datetime import datetime, date, timezone as dt_timezone, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
@@ -7,7 +7,16 @@ from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from api.models import BrowserUseAgent, BrowserUseAgentTask, PersistentAgent, PersistentAgentStep, UserBilling
+from api.models import (
+    BrowserUseAgent,
+    BrowserUseAgentTask,
+    PersistentAgent,
+    PersistentAgentStep,
+    UserBilling,
+    TaskCredit,
+    Organization,
+    MeteringBatch,
+)
 from api.tasks.billing_rollup import rollup_and_meter_usage_task, _to_aware_dt
 
 
@@ -75,6 +84,16 @@ class BillingRollupTaskTests(TestCase):
         self.agent = BrowserUseAgent.objects.create(user=self.user, name="Agent")
         self.pa = PersistentAgent.objects.create(user=self.user, name="PA", charter="do", browser_use_agent=self.agent)
 
+        now = timezone.now()
+        self.additional_credit = TaskCredit.objects.create(
+            user=self.user,
+            credits=Decimal("1"),
+            credits_used=Decimal("1"),
+            granted_date=now,
+            expiration_date=now + timedelta(days=30),
+            additional_task=True,
+        )
+
     @patch("api.tasks.billing_rollup.report_task_usage_to_stripe")
     @patch("api.tasks.billing_rollup.get_active_subscription")
     @patch("api.models.TaskCreditService.check_and_consume_credit_for_owner")
@@ -82,13 +101,30 @@ class BillingRollupTaskTests(TestCase):
         # Simulate active subscription (non-free)
         mock_get_sub.return_value = MagicMock()
         # Prevent credit errors on object creation
-        mock_consume.return_value = {"success": True, "credit": None, "error_message": None}
+        mock_consume.return_value = {"success": True, "credit": self.additional_credit, "error_message": None}
 
         # Create unmetered usage in current period
-        BrowserUseAgentTask.objects.create(agent=self.agent, user=self.user, prompt="x", credits_cost=Decimal("0.3"))
-        BrowserUseAgentTask.objects.create(agent=self.agent, user=self.user, prompt="y", credits_cost=Decimal("0.6"))
+        BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="x",
+            credits_cost=Decimal("0.3"),
+            task_credit=self.additional_credit,
+        )
+        BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="y",
+            credits_cost=Decimal("0.6"),
+            task_credit=self.additional_credit,
+        )
 
-        PersistentAgentStep.objects.create(agent=self.pa, description="z", credits_cost=Decimal("0.4"))
+        PersistentAgentStep.objects.create(
+            agent=self.pa,
+            description="z",
+            credits_cost=Decimal("0.4"),
+            task_credit=self.additional_credit,
+        )
 
         # Total = 1.3 -> rounded (half-up) = 1
         processed = rollup_and_meter_usage_task()
@@ -111,15 +147,26 @@ class BillingRollupTaskTests(TestCase):
         from datetime import timedelta
         # Simulate active subscription (non-free)
         mock_get_sub.return_value = MagicMock()
-        mock_consume.return_value = {"success": True, "credit": None, "error_message": None}
+        mock_consume.return_value = {"success": True, "credit": self.additional_credit, "error_message": None}
 
         # Force a period where today is NOT the last day
         today = timezone.now().date()
         mock_period.return_value = (today - timedelta(days=5), today + timedelta(days=5))
 
         # Create unmetered usage totaling < 0.5 (rounds to 0)
-        BrowserUseAgentTask.objects.create(agent=self.agent, user=self.user, prompt="x", credits_cost=Decimal("0.2"))
-        PersistentAgentStep.objects.create(agent=self.pa, description="z", credits_cost=Decimal("0.2"))
+        BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="x",
+            credits_cost=Decimal("0.2"),
+            task_credit=self.additional_credit,
+        )
+        PersistentAgentStep.objects.create(
+            agent=self.pa,
+            description="z",
+            credits_cost=Decimal("0.2"),
+            task_credit=self.additional_credit,
+        )
 
         rollup_and_meter_usage_task()
 
@@ -136,15 +183,26 @@ class BillingRollupTaskTests(TestCase):
         from datetime import timedelta
         # Simulate active subscription (non-free)
         mock_get_sub.return_value = MagicMock()
-        mock_consume.return_value = {"success": True, "credit": None, "error_message": None}
+        mock_consume.return_value = {"success": True, "credit": self.additional_credit, "error_message": None}
 
         # Force a period where today IS the last day
         today = timezone.now().date()
         mock_period.return_value = (today - timedelta(days=5), today)
 
         # Create unmetered usage totaling < 0.5 (rounds to 0)
-        BrowserUseAgentTask.objects.create(agent=self.agent, user=self.user, prompt="x", credits_cost=Decimal("0.1"))
-        PersistentAgentStep.objects.create(agent=self.pa, description="z", credits_cost=Decimal("0.2"))
+        BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="x",
+            credits_cost=Decimal("0.1"),
+            task_credit=self.additional_credit,
+        )
+        PersistentAgentStep.objects.create(
+            agent=self.pa,
+            description="z",
+            credits_cost=Decimal("0.2"),
+            task_credit=self.additional_credit,
+        )
 
         rollup_and_meter_usage_task()
 
@@ -152,6 +210,44 @@ class BillingRollupTaskTests(TestCase):
         mock_report.assert_not_called()
         self.assertEqual(BrowserUseAgentTask.objects.filter(user=self.user, metered=True).count(), 1)
         self.assertTrue(PersistentAgentStep.objects.filter(agent=self.pa, metered=True).exists())
+
+    @patch("api.tasks.billing_rollup.report_organization_task_usage_to_stripe")
+    @patch("api.models.TaskCreditService.check_and_consume_credit_for_owner")
+    def test_rollup_handles_organization_overage(self, mock_consume, mock_report):
+        mock_consume.return_value = {"success": True, "credit": self.additional_credit, "error_message": None}
+
+        org = Organization.objects.create(name="Org", slug="org", created_by=self.user)
+        billing = org.billing
+        billing.stripe_customer_id = "cus_test"
+        billing.save(update_fields=["stripe_customer_id"])
+
+        org_credit = TaskCredit.objects.create(
+            organization=org,
+            credits=Decimal("1.0"),
+            credits_used=Decimal("1.0"),
+            granted_date=timezone.now(),
+            expiration_date=timezone.now() + timedelta(days=30),
+            additional_task=True,
+        )
+
+        BrowserUseAgentTask.objects.create(
+            agent=None,
+            user=None,
+            prompt="org",
+            credits_cost=Decimal("1.0"),
+            task_credit=org_credit,
+        )
+
+        processed = rollup_and_meter_usage_task()
+
+        mock_report.assert_called_once()
+        self.assertEqual(processed, 1)
+        self.assertEqual(
+            BrowserUseAgentTask.objects.filter(task_credit=org_credit, metered=True).count(),
+            1,
+        )
+        batch = MeteringBatch.objects.get(organization=org)
+        self.assertEqual(batch.rounded_quantity, 1)
 
     @patch("api.tasks.billing_rollup.report_task_usage_to_stripe")
     @patch("api.tasks.billing_rollup.get_active_subscription")
@@ -161,15 +257,26 @@ class BillingRollupTaskTests(TestCase):
         from datetime import timedelta
         # Simulate active subscription (non-free)
         mock_get_sub.return_value = MagicMock()
-        mock_consume.return_value = {"success": True, "credit": None, "error_message": None}
+        mock_consume.return_value = {"success": True, "credit": self.additional_credit, "error_message": None}
 
         # Always not the last day of the period for both runs
         today = timezone.now().date()
         mock_period.return_value = (today - timedelta(days=5), today + timedelta(days=5))
 
         # First: create partial usage that rounds to 0 (carry-forward)
-        BrowserUseAgentTask.objects.create(agent=self.agent, user=self.user, prompt="x", credits_cost=Decimal("0.2"))
-        PersistentAgentStep.objects.create(agent=self.pa, description="z", credits_cost=Decimal("0.2"))
+        BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="x",
+            credits_cost=Decimal("0.2"),
+            task_credit=self.additional_credit,
+        )
+        PersistentAgentStep.objects.create(
+            agent=self.pa,
+            description="z",
+            credits_cost=Decimal("0.2"),
+            task_credit=self.additional_credit,
+        )
 
         rollup_and_meter_usage_task()
         mock_report.assert_not_called()
@@ -177,7 +284,13 @@ class BillingRollupTaskTests(TestCase):
         self.assertEqual(PersistentAgentStep.objects.filter(agent=self.pa, metered=True).count(), 0)
 
         # Second: add more usage so cumulative rounds up to 1
-        BrowserUseAgentTask.objects.create(agent=self.agent, user=self.user, prompt="y", credits_cost=Decimal("0.3"))
+        BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="y",
+            credits_cost=Decimal("0.3"),
+            task_credit=self.additional_credit,
+        )
 
         rollup_and_meter_usage_task()
 
@@ -199,7 +312,7 @@ class BillingRollupTaskTests(TestCase):
             patch("api.tasks.billing_rollup.report_task_usage_to_stripe") as mock_report, \
             patch("api.tasks.billing_rollup.logger.exception") as mock_log_exception:
 
-            mock_consume.return_value = {"success": True, "credit": None, "error_message": None}
+            mock_consume.return_value = {"success": True, "credit": self.additional_credit, "error_message": None}
 
             naive_start = datetime(2025, 9, 1, 0, 0, 0)
             naive_end = datetime(2025, 9, 30, 23, 59, 59)
@@ -218,11 +331,13 @@ class BillingRollupTaskTests(TestCase):
                     user=self.user,
                     prompt="x",
                     credits_cost=Decimal("0.2"),
+                    task_credit=self.additional_credit,
                 )
                 PersistentAgentStep.objects.create(
                     agent=self.pa,
                     description="z",
                     credits_cost=Decimal("0.2"),
+                    task_credit=self.additional_credit,
                 )
 
                 mock_now.return_value = timezone.make_aware(datetime(2025, 10, 1, 0, 0, 0), timezone=dt_timezone.utc)

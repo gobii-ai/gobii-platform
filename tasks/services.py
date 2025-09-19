@@ -16,8 +16,18 @@ from util.constants.task_constants import TASKS_UNLIMITED
 from django.db import transaction
 from django.conf import settings
 
-from util.subscription_helper import get_user_plan, get_active_subscription, report_task_usage_to_stripe, \
-    get_user_extra_task_limit, get_user_task_credit_limit
+from util.subscription_helper import (
+    get_user_plan,
+    get_active_subscription,
+    report_task_usage_to_stripe,
+    get_user_extra_task_limit,
+    get_user_task_credit_limit,
+    get_organization_plan,
+    get_organization_extra_task_limit,
+    allow_and_has_extra_tasks_for_organization,
+    allow_organization_extra_tasks,
+    get_organization_task_credit_limit,
+)
 
 from datetime import timedelta, datetime
 from django.apps import apps
@@ -317,28 +327,22 @@ class TaskCreditService:
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Get User Tasks Entitled")
     def get_tasks_entitled(user: User) -> int:
-        """
-        Gets the number of tasks a user is entitled to based on their plan. This includes the monthly task credits, and
-        their addl task credit configuration, which may be unlimited or a fixed number of additional tasks. Unlimited
-        is a special case where the user can create an unlimited number of tasks, and we use -1 to represent that. That
-        said, always used the TASKS_UNLIMITED constant to represent unlimited tasks.
+        """Backward-compatible helper returning task entitlement for a user."""
+        return TaskCreditService.get_tasks_entitled_for_owner(user)
 
-        It does include bonus tasks that may be granted to the user for promotions, compensation, etc
-
-        Parameters:
-        ----------
-        user : User
-            The user whose task entitlement is to be calculated.
-
-        Returns:
-        -------
-        int
-            The number of tasks the user is entitled to.
-        """
-        # Community Edition unlimited mode short‑circuit
+    @staticmethod
+    @tracer.start_as_current_span("TaskCreditService Get Tasks Entitled For Owner")
+    def get_tasks_entitled_for_owner(owner) -> int:
+        """Return task entitlement for either a User or an Organization owner."""
         if TaskCreditService._is_community_unlimited():
             return TASKS_UNLIMITED
 
+        if TaskCreditService._is_organization_owner(owner):
+            return TaskCreditService._get_tasks_entitled_for_org(owner)
+        return TaskCreditService._get_tasks_entitled_for_user(owner)
+
+    @staticmethod
+    def _get_tasks_entitled_for_user(user: User) -> int:
         plan = get_user_plan(user)
 
         if plan is None or plan["id"] == PlanNames.FREE:
@@ -346,32 +350,48 @@ class TaskCreditService:
         else:
             addl_tasks = get_user_extra_task_limit(user)
             if addl_tasks == TASKS_UNLIMITED:
-                # If the user has unlimited tasks, return unlimited
                 return TASKS_UNLIMITED
 
         TaskCredit = apps.get_model("api", "TaskCredit")
-        tasks_granted = TaskCredit.objects.filter(
+        tasks_granted_qs = TaskCredit.objects.filter(
             user=user,
             granted_date__lte=timezone.now(),
-            # Ensure the granted date is in the past, that is, the credits have been granted
             expiration_date__gte=timezone.now(),
-            additional_task=False, # Only consider regular task credits, not additional tasks - this is because
-                                   # additional tasks are not included in the plan's monthly task credit limit and
-                                   # show up on use
+            additional_task=False,
             voided=False,
         )
+        tasks_granted = tasks_granted_qs.aggregate(total_granted=Sum('credits'))['total_granted'] or 0
 
-        tasks_granted = tasks_granted.aggregate(total_granted=Sum('credits'))['total_granted'] or 0
-
-        # if granted tasks are 0, look at the plan's monthly task credit limit. this is possible for new user with grant
-        # not happening yet
         if tasks_granted == 0:
-            if plan and plan["monthly_task_credits"] is not None:
-                tasks_granted = plan["monthly_task_credits"]
-            else:
-                tasks_granted = 0
+            monthly_limit = plan.get("monthly_task_credits") if plan else None
+            tasks_granted = monthly_limit or 0
 
         return tasks_granted + addl_tasks
+
+    @staticmethod
+    def _get_tasks_entitled_for_org(organization) -> int:
+        plan = get_organization_plan(organization)
+        addl_limit = get_organization_extra_task_limit(organization)
+
+        if addl_limit == TASKS_UNLIMITED:
+            return TASKS_UNLIMITED
+
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        tasks_granted_qs = TaskCredit.objects.filter(
+            organization=organization,
+            granted_date__lte=timezone.now(),
+            expiration_date__gte=timezone.now(),
+            additional_task=False,
+            voided=False,
+        )
+        tasks_granted = tasks_granted_qs.aggregate(total_granted=Sum('credits'))['total_granted'] or 0
+
+        if tasks_granted == 0:
+            tasks_granted = get_organization_task_credit_limit(organization)
+
+        if addl_limit <= 0:
+            return tasks_granted
+        return tasks_granted + addl_limit
 
     # TODO: Ripe for caching
     @staticmethod
@@ -431,6 +451,11 @@ class TaskCreditService:
 
     # -------------------- Owner-aware APIs (User or Organization) --------------------
     @staticmethod
+    def _is_organization_owner(owner) -> bool:
+        meta = getattr(owner, "_meta", None)
+        return bool(meta and meta.app_label == "api" and meta.model_name == "organization")
+
+    @staticmethod
     @tracer.start_as_current_span("TaskCreditService Get Current Credit For Owner")
     def get_current_task_credit_for_owner(owner):
         """
@@ -438,10 +463,7 @@ class TaskCreditService:
         """
         TaskCredit = apps.get_model("api", "TaskCredit")
         now = timezone.now()
-        # Import types lazily to avoid circulars
-        OrgModel = apps.get_model("api", "Organization")
-
-        if isinstance(owner, OrgModel):
+        if TaskCreditService._is_organization_owner(owner):
             return TaskCredit.objects.filter(
                 organization=owner,
                 granted_date__lte=now,
@@ -459,26 +481,28 @@ class TaskCreditService:
         For organizations, additional_task credits are created with a 30-day expiry window for now.
         """
         TaskCredit = apps.get_model("api", "TaskCredit")
-        OrgModel = apps.get_model("api", "Organization")
         now = timezone.now()
+        plan_amount = Decimal(amount if amount is not None else settings.CREDITS_PER_TASK)
 
-        if isinstance(owner, OrgModel):
+        if TaskCreditService._is_organization_owner(owner):
             if additional_task:
-                # Minimal implementation: create a 1-credit block for the org that expires in 30 days
+                plan = get_organization_plan(owner)
+                period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
                 credit = TaskCredit.objects.create(
                     organization_id=owner.id,
-                    credits=1,
-                    credits_used=0,
-                    expiration_date=now + timedelta(days=30),
-                    granted_date=now,
+                    credits=plan_amount,
+                    credits_used=plan_amount,
+                    expiration_date=period_end,
+                    granted_date=period_start,
                     additional_task=True,
-                    plan=PlanNamesChoices(owner.plan) if hasattr(owner, 'plan') and owner.plan else PlanNamesChoices.FREE,
+                    plan=PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE,
                     grant_type=GrantTypeChoices.PLAN,
                 )
+                return credit
             else:
                 # Fractional consumption for organizations across blocks
                 with transaction.atomic():
-                    remaining = Decimal(amount if amount is not None else settings.CREDITS_PER_TASK)
+                    remaining = Decimal(plan_amount)
                     last_credit = None
                     while remaining > 0:
                         credit = (
@@ -511,7 +535,7 @@ class TaskCreditService:
                 return last_credit
         else:
             # Assume user
-            return TaskCreditService.consume_credit(owner, additional_task=additional_task, amount=amount)
+            return TaskCreditService.consume_credit(owner, additional_task=additional_task, amount=plan_amount)
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Check And Consume Credit For Owner")
@@ -519,16 +543,31 @@ class TaskCreditService:
         """Owner-aware wrapper mirroring check_and_consume_credit."""
         from django.core.exceptions import ValidationError
 
-        OrgModel = apps.get_model("api", "Organization")
-        if isinstance(owner, OrgModel):
+        if TaskCreditService._is_organization_owner(owner):
             try:
                 credit = TaskCreditService.consume_credit_for_owner(owner, amount=amount)
                 return {"success": True, "credit": credit, "error_message": None}
             except ValidationError:
+                if allow_and_has_extra_tasks_for_organization(owner):
+                    try:
+                        credit = TaskCreditService.consume_credit_for_owner(
+                            owner,
+                            additional_task=True,
+                            amount=amount,
+                        )
+                        return {"success": True, "credit": credit, "error_message": None}
+                    except ValidationError:
+                        pass
+
+                error_message = (
+                    "Organization has no remaining task credits nor additional tasks allowed."
+                    if allow_organization_extra_tasks(owner)
+                    else "Organization has no remaining task credits."
+                )
                 return {
                     "success": False,
                     "credit": None,
-                    "error_message": "Organization has no remaining task credits.",
+                    "error_message": error_message,
                 }
         else:
             return TaskCreditService.check_and_consume_credit(owner, amount=amount)
@@ -916,7 +955,7 @@ class TaskCreditService:
 
             # --- 2. Attempt additional-task credit for paid plans ---
             subscription = get_active_subscription(user)
-            if subscription is not None and allow_and_has_extra_tasks(user) > 0:
+            if subscription is not None and allow_and_has_extra_tasks(user):
                 try:
                     credit = TaskCreditService.consume_credit(user, additional_task=True)
                     span.add_event("Consumed additional task credit")
