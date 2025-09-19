@@ -1,5 +1,7 @@
 import hashlib, secrets, uuid, os, string
 
+from uuid import UUID
+
 import ulid
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -59,6 +61,39 @@ def generate_ulid() -> str:
     """Return a 26-character, time-ordered ULID string."""
     return str(ulid.new())
 
+
+# Web channel addressing helpers -------------------------------------------------
+
+WEB_CHANNEL_PREFIX = "web:"
+WEB_AGENT_PREFIX = "web:agent:"
+WEB_USER_PREFIX = "web:user:"
+
+
+def make_web_agent_address(agent_id: uuid.UUID | str) -> str:
+    """Return the canonical web address representing the agent itself."""
+    return f"{WEB_AGENT_PREFIX}{agent_id}"
+
+
+def make_web_user_address(user_id: UUID | int | str) -> str:
+    """Return the canonical web address for a console user communicating via web."""
+    return f"{WEB_USER_PREFIX}{user_id}"
+
+
+def parse_web_address(address: str) -> tuple[str, str] | None:
+    """Parse a web channel address into (kind, identifier)."""
+    if not address:
+        return None
+    addr = address.strip()
+    if not addr.startswith(WEB_CHANNEL_PREFIX):
+        return None
+    parts = addr.split(":", 2)
+    if len(parts) != 3:
+        return None
+    _, kind, identifier = parts
+    if not kind or not identifier:
+        return None
+    return kind, identifier
+
 def _hash(raw: str) -> str:
     """Return SHA256 hexdigest for given raw string."""
     return hashlib.sha256(raw.encode()).hexdigest()
@@ -72,6 +107,7 @@ class CommsChannel(models.TextChoices):
     SMS = "sms", "SMS"
     SLACK = "slack", "Slack"
     DISCORD = "discord", "Discord"
+    WEB = "web", "Web"
     OTHER = "other", "Other"
 
 
@@ -1977,8 +2013,32 @@ class PersistentAgent(models.Model):
 
         logger.info("Whitelist check for channel: %s, address: %s, policy=%s", channel_val, addr_lower, self.whitelist_policy)
 
-        if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS):
+        if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS, CommsChannel.WEB):
             logger.info("Whitelist check - Unsupported channel '%s'; defaulting to False", channel_val)
+            return False
+
+        if channel_val == CommsChannel.WEB:
+            parsed = parse_web_address(addr)
+            if not parsed or parsed[0] != "user":
+                return False
+            identifier = parsed[1]
+
+            if str(self.user_id) == identifier:
+                return True
+
+            if self.organization_id:
+                from .models import OrganizationMembership
+
+                if OrganizationMembership.objects.filter(
+                    org=self.organization,
+                    user_id=identifier,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                ).exists():
+                    return True
+
+            if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
+                return self._is_in_manual_allowlist(channel_val, addr, direction="inbound")
+
             return False
 
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
@@ -1992,9 +2052,33 @@ class PersistentAgent(models.Model):
         channel_val = channel.value if isinstance(channel, CommsChannel) else str(channel)
         addr = (address or "").strip()
 
-        if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS):
+        if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS, CommsChannel.WEB):
             return False
-        
+
+        if channel_val == CommsChannel.WEB:
+            parsed = parse_web_address(addr)
+            if not parsed or parsed[0] != "user":
+                return False
+            identifier = parsed[1]
+
+            if str(self.user_id) == identifier:
+                return True
+
+            if self.organization_id:
+                from .models import OrganizationMembership
+
+                if OrganizationMembership.objects.filter(
+                    org=self.organization,
+                    user_id=identifier,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                ).exists():
+                    return True
+
+            if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
+                return self._is_in_manual_allowlist(channel_val, addr, direction="outbound")
+
+            return False
+
         # Block SMS for multi-player agents (org-owned only)
         # until group SMS functionality is implemented
         if channel_val == CommsChannel.SMS:
@@ -2075,7 +2159,29 @@ class PersistentAgent(models.Model):
                     is_verified=True,
                 ).exists():
                     return True
-        
+        elif channel_val == CommsChannel.WEB:
+            parsed = parse_web_address(addr)
+            if not parsed or parsed[0] != "user":
+                return False
+
+            _, identifier = parsed
+            canonical_addr = make_web_user_address(identifier)
+
+            if str(self.user_id) == identifier:
+                return True
+
+            if self.organization_id:
+                from .models import OrganizationMembership
+
+                if OrganizationMembership.objects.filter(
+                    org=self.organization,
+                    user_id=identifier,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                ).exists():
+                    return True
+
+            addr = canonical_addr
+
         # Check manual allowlist entries with direction
         try:
             query = CommsAllowlistEntry.objects.filter(
@@ -2144,6 +2250,25 @@ class PersistentAgent(models.Model):
                 phone_number__iexact=address.strip(),
                 is_verified=True,
             ).exists()
+
+        if channel_val == CommsChannel.WEB:
+            parsed = parse_web_address(address or "")
+            if not parsed or parsed[0] != "user":
+                return False
+            identifier = parsed[1]
+
+            if str(self.user_id) == identifier:
+                return True
+
+            if self.organization_id:
+                from .models import OrganizationMembership
+                return OrganizationMembership.objects.filter(
+                    org=self.organization,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                    user_id=identifier,
+                ).exists()
+
+            return False
 
         return False
 
@@ -2602,6 +2727,14 @@ class CommsAllowlistEntry(models.Model):
         # Normalize address
         if self.channel == CommsChannel.EMAIL:
             self.address = (self.address or "").strip().lower()
+        elif self.channel == CommsChannel.WEB:
+            parsed = parse_web_address(self.address or "")
+            if not parsed or parsed[0] != "user":
+                raise ValidationError({
+                    "address": "Web addresses must be provided in the format 'web:user:<id>'."
+                })
+            _, identifier = parsed
+            self.address = make_web_user_address(identifier)
         else:
             self.address = (self.address or "").strip()
         
@@ -2715,6 +2848,14 @@ class AgentAllowlistInvite(models.Model):
         # Normalize address like CommsAllowlistEntry
         if self.channel == CommsChannel.EMAIL:
             self.address = (self.address or "").strip().lower()
+        elif self.channel == CommsChannel.WEB:
+            parsed = parse_web_address(self.address or "")
+            if not parsed or parsed[0] != "user":
+                raise ValidationError({
+                    "address": "Web addresses must be provided in the format 'web:user:<id>'."
+                })
+            _, identifier = parsed
+            self.address = make_web_user_address(identifier)
         else:
             self.address = (self.address or "").strip()
         

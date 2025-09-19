@@ -58,6 +58,9 @@ from console.views import (
     grant_credits,
     task_detail_view,
     AgentEmailSettingsView,
+    AgentWorkspaceView,
+    AgentTimelineWindowView,
+    AgentWebMessageView,
 )
 from console.context_views import SwitchContextView
 from pages.views import PaidPlanLanding
@@ -91,6 +94,9 @@ urlpatterns = [
     path("console/agents/", PersistentAgentsView.as_view(), name="agents"),
     path("console/agents/create/contact/", AgentCreateContactView.as_view(), name="agent_create_contact"),
     path("console/agents/<uuid:pk>/", AgentDetailView.as_view(), name="agent_detail"),
+    path("console/agents/<uuid:pk>/workspace/", AgentWorkspaceView.as_view(), name="agent_workspace"),
+    path("console/agents/<uuid:pk>/timeline/window/", AgentTimelineWindowView.as_view(), name="agent_timeline_window"),
+    path("console/agents/<uuid:pk>/messages/web/", AgentWebMessageView.as_view(), name="agent_web_message"),
     path("console/agents/<uuid:pk>/welcome/", AgentWelcomeView.as_view(), name="agent_welcome"),
     path("console/agents/<uuid:pk>/enable-sms/", AgentEnableSmsView.as_view(), name="agent_enable_sms"),
     path("console/agents/<uuid:pk>/delete/", AgentDeleteView.as_view(), name="agent_delete"),

@@ -1,0 +1,250 @@
+{% extends "console_page.html" %}
+{% load static %}
+{% load agent_extras %}
+
+{% block console_content %}
+<div id="agent-workspace-root"
+     class="relative flex h-full flex-col"
+     data-timeline-limit="{{ timeline_limit }}"
+     data-timeline-newer-url="{{ timeline_newer_url }}"
+     data-timeline-older-url="{{ timeline_older_url }}"
+     data-event-stream-url="{{ event_stream_url }}">
+  <header class="sticky top-0 z-20 -mx-4 mb-4 flex flex-col gap-4 bg-gradient-to-br from-indigo-600 via-indigo-500 to-purple-600 px-4 pb-6 pt-5 text-white shadow-lg sm:rounded-b-3xl">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <p class="text-xs uppercase tracking-wide text-white/70">Persistent agent</p>
+        <h1 class="text-2xl font-semibold leading-tight">{{ agent.name }}</h1>
+        <p class="mt-1 text-sm text-white/80">{{ agent.charter }}</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="agent-processing-indicator" class="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold">
+          <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+          Idle
+        </span>
+        {% if agent.schedule %}
+          <span class="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/80">{{ agent.schedule }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="flex gap-2 text-xs text-white/70">
+      <span class="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1">Life state: {{ agent.get_life_state_display }}</span>
+      <span class="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1">Visibility: {{ agent.get_whitelist_policy_display }}</span>
+    </div>
+  </header>
+
+  <div class="flex-1 overflow-hidden">
+    <div id="timeline-scroll-container" class="relative flex h-full flex-col overflow-hidden rounded-3xl border border-white/60 bg-gradient-to-b from-white/70 via-white/60 to-white/80 shadow-xl">
+      <div id="timeline-older-control" class="flex justify-center pt-4">
+        {% if timeline_window.has_more_older %}
+          <button
+            class="inline-flex items-center gap-2 rounded-full bg-white/80 px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200 hover:bg-white"
+            hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
+            hx-target="#timeline-events"
+            hx-swap="afterbegin"
+            hx-on::beforeRequest="window.agentTimelineState.setAction('older')">
+            <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+            </svg>
+            Load older updates
+          </button>
+        {% else %}
+          <span class="text-[11px] uppercase tracking-wide text-slate-300">Beginning of history</span>
+        {% endif %}
+      </div>
+
+      <div id="timeline-events" class="flex-1 space-y-4 overflow-y-auto px-4 pb-32 pt-2">
+        {% if timeline_window.events %}
+          {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events %}
+        {% else %}
+          <div class="flex h-full flex-col items-center justify-center text-center text-sm text-slate-400">
+            <svg class="mb-3 h-8 w-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6l4 2" />
+            </svg>
+            <p>No activity yet. Start the conversation below.</p>
+          </div>
+        {% endif %}
+      </div>
+
+      <div id="timeline-newer-control" class="pointer-events-none fixed inset-x-0 bottom-24 z-30 flex justify-center">
+        <button
+          class="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-indigo-500/30 transition {% if not timeline_window.has_more_newer %}hidden{% endif %}"
+          hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}"
+          hx-target="#timeline-events"
+          hx-swap="beforeend"
+          hx-on::beforeRequest="window.agentTimelineState.setAction('newer')">
+          Jump to live
+          <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5-5 5M6 7l5 5-5 5" />
+          </svg>
+        </button>
+      </div>
+
+      <div id="timeline-cursors" class="hidden"
+           data-older="{{ timeline_window.window_oldest_cursor|default:'' }}"
+           data-newer="{{ timeline_window.window_newest_cursor|default:'' }}"></div>
+    </div>
+  </div>
+
+  <footer class="sticky bottom-0 -mx-4 mt-6 bg-white/90 px-4 pb-6 pt-4 shadow-[0_-8px_20px_-12px_rgba(79,70,229,0.35)] backdrop-blur">
+    <form id="agent-web-compose" class="relative space-y-3" hx-post="{% url 'agent_web_message' agent.id %}"
+          hx-swap="none"
+          hx-on::beforeRequest="window.agentTimelineState.setAction('composer')"
+          hx-on::afterRequest="window.agentTimelineState.handleComposerResponse(event)">
+      <div class="flex items-start gap-3">
+        <textarea name="body" rows="3" required
+                  class="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-inner focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  placeholder="Send a message from web..."></textarea>
+        <button type="submit"
+                class="inline-flex items-center justify-center rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition-colors hover:bg-indigo-500">
+          Send
+        </button>
+      </div>
+      <p id="composer-hint" class="text-xs text-slate-400">Markdown supported. Shift + Enter for newline.</p>
+      <input type="hidden" name="current_newest" id="composer-latest-cursor" value="{{ timeline_window.window_newest_cursor|default:'' }}">
+    </form>
+  </footer>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.agentTimelineState = {
+    lastAction: null,
+    wasAtBottom: false,
+    priorScrollHeight: null,
+    setAction(action) {
+      this.lastAction = action;
+      if (action && action.indexOf('newer') !== -1) {
+        this.wasAtBottom = agentTimeline.isAtBottom();
+      }
+    },
+    handleComposerResponse(event) {
+      if (event.detail && event.detail.xhr && event.detail.xhr.status >= 400) {
+        return;
+      }
+      event.target.reset();
+      agentTimelineState.setAction('composer');
+    }
+  };
+
+  const agentTimeline = (() => {
+    const root = document.getElementById('agent-workspace-root');
+    const timeline = document.getElementById('timeline-events');
+    const cursorsEl = document.getElementById('timeline-cursors');
+    const composeLatest = document.getElementById('composer-latest-cursor');
+    const limit = parseInt(root.dataset.timelineLimit || '150', 10);
+    const newerUrl = root.dataset.timelineNewerUrl;
+    const olderUrl = root.dataset.timelineOlderUrl;
+    const eventSourceUrl = root.dataset.eventStreamUrl;
+
+    function updateComposerCursor() {
+      if (composeLatest) {
+        composeLatest.value = cursorsEl?.dataset.newer || '';
+      }
+    }
+
+    function trim(direction) {
+      if (!timeline) return;
+      const events = timeline.querySelectorAll('.timeline-event');
+      if (events.length <= limit) return;
+      const excess = events.length - limit;
+      if (direction === 'older') {
+        for (let i = 0; i < excess; i += 1) {
+          const node = events[events.length - 1 - i];
+          if (node) node.remove();
+        }
+      } else {
+        for (let i = 0; i < excess; i += 1) {
+          const node = events[i];
+          if (node) node.remove();
+        }
+      }
+    }
+
+    function isAtBottom() {
+      if (!timeline) return true;
+      const tolerance = 24;
+      return timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= tolerance;
+    }
+
+    function scrollToBottom(force) {
+      if (!timeline) return;
+      if (force || isAtBottom()) {
+        timeline.scrollTop = timeline.scrollHeight;
+      }
+    }
+
+    function fetchNewer(trigger) {
+      if (!newerUrl) return;
+      const cursor = cursorsEl?.dataset.newer;
+      const params = new URLSearchParams();
+      params.set('limit', limit);
+      if (cursor) params.set('cursor', cursor);
+      agentTimelineState.setAction(trigger || 'auto-newer');
+      htmx.ajax('GET', `${newerUrl}&${params.toString()}`, {
+        target: '#timeline-events',
+        swap: 'beforeend'
+      });
+    }
+
+    function setupEventSource() {
+      if (!eventSourceUrl || !window.EventSource) return;
+      const source = new EventSource(eventSourceUrl);
+      source.onmessage = () => {
+        fetchNewer('auto-newer');
+      };
+      source.addEventListener('step.created', () => fetchNewer('auto-newer'));
+      source.addEventListener('message.created', () => fetchNewer('auto-newer'));
+      source.onerror = () => {
+        // Attempt reconnect after delay
+        source.close();
+        setTimeout(setupEventSource, 5000);
+      };
+    }
+
+    htmx.on('htmx:beforeRequest', (event) => {
+      if (event.detail?.target?.id === 'timeline-events' && agentTimelineState.lastAction === 'older') {
+        agentTimelineState.priorScrollHeight = timeline.scrollHeight;
+      }
+    });
+
+    htmx.on('htmx:afterSwap', (event) => {
+      if (event.detail?.target?.id !== 'timeline-events') {
+        return;
+      }
+
+      const action = agentTimelineState.lastAction;
+      if (action === 'older' && agentTimelineState.priorScrollHeight) {
+        const previous = agentTimelineState.priorScrollHeight;
+        const delta = timeline.scrollHeight - previous;
+        timeline.scrollTop += delta;
+      }
+
+      trim(action);
+      updateComposerCursor();
+
+      if (action && action.indexOf('newer') !== -1 && agentTimelineState.wasAtBottom) {
+        scrollToBottom(true);
+      }
+
+      agentTimelineState.lastAction = null;
+      agentTimelineState.priorScrollHeight = null;
+    });
+
+    htmx.on('htmx:afterSettle', (event) => {
+      if (event.detail?.target?.id === 'timeline-events') {
+        agentTimelineState.wasAtBottom = isAtBottom();
+      }
+    });
+
+    setupEventSource();
+    scrollToBottom(true);
+    updateComposerCursor();
+
+    return {
+      isAtBottom,
+      fetchNewer,
+    };
+  })();
+</script>
+{% endblock %}

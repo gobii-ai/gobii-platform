@@ -20,12 +20,15 @@ from django.db import transaction
 from ..files.filespace_service import enqueue_import_after_commit
 
 from ...models import (
+    PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentConversationParticipant,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     CommsChannel,
+    make_web_agent_address,
+    make_web_user_address,
 )
 
 from .adapters import ParsedMessage
@@ -62,11 +65,14 @@ def _get_or_create_conversation(channel: str, address: str, owner_agent=None) ->
 
 
 def _ensure_participant(conv: PersistentAgentConversation, ep: PersistentAgentCommsEndpoint, role: str) -> None:
-    PersistentAgentConversationParticipant.objects.get_or_create(
+    participant, created = PersistentAgentConversationParticipant.objects.get_or_create(
         conversation=conv,
         endpoint=ep,
         defaults={"role": role},
     )
+    if not created and role and participant.role != role:
+        participant.role = role
+        participant.save(update_fields=["role"])
 
 
 def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any]) -> None:
@@ -144,7 +150,11 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
         to_ep = _get_or_create_endpoint(channel_val, parsed.recipient)
         conv = _get_or_create_conversation(channel_val, parsed.sender, owner_agent=to_ep.owner_agent)
 
-        _ensure_participant(conv, from_ep, PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL)
+        sender_role = PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL
+        if channel_val == CommsChannel.WEB:
+            sender_role = PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER
+
+        _ensure_participant(conv, from_ep, sender_role)
         _ensure_participant(conv, to_ep, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
 
         agent_id = get_agent_id_from_address(channel, parsed.recipient)
@@ -283,6 +293,70 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
                 process_agent_events_task.delay(str(owner_id))
 
         return InboundMessageInfo(message=message)
+
+
+def _ensure_web_channel_context(agent: PersistentAgent, user) -> tuple[PersistentAgentCommsEndpoint, PersistentAgentCommsEndpoint, PersistentAgentConversation]:
+    """Ensure the agent and user have web endpoints and a shared conversation."""
+
+    agent_address = make_web_agent_address(agent.id)
+    agent_ep, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=CommsChannel.WEB,
+        address=agent_address,
+        defaults={"owner_agent": agent, "is_primary": True},
+    )
+    if agent_ep.owner_agent_id != agent.id:
+        agent_ep.owner_agent = agent
+        agent_ep.save(update_fields=["owner_agent"])
+
+    user_address = make_web_user_address(user.id)
+    user_ep, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=CommsChannel.WEB,
+        address=user_address,
+        defaults={"owner_agent": None, "is_primary": False},
+    )
+
+    display_name = (
+        getattr(user, "get_full_name", lambda: "")() or getattr(user, "email", "")
+        or getattr(user, "username", "") or str(user.id)
+    )
+
+    conv, _ = PersistentAgentConversation.objects.get_or_create(
+        channel=CommsChannel.WEB,
+        address=user_address,
+        defaults={"owner_agent": agent, "display_name": display_name},
+    )
+    if conv.owner_agent_id != agent.id:
+        conv.owner_agent = agent
+        conv.save(update_fields=["owner_agent"])
+
+    _ensure_participant(conv, agent_ep, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
+    _ensure_participant(conv, user_ep, PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER)
+
+    return agent_ep, user_ep, conv
+
+
+@transaction.atomic
+def ingest_web_message(agent: PersistentAgent, user, *, body: str, subject: str | None = None) -> InboundMessageInfo:
+    """Persist a console-authored web message and trigger processing."""
+
+    agent_ep, user_ep, _ = _ensure_web_channel_context(agent, user)
+
+    parsed = ParsedMessage(
+        sender=user_ep.address,
+        recipient=agent_ep.address,
+        subject=subject,
+        body=body,
+        attachments=[],
+        raw_payload={
+            "channel": CommsChannel.WEB,
+            "source": "console",
+            "user_id": str(user.id),
+        },
+        msg_channel=CommsChannel.WEB,
+    )
+
+    return ingest_inbound_message(CommsChannel.WEB, parsed)
+
 
 def get_agent_id_from_address(channel: CommsChannel | str, address: str) -> UUID | None:
     """

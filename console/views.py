@@ -88,11 +88,16 @@ from api.agent.tools.mcp_manager import enable_mcp_tool
 from api.agent.tasks import process_agent_events_task
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
-from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
+from api.agent.comms.message_service import (
+    _get_or_create_conversation,
+    _ensure_participant,
+    ingest_web_message,
+)
 from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMembership
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
+from console.timeline import fetch_timeline_window
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -239,6 +244,54 @@ def _reattach_overage_from_session(request, org_id: str) -> bool:
     price_id = info.get("price_id")
     return _reattach_org_overage_subscription(subscription_id, price_id)
 
+
+def _agent_queryset_for_request(request):
+    qs = PersistentAgent.objects.all()
+    context_type = request.session.get('context_type', 'personal')
+
+    if context_type == 'organization':
+        org_id = request.session.get('context_id')
+        if not OrganizationMembership.objects.filter(
+            user=request.user,
+            org_id=org_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).exists():
+            return qs.none()
+        return qs.filter(organization_id=org_id)
+
+    return qs.filter(user=request.user, organization__isnull=True)
+
+
+class AgentAccessMixin(ConsoleViewMixin):
+    """Mixin that scopes agent queries to the active console context."""
+
+    _agent_cache: PersistentAgent | None = None
+
+    def get_agent_queryset(self):
+        return _agent_queryset_for_request(self.request)
+
+    def get_agent(self) -> PersistentAgent:
+        if self._agent_cache is None:
+            self._agent_cache = get_object_or_404(
+                self.get_agent_queryset(),
+                pk=self.kwargs.get('pk') or self.kwargs.get('agent_id'),
+            )
+        return self._agent_cache
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['agent'] = self.get_agent()
+        return context
+
+
+CHANNEL_LABELS = {
+    CommsChannel.EMAIL: "Email",
+    CommsChannel.SMS: "SMS",
+    CommsChannel.SLACK: "Slack",
+    CommsChannel.DISCORD: "Discord",
+    CommsChannel.WEB: "Web",
+    CommsChannel.OTHER: "Other",
+}
 class ConsoleHome(ConsoleViewMixin, TemplateView):
     """Dashboard homepage for the console."""
     template_name = "index.html"
@@ -5158,5 +5211,98 @@ class AgentAllowlistInviteRejectView(TemplateView):
             messages.error(request, "Invalid invitation token.")
         except Exception as e:
             messages.error(request, f"Error rejecting invitation: {e}")
-            
+           
         return redirect("agent_allowlist_invite_reject", token=token)
+
+
+TIMELINE_DEFAULT_LIMIT = 150
+
+
+class AgentWorkspaceView(AgentAccessMixin, TemplateView):
+    template_name = "console/agent_workspace.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = self.get_agent()
+        timeline_window = fetch_timeline_window(agent, limit=TIMELINE_DEFAULT_LIMIT)
+        window_url = reverse("agent_timeline_window", args=[agent.id])
+        event_stream_url = reverse("api:agent-events-stream", args=[agent.id])
+        context.update(
+            {
+                "timeline_window": timeline_window,
+                "timeline_limit": TIMELINE_DEFAULT_LIMIT,
+                "channel_labels": CHANNEL_LABELS,
+                "timeline_window_url": window_url,
+                "timeline_older_url": f"{window_url}?direction=older",
+                "timeline_newer_url": f"{window_url}?direction=newer",
+                "event_stream_url": event_stream_url,
+            }
+        )
+        return context
+
+
+class AgentTimelineWindowView(AgentAccessMixin, TemplateView):
+    template_name = "console/partials/agent_timeline_window.html"
+
+    def get(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        direction = request.GET.get("direction", "initial")
+        if direction not in {"initial", "older", "newer"}:
+            direction = "initial"
+
+        cursor = request.GET.get("cursor") or None
+
+        limit_param = request.GET.get("limit")
+        try:
+            limit = int(limit_param) if limit_param else TIMELINE_DEFAULT_LIMIT
+        except (TypeError, ValueError):
+            limit = TIMELINE_DEFAULT_LIMIT
+
+        window = fetch_timeline_window(
+            agent,
+            limit=limit,
+            direction=direction,
+            cursor=cursor,
+        )
+
+        current_newest_cursor = request.GET.get("current_newest") or window.window_newest_cursor
+
+        window_url = reverse("agent_timeline_window", args=[agent.id])
+
+        context = {
+            "agent": agent,
+            "timeline_window": window,
+            "direction": direction,
+            "timeline_limit": limit,
+            "channel_labels": CHANNEL_LABELS,
+            "requested_cursor": cursor,
+            "current_newest_cursor": current_newest_cursor,
+            "timeline_window_url": window_url,
+            "timeline_older_url": f"{window_url}?direction=older",
+            "timeline_newer_url": f"{window_url}?direction=newer",
+        }
+
+        return render(request, self.template_name, context)
+
+
+class AgentWebMessageView(AgentAccessMixin, View):
+    def post(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        body = (request.POST.get("body") or "").strip()
+        subject = (request.POST.get("subject") or "").strip() or None
+
+        if not body:
+            if request.headers.get("HX-Request"):
+                return JsonResponse({"error": "Message cannot be empty."}, status=400)
+            messages.error(request, "Message cannot be empty.")
+            return redirect("agent_workspace", pk=agent.pk)
+
+        ingest_web_message(agent, request.user, body=body, subject=subject)
+
+        if request.headers.get("HX-Request"):
+            response = HttpResponse(status=204)
+            response["HX-Trigger"] = "agent-message-sent"
+            return response
+
+        messages.success(request, "Message sent to agent.")
+        return redirect("agent_workspace", pk=agent.pk)
