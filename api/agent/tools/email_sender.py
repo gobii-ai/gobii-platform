@@ -6,6 +6,7 @@ including tool definition and execution logic.
 """
 
 import logging
+import unicodedata
 from typing import Dict, Any
 
 from ...models import (
@@ -21,6 +22,19 @@ from ..comms.outbound_delivery import deliver_agent_email
 
 logger = logging.getLogger(__name__)
 
+_ALLOWABLE_CONTROL_CHARS = {"\n", "\r", "\t"}
+_CONTROL_CHAR_SUBSTITUTIONS = {"\u0019": "'"}
+
+
+def _strip_control_chars(value: str | None) -> str:
+    """Remove all control characters except basic whitespace from the string."""
+    if not isinstance(value, str):
+        return ""
+    text = value.translate(str.maketrans(_CONTROL_CHAR_SUBSTITUTIONS))
+    return "".join(
+        ch for ch in text
+        if (unicodedata.category(ch)[0] != "C") or ch in _ALLOWABLE_CONTROL_CHARS
+    )
 
 def get_send_email_tool() -> Dict[str, Any]:
     """Return the send_email tool definition for the LLM."""
@@ -57,9 +71,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     """Execute the send_email tool for a persistent agent."""
     to_address = params.get("to_address")
     subject = params.get("subject")
-    mobile_first_html = params.get("mobile_first_html")
+    mobile_first_html = _strip_control_chars(params.get("mobile_first_html"))
     cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
-    
+
     if not all([to_address, subject, mobile_first_html]):
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
 
