@@ -4,12 +4,12 @@
 
 {% for event in events %}
   {% with message=event.message step=event.step %}
-    <article class="timeline-event rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm" data-cursor="{{ event.cursor }}">
+    <article class="timeline-event rounded-xl border border-slate-200/80 bg-white px-4 py-4 shadow-sm shadow-slate-200/60" data-cursor="{{ event.cursor }}">
       {% if message %}
         {% with endpoint=message.to_endpoint|default:message.from_endpoint %}
           <header class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
             <div class="flex items-center gap-2">
-              <span class="font-semibold text-slate-600">{{ endpoint.channel|channel_label }}</span>
+              <span class="font-semibold text-slate-600 uppercase tracking-wide">{{ endpoint.channel|channel_label }}</span>
               <span class="text-slate-400">•</span>
               <span>{% if message.is_outbound %}Sent to {{ message.to_endpoint.address|default:"recipient" }}{% else %}Received from {{ message.from_endpoint.address|default:"contact" }}{% endif %}</span>
             </div>
