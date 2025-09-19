@@ -223,11 +223,6 @@ def handle_subscription_event(event, **kwargs):
                 logger.exception("Failed to track subscription cancellation for user %s", owner.id)
         else:
             billing = organization_billing
-            if billing is None:
-                try:
-                    billing = owner.billing
-                except OrganizationBilling.DoesNotExist:
-                    billing = None
             if billing:
                 updates: list[str] = []
                 if getattr(billing, "stripe_subscription_id", None):
@@ -308,13 +303,7 @@ def handle_subscription_event(event, **kwargs):
                 }
             )
         else:
-            mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
-            billing = organization_billing
-            if billing is None:
-                try:
-                    billing = owner.billing
-                except OrganizationBilling.DoesNotExist:
-                    billing = None
+            billing = mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
             if billing:
                 updates: list[str] = []
                 if getattr(sub, 'current_period_start', None):

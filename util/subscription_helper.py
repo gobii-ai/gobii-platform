@@ -554,9 +554,6 @@ def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = Tr
 
         updates: list[str] = []
         if created:
-            if plan_name == PlanNames.FREE:
-                billing_record.downgraded_at = timezone.now()
-                billing_record.save(update_fields=["downgraded_at"])
             return billing_record
 
         for key, value in defaults.items():
