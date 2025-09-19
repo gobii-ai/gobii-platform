@@ -4,6 +4,10 @@ from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import MagicMock, patch
 
+from django.conf import settings
+
+from api.models import Organization, TaskCredit
+from constants.plans import PlanNames
 from tasks.services import TaskCreditService
 from util.constants.task_constants import TASKS_UNLIMITED
 
@@ -135,6 +139,44 @@ class TaskCreditServiceConsumeCreditTests(TestCase):
 
 
 @tag("batch_task_credits")
+class TaskCreditServiceCheckAndConsumeCreditForOwnerTests(TestCase):
+    def test_org_consumes_additional_task_when_allowed(self):
+        owner = User.objects.create(username="org_owner3")
+        org = Organization.objects.create(name="Org3", slug="org3", created_by=owner)
+        billing = org.billing
+        billing.subscription = PlanNames.ORG_TEAM
+        billing.purchased_seats = 1
+        billing.max_extra_tasks = 5
+        billing.save(update_fields=["subscription", "purchased_seats", "max_extra_tasks"])
+
+        result = TaskCreditService.check_and_consume_credit_for_owner(org)
+
+        self.assertTrue(result["success"])
+        credit = result["credit"]
+        self.assertIsNotNone(credit)
+        credit.refresh_from_db()
+        self.assertTrue(credit.additional_task)
+        self.assertEqual(credit.organization, org)
+        self.assertEqual(float(credit.credits), float(settings.CREDITS_PER_TASK))
+        self.assertEqual(float(credit.credits_used), float(settings.CREDITS_PER_TASK))
+
+    def test_org_consumption_fails_without_overage(self):
+        owner = User.objects.create(username="org_owner4")
+        org = Organization.objects.create(name="Org4", slug="org4", created_by=owner)
+        billing = org.billing
+        billing.subscription = PlanNames.ORG_TEAM
+        billing.purchased_seats = 1
+        billing.max_extra_tasks = 0
+        billing.save(update_fields=["subscription", "purchased_seats", "max_extra_tasks"])
+
+        result = TaskCreditService.check_and_consume_credit_for_owner(org)
+
+        self.assertFalse(result["success"])
+        self.assertIn("no remaining task credits", result["error_message"].lower())
+        self.assertIsNone(result["credit"])
+
+
+@tag("batch_task_credits")
 class TaskCreditServiceGetTasksEntitledTests(TestCase):
     @patch("tasks.services.get_user_extra_task_limit")
     @patch("tasks.services.apps.get_model")
@@ -160,6 +202,33 @@ class TaskCreditServiceGetTasksEntitledTests(TestCase):
         mock_extra.return_value = TASKS_UNLIMITED
 
         result = TaskCreditService.get_tasks_entitled(user)
+
+        self.assertEqual(result, TASKS_UNLIMITED)
+
+    def test_get_tasks_entitled_for_organization_uses_seats(self):
+        owner = User.objects.create(username="org_owner")
+        org = Organization.objects.create(name="Org", slug="org", created_by=owner)
+        billing = org.billing
+        billing.subscription = PlanNames.ORG_TEAM
+        billing.purchased_seats = 3
+        billing.max_extra_tasks = 0
+        billing.save(update_fields=["subscription", "purchased_seats", "max_extra_tasks"])
+
+        result = TaskCreditService.get_tasks_entitled_for_owner(org)
+
+        # Team plan grants 500 per seat => 1500 total
+        self.assertEqual(result, 1500)
+
+    def test_get_tasks_entitled_for_organization_with_unlimited_extra(self):
+        owner = User.objects.create(username="org_owner2")
+        org = Organization.objects.create(name="Org2", slug="org2", created_by=owner)
+        billing = org.billing
+        billing.subscription = PlanNames.ORG_TEAM
+        billing.purchased_seats = 1
+        billing.max_extra_tasks = TASKS_UNLIMITED
+        billing.save(update_fields=["subscription", "purchased_seats", "max_extra_tasks"])
+
+        result = TaskCreditService.get_tasks_entitled_for_owner(org)
 
         self.assertEqual(result, TASKS_UNLIMITED)
 

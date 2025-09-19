@@ -29,6 +29,9 @@ class OrganizationInvitesTest(TestCase):
             user=self.inviter,
             role=OrganizationMembership.OrgRole.OWNER,
         )
+        billing = self.org.billing
+        billing.purchased_seats = 2
+        billing.save(update_fields=["purchased_seats"])
 
     @tag("batch_organizations")
     def test_invite_email_and_accept_flow(self):
@@ -72,6 +75,36 @@ class OrganizationInvitesTest(TestCase):
 
         invite.refresh_from_db()
         self.assertIsNotNone(invite.accepted_at)
+
+    @tag("batch_organizations")
+    def test_invite_blocked_when_no_seats_available(self):
+        billing = self.org.billing
+        billing.purchased_seats = 1  # Only owner is covered
+        billing.save(update_fields=["purchased_seats"])
+
+        self.client.force_login(self.inviter)
+        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
+        resp = self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.MEMBER})
+
+        self.assertEqual(resp.status_code, 200)
+        form = resp.context.get("invite_form")
+        self.assertIsNotNone(form)
+        self.assertIn("No seats available", " ".join(form.non_field_errors()))
+        self.assertFalse(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).exists())
+
+    @tag("batch_organizations")
+    def test_invite_blocked_when_pending_invite_exists(self):
+        self.client.force_login(self.inviter)
+        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
+        # First invite succeeds (seat reserved)
+        self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.MEMBER})
+        self.assertTrue(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).exists())
+
+        resp = self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.MEMBER})
+        self.assertEqual(resp.status_code, 200)
+        form = resp.context.get("invite_form")
+        self.assertIn("already has a pending invitation", " ".join(form.errors.get("email", [])))
+        self.assertEqual(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).count(), 1)
 
     @tag("batch_organizations")
     def test_reject_flow(self):
@@ -160,6 +193,9 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
             user=self.admin,
             role=OrganizationMembership.OrgRole.ADMIN,
         )
+        billing = self.org.billing
+        billing.purchased_seats = 5
+        billing.save(update_fields=["purchased_seats"])
         OrganizationMembership.objects.create(
             org=self.org,
             user=self.viewer,
@@ -298,6 +334,9 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
             user=self.owner,
             role=OrganizationMembership.OrgRole.OWNER,
         )
+        billing = self.org.billing
+        billing.purchased_seats = 4
+        billing.save(update_fields=["purchased_seats"])
 
     def _create_invite(self, email, role, expires_at=None, token="tok-accept"):
         return OrganizationInvite.objects.create(

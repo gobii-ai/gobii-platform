@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.db.utils import IntegrityError
 
-from api.models import ApiKey, PersistentAgent, Organization, OrganizationMembership
+from api.models import ApiKey, PersistentAgent, Organization, OrganizationMembership, OrganizationInvite
 from api.models import UserPhoneNumber
 from django.core.validators import RegexValidator
 from django.utils import timezone
@@ -866,10 +866,39 @@ class OrganizationInviteForm(forms.Form):
 
     def clean_email(self):
         email = self.cleaned_data.get('email')
-        if self.org and email and OrganizationMembership.objects.filter(
-                org=self.org,
-                user__email__iexact=email,
-                status=OrganizationMembership.OrgStatus.ACTIVE
+        if not self.org or not email:
+            return email
+
+        if OrganizationMembership.objects.filter(
+            org=self.org,
+            user__email__iexact=email,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
         ).exists():
             raise forms.ValidationError('This user is already an active member of this organization.')
+
+        now = timezone.now()
+        if OrganizationInvite.objects.filter(
+            org=self.org,
+            email__iexact=email,
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+            expires_at__gte=now,
+        ).exists():
+            raise forms.ValidationError('This email already has a pending invitation.')
+
         return email
+
+    def clean(self):
+        cleaned = super().clean()
+
+        if not self.org:
+            return cleaned
+
+        billing = getattr(self.org, "billing", None)
+        if billing is None:
+            raise forms.ValidationError('Organization billing configuration is missing for this organization.')
+
+        if billing.seats_available <= 0:
+            raise forms.ValidationError('No seats available. Increase the seat count before inviting new members.')
+
+        return cleaned
