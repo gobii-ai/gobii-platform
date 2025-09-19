@@ -11,6 +11,7 @@ from api.models import (
     PersistentAgent,
     BrowserUseAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentMessage,
     DeliveryStatus,
 )
 from api.agent.tools.email_sender import execute_send_email
@@ -47,6 +48,12 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             address="ricardo.kingsley@my.gobii.ai",
             is_primary=True,
         )
+
+    def _mark_message_delivered(self, message):
+        message.latest_status = DeliveryStatus.DELIVERED
+        message.latest_sent_at = timezone.now()
+        message.latest_error_message = ""
+        message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
 
     def test_execute_send_email_retries_on_operational_error(self):
         """
@@ -90,12 +97,6 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
                 raise OperationalError("simulated stale connection on create")
             return original_create_msg(*args, **kwargs)
 
-        def _simulate_delivery(message):
-            message.latest_status = DeliveryStatus.DELIVERED
-            message.latest_sent_at = timezone.now()
-            message.latest_error_message = ""
-            message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
-
         with patch(
             "api.agent.tools.email_sender.PersistentAgentCommsEndpoint.objects.get_or_create",
             side_effect=_flaky_get_or_create,
@@ -104,8 +105,33 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             side_effect=_flaky_create_msg,
         ), patch(
             "api.agent.tools.email_sender.deliver_agent_email",
-            side_effect=_simulate_delivery,
+            side_effect=self._mark_message_delivered,
         ):
             result = execute_send_email(self.agent, params)
 
         self.assertEqual(result.get("status"), "ok")
+
+    def test_execute_send_email_strips_control_characters(self):
+        params = {
+            "to_address": self.user.email,
+            "subject": "Hello Team",
+            "mobile_first_html": "<p>Hi\u0019 there</p>",
+            "cc_addresses": [self.user.email],
+        }
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+
+        message = PersistentAgentMessage.objects.get(owner_agent=self.agent)
+        self.assertNotIn("\u0019", message.body)
+        self.assertEqual(message.raw_payload.get("subject", ""), params["subject"])
+        self.assertEqual(message.to_endpoint.address, params["to_address"])
+        self.assertListEqual(
+            list(message.cc_endpoints.values_list("address", flat=True)),
+            params["cc_addresses"],
+        )
