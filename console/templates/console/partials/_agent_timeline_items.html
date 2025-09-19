@@ -7,131 +7,144 @@
     <article class="timeline-event rounded-xl border border-slate-200/80 {% if step and step.description|default:''|lower == 'process events' and not step.tool_call %}border-dashed bg-slate-50 px-3 py-2 text-slate-500{% else %}bg-white px-4 py-4 shadow-sm shadow-slate-200/60{% endif %}" data-cursor="{{ event.cursor }}">
       {% if message %}
         {% with endpoint=message.to_endpoint|default:message.from_endpoint %}
-          <header class="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 text-xs text-slate-500">
-            <div class="flex flex-wrap items-center gap-2">
-              {% with channel_label=endpoint.channel|channel_label %}
+          {% with channel_label=endpoint.channel|channel_label %}
+            <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
+              <div class="flex flex-wrap items-center gap-2">
                 <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">{{ channel_label }}</span>
-                <span class="text-slate-500">On {{ channel_label|lower }} channel</span>
-              {% endwith %}
-              <span class="text-slate-400">•</span>
-              <span class="font-medium text-slate-600 flex items-center gap-1">
-                {% if message.is_outbound %}Sent{% else %}Received{% endif %}
-                {% if message.is_outbound and message.to_endpoint.address %}
-                  <span class="text-slate-400">to</span>
-                  <span class="hidden sm:inline text-slate-400">{{ message.to_endpoint.address }}</span>
-                {% elif not message.is_outbound and message.from_endpoint.address %}
-                  <span class="text-slate-400">from</span>
-                  <span class="hidden sm:inline text-slate-400">{{ message.from_endpoint.address }}</span>
+                {% if message.is_outbound %}
+                  <span class="flex items-center gap-1">Agent replied on {{ channel_label|lower }}{% if message.to_endpoint.address %}<span class="text-slate-400">to</span><span class="truncate max-w-[160px] text-slate-500" title="{{ message.to_endpoint.address }}">{{ message.to_endpoint.address }}</span>{% endif %}</span>
+                {% else %}
+                  <span class="flex items-center gap-1">New message on {{ channel_label|lower }}{% if message.from_endpoint.address %}<span class="text-slate-400">from</span><span class="truncate max-w-[160px] text-slate-500" title="{{ message.from_endpoint.address }}">{{ message.from_endpoint.address }}</span>{% endif %}</span>
                 {% endif %}
-              </span>
-            </div>
-            <time datetime="{{ event.timestamp|date:'c' }}" class="text-slate-400">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
-          </header>
+              </div>
+              <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
+            </header>
 
-          <div class="mt-3 prose prose-sm max-w-none break-words text-slate-800">
+          <div class="mt-3 prose prose-sm max-w-none text-slate-800 leading-relaxed">
             {{ message.body|agent_message_html }}
           </div>
 
-          <dl class="mt-3 flex flex-wrap gap-4 text-[11px] font-medium uppercase tracking-wide text-slate-400">
-            <div>Status: {{ message.latest_status|default:"Pending"|title }}</div>
-            {% if message.subject %}<div>Subject: {{ message.subject }}</div>{% endif %}
-          </dl>
-
           {% with attachments=message.attachments.all %}
             {% if attachments %}
-              <div class="mt-3 flex flex-wrap gap-2">
-                {% for attachment in attachments %}
-                  <a href="{{ attachment.file.url }}" class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 hover:border-slate-300" target="_blank" rel="noopener">
-                    <svg class="h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
-                    </svg>
-                    <span class="truncate max-w-[120px]">{{ attachment.filename }}</span>
-                    <span class="text-slate-400">{{ attachment.file_size|filesizeformat }}</span>
-                  </a>
-                {% endfor %}
+              <div class="mt-3 space-y-2">
+                <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Attachments</p>
+                <div class="flex flex-wrap gap-2">
+                  {% for attachment in attachments %}
+                    <a href="{{ attachment.file.url }}" class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm hover:bg-slate-50" target="_blank" rel="noopener">
+                      <svg class="h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
+                      </svg>
+                      <span class="truncate max-w-[140px]" title="{{ attachment.filename }}">{{ attachment.filename }}</span>
+                      <span class="text-slate-400">{{ attachment.file_size|filesizeformat }}</span>
+                    </a>
+                  {% endfor %}
+                </div>
               </div>
             {% endif %}
+          {% endwith %}
+
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+            {% with status=message.latest_status|default:"pending" %}
+              <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600 uppercase tracking-wide">
+                {% if status|lower == 'delivered' %}
+                  <svg class="h-3 w-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                {% elif status|lower == 'queued' %}
+                  <svg class="h-3 w-3 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3"/></svg>
+                {% elif status|lower == 'failed' %}
+                  <svg class="h-3 w-3 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.121 19h13.758c1.54 0 2.502-1.667 1.732-3L13.732 5c-.77-1.333-2.694-1.333-3.464 0L3.39 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                {% endif %}
+                {{ status|title }}
+              </span>
+            {% endwith %}
+
+            <details class="group ml-auto w-full sm:w-auto">
+              <summary class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs font-medium text-slate-500 transition hover:text-slate-700">
+                <span>Message details</span>
+                <svg class="h-3 w-3 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div class="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-500">
+                <div><span class="font-semibold text-slate-600">Channel:</span> {{ channel_label }}</div>
+                <div><span class="font-semibold text-slate-600">Direction:</span> {% if message.is_outbound %}Outbound{% else %}Inbound{% endif %}</div>
+                {% if message.subject %}<div><span class="font-semibold text-slate-600">Subject:</span> {{ message.subject }}</div>{% endif %}
+                {% if message.latest_sent_at %}<div><span class="font-semibold text-slate-600">Sent:</span> {{ message.latest_sent_at|date:"M j, g:i a" }}</div>{% endif %}
+                {% if message.latest_delivered_at %}<div><span class="font-semibold text-slate-600">Delivered:</span> {{ message.latest_delivered_at|date:"M j, g:i a" }}</div>{% endif %}
+              {% if message.latest_error_message %}<div class="text-rose-500"><span class="font-semibold">Last error:</span> {{ message.latest_error_message }}</div>{% endif %}
+              </div>
+            </details>
+          </div>
           {% endwith %}
         {% endwith %}
       {% elif step %}
         {% if step.description|default:''|lower == 'process events' and not step.tool_call %}
-          <div class="flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-500">
+          <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">
             <div class="flex items-center gap-2">
-              <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+              <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm">
                 <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2" />
                 </svg>
               </span>
-              <div class="flex flex-col">
-                <span class="font-semibold uppercase tracking-wide text-slate-600">System update</span>
-                <span class="text-[10px] text-slate-400">Processed agent events</span>
+              <div>
+                <p class="font-semibold text-slate-600">Agent is getting things ready</p>
+                <p class="text-xs text-slate-400">Background processing so your agent can respond.</p>
               </div>
             </div>
-            <div class="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
-              {% if step.llm_model %}
-                <span class="uppercase">{{ step.llm_model }}</span>
-              {% endif %}
-              {% if step.prompt_tokens or step.total_tokens %}
-                <span>Tokens {{ step.total_tokens|default:0|intcomma }}</span>
-              {% endif %}
-              <time datetime="{{ event.timestamp|date:'c' }}">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
-            </div>
+            <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400">{{ event.timestamp|date:"M j, g:i a" }}</time>
           </div>
         {% else %}
-          <header class="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 text-xs text-slate-500">
+          <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
             <div class="flex items-center gap-2">
-              <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-indigo-50 text-indigo-600">
+              <span class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2" />
                 </svg>
               </span>
               <div>
-                <p class="text-xs font-semibold uppercase tracking-wide text-slate-600">Agent step</p>
-                {% if step.tool_call %}
-                  <p class="text-[11px] text-slate-400">Tool: {{ step.tool_call.tool_name|default:"Execution" }}</p>
+                <p class="font-semibold text-slate-700">Agent worked on this</p>
+                {% if step.description %}
+                  <p class="text-xs text-slate-400">{{ step.description }}</p>
                 {% endif %}
               </div>
             </div>
-            <time datetime="{{ event.timestamp|date:'c' }}" class="text-slate-400">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
+            <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400">{{ event.timestamp|date:"M j, g:i a" }} · {{ event.timestamp|timesince }} ago</time>
           </header>
 
-          {% if step.description %}
-            <p class="mt-3 whitespace-pre-line text-sm text-slate-700">{{ step.description }}</p>
-          {% endif %}
-
-          <dl class="mt-3 flex flex-wrap gap-4 text-[11px] uppercase tracking-wide text-slate-400">
-            {% if step.llm_model %}
-              <div><span class="font-semibold text-slate-600">Model</span> {{ step.llm_model }}</div>
-            {% endif %}
-            {% if step.prompt_tokens or step.total_tokens %}
-              <div><span class="font-semibold text-slate-600">Tokens</span> {{ step.total_tokens|default:0|intcomma }}</div>
-            {% endif %}
-          </dl>
-
-          {% if step.tool_call %}
-            <details class="mt-3 rounded-lg border border-slate-200 bg-slate-50/70 text-xs text-slate-600">
-              <summary class="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 font-medium text-slate-700">
-                <span>Tool call · {{ step.tool_call.tool_name }}</span>
-                <svg class="h-3 w-3 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </summary>
-              <div class="space-y-3 px-3 pb-3">
-                {% if step.tool_call.tool_params %}
-                  <div>
-                    <p class="mb-1 font-semibold text-slate-700">Parameters</p>
-                    <pre class="max-h-48 overflow-auto rounded bg-slate-900/90 p-2 text-[11px] text-slate-100">{{ step.tool_call.tool_params|pretty_json }}</pre>
-                  </div>
+          <details class="mt-3 group">
+            <summary class="flex cursor-pointer items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-100">
+              <span>See technical details</span>
+              <svg class="h-3 w-3 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </summary>
+            <div class="space-y-3 rounded-b-md border border-t-0 border-slate-200 bg-white p-3 text-[11px] text-slate-600">
+              <div class="flex flex-wrap gap-4">
+                {% if step.llm_model %}
+                  <span><span class="font-semibold text-slate-700">Model:</span> {{ step.llm_model }}</span>
                 {% endif %}
-                {% if step.tool_call.result %}
-                  <div>
-                    <p class="mb-1 font-semibold text-slate-700">Result</p>
-                    <div class="max-h-48 overflow-auto rounded bg-white p-2 text-[11px] text-slate-700 whitespace-pre-wrap">{{ step.tool_call.result }}</div>
-                  </div>
+                {% if step.prompt_tokens or step.total_tokens %}
+                  <span><span class="font-semibold text-slate-700">Tokens:</span> {{ step.total_tokens|default:0|intcomma }}</span>
                 {% endif %}
               </div>
-            </details>
-          {% endif %}
+              {% if step.tool_call %}
+                <div class="space-y-2">
+                  <p class="font-semibold text-slate-700">Tool call · {{ step.tool_call.tool_name|default:"Execution" }}</p>
+                  {% if step.tool_call.tool_params %}
+                    <div>
+                      <p class="text-xs font-semibold text-slate-600">Parameters</p>
+                      <pre class="max-h-48 overflow-auto rounded bg-slate-900/90 p-2 text-[11px] text-slate-100">{{ step.tool_call.tool_params|pretty_json }}</pre>
+                    </div>
+                  {% endif %}
+                  {% if step.tool_call.result %}
+                    <div>
+                      <p class="text-xs font-semibold text-slate-600">Result</p>
+                      <div class="max-h-48 overflow-auto rounded bg-slate-50 p-2 text-[11px] text-slate-700 whitespace-pre-wrap">{{ step.tool_call.result }}</div>
+                    </div>
+                  {% endif %}
+                </div>
+              {% endif %}
+            </div>
+          </details>
         {% endif %}
       {% endif %}
     </article>
