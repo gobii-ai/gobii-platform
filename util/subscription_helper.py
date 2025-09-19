@@ -32,6 +32,7 @@ except Exception:  # pragma: no cover - optional dependency
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
+
 def get_stripe_customer(user) -> Customer | None:
     """
     Retrieves a Stripe Customer object associated with a specific user. If the user
@@ -53,6 +54,7 @@ def get_stripe_customer(user) -> Customer | None:
             return Customer.objects.get(subscriber=user)
         except Customer.DoesNotExist:
             return None
+
 
 def get_active_subscription(user) -> Subscription | None:
     """
@@ -91,6 +93,7 @@ def get_active_subscription(user) -> Subscription | None:
 
         return licensed_subs.first() if licensed_subs else None
 
+
 def user_has_active_subscription(user) -> bool:
     """
     Checks whether the specified user has an active subscription.
@@ -106,6 +109,7 @@ def user_has_active_subscription(user) -> bool:
         bool: True if the user has an active subscription, otherwise False.
     """
     return get_active_subscription(user) is not None
+
 
 def get_user_plan(user) -> dict[str, int | str]:
     """
@@ -140,7 +144,7 @@ def get_user_plan(user) -> dict[str, int | str]:
         for item_data in stripe_sub.get("items", {}).get("data", []):
             if item_data.get("plan", {}).get("usage_type") == "licensed":
                 product_id = item_data.get("price", {}).get("product")
-                break # Found the licensed item, no need to check further
+                break  # Found the licensed item, no need to check further
 
         logger.debug(f"get_user_plan {user.id} product_id: {product_id}")
 
@@ -151,6 +155,7 @@ def get_user_plan(user) -> dict[str, int | str]:
         plan = get_plan_by_product_id(product_id)
 
         return plan if plan else PLAN_CONFIG[PlanNames.FREE]
+
 
 def get_user_task_credit_limit(user) -> int:
     """
@@ -178,6 +183,7 @@ def get_user_task_credit_limit(user) -> int:
             return PLAN_CONFIG[PlanNames.FREE]["monthly_task_credits"]
 
         return plan["monthly_task_credits"]
+
 
 def get_or_create_stripe_customer(user) -> Customer:
     """
@@ -211,6 +217,7 @@ def get_or_create_stripe_customer(user) -> Customer:
         customer.save(update_fields=["subscriber"])
         return customer
 
+
 def get_user_api_rate_limit(user) -> int:
     """
     Determines the API rate limit for a given user based on their subscription
@@ -232,6 +239,7 @@ def get_user_api_rate_limit(user) -> int:
             return PLAN_CONFIG[PlanNames.FREE]["api_rate_limit"]
 
         return plan["api_rate_limit"]
+
 
 def get_user_agent_limit(user) -> int:
     """
@@ -255,7 +263,9 @@ def get_user_agent_limit(user) -> int:
 
         return plan["agent_limit"]
 
-def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIPE_TASK_METER_ID, idempotency_key: str | None = None):
+
+def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIPE_TASK_METER_ID,
+                                idempotency_key: str | None = None):
     """
     Reports usage to Stripe by creating a UsageRecord.
 
@@ -333,7 +343,9 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
             raise
 
 
-def report_organization_task_usage_to_stripe(organization, quantity: int = 1, meter_id=settings.STRIPE_ORG_TASK_METER_ID, idempotency_key: str | None = None):
+def report_organization_task_usage_to_stripe(organization, quantity: int = 1,
+                                             meter_id=settings.STRIPE_ORG_TASK_METER_ID,
+                                             idempotency_key: str | None = None):
     """Report additional task usage for an organization via Stripe metering."""
     with traced("SUBSCRIPTION Report Org Task Usage"):
         billing = getattr(organization, "billing", None)
@@ -395,6 +407,7 @@ def report_task_usage(subscription: Subscription, quantity: int = 1, idempotency
             logger.error(f"report_task_usage: Error reporting task usage: {str(e)}")
             raise
 
+
 def get_free_plan_users():
     """
     Retrieves all users who are currently on the free plan.
@@ -420,6 +433,7 @@ def get_free_plan_users():
         users_without_active_sub = users.objects.exclude(id__in=active_subscriber_ids)
 
         return users_without_active_sub
+
 
 def get_users_due_for_monthly_grant(days=1):
     """
@@ -460,6 +474,7 @@ def get_users_due_for_monthly_grant(days=1):
 
         return users_to_grant
 
+
 # Take a list of users, and return only the ones without an active subscription
 def filter_users_without_active_subscription(users):
     """
@@ -480,6 +495,7 @@ def filter_users_without_active_subscription(users):
     """
     with traced("SUBSCRIPTION Filter Users Without Active Subscription"):
         return [user for user in users if not get_active_subscription(user)]
+
 
 def mark_user_billing_with_plan(user, plan_name: str, update_anchor: bool = True):
     """
@@ -718,6 +734,7 @@ def allow_and_has_extra_tasks_for_organization(organization) -> bool:
         used = calculate_org_extra_tasks_used_during_subscription_period(organization)
         return used < limit and allow_organization_extra_tasks(organization)
 
+
 def get_user_extra_task_limit(user) -> int:
     """
     Gets the maximum number of extra tasks allowed for a user beyond their plan limits.
@@ -743,6 +760,7 @@ def get_user_extra_task_limit(user) -> int:
             logger.warning(f"get_user_extra_task_limit {user.id}: No UserBilling found, defaulting to 0")
             return 0
 
+
 def allow_user_extra_tasks(user) -> bool:
     """
     Determines if a user is allowed to have extra tasks beyond their plan limits.
@@ -766,6 +784,7 @@ def allow_user_extra_tasks(user) -> bool:
         allow_based_on_subscription_status = not sub.cancel_at_period_end
 
         return (task_limit > 0 or task_limit == TASKS_UNLIMITED) and allow_based_on_subscription_status
+
 
 def allow_and_has_extra_tasks(user) -> bool:
     """
@@ -792,6 +811,7 @@ def allow_and_has_extra_tasks(user) -> bool:
             return True
 
         return False
+
 
 def calculate_extra_tasks_used_during_subscription_period(user):
     """
@@ -833,6 +853,7 @@ def calculate_extra_tasks_used_during_subscription_period(user):
         except Exception:
             return 0
 
+
 def downgrade_user_to_free_plan(user):
     """
     Downgrades the user's plan to the free plan.
@@ -853,6 +874,7 @@ def downgrade_user_to_free_plan(user):
     """
     with traced("SUBSCRIPTION Downgrade User to Free Plan") as span:
         mark_user_billing_with_plan(user, PlanNames.FREE, False)  # Downgrade to free plan
+
 
 def has_unlimited_agents(user) -> bool:
     """
@@ -893,7 +915,8 @@ def get_user_max_contacts_per_agent(user) -> int:
         if quota and quota.max_agent_contacts is not None and quota.max_agent_contacts > 0:
             return int(quota.max_agent_contacts)
     except Exception as e:
-        logger.error("get_user_max_contacts_per_agent: quota lookup failed for user %s: %s", getattr(user, 'id', 'n/a'), e)
+        logger.error("get_user_max_contacts_per_agent: quota lookup failed for user %s: %s", getattr(user, 'id', 'n/a'),
+                     e)
 
     # Fallback to plan default
     plan = get_user_plan(user)

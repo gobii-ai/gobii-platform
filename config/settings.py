@@ -558,6 +558,7 @@ STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID = env("STRIPE_STARTUP_ADDITIONAL_TASK_PR
 STRIPE_STARTUP_PRODUCT_ID = env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup")
 STRIPE_TASK_METER_ID = env("STRIPE_TASK_METER_ID", default="meter_dummy_task")
 STRIPE_TASK_METER_EVENT_NAME = env("STRIPE_TASK_METER_EVENT_NAME", default="task")
+STRIPE_ORG_TASK_METER_ID = env("STRIPE_ORG_TASK_METER_ID", default="meter_dummy_org_task")
 
 # Credits configuration
 # How many credits a single task consumes from plan credits.
