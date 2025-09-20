@@ -11,6 +11,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
 )
 
 CursorTuple = Tuple[datetime, str, str]
@@ -98,6 +99,7 @@ def _get_base_step_qs(agent: PersistentAgent):
     return (
         PersistentAgentStep.objects
         .filter(agent=agent)
+        .exclude(system_step__code=PersistentAgentSystemStep.Code.PROCESS_EVENTS)
         .select_related("agent", "tool_call")
     )
 
