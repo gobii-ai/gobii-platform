@@ -100,6 +100,7 @@ def _get_base_step_qs(agent: PersistentAgent):
         PersistentAgentStep.objects
         .filter(agent=agent)
         .exclude(system_step__code=PersistentAgentSystemStep.Code.PROCESS_EVENTS)
+        .exclude(tool_call__tool_name="sleep_until_next_trigger")
         .select_related("agent", "tool_call")
     )
 
