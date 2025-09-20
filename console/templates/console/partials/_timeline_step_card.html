@@ -3,6 +3,9 @@
 {% load tz %}
 
 {% with tool=step.tool_call %}
+  {% if tool.tool_name == 'send_email' %}
+    {# skip #}
+  {% else %}
   {% comment %}Skip steps that don't provide meaningful information{% endcomment %}
   {% if not tool %}
     {# Skip steps with no tool call #}
@@ -112,5 +115,6 @@
     {% endif %}
     </div>
   </article>
+  {% endif %}
   {% endif %}
 {% endwith %}

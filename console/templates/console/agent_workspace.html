@@ -27,8 +27,6 @@
             hx-swap="afterbegin">
             Load older
           </button>
-        {% else %}
-          <span class="text-sm text-gray-400">Beginning of history</span>
         {% endif %}
       </div>
       {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events %}
