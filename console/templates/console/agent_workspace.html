@@ -132,6 +132,8 @@
     pendingComposerScroll: false,
     autoScroll: true,
     eventSource: null,
+    fetchingNewer: false,
+    queuedNewerTrigger: null,
   };
 
   let reconnectDelay = 3000;
@@ -188,14 +190,46 @@
     }
   }
 
+  function dedupeTimeline() {
+    if (!timeline) return;
+    const seen = new Set();
+    const items = timeline.querySelectorAll('.timeline-event');
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const node = items[i];
+      const cursor = node?.dataset?.cursor;
+      if (!cursor) continue;
+      if (seen.has(cursor)) {
+        node.remove();
+      } else {
+        seen.add(cursor);
+      }
+    }
+  }
+
+  function completeNewerRequest() {
+    state.fetchingNewer = false;
+    const queuedTrigger = state.queuedNewerTrigger;
+    state.queuedNewerTrigger = null;
+    if (queuedTrigger) {
+      log('consuming queued newer request', { trigger: queuedTrigger });
+      requestNewer(queuedTrigger);
+    }
+  }
+
   function requestNewer(trigger) {
     if (!newerUrl || !timeline) return;
+    if (state.fetchingNewer) {
+      state.queuedNewerTrigger = trigger || 'auto-newer';
+      log('requestNewer queued', { trigger });
+      return;
+    }
     const params = new URLSearchParams({ limit: String(limit) });
     const cursorNode = getCursorsEl();
     const cursor = cursorNode?.dataset.newer;
     if (cursor) params.set('cursor', cursor);
 
     state.action = 'newer';
+    state.fetchingNewer = true;
     state.autoScroll = state.pendingComposerScroll ? true : trigger !== 'auto-newer' ? true : isNearBottom();
 
     log('requestNewer', { trigger, cursor, autoScroll: state.autoScroll });
@@ -261,6 +295,7 @@
       timeline.scrollTop = Math.max(delta, 0);
     }
 
+    dedupeTimeline();
     trimTimeline(state.action);
     updateComposerCursor();
 
@@ -272,6 +307,10 @@
     if (state.autoScroll) {
       log('auto-scroll applied');
       scrollToBottom(true);
+    }
+
+    if (state.action === 'newer' || state.fetchingNewer) {
+      completeNewerRequest();
     }
 
     state.action = 'idle';
@@ -286,6 +325,18 @@
       log('htmx afterSettle');
       updateJumpButton();
     }
+  });
+
+  window.htmx.on('htmx:responseError', (event) => {
+    if (event.detail?.target?.id !== 'timeline-events') return;
+    log('htmx responseError', { status: event.detail.xhr?.status });
+    completeNewerRequest();
+  });
+
+  window.htmx.on('htmx:sendError', (event) => {
+    if (event.detail?.target?.id !== 'timeline-events') return;
+    log('htmx sendError');
+    completeNewerRequest();
   });
 
   function connectEventStream(lastId) {
