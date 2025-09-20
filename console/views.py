@@ -5265,7 +5265,13 @@ class AgentTimelineWindowView(AgentAccessMixin, TemplateView):
             cursor=cursor,
         )
 
-        current_newest_cursor = request.GET.get("current_newest") or window.window_newest_cursor
+        requested_current_newest = request.GET.get("current_newest") or None
+        window_newest_cursor = window.window_newest_cursor
+
+        if direction in {"initial", "newer"} and window_newest_cursor:
+            current_newest_cursor = window_newest_cursor
+        else:
+            current_newest_cursor = requested_current_newest or window_newest_cursor
 
         window_url = reverse("agent_timeline_window", args=[agent.id])
 
