@@ -3,8 +3,8 @@
   createFirstAgent = function() {
     // Function to handle agent creation logic
     // This can be customized based on your application's requirements
-    if (window.analytics) {
-      analytics.track('{{ analytics.cta.CTA_CREATE_FIRST_AGENT_CLICKED.value }}');
+    if (window.analytics?.track) {
+      window.analytics.track('{{ analytics.cta.CTA_CREATE_FIRST_AGENT_CLICKED.value }}');
     }
   };
 

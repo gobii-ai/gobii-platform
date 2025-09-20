@@ -1,0 +1,20 @@
+{% load agent_extras %}
+{% load humanize %}
+{% load tz %}
+
+{% comment %}
+  Top-level renderer for the agent timeline. Messages are rendered inline; step cards are delegated
+  to `_timeline_step_card.html` to keep the template logic manageable.
+{% endcomment %}
+
+{% for event in events %}
+  {% with message=event.message step=event.step %}
+    {% if message %}
+      {% include "console/partials/_timeline_message_card.html" with event=event message=message %}
+    {% elif step %}
+      {% include "console/partials/_timeline_step_card.html" with event=event step=step %}
+    {% endif %}
+  {% endwith %}
+{% empty %}
+  <div class="text-center text-sm text-slate-400">No activity yet.</div>
+{% endfor %}

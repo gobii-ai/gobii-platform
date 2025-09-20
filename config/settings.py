@@ -96,6 +96,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "whitenoise.runserver_nostatic",  # Should be before staticfiles if DEBUG is True and runserver
     "django.contrib.staticfiles",
+    "django.contrib.humanize",
 
     # 3rd-party
     "rest_framework",
@@ -171,6 +172,7 @@ TEMPLATES = [
                 "form_extras": "templatetags.form_extras",
                 "analytics_tags": "templatetags.analytics_tags",
                 "social_extras": "templatetags.social_extras",
+                "agent_extras": "console.templatetags.agent_extras",
             },
         },
     },
