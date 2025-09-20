@@ -3,7 +3,8 @@
 {% load tz %}
 
 {% with endpoint=message.to_endpoint|default:message.from_endpoint channel_label=endpoint.channel|channel_label channel_lower=channel_label|lower %}
-<article class="timeline-event rounded-3xl border border-white/25 bg-white/70 px-5 py-5 backdrop-blur-xl shadow-xl" data-cursor="{{ event.cursor }}">
+<article class="timeline-event bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden" data-cursor="{{ event.cursor }}">
+  <div class="p-6">
   <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
     <div class="flex flex-wrap items-center gap-2">
       <span class="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700 shadow-sm">{{ channel_label }}</span>
@@ -82,6 +83,7 @@
         {% if message.latest_error_message %}<div class="text-rose-500"><span class="font-semibold">Last error:</span> {{ message.latest_error_message }}</div>{% endif %}
       </div>
     </details>
+  </div>
   </div>
 </article>
 {% endwith %}

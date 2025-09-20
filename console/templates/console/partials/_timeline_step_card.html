@@ -11,8 +11,9 @@
   {% elif not tool.tool_name or tool.tool_name == 'action' %}
     {# Skip generic or empty tool names #}
   {% else %}
-  <article class="timeline-event rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm" data-cursor="{{ event.cursor }}">
-    <header class="flex items-center justify-between">
+  <article class="timeline-event bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden" data-cursor="{{ event.cursor }}">
+    <div class="p-6">
+      <header class="flex items-center justify-between">
       <div class="flex items-center gap-3">
         {% if tool.tool_name == 'update_charter' %}
           <div class="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100">
@@ -104,8 +105,11 @@
       {% endif %}
     {% endif %}
 
-    <div class="mt-2 text-right">
-      {% include "console/partials/_timeline_step_details.html" with step=step summary="Details" show_sql=True %}
+    {% if tool.tool_name != 'update_charter' %}
+      <div class="mt-2 text-right">
+        {% include "console/partials/_timeline_step_details.html" with step=step summary="Technical details" show_sql=True %}
+      </div>
+    {% endif %}
     </div>
   </article>
   {% endif %}
