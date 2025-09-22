@@ -121,16 +121,30 @@ def get_active_subscription(owner) -> Subscription | None:
             span.set_attribute("owner.customer", "")
             return None
 
+        now_ts = int(timezone.now().timestamp())
+
+        # Statuses you consider “active” for licensing (tweak as needed)
+        ACTIVE_STATUSES = ["active", "trialing"]  # add "past_due" if you still grant access
+
+        qs = customer.subscriptions.filter(
+            stripe_data__status__in=ACTIVE_STATUSES,
+            stripe_data__current_period_end__gte=now_ts,
+        )
+
+        # If you want the one that ends soonest, prefer ordering in Python (simplest & portable):
+        subs = list(qs)
+        subs.sort(key=lambda s: s.stripe_data.get("cancel_at_period_end") or 0)
+
+
         span.set_attribute("owner.customer.id", str(customer.id))
         logger.debug(
             "get_active_subscription %s %s subscriptions: %s",
             owner_type,
             owner_id,
-            customer.active_subscriptions,
+            subs,
         )
 
-        licensed_subs = customer.active_subscriptions.order_by("cancel_at_period_end")
-        return licensed_subs.first() if licensed_subs else None
+        return subs[0] if subs else None
 
 def user_has_active_subscription(user) -> bool:
     """
