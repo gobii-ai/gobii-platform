@@ -5,5 +5,5 @@ Running unit tests:
 - Typically, run only the test(s) you need, then at the end run the full suite.
 
 Writing unit tests:
-- Ensure the test is tagged with a batch tag, e.g. `@tag('decodo_batch')`
+- Ensure the test is tagged with a batch tag, e.g. `@tag('my_feature_batch')`
 - Ensure the tag is registered in ci.yml

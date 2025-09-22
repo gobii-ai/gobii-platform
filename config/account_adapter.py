@@ -39,11 +39,8 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
             return None
 
         for blocked in blocked_domains:
-            candidate = blocked.strip().lower()
-            if not candidate:
-                continue
-            if domain == candidate or domain.endswith(f".{candidate}"):
-                return candidate
+            if domain == blocked or domain.endswith(f".{blocked}"):
+                return blocked
 
         return None
 
