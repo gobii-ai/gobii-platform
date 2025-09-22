@@ -35,7 +35,7 @@ def noop(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ('api', '0021_task_credit_system'),
-        ("djstripe", "0014_2_9a"),
+        ("djstripe", "0001_initial"),
     ]
 
     operations = [
