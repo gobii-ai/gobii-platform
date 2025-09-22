@@ -692,7 +692,7 @@ def allow_organization_extra_tasks(organization) -> bool:
             return False
 
         billing = getattr(organization, "billing", None)
-        if not billing:
+        if not billing or getattr(billing, "purchased_seats", 0) <= 0:
             return False
 
         cancel_at_period_end = getattr(billing, "cancel_at_period_end", False)
@@ -758,6 +758,9 @@ def allow_and_has_extra_tasks_for_organization(organization) -> bool:
     """Return True if the organization may consume an additional-task credit now."""
     with traced("CREDITS Allow And Has Org Extra Tasks"):
         limit = get_organization_extra_task_limit(organization)
+
+        if getattr(getattr(organization, "billing", None), "purchased_seats", 0) <= 0:
+            return False
 
         if limit == TASKS_UNLIMITED:
             return allow_organization_extra_tasks(organization)

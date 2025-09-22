@@ -207,6 +207,69 @@ class TaskCreditService:
             return credits_to_grant
 
     @staticmethod
+    @tracer.start_as_current_span("TaskCreditService Grant Org Subscription Credits")
+    def grant_subscription_credits_for_organization(
+        organization,
+        seats: int,
+        plan=None,
+        invoice_id: str = "",
+        grant_date=None,
+        expiration_date=None,
+        subscription=None,
+    ) -> int:
+        if seats <= 0:
+            return 0
+
+        with traced("TASKCREDIT Grant Org Subscription Credits") as span:
+            TaskCredit = apps.get_model("api", "TaskCredit")
+
+            if invoice_id:
+                existing_credit = TaskCredit.objects.filter(
+                    organization=organization,
+                    stripe_invoice_id=invoice_id,
+                    voided=False,
+                ).first()
+                if existing_credit:
+                    logger.debug(
+                        "grant_subscription_credits_for_org %s: already granted credits for invoice %s",
+                        organization.id,
+                        invoice_id,
+                    )
+                    return 0
+
+            if plan is None:
+                plan = get_organization_plan(organization)
+
+            plan_id = plan.get("id") if plan else PlanNames.FREE
+
+            credits_per_seat = plan.get("credits_per_seat") or plan.get("monthly_task_credits") or 0
+            credits_to_grant = Decimal(credits_per_seat) * Decimal(seats)
+
+            span.set_attribute("organization.id", str(getattr(organization, "id", "")))
+            span.set_attribute("credits_to_grant", float(credits_to_grant))
+
+            grant_date = grant_date or timezone.now()
+
+            if subscription and getattr(subscription, "current_period_end", None):
+                expiration_date = subscription.current_period_end
+            else:
+                expiration_date = expiration_date or (grant_date + timedelta(days=30))
+
+            TaskCredit.objects.create(
+                organization=organization,
+                credits=credits_to_grant,
+                credits_used=0,
+                expiration_date=expiration_date,
+                stripe_invoice_id=invoice_id or None,
+                granted_date=grant_date,
+                plan=PlanNamesChoices(plan_id) if plan_id else PlanNamesChoices.FREE,
+                grant_type=GrantTypeChoices.PLAN,
+                additional_task=False,
+            )
+
+            return int(credits_to_grant)
+
+    @staticmethod
     @tracer.start_as_current_span("TaskCreditService Consume Credit")
     def consume_credit(user, additional_task: bool = False, amount: Decimal | None = None):
         """
@@ -370,6 +433,10 @@ class TaskCreditService:
 
     @staticmethod
     def _get_tasks_entitled_for_org(organization) -> int:
+        billing = getattr(organization, "billing", None)
+        if not billing or getattr(billing, "purchased_seats", 0) <= 0:
+            return 0
+
         plan = get_organization_plan(organization)
         addl_limit = get_organization_extra_task_limit(organization)
 

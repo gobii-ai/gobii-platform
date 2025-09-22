@@ -40,6 +40,7 @@ PLAN_CONFIG = {
         "credits_per_seat": 500,
         "api_rate_limit": 2000,
         "product_id": os.getenv("STRIPE_ORG_TEAM_PRODUCT_ID", "prod_dummy_org_team"),
+        "seat_price_id": os.getenv("STRIPE_ORG_TEAM_PRICE_ID", "price_dummy_org_team"),
         "agent_limit": AGENTS_UNLIMITED,
         "name": "Team",
         "description": "Team plan with collaboration features and priority support.",

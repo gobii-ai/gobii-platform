@@ -902,3 +902,21 @@ class OrganizationInviteForm(forms.Form):
             raise forms.ValidationError('No seats available. Increase the seat count before inviting new members.')
 
         return cleaned
+
+
+class OrganizationSeatPurchaseForm(forms.Form):
+    seats = forms.IntegerField(
+        min_value=1,
+        initial=1,
+        widget=forms.NumberInput(
+            attrs={
+                "class": "w-24 px-3 py-2 border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500",
+                "min": "1",
+            }
+        ),
+        label="Seats",
+    )
+
+    def __init__(self, *args, org=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.org = org

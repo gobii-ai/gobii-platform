@@ -175,6 +175,21 @@ class TaskCreditServiceCheckAndConsumeCreditForOwnerTests(TestCase):
         self.assertIn("no remaining task credits", result["error_message"].lower())
         self.assertIsNone(result["credit"])
 
+    def test_org_additional_tasks_blocked_without_paid_seats(self):
+        owner = User.objects.create(username="org_owner5")
+        org = Organization.objects.create(name="Org5", slug="org5", created_by=owner)
+        billing = org.billing
+        billing.subscription = PlanNames.ORG_TEAM
+        billing.purchased_seats = 0
+        billing.max_extra_tasks = TASKS_UNLIMITED
+        billing.save(update_fields=["subscription", "purchased_seats", "max_extra_tasks"])
+
+        result = TaskCreditService.check_and_consume_credit_for_owner(org)
+
+        self.assertFalse(result["success"])
+        self.assertIsNone(result["credit"])
+        self.assertIn("no remaining task credits", result["error_message"].lower())
+
 
 @tag("batch_task_credits")
 class TaskCreditServiceGetTasksEntitledTests(TestCase):
@@ -259,6 +274,45 @@ class TaskCreditServiceCalculateUsedPctTests(TestCase):
         mock_used.return_value = 5
         self.assertEqual(TaskCreditService.calculate_used_pct(user), 0.0)
 
+
+@tag("batch_task_credits")
+class TaskCreditServiceGrantOrgSubscriptionCreditsTests(TestCase):
+    def setUp(self):
+        owner = User.objects.create(username="org_owner_seed")
+        self.org = Organization.objects.create(name="SeedOrg", slug="seedorg", created_by=owner)
+        billing = self.org.billing
+        billing.subscription = PlanNames.ORG_TEAM
+        billing.purchased_seats = 2
+        billing.save(update_fields=["subscription", "purchased_seats"])
+
+    def test_grant_subscription_credits_for_organization_creates_credit(self):
+        TaskCreditService.grant_subscription_credits_for_organization(
+            self.org,
+            seats=2,
+            invoice_id="inv-org-1",
+        )
+
+        credits = TaskCredit.objects.filter(organization=self.org, stripe_invoice_id="inv-org-1")
+        self.assertEqual(credits.count(), 1)
+        self.assertGreater(float(credits.first().credits), 0)
+
+    def test_grant_subscription_credits_for_organization_idempotent(self):
+        TaskCreditService.grant_subscription_credits_for_organization(
+            self.org,
+            seats=1,
+            invoice_id="inv-org-dup",
+        )
+        duplicate = TaskCreditService.grant_subscription_credits_for_organization(
+            self.org,
+            seats=1,
+            invoice_id="inv-org-dup",
+        )
+
+        self.assertEqual(duplicate, 0)
+        self.assertEqual(
+            TaskCredit.objects.filter(organization=self.org, stripe_invoice_id="inv-org-dup").count(),
+            1,
+        )
 
 @tag("batch_task_credits")
 class TaskCreditServiceHandleThresholdTests(TestCase):

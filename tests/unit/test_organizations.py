@@ -2,12 +2,20 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from waffle.models import Flag
 
-from api.models import Organization, OrganizationMembership, OrganizationInvite
+from api.models import (
+    Organization,
+    OrganizationMembership,
+    OrganizationInvite,
+    PersistentAgent,
+    BrowserUseAgent,
+)
 from datetime import timedelta
+from unittest.mock import patch, MagicMock
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
@@ -79,7 +87,7 @@ class OrganizationInvitesTest(TestCase):
     @tag("batch_organizations")
     def test_invite_blocked_when_no_seats_available(self):
         billing = self.org.billing
-        billing.purchased_seats = 1  # Only owner is covered
+        billing.purchased_seats = 0
         billing.save(update_fields=["purchased_seats"])
 
         self.client.force_login(self.inviter)
@@ -105,6 +113,74 @@ class OrganizationInvitesTest(TestCase):
         form = resp.context.get("invite_form")
         self.assertIn("already has a pending invitation", " ".join(form.errors.get("email", [])))
         self.assertEqual(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).count(), 1)
+
+    @patch("console.views.stripe.checkout.Session.create")
+    @patch("console.views.get_or_create_stripe_customer")
+    def test_seat_checkout_redirects_to_stripe(self, mock_customer, mock_session):
+        mock_customer.return_value = MagicMock(id="cus_test")
+        mock_session.return_value = MagicMock(url="https://stripe.test/checkout")
+
+        self.client.force_login(self.inviter)
+        billing = self.org.billing
+        billing.purchased_seats = 0
+        billing.save(update_fields=["purchased_seats"])
+
+        url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, {"seats": 1})
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout")
+        mock_session.assert_called_once()
+
+    def test_seat_checkout_requires_membership(self):
+        stranger = get_user_model().objects.create_user(email="stranger@example.com", password="pw", username="stranger")
+        self.client.force_login(stranger)
+        url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, {"seats": 1})
+        self.assertEqual(resp.status_code, 403)
+
+    @patch("console.views.stripe.checkout.Session.create")
+    @patch("console.views.get_or_create_stripe_customer")
+    def test_seat_checkout_blocks_existing_subscription(self, mock_customer, mock_session):
+        mock_customer.return_value = MagicMock(id="cus_test")
+        mock_session.return_value = MagicMock(url="https://stripe.test/checkout")
+
+        billing = self.org.billing
+        billing.purchased_seats = 2
+        billing.stripe_subscription_id = "sub_123"
+        billing.save(update_fields=["purchased_seats", "stripe_subscription_id"])
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, {"seats": 1}, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Use the Stripe management button to adjust seats", status_code=200)
+        mock_session.assert_not_called()
+
+    @patch("console.views.stripe.billing_portal.Session.create")
+    def test_seat_portal_redirects(self, mock_portal):
+        mock_portal.return_value = MagicMock(url="https://stripe.test/portal")
+        billing = self.org.billing
+        billing.purchased_seats = 2
+        billing.stripe_customer_id = "cus_portal"
+        billing.stripe_subscription_id = "sub_portal"
+        billing.save(update_fields=["purchased_seats", "stripe_customer_id", "stripe_subscription_id"])
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_portal", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/portal")
+        mock_portal.assert_called_once()
+
+    def test_seat_portal_requires_membership(self):
+        stranger = get_user_model().objects.create_user(email="another@example.com", password="pw", username="another")
+        self.client.force_login(stranger)
+        url = reverse("organization_seat_portal", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 403)
 
     @tag("batch_organizations")
     def test_reject_flow(self):
@@ -315,6 +391,27 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
         self.assertEqual(resp.status_code, 302)
         m = OrganizationMembership.objects.get(org=self.org, user=self.viewer)
         self.assertEqual(m.role, OrganizationMembership.OrgRole.ADMIN)
+
+    def test_org_owned_agent_requires_paid_seat(self):
+        owner = self.owner
+        seatless_org = Organization.objects.create(name="Seatless", slug="seatless", created_by=owner)
+        OrganizationMembership.objects.create(
+            org=seatless_org,
+            user=owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+
+        browser = BrowserUseAgent.objects.create(user=owner, name="Seatless Browser")
+        agent = PersistentAgent(
+            user=owner,
+            organization=seatless_org,
+            name="Seatless Agent",
+            charter="do things",
+            browser_use_agent=browser,
+        )
+
+        with self.assertRaises(ValidationError):
+            agent.full_clean()
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')

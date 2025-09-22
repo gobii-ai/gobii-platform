@@ -225,6 +225,9 @@ def handle_subscription_event(event, **kwargs):
             billing = organization_billing
             if billing:
                 updates: list[str] = []
+                if billing.purchased_seats != 0:
+                    billing.purchased_seats = 0
+                    updates.append("purchased_seats")
                 if getattr(billing, "stripe_subscription_id", None):
                     billing.stripe_subscription_id = None
                     updates.append("stripe_subscription_id")
@@ -303,6 +306,16 @@ def handle_subscription_event(event, **kwargs):
                 }
             )
         else:
+            seats = 0
+            try:
+                seats = int(licensed_item.get("quantity") or 0)
+            except (TypeError, ValueError):
+                seats = 0
+
+            prev_seats = 0
+            if organization_billing:
+                prev_seats = getattr(organization_billing, "purchased_seats", 0)
+
             billing = mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
             if billing:
                 updates: list[str] = []
@@ -316,6 +329,10 @@ def handle_subscription_event(event, **kwargs):
                 if getattr(billing, 'stripe_subscription_id', None) != new_subscription_id:
                     billing.stripe_subscription_id = new_subscription_id
                     updates.append("stripe_subscription_id")
+
+                if seats and getattr(billing, 'purchased_seats', None) != seats:
+                    billing.purchased_seats = seats
+                    updates.append("purchased_seats")
 
                 if hasattr(billing, 'cancel_at'):
                     cancel_at = getattr(sub, 'cancel_at', None)
@@ -331,3 +348,19 @@ def handle_subscription_event(event, **kwargs):
 
                 if updates:
                     billing.save(update_fields=updates)
+
+            if seats > 0:
+                seats_to_grant = 0
+                if source_data.get("billing_reason") in {"subscription_create", "subscription_cycle"}:
+                    seats_to_grant = seats
+                elif source_data.get("billing_reason") == "subscription_update" and seats > prev_seats:
+                    seats_to_grant = seats - prev_seats
+
+                if seats_to_grant > 0:
+                    TaskCreditService.grant_subscription_credits_for_organization(
+                        owner,
+                        seats=seats_to_grant,
+                        plan=plan,
+                        invoice_id=invoice_id or "",
+                        subscription=sub,
+                    )

@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='organizationbilling',
             name='purchased_seats',
-            field=models.PositiveIntegerField(default=1, help_text='Number of seats purchased for this organization (must cover active members + pending invites).'),
+            field=models.PositiveIntegerField(default=0, help_text='Number of seats purchased for this organization (must cover active members + pending invites beyond the founder).'),
         ),
         migrations.AlterField(
             model_name='organizationbilling',
