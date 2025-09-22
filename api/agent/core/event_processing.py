@@ -23,6 +23,7 @@ from pottery import Redlock
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction, close_old_connections
 from django.db.utils import OperationalError
+from django.contrib.auth import get_user_model
 from tenacity import (
     before_sleep_log,
     retry,
@@ -58,11 +59,16 @@ from ..tools.sqlite_batch import execute_sqlite_batch, get_sqlite_batch_tool
 from ..tools.http_request import execute_http_request, get_http_request_tool
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
 from ..tools.request_contact_permission import execute_request_contact_permission, get_request_contact_permission_tool
+from ..tools.web_message_sender import (
+    execute_send_web_message,
+    get_send_web_message_tool,
+)
 from ..tools.mcp_tools import (
     get_search_tools_tool,
     execute_search_tools, execute_mcp_tool
 )
 from ..tools.mcp_manager import get_mcp_manager
+from ..events import publish_agent_event, get_agent_processing_lock_key
 from ...models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -78,6 +84,8 @@ from ...models import (
     PersistentAgentStepSnapshot,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
+    PersistentAgentConversationParticipant,
+    parse_web_address,
 )
 from .schedule_parser import ScheduleParser
 from config import settings
@@ -562,7 +570,7 @@ def process_agent_events(
     set_budget_context(ctx)
 
     # Use distributed lock to ensure only one event processing call per agent
-    lock_key = f"agent-event-processing:{persistent_agent_id}"
+    lock_key = get_agent_processing_lock_key(persistent_agent_id)
     pending_key = f"agent-event-processing:pending:{persistent_agent_id}"
 
     redis_client = get_redis_client()
@@ -593,6 +601,10 @@ def process_agent_events(
         logger.info("Acquired distributed lock for agent %s", persistent_agent_id)
         span.add_event("Distributed lock acquired")
         span.set_attribute("lock.acquired", True)
+        publish_agent_event(
+            persistent_agent_id,
+            kind="processing.started",
+        )
 
         # ---------------- SQLite state context ---------------- #
         with agent_sqlite_db(str(persistent_agent_id)) as _sqlite_db_path:
@@ -642,6 +654,13 @@ def process_agent_events(
                 # this may be a MagicMock instance – treat that as 0 to avoid eager-execution loops.
                 if isinstance(deleted_count, int) and deleted_count > 0:
                     should_schedule_follow_up = True
+
+        if lock_acquired:
+            publish_agent_event(
+                persistent_agent_id,
+                kind="processing.finished",
+                payload={"follow_up_scheduled": bool(should_schedule_follow_up)},
+            )
 
         if should_schedule_follow_up:
             logger.info("Scheduling follow-up event processing for agent %s due to pending flag", persistent_agent_id)
@@ -1092,6 +1111,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         result = execute_send_email(agent, tool_params)
                     elif tool_name == "send_sms":
                         result = execute_send_sms(agent, tool_params)
+                    elif tool_name == "send_web_message":
+                        result = execute_send_web_message(agent, tool_params)
                     elif tool_name == "update_schedule":
                         result = execute_update_schedule(agent, tool_params)
                     elif tool_name == "update_charter":
@@ -1622,9 +1643,37 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     allowed_lines.append("IF YOU NEED TO CONTACT SOMEONE NEW, USE THE 'request_contact_permission' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE DETAILS.")
     allowed_lines.append("You do not have to message or reply to everyone; you may choose the best contact or contacts for your needs.")
 
+    UserModel = get_user_model()
+    web_contacts: list[str] = []
+    web_participants = (
+        PersistentAgentConversationParticipant.objects.filter(
+            conversation__owner_agent=agent,
+            conversation__channel=CommsChannel.WEB,
+            role=PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
+        )
+        .select_related("conversation", "endpoint")
+    )
+    for participant in web_participants:
+        endpoint = participant.endpoint
+        address = endpoint.address
+        parsed = parse_web_address(address)
+        label: str = participant.conversation.display_name or address
+        if parsed and parsed[0] == "user":
+            try:
+                web_user = UserModel.objects.get(id=parsed[1])
+                label = (
+                    getattr(web_user, "get_full_name", lambda: "")()
+                    or getattr(web_user, "email", "")
+                    or getattr(web_user, "username", "")
+                    or label
+                )
+            except UserModel.DoesNotExist:
+                label = label
+        web_contacts.append(f"- web: {label} ({address})")
+
     contacts_group.section_text(
         "allowed_contacts",
-        "\n".join(allowed_lines),
+        "\n".join(allowed_lines + ( ["Web console contacts:"] + web_contacts if web_contacts else [] )),
         weight=2  # Higher weight since these are explicitly allowed
     )
 
@@ -1778,6 +1827,8 @@ def _get_system_instruction(
         "You will typically want to contact the user and let them know that you updated your charter/schedule if relevant, so they can give you corrections if needed. "
         "Don't use the word 'charter' when talking to the user, just talk as if you are human --as far as they are concerned, you are an employee/intern with a job. "
         "If you contact the user with information, make sure it is *new* information, do not repeat things you have already sent to the user. "
+        "When replying inside the Gobii console web chat, ALWAYS call the 'send_web_message' tool. "
+        "Multiple humans may share your console workspace simultaneously, so you must pass the exact person you are speaking with by providing the 'user_id' from their inbound web message (raw_payload.user_id) or by parsing the conversation address (for example, 'web:user:<uuid>'). Never guess or reuse another person's identifier. "
         "You may not even need to send a message at all if there is nothing new."
         "You may break work down into multiple web agent tasks. "
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
@@ -1899,6 +1950,10 @@ def _get_system_instruction(
                     "Immediately after sending your welcome message, call search_tools to find and automatically enable the best tools to efficiently and accurately complete your task with the most timely information. You can run search_tools again later as your job evolves. "
                     "Use phrasing like 'I'm your new agent' vs just 'I'm an agent' or 'I'm an assistant'."
                 )
+                if channel == CommsChannel.WEB:
+                    welcome_instruction += (
+                        " Use the 'send_web_message' tool and provide the exact user_id from their inbound web message (raw_payload.user_id or the conversation address like 'web:user:<uuid>') so your reply reaches the right human."
+                    )
                 return welcome_instruction + "\n\n" + base_prompt
 
     return base_prompt
@@ -2011,7 +2066,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
             # Exclude send_email and send_sms tool calls entirely from prompt history,
             # since they are listed in the agent comms part of the context
-            if tc.tool_name in ("send_email", "send_sms"):
+            if tc.tool_name in ("send_email", "send_sms", "send_web_message"):
                 continue
 
             components = {
@@ -2161,6 +2216,7 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         },
         get_send_email_tool(),
         get_send_sms_tool(),
+        get_send_web_message_tool(),
         get_search_web_tool(),
         get_spawn_web_task_tool(),
         get_update_schedule_tool(),

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Keep streams bounded while retaining enough history for reconnects.
 _MAX_STREAM_LENGTH = 2000
+_PROCESSING_LOCK_TEMPLATE = "agent-event-processing:{agent_id}"
 
 
 def _stream_key(agent_id: str | UUID) -> str:
@@ -24,6 +25,22 @@ def _stream_key(agent_id: str | UUID) -> str:
 def get_agent_event_stream_key(agent_id: str | UUID) -> str:
     """Return the Redis stream key for a persistent agent."""
     return _stream_key(agent_id)
+
+
+def get_agent_processing_lock_key(agent_id: str | UUID) -> str:
+    """Return the Redis lock key used while processing agent events."""
+    return _PROCESSING_LOCK_TEMPLATE.format(agent_id=str(agent_id))
+
+
+def is_agent_processing(agent_id: str | UUID) -> bool:
+    """Return True if the agent's processing lock is currently held."""
+
+    try:
+        redis = get_redis_client()
+        return bool(redis.exists(get_agent_processing_lock_key(agent_id)))
+    except Exception:  # pragma: no cover - defensive; processing status should not break views
+        logger.debug("Failed to check processing lock state for %s", agent_id, exc_info=True)
+        return False
 
 
 def _serialise_fields(fields: Mapping[str, Any]) -> dict[str, str]:

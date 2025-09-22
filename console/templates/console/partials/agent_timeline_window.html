@@ -6,7 +6,8 @@
      data-older="{{ timeline_window.window_oldest_cursor|default:'' }}"
      data-newer="{{ current_newest_cursor|default:'' }}"
      data-has-more-older="{{ timeline_window.has_more_older|yesno:'true,false' }}"
-     data-has-more-newer="{{ timeline_window.has_more_newer|yesno:'true,false' }}"></div>
+     data-has-more-newer="{{ timeline_window.has_more_newer|yesno:'true,false' }}"
+     data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>
 
 <div id="timeline-load-older" hx-swap-oob="true" class="flex justify-center border-b border-slate-100 py-2 text-xs text-slate-500">
   {% if timeline_window.has_more_older %}
@@ -27,3 +28,5 @@
         type="button">
   Jump to latest
 </button>
+
+<div id="processing-state" hx-swap-oob="true" class="hidden" style="display:none" data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>

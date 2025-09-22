@@ -93,6 +93,7 @@ from api.agent.comms.message_service import (
     _ensure_participant,
     ingest_web_message,
 )
+from api.agent.events import is_agent_processing
 from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMembership
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
@@ -5227,6 +5228,13 @@ class AgentWorkspaceView(AgentAccessMixin, TemplateView):
         timeline_window = fetch_timeline_window(agent, limit=TIMELINE_DEFAULT_LIMIT)
         window_url = reverse("agent_timeline_window", args=[agent.id])
         event_stream_url = reverse("api:agent-events-stream", args=[agent.id])
+        processing_active = is_agent_processing(agent.id)
+        logger.info(
+            "AgentWorkspaceView: processing_active=%s agent=%s user=%s",
+            processing_active,
+            agent.id,
+            self.request.user.id,
+        )
         context.update(
             {
                 "timeline_window": timeline_window,
@@ -5236,6 +5244,7 @@ class AgentWorkspaceView(AgentAccessMixin, TemplateView):
                 "timeline_older_url": f"{window_url}?direction=older",
                 "timeline_newer_url": f"{window_url}?direction=newer",
                 "event_stream_url": event_stream_url,
+                "processing_active": processing_active,
             }
         )
         return context
@@ -5286,7 +5295,17 @@ class AgentTimelineWindowView(AgentAccessMixin, TemplateView):
             "timeline_window_url": window_url,
             "timeline_older_url": f"{window_url}?direction=older",
             "timeline_newer_url": f"{window_url}?direction=newer",
+            "processing_active": is_agent_processing(agent.id),
         }
+
+        logger.info(
+            "AgentTimelineWindowView: direction=%s cursor=%s processing_active=%s agent=%s user=%s",
+            direction,
+            cursor,
+            context["processing_active"],
+            agent.id,
+            self.request.user.id,
+        )
 
         return render(request, self.template_name, context)
 

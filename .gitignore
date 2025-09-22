@@ -33,3 +33,4 @@ mediafiles/
 # AI
 .claude/
 .ra-aid/
+/.gemini-clipboard/
