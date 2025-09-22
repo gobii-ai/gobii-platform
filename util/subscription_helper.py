@@ -386,7 +386,7 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
 
 
 def report_organization_task_usage_to_stripe(organization, quantity: int = 1,
-                                             meter_id=settings.STRIPE_ORG_TASK_METER_ID,
+                                             meter_id=settings.STRIPE_ORG_TEAM_TASK_METER_ID,
                                              idempotency_key: str | None = None):
     """Report additional task usage for an organization via Stripe metering."""
     with traced("SUBSCRIPTION Report Org Task Usage"):

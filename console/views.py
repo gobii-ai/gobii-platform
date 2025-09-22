@@ -3959,18 +3959,24 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                 reverse("organization_detail", kwargs={"org_id": org.id})
             ) + "?seats_cancelled=1"
 
+            line_items = [
+                {
+                    "price": price_id,
+                    "quantity": seat_count,
+                }
+            ]
+
+            overage_price_id = getattr(settings, "STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", "")
+            if overage_price_id:
+                line_items.append({"price": overage_price_id})
+
             session = stripe.checkout.Session.create(
                 customer=customer.id,
                 mode="subscription",
                 success_url=success_url,
                 cancel_url=cancel_url,
                 allow_promotion_codes=True,
-                line_items=[
-                    {
-                        "price": price_id,
-                        "quantity": seat_count,
-                    }
-                ],
+                line_items=line_items,
                 metadata={
                     "org_id": str(org.id),
                     "seat_requestor_id": str(request.user.id),

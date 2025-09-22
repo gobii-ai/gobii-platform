@@ -568,10 +568,16 @@ DJSTRIPE_USE_NATIVE_JSONFIELD = True
 STRIPE_STARTUP_PRICE_ID = env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup")
 STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID = env("STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_startup_additional_task")
 STRIPE_STARTUP_PRODUCT_ID = env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup")
-STRIPE_ORG_TEAM_PRICE_ID = env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team")
 STRIPE_TASK_METER_ID = env("STRIPE_TASK_METER_ID", default="meter_dummy_task")
 STRIPE_TASK_METER_EVENT_NAME = env("STRIPE_TASK_METER_EVENT_NAME", default="task")
-STRIPE_ORG_TASK_METER_ID = env("STRIPE_ORG_TASK_METER_ID", default="meter_dummy_org_task")
+
+# Stripe - Orgs - Team
+STRIPE_ORG_TEAM_PRODUCT_ID=env("STRIPE_ORG_TEAM_PRODUCT_ID", default="prod_dummy_org_team")
+STRIPE_ORG_TEAM_PRICE_ID=env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team")
+STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional")
+STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task")
+STRIPE_ORG_TEAM_TASK_METER_ID=env("STRIPE_ORG_TASK_METER_ID", default="meter_dummy_org_task")
+STRIPE_ORG_TEAM_TASK_METER_EVENT_NAME=env("STRIPE_ORG_TASK_METER_EVENT_NAME", default="task_org_team_task_meter_name")
 
 # Credits configuration
 # How many credits a single task consumes from plan credits.
