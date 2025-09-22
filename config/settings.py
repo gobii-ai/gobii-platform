@@ -323,6 +323,17 @@ AUTHENTICATION_BACKENDS = (
 )
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+
+# Domains declined during signup (lowercase, comma separated via env override)
+SIGNUP_BLOCKED_EMAIL_DOMAINS = [
+    domain.strip().lower()
+    for domain in env(
+        "SIGNUP_BLOCKED_EMAIL_DOMAINS",
+        default="mailslurp.biz",
+    ).split(",")
+    if domain.strip()
+]
+
 # Mailgun credentials only exist in hosted/prod environments; local proprietary
 # runs typically omit them. Use that to decide whether to enforce email
 # verification, while still allowing an explicit override via ENV.
@@ -334,6 +345,7 @@ ACCOUNT_EMAIL_VERIFICATION = env(
     default="mandatory" if GOBII_PROPRIETARY_MODE and MAILGUN_API_KEY else "none",
 )
 ACCOUNT_LOGOUT_ON_GET = True
+ACCOUNT_ADAPTER = "config.account_adapter.GobiiAccountAdapter"
 
 # TODO: Test the removal of this; got deprecation warning
 #ACCOUNT_EMAIL_REQUIRED = True

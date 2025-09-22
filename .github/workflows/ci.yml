@@ -159,6 +159,8 @@ jobs:
             tag: batch_schedule
           - batch: owner_billing
             tag: batch_owner_billing
+          - batch: email_blocklist
+            tag: batch_email_blocklist
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
