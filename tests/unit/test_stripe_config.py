@@ -1,12 +1,12 @@
 from django.conf import settings
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from api.models import StripeConfig
 from config import plans as plan_module
 from config.stripe_config import get_stripe_settings, invalidate_stripe_settings_cache
 from util.payments_helper import PaymentsHelper
 
-
+@tag("batch_stripe_config")
 class StripeConfigHelperTests(TestCase):
     def setUp(self):
         StripeConfig.objects.all().delete()
