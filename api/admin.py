@@ -7,7 +7,7 @@ from django.db.models import Count  # For annotated counts
 from django.db.models.expressions import OuterRef, Exists
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from .admin_forms import TestSmsForm, GrantPlanCreditsForm, GrantCreditsByUserIdsForm, AgentEmailAccountForm
+from .admin_forms import TestSmsForm, GrantPlanCreditsForm, GrantCreditsByUserIdsForm, AgentEmailAccountForm, StripeConfigForm
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, ProxyHealthCheckSpec, ProxyHealthCheckResult,
@@ -15,6 +15,7 @@ from .models import (
     PersistentAgentStep, CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName,
+    StripeConfig,
     MeteringBatch,
 )
 from django.contrib.auth import get_user_model
@@ -41,6 +42,69 @@ class ApiKeyAdmin(admin.ModelAdmin):
 class UserQuotaAdmin(admin.ModelAdmin):
     list_display = ("user", "agent_limit")
     search_fields = ("user__email", "user__id")
+
+
+@admin.register(StripeConfig)
+class StripeConfigAdmin(admin.ModelAdmin):
+    form = StripeConfigForm
+    list_display = ("release_env", "live_mode", "updated_at")
+    search_fields = ("release_env",)
+    list_filter = ("live_mode",)
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "live_secret_key_status",
+        "test_secret_key_status",
+        "webhook_secret_status",
+    )
+
+    fieldsets = (
+        (None, {"fields": ("release_env", "live_mode")} ),
+        (
+            "Secrets",
+            {
+                "fields": (
+                    "live_secret_key",
+                    "clear_live_secret_key",
+                    "live_secret_key_status",
+                    "test_secret_key",
+                    "clear_test_secret_key",
+                    "test_secret_key_status",
+                    "webhook_secret",
+                    "clear_webhook_secret",
+                    "webhook_secret_status",
+                )
+            },
+        ),
+        (
+            "Identifiers",
+            {
+                "fields": (
+                    "startup_price_id",
+                    "startup_additional_task_price_id",
+                    "startup_product_id",
+                    "org_team_product_id",
+                    "task_meter_id",
+                    "task_meter_event_name",
+                    "org_task_meter_id",
+                )
+            },
+        ),
+        ("Metadata", {"fields": ("created_at", "updated_at")}),
+    )
+
+    def live_secret_key_status(self, obj):
+        return "Configured" if obj.live_secret_key_encrypted else "Not set"
+
+    def test_secret_key_status(self, obj):
+        return "Configured" if obj.test_secret_key_encrypted else "Not set"
+
+    def webhook_secret_status(self, obj):
+        return "Configured" if obj.webhook_secret_encrypted else "Not set"
+
+    live_secret_key_status.short_description = "Live key"
+    test_secret_key_status.short_description = "Test key"
+    webhook_secret_status.short_description = "Webhook secret"
 
 
 # Ownership filter reused across models

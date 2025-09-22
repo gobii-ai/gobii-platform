@@ -1,5 +1,9 @@
 import os
 
+from django.core.exceptions import AppRegistryNotReady
+
+from config.stripe_config import get_stripe_settings
+
 
 # Python has no int min constant, so we define our own
 AGENTS_UNLIMITED = -2147483648
@@ -53,11 +57,26 @@ PLAN_CONFIG = {
 
 }
 
+
+def _refresh_plan_products() -> None:
+    """Update plan product IDs from StripeConfig storage."""
+    try:
+        stripe_settings = get_stripe_settings()
+    except AppRegistryNotReady:
+        return
+
+    if stripe_settings.startup_product_id:
+        PLAN_CONFIG["startup"]["product_id"] = stripe_settings.startup_product_id
+    if stripe_settings.org_team_product_id:
+        PLAN_CONFIG["org_team"]["product_id"] = stripe_settings.org_team_product_id
+
+
 def get_plan_product_id(plan_name: str) -> str | None:
     """
     Returns the product ID for the given plan name.
     If the plan name is not found, returns None.
     """
+    _refresh_plan_products()
     plan = PLAN_CONFIG.get(plan_name.lower())
     if plan:
         return plan["product_id"]
@@ -68,8 +87,10 @@ def get_plan_by_product_id(product_id: str) -> dict[str, int | str] | None:
     Returns the plan name for the given product ID.
     If the product ID is not found, returns None.
     """
+    _refresh_plan_products()
     for plan_name, config in PLAN_CONFIG.items():
         if config["product_id"] == product_id:
             return config
 
     return None
+

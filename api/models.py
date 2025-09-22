@@ -1336,6 +1336,79 @@ class UserPhoneNumber(models.Model):
     def __str__(self) -> str:
         return f"{self.user_id}:{self.phone_number}"
 
+class StripeConfig(models.Model):
+    """Per-environment Stripe credentials and identifiers."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    release_env = models.CharField(
+        max_length=32,
+        unique=True,
+        help_text="Environment this configuration applies to (e.g., prod, staging, local).",
+    )
+    live_mode = models.BooleanField(
+        default=False,
+        help_text="Whether this configuration should run Stripe in live mode.",
+    )
+
+    live_secret_key_encrypted = models.BinaryField(null=True, blank=True)
+    test_secret_key_encrypted = models.BinaryField(null=True, blank=True)
+    webhook_secret_encrypted = models.BinaryField(null=True, blank=True)
+
+    startup_price_id = models.CharField(max_length=128, blank=True, default="")
+    startup_additional_task_price_id = models.CharField(max_length=128, blank=True, default="")
+    startup_product_id = models.CharField(max_length=128, blank=True, default="")
+    org_team_product_id = models.CharField(max_length=128, blank=True, default="")
+    task_meter_id = models.CharField(max_length=128, blank=True, default="")
+    task_meter_event_name = models.CharField(max_length=128, blank=True, default="")
+    org_task_meter_id = models.CharField(max_length=128, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["release_env"]
+        verbose_name = "Stripe Configuration"
+        verbose_name_plural = "Stripe Configuration"
+
+    def __str__(self) -> str:
+        return f"StripeConfig<{self.release_env}>"
+
+    def _decrypt(self, value: bytes | None) -> str:
+        if not value:
+            return ""
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.decrypt_value(value)
+
+    def _encrypt(self, value: str | None) -> bytes | None:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @property
+    def live_secret_key(self) -> str:
+        return self._decrypt(self.live_secret_key_encrypted)
+
+    def set_live_secret_key(self, value: str | None) -> None:
+        self.live_secret_key_encrypted = self._encrypt(value)
+
+    @property
+    def test_secret_key(self) -> str:
+        return self._decrypt(self.test_secret_key_encrypted)
+
+    def set_test_secret_key(self, value: str | None) -> None:
+        self.test_secret_key_encrypted = self._encrypt(value)
+
+    @property
+    def webhook_secret(self) -> str:
+        return self._decrypt(self.webhook_secret_encrypted)
+
+    def set_webhook_secret(self, value: str | None) -> None:
+        self.webhook_secret_encrypted = self._encrypt(value)
+
+
 class MeteringBatch(models.Model):
     """Audit record linking a batch of reserved usage to a Stripe meter event.
 

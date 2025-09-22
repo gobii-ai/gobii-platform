@@ -1,7 +1,7 @@
 # admin_forms.py  (optional file)
 from django import forms
 from django.forms import ModelForm
-from .models import CommsChannel, AgentEmailAccount, LLMProvider
+from .models import CommsChannel, AgentEmailAccount, LLMProvider, StripeConfig
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 class AgentEmailAccountForm(ModelForm):
@@ -261,6 +261,88 @@ class LLMProviderForm(ModelForm):
         elif api_key:
             from .encryption import SecretsEncryption
             instance.api_key_encrypted = SecretsEncryption.encrypt_value(api_key)
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
+
+class StripeConfigForm(ModelForm):
+    """Admin form for managing Stripe configuration secrets."""
+
+    live_secret_key = forms.CharField(
+        label="Stripe live secret key",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leave blank to keep existing key.",
+    )
+    clear_live_secret_key = forms.BooleanField(
+        label="Clear live secret key",
+        required=False,
+        initial=False,
+    )
+    test_secret_key = forms.CharField(
+        label="Stripe test secret key",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leave blank to keep existing key.",
+    )
+    clear_test_secret_key = forms.BooleanField(
+        label="Clear test secret key",
+        required=False,
+        initial=False,
+    )
+    webhook_secret = forms.CharField(
+        label="Stripe webhook signing secret",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leave blank to keep existing key.",
+    )
+    clear_webhook_secret = forms.BooleanField(
+        label="Clear webhook secret",
+        required=False,
+        initial=False,
+    )
+
+    class Meta:
+        model = StripeConfig
+        fields = (
+            "release_env",
+            "live_mode",
+            "startup_price_id",
+            "startup_additional_task_price_id",
+            "startup_product_id",
+            "org_team_product_id",
+            "task_meter_id",
+            "task_meter_event_name",
+            "org_task_meter_id",
+        )
+
+    def clean_release_env(self):
+        value = self.cleaned_data.get("release_env", "")
+        return value.strip()
+
+    def save(self, commit: bool = True):
+        instance: StripeConfig = super().save(commit=False)
+
+        live_secret = self.cleaned_data.get("live_secret_key")
+        if self.cleaned_data.get("clear_live_secret_key"):
+            instance.live_secret_key_encrypted = None
+        elif live_secret:
+            instance.set_live_secret_key(live_secret.strip())
+
+        test_secret = self.cleaned_data.get("test_secret_key")
+        if self.cleaned_data.get("clear_test_secret_key"):
+            instance.test_secret_key_encrypted = None
+        elif test_secret:
+            instance.set_test_secret_key(test_secret.strip())
+
+        webhook_secret = self.cleaned_data.get("webhook_secret")
+        if self.cleaned_data.get("clear_webhook_secret"):
+            instance.webhook_secret_encrypted = None
+        elif webhook_secret:
+            instance.set_webhook_secret(webhook_secret.strip())
+
         if commit:
             instance.save()
             self.save_m2m()
