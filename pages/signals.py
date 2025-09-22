@@ -282,8 +282,8 @@ def handle_subscription_event(event, **kwargs):
 
             try:
                 ub = owner.billing
-                if getattr(sub, 'current_period_start', None):
-                    new_day = sub.current_period_start.day
+                if getattr(sub.stripe_data, 'current_period_start', None):
+                    new_day = sub.stripe_data['current_period_start'].day
                     if ub.billing_cycle_anchor != new_day:
                         ub.billing_cycle_anchor = new_day
                         ub.save(update_fields=["billing_cycle_anchor"])
@@ -319,8 +319,8 @@ def handle_subscription_event(event, **kwargs):
             billing = mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
             if billing:
                 updates: list[str] = []
-                if getattr(sub, 'current_period_start', None):
-                    new_day = sub.current_period_start.day
+                if getattr(sub.stripe_data, 'current_period_start', None):
+                    new_day = sub.stripe_data['current_period_start'].day
                     if billing.billing_cycle_anchor != new_day:
                         billing.billing_cycle_anchor = new_day
                         updates.append("billing_cycle_anchor")

@@ -87,9 +87,9 @@ def _rollup_for_user(user) -> int:
 
     # Use Stripe subscription period when available; otherwise fall back to local anchor bounds
     use_stripe_bounds = False
-    if getattr(sub, 'current_period_start', None) and getattr(sub, 'current_period_end', None):
-        start_dt = _to_aware_dt(sub.current_period_start, as_start=True)
-        end_dt = _to_aware_dt(sub.current_period_end, as_start=False)
+    if getattr(sub.stripe_data, 'current_period_start', None) and getattr(sub.stripe_data, 'current_period_end', None):
+        start_dt = _to_aware_dt(sub.stripe_data['current_period_start'], as_start=True)
+        end_dt = _to_aware_dt(sub.stripe_data['current_period_end'], as_start=False)
         if start_dt is not None and end_dt is not None:
             use_stripe_bounds = True
             period_start_date = start_dt.date()

@@ -21,7 +21,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.text import slugify
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone as dt_timezone
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
@@ -255,8 +255,14 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
         context['paid_subscriber'] = sub is not None
 
         if sub:
-            context['period_start_date'] = sub.current_period_start.strftime("%B %d, %Y")
-            context['period_end_date'] = sub.current_period_end.strftime("%B %d, %Y")
+            start = sub.stripe_data['current_period_start']
+            end = sub.stripe_data['current_period_end']
+
+            dt_start = datetime.fromtimestamp(int(start), tz=dt_timezone.utc)
+            dt_end = datetime.fromtimestamp(int(end), tz=dt_timezone.utc)
+
+            context['period_start_date'] = dt_start.strftime("%B %d, %Y")
+            context['period_end_date'] = dt_end.strftime("%B %d, %Y")
 
         # Get task status breakdown
         from django.db.models import Count
@@ -546,11 +552,20 @@ class BillingView(ConsoleViewMixin, TemplateView):
         paid_subscriber = sub is not None
 
         if sub:
-            context['period_start_date'] = sub.current_period_start.strftime("%B %d, %Y")
-            context['period_end_date'] = sub.current_period_end.strftime("%B %d, %Y")
+            start = sub.stripe_data['current_period_start']
+            end = sub.stripe_data['current_period_end']
+            cancel_at = getattr(sub.stripe_data, "cancel_at", None)
+
+            dt_start = datetime.fromtimestamp(int(start), tz=dt_timezone.utc)
+            dt_end = datetime.fromtimestamp(int(end), tz=dt_timezone.utc)
+            dt_cancel_at = datetime.fromtimestamp(int(cancel_at), tz=dt_timezone.utc) if cancel_at else None
+
+
+            context['period_start_date'] = dt_start.strftime("%B %d, %Y")
+            context['period_end_date'] = dt_end.strftime("%B %d, %Y")
             context['subscription_active'] = sub.is_status_current()
-            context['cancel_at'] = sub.cancel_at.strftime("%B %d, %Y") if sub.cancel_at else None
-            context['cancel_at_period_end'] = sub.cancel_at_period_end
+            context['cancel_at'] = dt_cancel_at
+            context['cancel_at_period_end'] = getattr(sub.stripe_data, "cancel_at_period_end", False)
 
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber

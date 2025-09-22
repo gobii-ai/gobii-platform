@@ -135,7 +135,6 @@ def get_active_subscription(owner) -> Subscription | None:
         subs = list(qs)
         subs.sort(key=lambda s: s.stripe_data.get("cancel_at_period_end") or 0)
 
-
         span.set_attribute("owner.customer.id", str(customer.id))
         logger.debug(
             "get_active_subscription %s %s subscriptions: %s",
@@ -877,10 +876,14 @@ def calculate_extra_tasks_used_during_subscription_period(user):
     """
     with traced("CREDITS Calculate Extra Tasks Used During Subscription Period"):
         subscription = get_active_subscription(user)
-        sub_start = subscription.current_period_start if subscription else None
-        sub_end = subscription.current_period_end if subscription else None
 
-        if not subscription or not sub_start or not sub_end:
+        if not subscription:
+            return 0
+
+        sub_start = getattr(subscription.stripe_data, "current_period_start", None)
+        sub_end = getattr(subscription.stripe_data, "current_period_end", None)
+
+        if sub_start or not sub_end:
             return 0
 
         TaskCredit = apps.get_model("api", "TaskCredit")
