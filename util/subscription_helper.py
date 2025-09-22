@@ -366,7 +366,7 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id: str | None = 
 
         stripe_settings = get_stripe_settings()
 
-        # Use default meter ID if none provided (kept for backwards compat logging)
+        # se default meter ID if meter_id is not provided or is falsy (e.g., None or empty string).
         if not meter_id:
             meter_id = stripe_settings.task_meter_id
 

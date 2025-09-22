@@ -325,23 +325,17 @@ class StripeConfigForm(ModelForm):
     def save(self, commit: bool = True):
         instance: StripeConfig = super().save(commit=False)
 
-        live_secret = self.cleaned_data.get("live_secret_key")
-        if self.cleaned_data.get("clear_live_secret_key"):
-            instance.live_secret_key_encrypted = None
-        elif live_secret:
-            instance.set_live_secret_key(live_secret.strip())
-
-        test_secret = self.cleaned_data.get("test_secret_key")
-        if self.cleaned_data.get("clear_test_secret_key"):
-            instance.test_secret_key_encrypted = None
-        elif test_secret:
-            instance.set_test_secret_key(test_secret.strip())
-
-        webhook_secret = self.cleaned_data.get("webhook_secret")
-        if self.cleaned_data.get("clear_webhook_secret"):
-            instance.webhook_secret_encrypted = None
-        elif webhook_secret:
-            instance.set_webhook_secret(webhook_secret.strip())
+        secrets_to_process = [
+            ("live_secret_key", "clear_live_secret_key", instance.set_live_secret_key),
+            ("test_secret_key", "clear_test_secret_key", instance.set_test_secret_key),
+            ("webhook_secret", "clear_webhook_secret", instance.set_webhook_secret),
+        ]
+        for secret_field, clear_field, setter_method in secrets_to_process:
+            secret_value = self.cleaned_data.get(secret_field)
+            if self.cleaned_data.get(clear_field):
+                setter_method(None)
+            elif secret_value:
+                setter_method(secret_value.strip())
 
         if commit:
             instance.save()
