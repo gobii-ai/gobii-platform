@@ -39,6 +39,10 @@ def _build_event_payload(
             ]
         },
         "status": status,
+        "cancel_at": None,
+        "cancel_at_period_end": False,
+        "current_period_start": None,
+        "current_period_end": None,
     }
 
 
@@ -64,9 +68,9 @@ class SubscriptionSignalTests(TestCase):
         sub.status = "active"
         sub.id = "sub_123"
         sub.customer = SimpleNamespace(subscriber=subscriber)
-        sub.current_period_start = aware_start
-        sub.current_period_end = aware_end
         sub.stripe_data = _build_event_payload()
+        sub.stripe_data['current_period_start'] = str(aware_start)
+        sub.stripe_data['current_period_end'] = str(aware_end)
         return sub
 
     @tag("batch_pages")
@@ -145,10 +149,6 @@ class SubscriptionSignalOrganizationTests(TestCase):
         sub.status = "active"
         sub.id = "sub_org"
         sub.customer = SimpleNamespace(id="cus_org", subscriber=None)
-        sub.current_period_start = aware_start
-        sub.current_period_end = aware_end
-        sub.cancel_at = None
-        sub.cancel_at_period_end = False
         payload = _build_event_payload(
             invoice_id=payload_invoice,
             quantity=quantity,
@@ -156,6 +156,11 @@ class SubscriptionSignalOrganizationTests(TestCase):
             product="prod_org",
         )
         sub.stripe_data = payload
+        sub.stripe_data['current_period_start'] = aware_start
+        sub.stripe_data['current_period_end'] = aware_end
+        sub.stripe_data['cancel_at'] = None
+        sub.stripe_data['cancel_at_period_end'] = False
+
         return sub, payload
 
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")

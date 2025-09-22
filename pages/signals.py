@@ -1,7 +1,11 @@
 import uuid
 import json
 from datetime import timedelta, datetime
+from numbers import Number
+from typing import Any, Mapping
+
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from allauth.account.signals import user_signed_up, user_logged_in, user_logged_out
 from django.dispatch import receiver
@@ -33,6 +37,69 @@ UTM_MAPPING = {
     'content': 'utm_content',
     'term': 'utm_term'
 }
+
+
+def _get_stripe_data_value(container: Any, key: str) -> Any:
+    """Fetch a key from Stripe payloads regardless of dict/object shape."""
+    if not container:
+        return None
+    if isinstance(container, Mapping):
+        return container.get(key)
+    try:
+        return getattr(container, key)
+    except AttributeError:
+        return None
+
+
+def _coerce_datetime(value: Any) -> datetime | None:
+    """Normalise Stripe timestamps to aware datetimes."""
+    if value in (None, ""):
+        return None
+
+    candidate: datetime | None = None
+
+    if isinstance(value, datetime):
+        candidate = value
+    elif isinstance(value, Number):
+        try:
+            candidate = datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            candidate = None
+    elif isinstance(value, str):
+        parsed = parse_datetime(value.strip()) if value.strip() else None
+        if parsed is not None:
+            candidate = parsed
+        else:
+            try:
+                candidate = datetime.fromtimestamp(float(value), tz=timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                candidate = None
+
+    if candidate is None:
+        return None
+
+    if timezone.is_naive(candidate):
+        candidate = timezone.make_aware(candidate, timezone=timezone.utc)
+
+    return candidate
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    """Convert Stripe boolean-ish values to strict bools."""
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no"}:
+            return False
+        return None
+    if isinstance(value, Number):
+        return bool(value)
+    return None
 
 @receiver(user_signed_up)
 def handle_user_signed_up(sender, request, user, **kwargs):
@@ -245,6 +312,15 @@ def handle_subscription_event(event, **kwargs):
     # from the Subscription row. This allows the normal sync_from_stripe_data path to work.
     source_data = stripe_sub if stripe_sub is not None else (getattr(sub, "stripe_data", {}) or {})
 
+    current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
+    cancel_at_dt = _coerce_datetime(_get_stripe_data_value(source_data, "cancel_at"))
+    cancel_at_period_end_flag = _coerce_bool(_get_stripe_data_value(source_data, "cancel_at_period_end"))
+
+    if cancel_at_dt is None:
+        cancel_at_dt = _coerce_datetime(getattr(sub, "cancel_at", None))
+    if cancel_at_period_end_flag is None:
+        cancel_at_period_end_flag = _coerce_bool(getattr(sub, "cancel_at_period_end", None))
+
     # Locate the licensed (base plan) item among subscription items
     licensed_item = None
     try:
@@ -282,8 +358,8 @@ def handle_subscription_event(event, **kwargs):
 
             try:
                 ub = owner.billing
-                if getattr(sub.stripe_data, 'current_period_start', None):
-                    new_day = sub.stripe_data['current_period_start'].day
+                if current_period_start_dt:
+                    new_day = current_period_start_dt.day
                     if ub.billing_cycle_anchor != new_day:
                         ub.billing_cycle_anchor = new_day
                         ub.save(update_fields=["billing_cycle_anchor"])
@@ -319,8 +395,8 @@ def handle_subscription_event(event, **kwargs):
             billing = mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
             if billing:
                 updates: list[str] = []
-                if getattr(sub.stripe_data, 'current_period_start', None):
-                    new_day = sub.stripe_data['current_period_start'].day
+                if current_period_start_dt:
+                    new_day = current_period_start_dt.day
                     if billing.billing_cycle_anchor != new_day:
                         billing.billing_cycle_anchor = new_day
                         updates.append("billing_cycle_anchor")
@@ -335,15 +411,13 @@ def handle_subscription_event(event, **kwargs):
                     updates.append("purchased_seats")
 
                 if hasattr(billing, 'cancel_at'):
-                    cancel_at = getattr(sub, 'cancel_at', None)
-                    if billing.cancel_at != cancel_at:
-                        billing.cancel_at = cancel_at
+                    if billing.cancel_at != cancel_at_dt:
+                        billing.cancel_at = cancel_at_dt
                         updates.append("cancel_at")
 
                 if hasattr(billing, 'cancel_at_period_end'):
-                    cancel_end = getattr(sub, 'cancel_at_period_end', None)
-                    if cancel_end is not None and billing.cancel_at_period_end != cancel_end:
-                        billing.cancel_at_period_end = cancel_end
+                    if cancel_at_period_end_flag is not None and billing.cancel_at_period_end != cancel_at_period_end_flag:
+                        billing.cancel_at_period_end = cancel_at_period_end_flag
                         updates.append("cancel_at_period_end")
 
                 if updates:
