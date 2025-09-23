@@ -182,8 +182,8 @@ class TaskCreditService:
 
             # Set expiration date - if there's an active subscription, set it to the end of current period
             # Otherwise, default to 30 days from now
-            if subscription and hasattr(subscription, 'current_period_end'):
-                expiration_date = subscription.current_period_end
+            if subscription and hasattr(subscription.stripe_data, 'current_period_end'):
+                expiration_date = subscription.stripe_data['current_period_end']
             else:
                 expiration_date = grant_date + timedelta(days=30)
 
@@ -250,8 +250,8 @@ class TaskCreditService:
 
             grant_date = grant_date or timezone.now()
 
-            if subscription and getattr(subscription, "current_period_end", None):
-                expiration_date = subscription.current_period_end
+            if subscription and getattr(subscription.stripe_data, "current_period_end", None):
+                expiration_date = subscription.stripe_data['current_period_end']
             else:
                 expiration_date = expiration_date or (grant_date + timedelta(days=30))
 
