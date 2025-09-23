@@ -36,6 +36,7 @@ from djstripe.models import Customer, BankAccount, Card
 from djstripe.admin import StripeModelAdmin  # base admin with actions & changelist_view
 
 # Replace dj-stripe's default registration
+# 2.10.1 has removed some fields we still want to see, but their own admin still references them
 admin.site.unregister(Customer)
 
 @admin.register(Customer)
