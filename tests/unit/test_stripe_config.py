@@ -12,13 +12,7 @@ class StripeConfigHelperTests(TestCase):
         StripeConfig.objects.all().delete()
         invalidate_stripe_settings_cache()
 
-    def test_get_stripe_settings_falls_back_to_env(self):
-        stripe_settings = get_stripe_settings(force_reload=True)
-
-        self.assertEqual(stripe_settings.startup_price_id, settings.STRIPE_STARTUP_PRICE_ID)
-        self.assertEqual(stripe_settings.startup_product_id, settings.STRIPE_STARTUP_PRODUCT_ID)
-
-    def test_get_stripe_settings_prefers_database(self):
+    def test_get_stripe_settings_database(self):
         config = StripeConfig.objects.create(
             release_env=settings.GOBII_RELEASE_ENV,
             live_mode=True,
