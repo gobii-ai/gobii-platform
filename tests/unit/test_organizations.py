@@ -3,7 +3,6 @@ from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.exceptions import ValidationError
-from django.conf import settings
 from django.utils import timezone
 
 from waffle.models import Flag
@@ -17,6 +16,8 @@ from api.models import (
 )
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
+
+from config.stripe_config import get_stripe_settings
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
@@ -135,9 +136,13 @@ class OrganizationInvitesTest(TestCase):
         _, kwargs = mock_session.call_args
         line_items = kwargs.get("line_items")
         self.assertIsNotNone(line_items)
-        self.assertEqual(line_items[0]["price"], settings.STRIPE_ORG_TEAM_PRICE_ID)
+        stripe_settings = get_stripe_settings()
+        self.assertEqual(line_items[0]["price"], stripe_settings.org_team_price_id)
         self.assertEqual(line_items[0]["quantity"], 1)
-        self.assertEqual(line_items[1]["price"], settings.STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID)
+        self.assertEqual(
+            line_items[1]["price"],
+            stripe_settings.org_team_additional_task_price_id,
+        )
 
     def test_seat_checkout_requires_membership(self):
         stranger = get_user_model().objects.create_user(email="stranger@example.com", password="pw", username="stranger")

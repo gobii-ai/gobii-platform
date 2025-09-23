@@ -1463,6 +1463,22 @@ class StripeConfig(models.Model):
         self.set_value("org_team_product_id", value)
 
     @property
+    def org_team_price_id(self) -> str:
+        return self.get_value("org_team_price_id")
+
+    @org_team_price_id.setter
+    def org_team_price_id(self, value: str | None) -> None:
+        self.set_value("org_team_price_id", value)
+
+    @property
+    def org_team_additional_task_price_id(self) -> str:
+        return self.get_value("org_team_additional_task_price_id")
+
+    @org_team_additional_task_price_id.setter
+    def org_team_additional_task_price_id(self, value: str | None) -> None:
+        self.set_value("org_team_additional_task_price_id", value)
+
+    @property
     def task_meter_id(self) -> str:
         return self.get_value("task_meter_id")
 
@@ -1477,6 +1493,22 @@ class StripeConfig(models.Model):
     @task_meter_event_name.setter
     def task_meter_event_name(self, value: str | None) -> None:
         self.set_value("task_meter_event_name", value)
+
+    @property
+    def org_team_task_meter_id(self) -> str:
+        return self.get_value("org_team_task_meter_id")
+
+    @org_team_task_meter_id.setter
+    def org_team_task_meter_id(self, value: str | None) -> None:
+        self.set_value("org_team_task_meter_id", value)
+
+    @property
+    def org_team_task_meter_event_name(self) -> str:
+        return self.get_value("org_team_task_meter_event_name")
+
+    @org_team_task_meter_event_name.setter
+    def org_team_task_meter_event_name(self, value: str | None) -> None:
+        self.set_value("org_team_task_meter_event_name", value)
 
     @property
     def org_task_meter_id(self) -> str:

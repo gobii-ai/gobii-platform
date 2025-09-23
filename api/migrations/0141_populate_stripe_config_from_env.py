@@ -30,6 +30,18 @@ def populate_from_env(apps, _schema_editor):
         ('startup_additional_task_price_id', 'STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID', False),
         ('startup_product_id', 'STRIPE_STARTUP_PRODUCT_ID', False),
         ('org_team_product_id', 'STRIPE_ORG_TEAM_PRODUCT_ID', False),
+        ('org_team_price_id', 'STRIPE_ORG_TEAM_PRICE_ID', False),
+        (
+            'org_team_additional_task_price_id',
+            'STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID',
+            False,
+        ),
+        ('org_team_task_meter_id', 'STRIPE_ORG_TEAM_TASK_METER_ID', False),
+        (
+            'org_team_task_meter_event_name',
+            'STRIPE_ORG_TEAM_TASK_METER_EVENT_NAME',
+            False,
+        ),
         ('task_meter_id', 'STRIPE_TASK_METER_ID', False),
         ('task_meter_event_name', 'STRIPE_TASK_METER_EVENT_NAME', False),
         ('org_task_meter_id', 'STRIPE_ORG_TASK_METER_ID', False),

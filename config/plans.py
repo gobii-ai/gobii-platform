@@ -1,5 +1,3 @@
-import os
-
 from django.core.exceptions import AppRegistryNotReady
 
 from config.stripe_config import get_stripe_settings
@@ -29,7 +27,7 @@ PLAN_CONFIG = {
         "id": "startup",
         "monthly_task_credits": 500,
         "api_rate_limit": 600,
-        "product_id": os.getenv("STRIPE_STARTUP_PRODUCT_ID", "prod_dummy_startup"),
+        "product_id": "",
         "agent_limit": AGENTS_UNLIMITED,
         "name": "Pro",
         "description": "Pro plan with enhanced features and support.",
@@ -43,8 +41,9 @@ PLAN_CONFIG = {
         "monthly_task_credits": 2000,
         "credits_per_seat": 500,
         "api_rate_limit": 2000,
-        "product_id": os.getenv("STRIPE_ORG_TEAM_PRODUCT_ID", "prod_dummy_org_team"),
-        "seat_price_id": os.getenv("STRIPE_ORG_TEAM_PRICE_ID", "price_dummy_org_team"),
+        "product_id": "",
+        "seat_price_id": "",
+        "overage_price_id": "",
         "agent_limit": AGENTS_UNLIMITED,
         "name": "Team",
         "description": "Team plan with collaboration features and priority support.",
@@ -65,10 +64,13 @@ def _refresh_plan_products() -> None:
     except AppRegistryNotReady:
         return
 
-    if stripe_settings.startup_product_id:
-        PLAN_CONFIG["startup"]["product_id"] = stripe_settings.startup_product_id
-    if stripe_settings.org_team_product_id:
-        PLAN_CONFIG["org_team"]["product_id"] = stripe_settings.org_team_product_id
+    PLAN_CONFIG["startup"]["product_id"] = stripe_settings.startup_product_id or ""
+
+    PLAN_CONFIG["org_team"]["product_id"] = stripe_settings.org_team_product_id or ""
+    PLAN_CONFIG["org_team"]["seat_price_id"] = stripe_settings.org_team_price_id or ""
+    PLAN_CONFIG["org_team"]["overage_price_id"] = (
+        stripe_settings.org_team_additional_task_price_id or ""
+    )
 
 
 def get_plan_product_id(plan_name: str) -> str | None:
@@ -93,4 +95,3 @@ def get_plan_by_product_id(product_id: str) -> dict[str, int | str] | None:
             return config
 
     return None
-

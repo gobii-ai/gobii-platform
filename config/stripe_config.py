@@ -24,8 +24,12 @@ class StripeSettings:
     startup_additional_task_price_id: str
     startup_product_id: str
     org_team_product_id: str
+    org_team_price_id: str
+    org_team_additional_task_price_id: str
     task_meter_id: str
     task_meter_event_name: str
+    org_team_task_meter_id: str
+    org_team_task_meter_event_name: str
     org_task_meter_id: str
 
 
@@ -40,8 +44,20 @@ def _env_defaults() -> StripeSettings:
         startup_additional_task_price_id=getattr(settings, "STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", ""),
         startup_product_id=getattr(settings, "STRIPE_STARTUP_PRODUCT_ID", ""),
         org_team_product_id=getattr(settings, "STRIPE_ORG_TEAM_PRODUCT_ID", ""),
+        org_team_price_id=getattr(settings, "STRIPE_ORG_TEAM_PRICE_ID", ""),
+        org_team_additional_task_price_id=getattr(
+            settings,
+            "STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID",
+            "",
+        ),
         task_meter_id=getattr(settings, "STRIPE_TASK_METER_ID", ""),
         task_meter_event_name=getattr(settings, "STRIPE_TASK_METER_EVENT_NAME", ""),
+        org_team_task_meter_id=getattr(settings, "STRIPE_ORG_TEAM_TASK_METER_ID", ""),
+        org_team_task_meter_event_name=getattr(
+            settings,
+            "STRIPE_ORG_TEAM_TASK_METER_EVENT_NAME",
+            "",
+        ),
         org_task_meter_id=getattr(settings, "STRIPE_ORG_TASK_METER_ID", ""),
     )
 
@@ -91,8 +107,12 @@ def _load_from_database() -> Optional[StripeSettings]:
         startup_additional_task_price_id=config.startup_additional_task_price_id or "",
         startup_product_id=config.startup_product_id or "",
         org_team_product_id=config.org_team_product_id or "",
+        org_team_price_id=config.org_team_price_id or "",
+        org_team_additional_task_price_id=config.org_team_additional_task_price_id or "",
         task_meter_id=config.task_meter_id or "",
         task_meter_event_name=config.task_meter_event_name or "",
+        org_team_task_meter_id=config.org_team_task_meter_id or "",
+        org_team_task_meter_event_name=config.org_team_task_meter_event_name or "",
         org_task_meter_id=config.org_task_meter_id or "",
     )
 
