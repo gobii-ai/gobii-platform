@@ -1,5 +1,6 @@
 import logging
 
+import djstripe
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.contrib.sites.models import Site
@@ -30,6 +31,34 @@ from .agent.files.filespace_service import enqueue_import_after_commit
 from .tasks import sync_ip_block, backfill_missing_proxy_records, proxy_health_check_single, garbage_collect_timed_out_tasks
 from .tasks.sms_tasks import sync_twilio_numbers, send_test_sms
 from config import settings
+
+from djstripe.models import Customer, BankAccount, Card
+from djstripe.admin import StripeModelAdmin  # base admin with actions & changelist_view
+
+# Replace dj-stripe's default registration
+admin.site.unregister(Customer)
+
+@admin.register(Customer)
+class PatchedCustomerAdmin(StripeModelAdmin):
+    # remove the removed field; keep valid FKs
+    list_select_related = ("subscriber", "djstripe_owner_account", "default_payment_method")
+
+# --- BankAccount ---
+admin.site.unregister(BankAccount)
+
+@admin.register(BankAccount)
+class PatchedBankAccountAdmin(StripeModelAdmin):
+    # DO NOT include 'customer__default_source' (removed in 2.10)
+    # Keep the common useful relations for query perf:
+    list_select_related = ("customer", "djstripe_owner_account")
+
+# --- Card ---
+admin.site.unregister(Card)
+
+@admin.register(Card)
+class PatchedCardAdmin(StripeModelAdmin):
+    # Valid relations only; 'customer__default_source' was removed in 2.10
+    list_select_related = ("customer", "djstripe_owner_account")
 
 
 @admin.register(ApiKey)
