@@ -594,7 +594,7 @@ TOOL_CREDIT_COSTS = {
 
 # Analytics
 SEGMENT_WRITE_KEY = env("SEGMENT_WRITE_KEY", default="")
-SEGMENT_WEB_WRITE_KEY = env("SEGMENT_WEB_WRITE_KEY", default="")
+SEGMENT_WEB_WRITE_KEY = env("SEGMENT_WEB_WRITE_KEY", default=SEGMENT_WRITE_KEY)
 
 # Ad/Pixel IDs (empty disables)
 REDDIT_PIXEL_ID = env("REDDIT_PIXEL_ID", default="")
