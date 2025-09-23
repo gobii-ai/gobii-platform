@@ -1,5 +1,6 @@
 import logging
 
+import djstripe
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.contrib.sites.models import Site
@@ -30,6 +31,17 @@ from .agent.files.filespace_service import enqueue_import_after_commit
 from .tasks import sync_ip_block, backfill_missing_proxy_records, proxy_health_check_single, garbage_collect_timed_out_tasks
 from .tasks.sms_tasks import sync_twilio_numbers, send_test_sms
 from config import settings
+
+from djstripe.models import Customer
+from djstripe.admin import StripeModelAdmin  # base admin with actions & changelist_view
+
+# Replace dj-stripe's default registration
+admin.site.unregister(Customer)
+
+@admin.register(Customer)
+class PatchedCustomerAdmin(StripeModelAdmin):
+    # remove the removed field; keep valid FKs
+    list_select_related = ("subscriber", "djstripe_owner_account", "default_payment_method")
 
 
 @admin.register(ApiKey)
