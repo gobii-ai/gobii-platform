@@ -1,6 +1,6 @@
 import uuid
 import json
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone as dt_timezone
 from numbers import Number
 from typing import Any, Mapping
 
@@ -62,7 +62,7 @@ def _coerce_datetime(value: Any) -> datetime | None:
         candidate = value
     elif isinstance(value, Number):
         try:
-            candidate = datetime.fromtimestamp(float(value), tz=timezone.utc)
+            candidate = datetime.fromtimestamp(float(value), tz=dt_timezone.utc)
         except (OverflowError, OSError, ValueError):
             candidate = None
     elif isinstance(value, str):
@@ -71,7 +71,7 @@ def _coerce_datetime(value: Any) -> datetime | None:
             candidate = parsed
         else:
             try:
-                candidate = datetime.fromtimestamp(float(value), tz=timezone.utc)
+                candidate = datetime.fromtimestamp(float(value), tz=dt_timezone.utc)
             except (OverflowError, OSError, ValueError):
                 candidate = None
 
@@ -79,7 +79,7 @@ def _coerce_datetime(value: Any) -> datetime | None:
         return None
 
     if timezone.is_naive(candidate):
-        candidate = timezone.make_aware(candidate, timezone=timezone.utc)
+        candidate = timezone.make_aware(candidate, timezone=dt_timezone.utc)
 
     return candidate
 
