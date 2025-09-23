@@ -1762,6 +1762,7 @@ def _get_system_instruction(
     *,
     is_first_run: bool = False,
 ) -> str:
+    """Return the static system instruction prompt for the agent."""
 
     base_prompt = (
         f"You are a persistent AI agent named '{agent.name}'. Use this name as your self identity when talking to the user. "
