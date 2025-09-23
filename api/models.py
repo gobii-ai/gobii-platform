@@ -1210,8 +1210,8 @@ class OrganizationBilling(models.Model):
         help_text="Timestamp when the organization was downgraded to free",
     )
     purchased_seats = models.PositiveIntegerField(
-        default=1,
-        help_text="Number of seats purchased for this organization (must cover active members + pending invites).",
+        default=0,
+        help_text="Number of seats purchased for this organization (must cover active members + pending invites beyond the founder).",
     )
     max_extra_tasks = models.IntegerField(
         default=0,
@@ -1234,6 +1234,8 @@ class OrganizationBilling(models.Model):
 
         now = timezone.now()
 
+        founder_allowance = 1
+
         active_members = OrganizationMembership.objects.filter(
             org_id=self.organization_id,
             status=OrganizationMembership.OrgStatus.ACTIVE,
@@ -1245,7 +1247,7 @@ class OrganizationBilling(models.Model):
             expires_at__gte=now,
         ).count()
 
-        seats_required = active_members + pending_invites
+        seats_required = max(active_members - founder_allowance, 0) + pending_invites
 
         if self.purchased_seats < seats_required:
             raise ValidationError({
@@ -1264,6 +1266,8 @@ class OrganizationBilling(models.Model):
 
         now = timezone.now()
 
+        founder_allowance = 1
+
         active_members = OrganizationMembership.objects.filter(
             org_id=self.organization_id,
             status=OrganizationMembership.OrgStatus.ACTIVE,
@@ -1274,7 +1278,8 @@ class OrganizationBilling(models.Model):
             revoked_at__isnull=True,
             expires_at__gte=now,
         ).count()
-        return active_members + pending_invites
+        reserved_members = max(active_members - founder_allowance, 0)
+        return reserved_members + pending_invites
 
     @property
     def seats_available(self) -> int:
@@ -1695,6 +1700,12 @@ class PersistentAgent(models.Model):
     def clean(self):
         """Custom validation for the agent."""
         super().clean()
+        if self.organization_id:
+            billing = getattr(self.organization, "billing", None)
+            if not billing or billing.purchased_seats <= 0:
+                raise ValidationError({
+                    "organization": "Purchase organization seats before creating org-owned agents."
+                })
         if self.schedule:
             try:
                 # Use the same parser that's used for task scheduling to ensure consistency.
@@ -4225,6 +4236,8 @@ class OrganizationInvite(models.Model):
 
         now = timezone.now()
 
+        founder_allowance = 1
+
         active_members = OrganizationMembership.objects.filter(
             org_id=self.org_id,
             status=OrganizationMembership.OrgStatus.ACTIVE,
@@ -4248,7 +4261,7 @@ class OrganizationInvite(models.Model):
             and (self.expires_at or now) >= now
         )
 
-        seats_required = active_members + pending_invites + (1 if will_reserve_seat else 0)
+        seats_required = max(active_members - founder_allowance, 0) + pending_invites + (1 if will_reserve_seat else 0)
 
         if seats_required > billing.purchased_seats:
             raise ValidationError({

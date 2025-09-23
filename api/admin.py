@@ -2138,10 +2138,10 @@ class UserBillingAdmin(admin.ModelAdmin):
         for ub in queryset.select_related('user'):
             try:
                 sub = get_active_subscription(ub.user)
-                if not sub or not getattr(sub, 'current_period_start', None):
+                if not sub or not getattr(sub.stripe_data, 'current_period_start', None):
                     skipped += 1
                     continue
-                new_day = sub.current_period_start.day
+                new_day = sub.stripe_data['current_period_start'].day
                 if ub.billing_cycle_anchor != new_day:
                     ub.billing_cycle_anchor = new_day
                     ub.save(update_fields=["billing_cycle_anchor"])

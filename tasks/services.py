@@ -5,6 +5,8 @@ from django.core.exceptions import ValidationError
 from django.db.models.aggregates import Sum
 from django.db.models.expressions import F
 from django.utils import timezone
+from datetime import timezone as dt_timezone
+from django.utils.dateparse import parse_datetime, parse_date
 
 from api import models
 from billing.services import BillingService
@@ -30,6 +32,8 @@ from util.subscription_helper import (
 )
 
 from datetime import timedelta, datetime
+from numbers import Number
+from typing import Any, Mapping
 from django.apps import apps
 import os
 
@@ -52,6 +56,51 @@ THRESHOLDS = (75, 90, 100)
 #
 # By default, all of this is "in range", that is, the task credits that are currently valid for the user, with a granted date
 # in the past and an expiration date in the future. This is the most common use case.
+def _extract_subscription_field(subscription: Any, key: str) -> Any:
+    """Return a field from a subscription, preferring stripe_data when available."""
+    if not subscription:
+        return None
+
+    source = getattr(subscription, "stripe_data", None)
+    if source:
+        if isinstance(source, Mapping):
+            if key in source:
+                return source[key]
+        else:
+            try:
+                return getattr(source, key)
+            except AttributeError:
+                pass
+
+    return getattr(subscription, key, None)
+
+
+def _coerce_subscription_datetime(value: Any) -> datetime | None:
+    """Convert Stripe subscription timestamp formats into datetimes."""
+    if value in (None, ""):
+        return None
+
+    if isinstance(value, datetime):
+        return value
+
+    if isinstance(value, Number):
+        try:
+            return datetime.fromtimestamp(float(value), tz=dt_timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            return None
+
+    if isinstance(value, str):
+        parsed_dt = parse_datetime(value.strip()) if value.strip() else None
+        if parsed_dt is not None:
+            return parsed_dt
+
+        parsed_date = parse_date(value.strip()) if value.strip() else None
+        if parsed_date is not None:
+            return datetime.combine(parsed_date, datetime.min.time())
+
+    return None
+
+
 class TaskCreditService:
     @staticmethod
     def _is_community_unlimited() -> bool:
@@ -180,12 +229,16 @@ class TaskCreditService:
 
             logger.debug(f"grant_subscription_credits {user.id}: granting {credits_to_grant} credits")
 
-            # Set expiration date - if there's an active subscription, set it to the end of current period
-            # Otherwise, default to 30 days from now
-            if subscription and hasattr(subscription, 'current_period_end'):
-                expiration_date = subscription.current_period_end
-            else:
-                expiration_date = grant_date + timedelta(days=30)
+            # Set expiration date - prefer the subscription's current period end
+            if expiration_date is None:
+                period_end = _coerce_subscription_datetime(
+                    _extract_subscription_field(subscription, "current_period_end")
+                ) if subscription else None
+
+                if period_end is not None:
+                    expiration_date = period_end
+                else:
+                    expiration_date = grant_date + timedelta(days=30)
 
             logger.debug(f"grant_subscription_credits {user.id}: expiration date {expiration_date}")
 
@@ -205,6 +258,71 @@ class TaskCreditService:
             logger.debug(f"grant_subscription_credits {user.id}: created TaskCredit {task_credit.id}")
 
             return credits_to_grant
+
+    @staticmethod
+    @tracer.start_as_current_span("TaskCreditService Grant Org Subscription Credits")
+    def grant_subscription_credits_for_organization(
+        organization,
+        seats: int,
+        plan=None,
+        invoice_id: str = "",
+        grant_date=None,
+        expiration_date=None,
+        subscription=None,
+    ) -> int:
+        if seats <= 0:
+            return 0
+
+        with traced("TASKCREDIT Grant Org Subscription Credits") as span:
+            TaskCredit = apps.get_model("api", "TaskCredit")
+
+            if invoice_id:
+                existing_credit = TaskCredit.objects.filter(
+                    organization=organization,
+                    stripe_invoice_id=invoice_id,
+                    voided=False,
+                ).first()
+                if existing_credit:
+                    logger.debug(
+                        "grant_subscription_credits_for_org %s: already granted credits for invoice %s",
+                        organization.id,
+                        invoice_id,
+                    )
+                    return 0
+
+            if plan is None:
+                plan = get_organization_plan(organization)
+
+            plan_id = plan.get("id") if plan else PlanNames.FREE
+
+            credits_per_seat = plan.get("credits_per_seat") or plan.get("monthly_task_credits") or 0
+            credits_to_grant = Decimal(credits_per_seat) * Decimal(seats)
+
+            span.set_attribute("organization.id", str(getattr(organization, "id", "")))
+            span.set_attribute("credits_to_grant", float(credits_to_grant))
+
+            grant_date = grant_date or timezone.now()
+
+            if expiration_date is None:
+                period_end = _coerce_subscription_datetime(
+                    _extract_subscription_field(subscription, "current_period_end")
+                ) if subscription else None
+
+                expiration_date = period_end or (grant_date + timedelta(days=30))
+
+            TaskCredit.objects.create(
+                organization=organization,
+                credits=credits_to_grant,
+                credits_used=0,
+                expiration_date=expiration_date,
+                stripe_invoice_id=invoice_id or None,
+                granted_date=grant_date,
+                plan=PlanNamesChoices(plan_id) if plan_id else PlanNamesChoices.FREE,
+                grant_type=GrantTypeChoices.PLAN,
+                additional_task=False,
+            )
+
+            return int(credits_to_grant)
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Consume Credit")
@@ -370,6 +488,10 @@ class TaskCreditService:
 
     @staticmethod
     def _get_tasks_entitled_for_org(organization) -> int:
+        billing = getattr(organization, "billing", None)
+        if not billing or getattr(billing, "purchased_seats", 0) <= 0:
+            return 0
+
         plan = get_organization_plan(organization)
         addl_limit = get_organization_extra_task_limit(organization)
 

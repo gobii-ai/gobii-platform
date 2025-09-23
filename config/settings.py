@@ -570,7 +570,14 @@ STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID = env("STRIPE_STARTUP_ADDITIONAL_TASK_PR
 STRIPE_STARTUP_PRODUCT_ID = env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup")
 STRIPE_TASK_METER_ID = env("STRIPE_TASK_METER_ID", default="meter_dummy_task")
 STRIPE_TASK_METER_EVENT_NAME = env("STRIPE_TASK_METER_EVENT_NAME", default="task")
-STRIPE_ORG_TASK_METER_ID = env("STRIPE_ORG_TASK_METER_ID", default="meter_dummy_org_task")
+
+# Stripe - Orgs - Team
+STRIPE_ORG_TEAM_PRODUCT_ID=env("STRIPE_ORG_TEAM_PRODUCT_ID", default="prod_dummy_org_team")
+STRIPE_ORG_TEAM_PRICE_ID=env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team")
+STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional")
+STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task")
+STRIPE_ORG_TEAM_TASK_METER_ID=env("STRIPE_ORG_TASK_METER_ID", default="meter_dummy_org_task")
+STRIPE_ORG_TEAM_TASK_METER_EVENT_NAME=env("STRIPE_ORG_TASK_METER_EVENT_NAME", default="task_org_team_task_meter_name")
 
 # Credits configuration
 # How many credits a single task consumes from plan credits.
@@ -587,6 +594,8 @@ TOOL_CREDIT_COSTS = {
 
 # Analytics
 SEGMENT_WRITE_KEY = env("SEGMENT_WRITE_KEY", default="")
+SEGMENT_WEB_WRITE_KEY = env("SEGMENT_WEB_WRITE_KEY", default=SEGMENT_WRITE_KEY)
+
 # Ad/Pixel IDs (empty disables)
 REDDIT_PIXEL_ID = env("REDDIT_PIXEL_ID", default="")
 META_PIXEL_ID = env("META_PIXEL_ID", default="")

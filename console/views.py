@@ -21,7 +21,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.text import slugify
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone as dt_timezone
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
@@ -52,7 +52,8 @@ from util import sms
 from util.payments_helper import PaymentsHelper
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import get_user_plan, get_active_subscription, allow_user_extra_tasks, \
-    calculate_extra_tasks_used_during_subscription_period, get_user_extra_task_limit
+    calculate_extra_tasks_used_during_subscription_period, get_user_extra_task_limit, get_or_create_stripe_customer
+from config import settings
 
 from .forms import (
     ApiKeyForm,
@@ -64,6 +65,7 @@ from .forms import (
     PhoneAddForm,
     OrganizationForm,
     OrganizationInviteForm,
+    OrganizationSeatPurchaseForm,
 )
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
@@ -253,8 +255,14 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
         context['paid_subscriber'] = sub is not None
 
         if sub:
-            context['period_start_date'] = sub.current_period_start.strftime("%B %d, %Y")
-            context['period_end_date'] = sub.current_period_end.strftime("%B %d, %Y")
+            start = sub.stripe_data['current_period_start']
+            end = sub.stripe_data['current_period_end']
+
+            dt_start = datetime.fromtimestamp(int(start), tz=dt_timezone.utc)
+            dt_end = datetime.fromtimestamp(int(end), tz=dt_timezone.utc)
+
+            context['period_start_date'] = dt_start.strftime("%B %d, %Y")
+            context['period_end_date'] = dt_end.strftime("%B %d, %Y")
 
         # Get task status breakdown
         from django.db.models import Count
@@ -544,11 +552,20 @@ class BillingView(ConsoleViewMixin, TemplateView):
         paid_subscriber = sub is not None
 
         if sub:
-            context['period_start_date'] = sub.current_period_start.strftime("%B %d, %Y")
-            context['period_end_date'] = sub.current_period_end.strftime("%B %d, %Y")
+            start = sub.stripe_data['current_period_start']
+            end = sub.stripe_data['current_period_end']
+            cancel_at = getattr(sub.stripe_data, "cancel_at", None)
+
+            dt_start = datetime.fromtimestamp(int(start), tz=dt_timezone.utc)
+            dt_end = datetime.fromtimestamp(int(end), tz=dt_timezone.utc)
+            dt_cancel_at = datetime.fromtimestamp(int(cancel_at), tz=dt_timezone.utc) if cancel_at else None
+
+
+            context['period_start_date'] = dt_start.strftime("%B %d, %Y")
+            context['period_end_date'] = dt_end.strftime("%B %d, %Y")
             context['subscription_active'] = sub.is_status_current()
-            context['cancel_at'] = sub.cancel_at.strftime("%B %d, %Y") if sub.cancel_at else None
-            context['cancel_at_period_end'] = sub.cancel_at_period_end
+            context['cancel_at'] = dt_cancel_at
+            context['cancel_at_period_end'] = getattr(sub.stripe_data, "cancel_at_period_end", False)
 
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
@@ -3590,6 +3607,18 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     @tracer.start_as_current_span("CONSOLE Organization Detail")
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+
+        if self.request.GET.get("seats_success"):
+            messages.success(
+                self.request,
+                "Seat checkout started successfully. Features will unlock once payment completes.",
+            )
+        if self.request.GET.get("seats_cancelled"):
+            messages.info(
+                self.request,
+                "Seat checkout was cancelled before completion.",
+            )
+
         members = OrganizationMembership.objects.filter(
             org=self.org, status=OrganizationMembership.OrgStatus.ACTIVE
         ).select_related("user")
@@ -3603,6 +3632,8 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 expires_at__gte=now,
             ).select_related("invited_by")
         )
+        billing = getattr(self.org, "billing", None)
+
         # Determine viewer's membership and allowed role choices for UI
         my_membership = OrganizationMembership.objects.filter(
             org=self.org,
@@ -3613,6 +3644,11 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
             OrganizationMembership.OrgRole.OWNER,
             OrganizationMembership.OrgRole.ADMIN,
         )
+        can_manage_billing = my_membership and my_membership.role in (
+            OrganizationMembership.OrgRole.OWNER,
+            OrganizationMembership.OrgRole.ADMIN,
+            OrganizationMembership.OrgRole.BILLING,
+        )
         all_role_choices = list(OrganizationMembership.OrgRole.choices)
         if my_membership and my_membership.role == OrganizationMembership.OrgRole.OWNER:
             allowed_role_choices = all_role_choices
@@ -3621,6 +3657,8 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         else:
             allowed_role_choices = []
 
+        seat_purchase_required = bool(billing and billing.purchased_seats <= 0)
+
         context.update(
             {
                 "org": self.org,
@@ -3628,9 +3666,13 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 "invite_form": OrganizationInviteForm(),
                 "pending_invites": org_pending_invites,
                 "can_manage_members": bool(can_manage_members),
+                "can_manage_billing": bool(can_manage_billing),
                 "allowed_role_choices": allowed_role_choices,
                 "is_org_owner": bool(my_membership and my_membership.role == OrganizationMembership.OrgRole.OWNER),
                 "is_org_admin": bool(my_membership and my_membership.role == OrganizationMembership.OrgRole.ADMIN),
+                "org_billing": billing,
+                "seat_purchase_required": seat_purchase_required,
+                "seat_purchase_form": OrganizationSeatPurchaseForm(org=self.org),
             }
         )
         return context
@@ -3690,6 +3732,20 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 expires_at__gte=now,
             ).select_related("invited_by")
         )
+        my_membership = OrganizationMembership.objects.filter(
+            org=self.org,
+            user=request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).first()
+        can_manage_members = my_membership and my_membership.role in (
+            OrganizationMembership.OrgRole.OWNER,
+            OrganizationMembership.OrgRole.ADMIN,
+        )
+        can_manage_billing = my_membership and my_membership.role in (
+            OrganizationMembership.OrgRole.OWNER,
+            OrganizationMembership.OrgRole.ADMIN,
+            OrganizationMembership.OrgRole.BILLING,
+        )
         return render(
             request,
             self.template_name,
@@ -3698,6 +3754,11 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 "members": members,
                 "invite_form": form,
                 "pending_invites": org_pending_invites,
+                "org_billing": getattr(self.org, "billing", None),
+                "seat_purchase_required": bool(getattr(self.org.billing, "purchased_seats", 0) <= 0),
+                "seat_purchase_form": OrganizationSeatPurchaseForm(org=self.org),
+                "can_manage_members": bool(can_manage_members),
+                "can_manage_billing": bool(can_manage_billing),
             },
         )
 
@@ -3852,6 +3913,150 @@ class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlag
     @transaction.atomic
     def get(self, request, token: str):
         return self._reject(request, token)
+
+
+class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
+    """Kick off Stripe Checkout to purchase seats for an organization."""
+
+    waffle_flag = ORGANIZATIONS
+
+    @tracer.start_as_current_span("CONSOLE Organization Seat Checkout")
+    @transaction.atomic
+    def post(self, request, org_id: str):
+        org = get_object_or_404(Organization.objects.select_related("billing"), id=org_id)
+
+        membership = OrganizationMembership.objects.filter(
+            org=org,
+            user=request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            role__in=(
+                OrganizationMembership.OrgRole.OWNER,
+                OrganizationMembership.OrgRole.ADMIN,
+                OrganizationMembership.OrgRole.BILLING,
+            ),
+        ).first()
+
+        if membership is None:
+            return HttpResponseForbidden()
+
+        form = OrganizationSeatPurchaseForm(request.POST, org=org)
+        if not form.is_valid():
+            for error in form.errors.get("seats", []):
+                messages.error(request, error)
+            return redirect("organization_detail", org_id=org.id)
+
+        billing = getattr(org, "billing", None)
+        if billing and billing.purchased_seats > 0 and getattr(billing, "stripe_subscription_id", None):
+            messages.info(
+                request,
+                "This organization already has an active subscription. Use the Stripe management button to adjust seats.",
+            )
+            return redirect("organization_detail", org_id=org.id)
+
+        seat_count = form.cleaned_data["seats"]
+        if seat_count <= 0:
+            messages.error(request, "Please select at least one seat to purchase.")
+            return redirect("organization_detail", org_id=org.id)
+
+        price_id = getattr(settings, "STRIPE_ORG_TEAM_PRICE_ID", "")
+        if not price_id:
+            messages.error(request, "Stripe price not configured. Please contact support.")
+            return redirect("organization_detail", org_id=org.id)
+
+        try:
+            stripe.api_key = PaymentsHelper.get_stripe_key()
+            customer = get_or_create_stripe_customer(org)
+
+            success_url = request.build_absolute_uri(
+                reverse("organization_detail", kwargs={"org_id": org.id})
+            ) + "?seats_success=1"
+            cancel_url = request.build_absolute_uri(
+                reverse("organization_detail", kwargs={"org_id": org.id})
+            ) + "?seats_cancelled=1"
+
+            line_items = [
+                {
+                    "price": price_id,
+                    "quantity": seat_count,
+                }
+            ]
+
+            overage_price_id = getattr(settings, "STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", "")
+            if overage_price_id:
+                line_items.append({"price": overage_price_id})
+
+            session = stripe.checkout.Session.create(
+                customer=customer.id,
+                mode="subscription",
+                success_url=success_url,
+                cancel_url=cancel_url,
+                allow_promotion_codes=True,
+                line_items=line_items,
+                metadata={
+                    "org_id": str(org.id),
+                    "seat_requestor_id": str(request.user.id),
+                },
+            )
+
+            return redirect(session.url)
+        except Exception as exc:
+            logger.exception("Failed to create Stripe checkout session for org %s: %s", org.id, exc)
+            messages.error(
+                request,
+                "We weren’t able to start the checkout flow. Please try again or contact support.",
+            )
+            return redirect("organization_detail", org_id=org.id)
+
+
+class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
+    """Open the Stripe billing portal to manage existing organization seats."""
+
+    waffle_flag = ORGANIZATIONS
+
+    @tracer.start_as_current_span("CONSOLE Organization Seat Portal")
+    @transaction.atomic
+    def post(self, request, org_id: str):
+        org = get_object_or_404(Organization.objects.select_related("billing"), id=org_id)
+
+        membership = OrganizationMembership.objects.filter(
+            org=org,
+            user=request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            role__in=(
+                OrganizationMembership.OrgRole.OWNER,
+                OrganizationMembership.OrgRole.ADMIN,
+                OrganizationMembership.OrgRole.BILLING,
+            ),
+        ).first()
+
+        if membership is None:
+            return HttpResponseForbidden()
+
+        billing = getattr(org, "billing", None)
+        if not billing or not billing.stripe_customer_id:
+            messages.error(request, "This organization does not have an active Stripe subscription yet.")
+            return redirect("organization_detail", org_id=org.id)
+
+        try:
+            stripe.api_key = PaymentsHelper.get_stripe_key()
+
+            return_url = request.build_absolute_uri(
+                reverse("organization_detail", kwargs={"org_id": org.id})
+            )
+
+            session = stripe.billing_portal.Session.create(
+                customer=billing.stripe_customer_id,
+                return_url=return_url,
+            )
+
+            return redirect(session.url)
+        except Exception as exc:
+            logger.exception("Failed to create Stripe billing portal session for org %s: %s", org.id, exc)
+            messages.error(
+                request,
+                "We weren’t able to open the Stripe billing portal. Please try again or contact support.",
+            )
+            return redirect("organization_detail", org_id=org.id)
 
 
 class _OrgPermissionMixin:

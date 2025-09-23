@@ -121,16 +121,29 @@ def get_active_subscription(owner) -> Subscription | None:
             span.set_attribute("owner.customer", "")
             return None
 
+        now_ts = int(timezone.now().timestamp())
+
+        # Statuses you consider “active” for licensing (tweak as needed)
+        ACTIVE_STATUSES = ["active", "trialing"]  # add "past_due" if you still grant access
+
+        qs = customer.subscriptions.filter(
+            stripe_data__status__in=ACTIVE_STATUSES,
+            stripe_data__current_period_end__gte=now_ts,
+        )
+
+        # If you want the one that ends soonest, prefer ordering in Python (simplest & portable):
+        subs = list(qs)
+        subs.sort(key=lambda s: s.stripe_data.get("cancel_at_period_end") or 0)
+
         span.set_attribute("owner.customer.id", str(customer.id))
         logger.debug(
             "get_active_subscription %s %s subscriptions: %s",
             owner_type,
             owner_id,
-            customer.active_subscriptions,
+            subs,
         )
 
-        licensed_subs = customer.active_subscriptions.order_by("cancel_at_period_end")
-        return licensed_subs.first() if licensed_subs else None
+        return subs[0] if subs else None
 
 def user_has_active_subscription(user) -> bool:
     """
@@ -386,7 +399,7 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
 
 
 def report_organization_task_usage_to_stripe(organization, quantity: int = 1,
-                                             meter_id=settings.STRIPE_ORG_TASK_METER_ID,
+                                             meter_id=settings.STRIPE_ORG_TEAM_TASK_METER_ID,
                                              idempotency_key: str | None = None):
     """Report additional task usage for an organization via Stripe metering."""
     with traced("SUBSCRIPTION Report Org Task Usage"):
@@ -692,7 +705,7 @@ def allow_organization_extra_tasks(organization) -> bool:
             return False
 
         billing = getattr(organization, "billing", None)
-        if not billing:
+        if not billing or getattr(billing, "purchased_seats", 0) <= 0:
             return False
 
         cancel_at_period_end = getattr(billing, "cancel_at_period_end", False)
@@ -758,6 +771,9 @@ def allow_and_has_extra_tasks_for_organization(organization) -> bool:
     """Return True if the organization may consume an additional-task credit now."""
     with traced("CREDITS Allow And Has Org Extra Tasks"):
         limit = get_organization_extra_task_limit(organization)
+
+        if getattr(getattr(organization, "billing", None), "purchased_seats", 0) <= 0:
+            return False
 
         if limit == TASKS_UNLIMITED:
             return allow_organization_extra_tasks(organization)
@@ -860,10 +876,14 @@ def calculate_extra_tasks_used_during_subscription_period(user):
     """
     with traced("CREDITS Calculate Extra Tasks Used During Subscription Period"):
         subscription = get_active_subscription(user)
-        sub_start = subscription.current_period_start if subscription else None
-        sub_end = subscription.current_period_end if subscription else None
 
-        if not subscription or not sub_start or not sub_end:
+        if not subscription:
+            return 0
+
+        sub_start = getattr(subscription.stripe_data, "current_period_start", None)
+        sub_end = getattr(subscription.stripe_data, "current_period_end", None)
+
+        if sub_start or not sub_end:
             return 0
 
         TaskCredit = apps.get_model("api", "TaskCredit")

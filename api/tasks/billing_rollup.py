@@ -4,6 +4,8 @@ from celery import shared_task
 from datetime import datetime, date as dt_date, timedelta, time as dt_time
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
+from numbers import Number
+from typing import Any, Mapping
 
 from django.contrib.auth import get_user_model
 from django.db.models import Sum
@@ -22,6 +24,20 @@ from api.models import BrowserUseAgentTask, PersistentAgentStep, MeteringBatch, 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_subscription_value(sub: Any, key: str) -> Any:
+    """Read a subscription attribute from Stripe payloads or direct attributes."""
+    source = getattr(sub, "stripe_data", None)
+    if source:
+        if isinstance(source, Mapping):
+            if key in source:
+                return source[key]
+        try:
+            return getattr(source, key)
+        except AttributeError:
+            pass
+    return getattr(sub, key, None)
 
 
 def _period_bounds_for_owner(owner) -> tuple[tuple[datetime, datetime], tuple[dt_date, dt_date]]:
@@ -61,15 +77,21 @@ def _to_aware_dt(value, *, as_start: bool) -> datetime | None:
     elif isinstance(value, dt_date):
         base = datetime.combine(value, dt_time.min)
         dt = base if as_start else (base + timedelta(days=1))
-    elif isinstance(value, str):
-        parsed_dt = parse_datetime(value)
+    elif isinstance(value, (str, Number)):
+        text = str(value)
+        parsed_dt = parse_datetime(text)
         if parsed_dt is not None:
             dt = parsed_dt
         else:
-            parsed_d = parse_date(value)
+            parsed_d = parse_date(text)
             if parsed_d is not None:
                 base = datetime.combine(parsed_d, dt_time.min)
                 dt = base if as_start else (base + timedelta(days=1))
+            else:
+                try:
+                    dt = datetime.fromtimestamp(float(text), tz=timezone.utc)
+                except (TypeError, ValueError, OverflowError, OSError):
+                    dt = None
 
     if dt is None:
         return None
@@ -87,9 +109,12 @@ def _rollup_for_user(user) -> int:
 
     # Use Stripe subscription period when available; otherwise fall back to local anchor bounds
     use_stripe_bounds = False
-    if getattr(sub, 'current_period_start', None) and getattr(sub, 'current_period_end', None):
-        start_dt = _to_aware_dt(sub.current_period_start, as_start=True)
-        end_dt = _to_aware_dt(sub.current_period_end, as_start=False)
+    current_period_start = _extract_subscription_value(sub, "current_period_start")
+    current_period_end = _extract_subscription_value(sub, "current_period_end")
+
+    if current_period_start is not None and current_period_end is not None:
+        start_dt = _to_aware_dt(current_period_start, as_start=True)
+        end_dt = _to_aware_dt(current_period_end, as_start=False)
         if start_dt is not None and end_dt is not None:
             use_stripe_bounds = True
             period_start_date = start_dt.date()
