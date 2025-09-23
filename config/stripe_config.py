@@ -28,24 +28,6 @@ class StripeSettings:
     task_meter_event_name: str
     org_task_meter_id: str
 
-
-def _env_defaults() -> StripeSettings:
-    return StripeSettings(
-        release_env=getattr(settings, "GOBII_RELEASE_ENV", "local"),
-        live_mode=getattr(settings, "STRIPE_LIVE_MODE", False),
-        live_secret_key=getattr(settings, "STRIPE_LIVE_SECRET_KEY", None),
-        test_secret_key=getattr(settings, "STRIPE_TEST_SECRET_KEY", None),
-        webhook_secret=getattr(settings, "STRIPE_WEBHOOK_SECRET", None),
-        startup_price_id=getattr(settings, "STRIPE_STARTUP_PRICE_ID", ""),
-        startup_additional_task_price_id=getattr(settings, "STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", ""),
-        startup_product_id=getattr(settings, "STRIPE_STARTUP_PRODUCT_ID", ""),
-        org_team_product_id=getattr(settings, "STRIPE_ORG_TEAM_PRODUCT_ID", ""),
-        task_meter_id=getattr(settings, "STRIPE_TASK_METER_ID", ""),
-        task_meter_event_name=getattr(settings, "STRIPE_TASK_METER_EVENT_NAME", ""),
-        org_task_meter_id=getattr(settings, "STRIPE_ORG_TASK_METER_ID", ""),
-    )
-
-
 def _coalesce(value: str | None) -> Optional[str]:
     if not value:
         return None
@@ -100,9 +82,9 @@ def _load_from_database() -> Optional[StripeSettings]:
 @lru_cache(maxsize=1)
 def _cached_stripe_settings() -> StripeSettings:
     from_db = _load_from_database()
-    if from_db is not None:
-        return from_db
-    return _env_defaults()
+    if from_db is None:
+        raise ImproperlyConfigured("StripeConfig not found in database.")
+    return from_db
 
 
 def get_stripe_settings(force_reload: bool = False) -> StripeSettings:
