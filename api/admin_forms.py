@@ -1,7 +1,7 @@
 # admin_forms.py  (optional file)
 from django import forms
 from django.forms import ModelForm
-from .models import CommsChannel, AgentEmailAccount, LLMProvider
+from .models import CommsChannel, AgentEmailAccount, LLMProvider, StripeConfig
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 class AgentEmailAccountForm(ModelForm):
@@ -261,6 +261,133 @@ class LLMProviderForm(ModelForm):
         elif api_key:
             from .encryption import SecretsEncryption
             instance.api_key_encrypted = SecretsEncryption.encrypt_value(api_key)
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
+
+class StripeConfigForm(ModelForm):
+    """Admin form for managing Stripe configuration secrets."""
+
+    live_secret_key = forms.CharField(
+        label="Stripe live secret key",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leave blank to keep existing key.",
+    )
+    clear_live_secret_key = forms.BooleanField(
+        label="Clear live secret key",
+        required=False,
+        initial=False,
+    )
+    test_secret_key = forms.CharField(
+        label="Stripe test secret key",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leave blank to keep existing key.",
+    )
+    clear_test_secret_key = forms.BooleanField(
+        label="Clear test secret key",
+        required=False,
+        initial=False,
+    )
+    webhook_secret = forms.CharField(
+        label="Stripe webhook signing secret",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leave blank to keep existing key.",
+    )
+    clear_webhook_secret = forms.BooleanField(
+        label="Clear webhook secret",
+        required=False,
+        initial=False,
+    )
+    startup_price_id = forms.CharField(
+        label="Startup base price ID",
+        required=False,
+    )
+    startup_additional_task_price_id = forms.CharField(
+        label="Startup additional task price ID",
+        required=False,
+    )
+    startup_product_id = forms.CharField(
+        label="Startup product ID",
+        required=False,
+    )
+    org_team_product_id = forms.CharField(
+        label="Org/Team product ID",
+        required=False,
+    )
+    task_meter_id = forms.CharField(
+        label="Task meter ID",
+        required=False,
+    )
+    task_meter_event_name = forms.CharField(
+        label="Task meter event name",
+        required=False,
+    )
+    org_task_meter_id = forms.CharField(
+        label="Organization task meter ID",
+        required=False,
+    )
+
+    class Meta:
+        model = StripeConfig
+        fields = (
+            "release_env",
+            "live_mode",
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        instance: StripeConfig = self.instance
+        if instance and instance.pk:
+            self.fields["startup_price_id"].initial = instance.startup_price_id
+            self.fields["startup_additional_task_price_id"].initial = instance.startup_additional_task_price_id
+            self.fields["startup_product_id"].initial = instance.startup_product_id
+            self.fields["org_team_product_id"].initial = instance.org_team_product_id
+            self.fields["task_meter_id"].initial = instance.task_meter_id
+            self.fields["task_meter_event_name"].initial = instance.task_meter_event_name
+            self.fields["org_task_meter_id"].initial = instance.org_task_meter_id
+
+    def clean_release_env(self):
+        value = self.cleaned_data.get("release_env", "")
+        return value.strip()
+
+    def save(self, commit: bool = True):
+        instance: StripeConfig = super().save(commit=False)
+
+        if instance.pk is None:
+            if not commit:
+                raise ValueError("StripeConfigForm.save(commit=False) is not supported for new configs")
+            instance.save()
+
+        secrets_to_process = [
+            ("live_secret_key", "clear_live_secret_key", instance.set_live_secret_key),
+            ("test_secret_key", "clear_test_secret_key", instance.set_test_secret_key),
+            ("webhook_secret", "clear_webhook_secret", instance.set_webhook_secret),
+        ]
+        for secret_field, clear_field, setter_method in secrets_to_process:
+            secret_value = self.cleaned_data.get(secret_field)
+            if self.cleaned_data.get(clear_field):
+                setter_method(None)
+            elif secret_value:
+                setter_method(secret_value.strip())
+
+        simple_fields = [
+            "startup_price_id",
+            "startup_additional_task_price_id",
+            "startup_product_id",
+            "org_team_product_id",
+            "task_meter_id",
+            "task_meter_event_name",
+            "org_task_meter_id",
+        ]
+        for field_name in simple_fields:
+            value = self.cleaned_data.get(field_name)
+            instance.set_value(field_name, (value or "").strip() or None)
+
         if commit:
             instance.save()
             self.save_m2m()

@@ -5,8 +5,8 @@ from django.db.utils import IntegrityError
 from djstripe.models import Customer
 
 from constants.grant_types import GrantTypeChoices
-from config import settings
 from config.plans import PLAN_CONFIG, get_plan_by_product_id, AGENTS_UNLIMITED
+from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNames
 from datetime import datetime, timedelta, date, time
 from django.utils import timezone
@@ -320,7 +320,7 @@ def get_user_agent_limit(user) -> int:
 
         return plan["agent_limit"]
 
-def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIPE_TASK_METER_ID, idempotency_key: str | None = None):
+def report_task_usage_to_stripe(user, quantity: int = 1, meter_id: str | None = None, idempotency_key: str | None = None):
     """
     Reports usage to Stripe by creating a UsageRecord.
 
@@ -336,7 +336,7 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
         The quantity of usage to report (default is 1).
     meter_id : str, optional
         The ID of the meter to report usage against. If not provided,
-        defaults to settings.STRIPE_TASK_METER_ID.
+        defaults to the configured task meter in StripeConfig/environment.
 
     Returns:
     -------
@@ -364,9 +364,11 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
             logger.debug(f"report_usage_to_stripe: User {user.id} has no Stripe customer, skipping")
             return None
 
-        # Use default meter ID if none provided
-        if meter_id is None:
-            meter_id = settings.STRIPE_TASK_METER_ID
+        stripe_settings = get_stripe_settings()
+
+        # se default meter ID if meter_id is not provided or is falsy (e.g., None or empty string).
+        if not meter_id:
+            meter_id = stripe_settings.task_meter_id
 
         # Create the usage record in Stripe
         try:
@@ -399,7 +401,7 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id=settings.STRIP
 
 
 def report_organization_task_usage_to_stripe(organization, quantity: int = 1,
-                                             meter_id=settings.STRIPE_ORG_TEAM_TASK_METER_ID,
+                                             meter_id: str | None = None,
                                              idempotency_key: str | None = None):
     """Report additional task usage for an organization via Stripe metering."""
     with traced("SUBSCRIPTION Report Org Task Usage"):
@@ -413,13 +415,15 @@ def report_organization_task_usage_to_stripe(organization, quantity: int = 1,
 
         # TODO: Overhaul this to use the properties we will define for orgs and their tasks (since org plans have their own
         # task meters)
-        if meter_id is None:
-            meter_id = settings.STRIPE_TASK_METER_ID
+        stripe_settings = get_stripe_settings()
+
+        if not meter_id:
+            meter_id = stripe_settings.org_task_meter_id or stripe_settings.task_meter_id
 
         try:
             stripe.api_key = PaymentsHelper.get_stripe_key()
             meter_event = stripe.billing.MeterEvent.create(
-                event_name=settings.STRIPE_TASK_METER_EVENT_NAME,
+                event_name=stripe_settings.task_meter_event_name,
                 payload={"value": quantity, "stripe_customer_id": billing.stripe_customer_id},
                 idempotency_key=idempotency_key,
             )
@@ -449,10 +453,11 @@ def report_task_usage(subscription: Subscription, quantity: int = 1, idempotency
             return
         try:
             stripe.api_key = PaymentsHelper.get_stripe_key()
+            stripe_settings = get_stripe_settings()
 
             with traced("STRIPE Create Meter Event"):
                 meter_event = stripe.billing.MeterEvent.create(
-                    event_name=settings.STRIPE_TASK_METER_EVENT_NAME,
+                    event_name=stripe_settings.task_meter_event_name,
                     payload={"value": quantity, "stripe_customer_id": subscription.customer.id},
                     idempotency_key=idempotency_key,
                 )

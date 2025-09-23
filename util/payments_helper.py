@@ -1,4 +1,4 @@
-from config import settings
+from config.stripe_config import get_stripe_settings
 
 class PaymentsHelper:
     """
@@ -16,7 +16,8 @@ class PaymentsHelper:
         Returns:
             str: The Stripe secret key for the current environment.
         """
-        if settings.STRIPE_LIVE_MODE:
-            return settings.STRIPE_LIVE_SECRET_KEY
+        stripe = get_stripe_settings()
+        if stripe.live_mode:
+            return stripe.live_secret_key or ""
 
-        return settings.STRIPE_TEST_SECRET_KEY
+        return stripe.test_secret_key or ""

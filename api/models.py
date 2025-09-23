@@ -1336,6 +1336,250 @@ class UserPhoneNumber(models.Model):
     def __str__(self) -> str:
         return f"{self.user_id}:{self.phone_number}"
 
+class StripeConfig(models.Model):
+    """Per-environment Stripe credentials and identifiers."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    release_env = models.CharField(
+        max_length=32,
+        unique=True,
+        help_text="Environment this configuration applies to (e.g., prod, staging, local).",
+    )
+    live_mode = models.BooleanField(
+        default=False,
+        help_text="Whether this configuration should run Stripe in live mode.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["release_env"]
+        verbose_name = "Stripe Configuration"
+        verbose_name_plural = "Stripe Configuration"
+
+    def __str__(self) -> str:
+        return f"StripeConfig<{self.release_env}>"
+
+    def _entries_cache(self) -> dict[str, "StripeConfigEntry"]:
+        if not hasattr(self, "_entries_by_name"):
+            prefetched = getattr(self, "_prefetched_objects_cache", {})
+            if "entries" in prefetched:
+                entries = prefetched["entries"]
+            else:
+                entries = list(self.entries.all())
+            self._entries_by_name = {entry.name: entry for entry in entries}
+        return self._entries_by_name
+
+    def _get_entry(self, name: str) -> "StripeConfigEntry | None":
+        return self._entries_cache().get(name)
+
+    def get_value(self, name: str, default: str = "") -> str:
+        entry = self._get_entry(name)
+        if entry is None:
+            return default
+        return entry.get_value()
+
+    def set_value(self, name: str, value: str | None, *, is_secret: bool = False) -> None:
+        entry = self._get_entry(name)
+        if entry is None:
+            entry = StripeConfigEntry(config=self, name=name, is_secret=is_secret)
+            created = True
+        else:
+            created = False
+        entry.is_secret = is_secret
+        entry.set_value(value)
+        if created:
+            entry.save()
+        else:
+            entry.save(update_fields=["value_text", "value_encrypted", "is_secret", "updated_at"])
+        self._entries_cache()[name] = entry
+
+    def clear_value(self, name: str) -> None:
+        entry = self._get_entry(name)
+        if entry is None:
+            return
+        entry.set_value(None)
+        entry.save(update_fields=["value_text", "value_encrypted", "updated_at"])
+        self._entries_cache()[name] = entry
+
+    def has_value(self, name: str) -> bool:
+        entry = self._get_entry(name)
+        if entry is None:
+            return False
+        return entry.has_value
+
+    @property
+    def live_secret_key(self) -> str:
+        return self.get_value("live_secret_key")
+
+    def set_live_secret_key(self, value: str | None) -> None:
+        self.set_value("live_secret_key", value, is_secret=True)
+
+    @property
+    def test_secret_key(self) -> str:
+        return self.get_value("test_secret_key")
+
+    def set_test_secret_key(self, value: str | None) -> None:
+        self.set_value("test_secret_key", value, is_secret=True)
+
+    @property
+    def webhook_secret(self) -> str:
+        return self.get_value("webhook_secret")
+
+    def set_webhook_secret(self, value: str | None) -> None:
+        self.set_value("webhook_secret", value, is_secret=True)
+
+    @property
+    def startup_price_id(self) -> str:
+        return self.get_value("startup_price_id")
+
+    @startup_price_id.setter
+    def startup_price_id(self, value: str | None) -> None:
+        self.set_value("startup_price_id", value)
+
+    @property
+    def startup_additional_task_price_id(self) -> str:
+        return self.get_value("startup_additional_task_price_id")
+
+    @startup_additional_task_price_id.setter
+    def startup_additional_task_price_id(self, value: str | None) -> None:
+        self.set_value("startup_additional_task_price_id", value)
+
+    @property
+    def startup_product_id(self) -> str:
+        return self.get_value("startup_product_id")
+
+    @startup_product_id.setter
+    def startup_product_id(self, value: str | None) -> None:
+        self.set_value("startup_product_id", value)
+
+    @property
+    def org_team_product_id(self) -> str:
+        return self.get_value("org_team_product_id")
+
+    @org_team_product_id.setter
+    def org_team_product_id(self, value: str | None) -> None:
+        self.set_value("org_team_product_id", value)
+
+    @property
+    def org_team_price_id(self) -> str:
+        return self.get_value("org_team_price_id")
+
+    @org_team_price_id.setter
+    def org_team_price_id(self, value: str | None) -> None:
+        self.set_value("org_team_price_id", value)
+
+    @property
+    def org_team_additional_task_price_id(self) -> str:
+        return self.get_value("org_team_additional_task_price_id")
+
+    @org_team_additional_task_price_id.setter
+    def org_team_additional_task_price_id(self, value: str | None) -> None:
+        self.set_value("org_team_additional_task_price_id", value)
+
+    @property
+    def task_meter_id(self) -> str:
+        return self.get_value("task_meter_id")
+
+    @task_meter_id.setter
+    def task_meter_id(self, value: str | None) -> None:
+        self.set_value("task_meter_id", value)
+
+    @property
+    def task_meter_event_name(self) -> str:
+        return self.get_value("task_meter_event_name")
+
+    @task_meter_event_name.setter
+    def task_meter_event_name(self, value: str | None) -> None:
+        self.set_value("task_meter_event_name", value)
+
+    @property
+    def org_team_task_meter_id(self) -> str:
+        return self.get_value("org_team_task_meter_id")
+
+    @org_team_task_meter_id.setter
+    def org_team_task_meter_id(self, value: str | None) -> None:
+        self.set_value("org_team_task_meter_id", value)
+
+    @property
+    def org_team_task_meter_event_name(self) -> str:
+        return self.get_value("org_team_task_meter_event_name")
+
+    @org_team_task_meter_event_name.setter
+    def org_team_task_meter_event_name(self, value: str | None) -> None:
+        self.set_value("org_team_task_meter_event_name", value)
+
+    @property
+    def org_task_meter_id(self) -> str:
+        return self.get_value("org_task_meter_id")
+
+    @org_task_meter_id.setter
+    def org_task_meter_id(self, value: str | None) -> None:
+        self.set_value("org_task_meter_id", value)
+
+
+class StripeConfigEntry(models.Model):
+    """Individual Stripe configuration value scoped to an environment."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    config = models.ForeignKey(
+        StripeConfig,
+        on_delete=models.CASCADE,
+        related_name="entries",
+    )
+    name = models.CharField(max_length=128)
+    is_secret = models.BooleanField(default=False)
+    value_text = models.TextField(blank=True, default="")
+    value_encrypted = models.BinaryField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("config", "name")
+        indexes = [
+            models.Index(fields=["config", "name"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"StripeConfigEntry<{self.config.release_env}:{self.name}>"
+
+    @staticmethod
+    def _decrypt(value: bytes | None) -> str:
+        if not value:
+            return ""
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.decrypt_value(value)
+
+    @staticmethod
+    def _encrypt(value: str | None) -> bytes | None:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    def get_value(self) -> str:
+        if self.is_secret:
+            return self._decrypt(self.value_encrypted)
+        return self.value_text or ""
+
+    def set_value(self, value: str | None) -> None:
+        if self.is_secret:
+            self.value_encrypted = self._encrypt(value)
+            self.value_text = ""
+        else:
+            self.value_text = value or ""
+            self.value_encrypted = None
+
+    @property
+    def has_value(self) -> bool:
+        if self.is_secret:
+            return bool(self.value_encrypted)
+        return bool(self.value_text)
+
+
 class MeteringBatch(models.Model):
     """Audit record linking a batch of reserved usage to a Stripe meter event.
 

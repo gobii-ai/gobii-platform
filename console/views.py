@@ -54,6 +54,7 @@ from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import get_user_plan, get_active_subscription, allow_user_extra_tasks, \
     calculate_extra_tasks_used_during_subscription_period, get_user_extra_task_limit, get_or_create_stripe_customer
 from config import settings
+from config.stripe_config import get_stripe_settings
 
 from .forms import (
     ApiKeyForm,
@@ -3958,7 +3959,8 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
             messages.error(request, "Please select at least one seat to purchase.")
             return redirect("organization_detail", org_id=org.id)
 
-        price_id = getattr(settings, "STRIPE_ORG_TEAM_PRICE_ID", "")
+        stripe_settings = get_stripe_settings()
+        price_id = stripe_settings.org_team_price_id
         if not price_id:
             messages.error(request, "Stripe price not configured. Please contact support.")
             return redirect("organization_detail", org_id=org.id)
@@ -3981,7 +3983,7 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                 }
             ]
 
-            overage_price_id = getattr(settings, "STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", "")
+            overage_price_id = stripe_settings.org_team_additional_task_price_id
             if overage_price_id:
                 line_items.append({"price": overage_price_id})
 

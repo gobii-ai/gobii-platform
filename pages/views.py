@@ -21,6 +21,7 @@ from api.models import PaidPlanIntent, PersistentAgent
 from agents.services import AIEmployeeTemplateService
 from waffle import flag_is_active
 from api.models import OrganizationMembership
+from config.stripe_config import get_stripe_settings
 
 import stripe
 from djstripe.models import Customer, Subscription, Price
@@ -526,6 +527,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
     def get(self, request, *args, **kwargs):
         stripe.api_key = PaymentsHelper.get_stripe_key()
+        stripe_settings = get_stripe_settings()
 
         user = request.user
 
@@ -534,12 +536,12 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
         price = 0.0
         try:
-            price_object = Price.objects.get(id=settings.STRIPE_STARTUP_PRICE_ID)
+            price_object = Price.objects.get(id=stripe_settings.startup_price_id)
             # unit_amount is in cents, convert to dollars
             if price_object.unit_amount is not None:
                 price = price_object.unit_amount / 100
         except Price.DoesNotExist:
-            logger.warning(f"Price with ID '{settings.STRIPE_STARTUP_PRICE_ID}' does not exist in dj-stripe.")
+            logger.warning(f"Price with ID '{stripe_settings.startup_price_id}' does not exist in dj-stripe.")
         except Exception as e:
             logger.error(f"An unexpected error occurred while fetching price: {e}")
 
@@ -552,11 +554,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             allow_promotion_codes=True,
             line_items=[
                 {
-                    "price": settings.STRIPE_STARTUP_PRICE_ID,
+                    "price": stripe_settings.startup_price_id,
                     "quantity": 1,  # Fixed quantity for the base plan
                 },
                 {
-                    "price": settings.STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID,
+                    "price": stripe_settings.startup_additional_task_price_id,
                 },
             ],
         )
