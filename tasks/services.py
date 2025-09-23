@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db.models.aggregates import Sum
 from django.db.models.expressions import F
 from django.utils import timezone
+from datetime import timezone as dt_timezone
 from django.utils.dateparse import parse_datetime, parse_date
 
 from api import models
@@ -84,7 +85,7 @@ def _coerce_subscription_datetime(value: Any) -> datetime | None:
 
     if isinstance(value, Number):
         try:
-            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+            return datetime.fromtimestamp(float(value), tz=dt_timezone.utc)
         except (ValueError, OverflowError, OSError):
             return None
 
