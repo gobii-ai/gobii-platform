@@ -94,13 +94,13 @@ class StripeConfigAdmin(admin.ModelAdmin):
     )
 
     def live_secret_key_status(self, obj):
-        return "Configured" if obj.live_secret_key_encrypted else "Not set"
+        return "Configured" if obj.has_value("live_secret_key") else "Not set"
 
     def test_secret_key_status(self, obj):
-        return "Configured" if obj.test_secret_key_encrypted else "Not set"
+        return "Configured" if obj.has_value("test_secret_key") else "Not set"
 
     def webhook_secret_status(self, obj):
-        return "Configured" if obj.webhook_secret_encrypted else "Not set"
+        return "Configured" if obj.has_value("webhook_secret") else "Not set"
 
     live_secret_key_status.short_description = "Live key"
     test_secret_key_status.short_description = "Test key"

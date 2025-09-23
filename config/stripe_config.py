@@ -61,7 +61,7 @@ def _load_from_database() -> Optional[StripeSettings]:
     release_env = getattr(settings, "GOBII_RELEASE_ENV", "local")
 
     try:
-        config = StripeConfig.objects.get(release_env=release_env)
+        config = StripeConfig.objects.prefetch_related("entries").get(release_env=release_env)
     except StripeConfig.DoesNotExist:
         return None
     except (OperationalError, ProgrammingError):

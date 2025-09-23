@@ -19,21 +19,20 @@ class StripeConfigHelperTests(TestCase):
         self.assertEqual(stripe_settings.startup_product_id, settings.STRIPE_STARTUP_PRODUCT_ID)
 
     def test_get_stripe_settings_prefers_database(self):
-        config = StripeConfig(
+        config = StripeConfig.objects.create(
             release_env=settings.GOBII_RELEASE_ENV,
             live_mode=True,
-            startup_price_id="price_startup_test",
-            startup_additional_task_price_id="price_startup_extra_test",
-            startup_product_id="prod_startup_test",
-            org_team_product_id="prod_org_test",
-            task_meter_id="meter_task_test",
-            task_meter_event_name="task_test",
-            org_task_meter_id="meter_org_test",
         )
+        config.startup_price_id = "price_startup_test"
+        config.startup_additional_task_price_id = "price_startup_extra_test"
+        config.startup_product_id = "prod_startup_test"
+        config.org_team_product_id = "prod_org_test"
+        config.task_meter_id = "meter_task_test"
+        config.task_meter_event_name = "task_test"
+        config.org_task_meter_id = "meter_org_test"
         config.set_live_secret_key("sk_live_test")
         config.set_test_secret_key("sk_test_test")
         config.set_webhook_secret("whsec_test")
-        config.save()
 
         invalidate_stripe_settings_cache()
 
@@ -52,3 +51,20 @@ class StripeConfigHelperTests(TestCase):
         plan = plan_module.get_plan_by_product_id("prod_org_test")
         self.assertIsNotNone(plan)
         self.assertEqual(plan["id"], "org_team")
+
+    def test_set_value_persists_entries(self):
+        config = StripeConfig.objects.create(
+            release_env=settings.GOBII_RELEASE_ENV,
+            live_mode=False,
+        )
+        config.startup_product_id = "prod_123"
+        config.set_live_secret_key("sk_live_123")
+
+        product_entry = config.entries.get(name="startup_product_id")
+        secret_entry = config.entries.get(name="live_secret_key")
+
+        self.assertFalse(product_entry.is_secret)
+        self.assertEqual(product_entry.value_text, "prod_123")
+        self.assertTrue(secret_entry.is_secret)
+        self.assertTrue(secret_entry.value_encrypted)
+        self.assertEqual(config.live_secret_key, "sk_live_123")
