@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db.models.aggregates import Sum
 from django.db.models.expressions import F
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime, parse_date
 
 from api import models
 from billing.services import BillingService
@@ -30,6 +31,8 @@ from util.subscription_helper import (
 )
 
 from datetime import timedelta, datetime
+from numbers import Number
+from typing import Any, Mapping
 from django.apps import apps
 import os
 
@@ -52,6 +55,51 @@ THRESHOLDS = (75, 90, 100)
 #
 # By default, all of this is "in range", that is, the task credits that are currently valid for the user, with a granted date
 # in the past and an expiration date in the future. This is the most common use case.
+def _extract_subscription_field(subscription: Any, key: str) -> Any:
+    """Return a field from a subscription, preferring stripe_data when available."""
+    if not subscription:
+        return None
+
+    source = getattr(subscription, "stripe_data", None)
+    if source:
+        if isinstance(source, Mapping):
+            if key in source:
+                return source[key]
+        else:
+            try:
+                return getattr(source, key)
+            except AttributeError:
+                pass
+
+    return getattr(subscription, key, None)
+
+
+def _coerce_subscription_datetime(value: Any) -> datetime | None:
+    """Convert Stripe subscription timestamp formats into datetimes."""
+    if value in (None, ""):
+        return None
+
+    if isinstance(value, datetime):
+        return value
+
+    if isinstance(value, Number):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            return None
+
+    if isinstance(value, str):
+        parsed_dt = parse_datetime(value.strip()) if value.strip() else None
+        if parsed_dt is not None:
+            return parsed_dt
+
+        parsed_date = parse_date(value.strip()) if value.strip() else None
+        if parsed_date is not None:
+            return datetime.combine(parsed_date, datetime.min.time())
+
+    return None
+
+
 class TaskCreditService:
     @staticmethod
     def _is_community_unlimited() -> bool:
@@ -180,12 +228,16 @@ class TaskCreditService:
 
             logger.debug(f"grant_subscription_credits {user.id}: granting {credits_to_grant} credits")
 
-            # Set expiration date - if there's an active subscription, set it to the end of current period
-            # Otherwise, default to 30 days from now
-            if subscription and hasattr(subscription.stripe_data, 'current_period_end'):
-                expiration_date = subscription.stripe_data['current_period_end']
-            else:
-                expiration_date = grant_date + timedelta(days=30)
+            # Set expiration date - prefer the subscription's current period end
+            if expiration_date is None:
+                period_end = _coerce_subscription_datetime(
+                    _extract_subscription_field(subscription, "current_period_end")
+                ) if subscription else None
+
+                if period_end is not None:
+                    expiration_date = period_end
+                else:
+                    expiration_date = grant_date + timedelta(days=30)
 
             logger.debug(f"grant_subscription_credits {user.id}: expiration date {expiration_date}")
 
@@ -250,10 +302,12 @@ class TaskCreditService:
 
             grant_date = grant_date or timezone.now()
 
-            if subscription and getattr(subscription.stripe_data, "current_period_end", None):
-                expiration_date = subscription.stripe_data['current_period_end']
-            else:
-                expiration_date = expiration_date or (grant_date + timedelta(days=30))
+            if expiration_date is None:
+                period_end = _coerce_subscription_datetime(
+                    _extract_subscription_field(subscription, "current_period_end")
+                ) if subscription else None
+
+                expiration_date = period_end or (grant_date + timedelta(days=30))
 
             TaskCredit.objects.create(
                 organization=organization,
