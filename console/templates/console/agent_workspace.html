@@ -723,7 +723,7 @@
     const BASE_SCROLL_THRESHOLD = 140;
     const ALIGN_THRESHOLD = 160;
     const BOTTOM_ANCHOR_THRESHOLD = 48;
-    const AUTO_NEWER_TRIGGERS = new Set(['auto-newer', 'processing-finished', 'auto-newer-loop', 'manual-newer']);
+    const AUTO_NEWER_TRIGGERS = new Set(['auto-newer', 'processing-finished', 'auto-newer-loop', 'manual-newer', 'jump-to-latest']);
 
     let openToolChip = null;
 
@@ -1330,9 +1330,12 @@
     document.addEventListener('click', (event) => {
       const btn = event.target.closest('#jump-to-latest');
       if (!btn) return;
-      scrollToBottom({ force: true });
       state.autoScroll = true;
       toggleJumpButtonVisibility(false);
+      if (hasMoreNewerInDom()) {
+        requestNewer('jump-to-latest');
+      }
+      scrollToBottom({ force: true });
     });
 
     document.addEventListener('click', (event) => {
