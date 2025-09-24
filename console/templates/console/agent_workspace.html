@@ -119,7 +119,6 @@
   }
 
   #timeline-events {
-    scroll-behavior: smooth;
     padding: 1rem 0.75rem var(--timeline-bottom-padding, 16rem);
   }
 
@@ -633,12 +632,15 @@
       fetchingNewer: false,
       queuedNewerTrigger: null,
       processingActive: false,
+      bottomAnchorOffset: null,
+      pageBottomOffset: null,
     };
     state.processingActive = root.dataset.processingActive === 'true';
 
     const JUMP_BUTTON_SIZE = 52; // matches 3.25rem
     const JUMP_BUTTON_GAP = 18;
     const BASE_SCROLL_THRESHOLD = 140;
+    const BOTTOM_ANCHOR_THRESHOLD = 48;
 
     let openToolChip = null;
 
@@ -794,6 +796,26 @@
       return offset;
     }
 
+    // Smoothly maintain the page's distance from the bottom when new content arrives.
+    function scrollPageToBottomOffset(offset, behavior) {
+      const doc = document.documentElement || document.body;
+      const body = document.body || { scrollHeight: 0, offsetHeight: 0 };
+      const totalHeight = Math.max(
+        doc?.scrollHeight || 0,
+        doc?.offsetHeight || 0,
+        body.scrollHeight || 0,
+        body.offsetHeight || 0
+      );
+      const viewportHeight = window.innerHeight || doc?.clientHeight || 0;
+      const target = Math.max(totalHeight - viewportHeight - Math.max(offset || 0, 0), 0);
+      const config = { top: target, behavior };
+      try {
+        window.scrollTo(config);
+      } catch (err) {
+        window.scrollTo(0, target);
+      }
+    }
+
     function isNearBottom() {
       if (!timeline) {
         return true;
@@ -835,34 +857,30 @@
       if (!force && !nearBefore) return;
 
       const prefersReducedMotion = Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-      const timelineBehavior = hasOptions && arg.behavior
-        ? arg.behavior
-        : (prefersReducedMotion ? 'auto' : 'smooth');
-      const pageBehavior = hasOptions && arg.pageBehavior
-        ? arg.pageBehavior
-        : (prefersReducedMotion ? 'auto' : (nearBefore ? 'auto' : 'smooth'));
+      const defaultTimelineBehavior = prefersReducedMotion ? 'auto' : 'smooth';
+      const timelineBehavior = hasOptions && arg.behavior ? arg.behavior : defaultTimelineBehavior;
+      const defaultPageBehavior = prefersReducedMotion ? 'auto' : (nearBefore ? 'auto' : 'smooth');
+      const pageBehavior = hasOptions && arg.pageBehavior ? arg.pageBehavior : defaultPageBehavior;
+      const alignPage = hasOptions ? arg.alignPage !== false : true;
+      const desiredPageOffset = hasOptions && typeof arg.pageOffset === 'number' ? arg.pageOffset : null;
 
+      const targetTop = Math.max(timeline.scrollHeight - timeline.clientHeight, 0);
       if (typeof timeline.scrollTo === 'function') {
-        timeline.scrollTo({ top: timeline.scrollHeight, behavior: timelineBehavior });
+        timeline.scrollTo({ top: targetTop, behavior: timelineBehavior });
       } else {
-        timeline.scrollTop = timeline.scrollHeight;
+        timeline.scrollTop = targetTop;
       }
 
       state.autoScroll = true;
 
-      const offset = getPageBottomOffset();
-      if (offset > 1) {
-        if (typeof window.scrollBy === 'function') {
-          try {
-            window.scrollBy({ top: offset, behavior: pageBehavior });
-          } catch (err) {
-            const current = window.scrollY ?? window.pageYOffset ?? document.documentElement?.scrollTop ?? document.body?.scrollTop ?? 0;
-            window.scrollTo(0, current + offset);
-          }
-        } else {
-          const current = window.scrollY ?? window.pageYOffset ?? document.documentElement?.scrollTop ?? document.body?.scrollTop ?? 0;
-          window.scrollTo(0, current + offset);
-        }
+      if (!alignPage) {
+        return;
+      }
+
+      const currentOffset = getPageBottomOffset();
+      const targetOffset = desiredPageOffset !== null ? desiredPageOffset : 0;
+      if (Math.abs(targetOffset - currentOffset) > 1) {
+        scrollPageToBottomOffset(targetOffset, pageBehavior);
       }
     }
 
@@ -931,7 +949,7 @@
       setProcessingDataset(true);
       refreshEmptyState();
       if (isNearBottom()) {
-        scrollToBottom(true);
+        scrollToBottom({ force: true });
       }
     }
 
@@ -997,7 +1015,20 @@
       if (!timeline) return;
       const nodes = Array.from(timeline.querySelectorAll('.timeline-event[data-cursor]'));
       if (nodes.length <= limit) return;
+
       const excess = nodes.length - limit;
+      const removingFromTop = direction !== 'older';
+      let restoreScroll = false;
+      let previousBottomOffset = 0;
+
+      if (removingFromTop) {
+        const autoScrollActive = state.autoScroll || isNearBottom();
+        if (autoScrollActive) {
+          restoreScroll = true;
+          previousBottomOffset = timeline.scrollHeight - timeline.scrollTop;
+        }
+      }
+
       if (direction === 'older') {
         for (let i = 0; i < excess; i += 1) {
           const node = nodes[nodes.length - 1 - i];
@@ -1009,6 +1040,16 @@
           if (node) node.remove();
         }
       }
+
+      if (restoreScroll) {
+        const target = Math.max(timeline.scrollHeight - previousBottomOffset, 0);
+        if (typeof timeline.scrollTo === 'function') {
+          timeline.scrollTo({ top: target, behavior: 'auto' });
+        } else {
+          timeline.scrollTop = target;
+        }
+      }
+
       ensureProcessingSlotPosition();
       refreshEmptyState();
     }
@@ -1096,7 +1137,7 @@
     document.addEventListener('click', (event) => {
       const btn = event.target.closest('#jump-to-latest');
       if (!btn) return;
-      scrollToBottom(true);
+      scrollToBottom({ force: true });
       state.autoScroll = true;
       toggleJumpButtonVisibility(false);
     });
@@ -1170,13 +1211,52 @@
       }
     });
 
+    // Preserve the user's bottom offset while new timeline fragments stream in.
+    window.htmx.on('htmx:beforeSwap', (event) => {
+      if (event.detail?.target?.id !== 'timeline-events') return;
+      if (!timeline || state.action !== 'newer') {
+        state.bottomAnchorOffset = null;
+        state.pageBottomOffset = null;
+        return;
+      }
+
+      const bottomOffset = getTimelineBottomOffset();
+      const maintainAnchor = state.autoScroll || bottomOffset <= BOTTOM_ANCHOR_THRESHOLD;
+
+      if (maintainAnchor) {
+        state.bottomAnchorOffset = Math.max(bottomOffset, 0);
+        state.pageBottomOffset = Math.max(getPageBottomOffset(), 0);
+      } else {
+        state.bottomAnchorOffset = null;
+        state.pageBottomOffset = null;
+      }
+    });
+
     window.htmx.on('htmx:afterSwap', (event) => {
       if (event.detail?.target?.id !== 'timeline-events') return;
 
       closeOpenToolChip();
 
+      const anchorOffset = typeof state.bottomAnchorOffset === 'number' ? state.bottomAnchorOffset : null;
+      const pageOffset = typeof state.pageBottomOffset === 'number' ? state.pageBottomOffset : null;
+      state.bottomAnchorOffset = null;
+      state.pageBottomOffset = null;
+
       ensureProcessingSlotPosition();
       updateTimelinePadding();
+
+      if (state.action === 'newer' && anchorOffset !== null) {
+        const target = Math.max(timeline.scrollHeight - timeline.clientHeight - anchorOffset, 0);
+        if (typeof timeline.scrollTo === 'function') {
+          timeline.scrollTo({ top: target, behavior: 'auto' });
+        } else {
+          timeline.scrollTop = target;
+        }
+      }
+
+      if (state.action === 'newer' && pageOffset !== null) {
+        scrollPageToBottomOffset(pageOffset, 'auto');
+      }
 
       if (state.action === 'older' && timeline) {
         const delta = timeline.scrollHeight - state.previousScrollHeight;
@@ -1192,7 +1272,7 @@
       }
 
       if (state.autoScroll) {
-        scrollToBottom(true);
+        scrollToBottom({ force: true });
       }
 
       if (state.action === 'newer' || state.fetchingNewer) {
