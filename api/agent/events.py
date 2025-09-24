@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Keep streams bounded while retaining enough history for reconnects.
 _MAX_STREAM_LENGTH = 2000
-_PROCESSING_LOCK_TEMPLATE = "agent-event-processing:{agent_id}"
+_PROCESSING_RESOURCE_TEMPLATE = "agent-event-processing:{agent_id}"
 
 
 def _stream_key(agent_id: str | UUID) -> str:
@@ -27,9 +27,19 @@ def get_agent_event_stream_key(agent_id: str | UUID) -> str:
     return _stream_key(agent_id)
 
 
+def get_agent_processing_resource_key(agent_id: str | UUID) -> str:
+    """Return the raw resource key used for the Redlock."""
+
+    return _PROCESSING_RESOURCE_TEMPLATE.format(agent_id=str(agent_id))
+
+
 def get_agent_processing_lock_key(agent_id: str | UUID) -> str:
-    """Return the Redis lock key used while processing agent events."""
-    return _PROCESSING_LOCK_TEMPLATE.format(agent_id=str(agent_id))
+    """Return the actual Redis key maintained by Redlock."""
+
+    from pottery.redlock import Redlock
+
+    resource = get_agent_processing_resource_key(agent_id)
+    return f"{Redlock._KEY_PREFIX}:{resource}"
 
 
 def is_agent_processing(agent_id: str | UUID) -> bool:
@@ -37,7 +47,19 @@ def is_agent_processing(agent_id: str | UUID) -> bool:
 
     try:
         redis = get_redis_client()
-        return bool(redis.exists(get_agent_processing_lock_key(agent_id)))
+        redis_key = get_agent_processing_lock_key(agent_id)
+        resource_key = get_agent_processing_resource_key(agent_id)
+        exists = redis.exists(redis_key)
+        matching = list(redis.scan_iter(match="*agent-event-processing*"))
+        logger.info(
+            "processing_lock_check agent=%s redis_key=%s resource_key=%s exists=%s matching_keys=%s",
+            agent_id,
+            redis_key,
+            resource_key,
+            int(exists),
+            matching,
+        )
+        return bool(exists)
     except Exception:  # pragma: no cover - defensive; processing status should not break views
         logger.debug("Failed to check processing lock state for %s", agent_id, exc_info=True)
         return False

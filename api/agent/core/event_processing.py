@@ -68,7 +68,11 @@ from ..tools.mcp_tools import (
     execute_search_tools, execute_mcp_tool
 )
 from ..tools.mcp_manager import get_mcp_manager
-from ..events import publish_agent_event, get_agent_processing_lock_key
+from ..events import (
+    publish_agent_event,
+    get_agent_processing_lock_key,
+    get_agent_processing_resource_key,
+)
 from ...models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -570,7 +574,9 @@ def process_agent_events(
     set_budget_context(ctx)
 
     # Use distributed lock to ensure only one event processing call per agent
-    lock_key = get_agent_processing_lock_key(persistent_agent_id)
+    resource_key = get_agent_processing_resource_key(persistent_agent_id)
+    redis_lock_key = get_agent_processing_lock_key(persistent_agent_id)
+    lock_key = resource_key
     pending_key = f"agent-event-processing:pending:{persistent_agent_id}"
 
     redis_client = get_redis_client()
@@ -601,6 +607,17 @@ def process_agent_events(
         logger.info("Acquired distributed lock for agent %s", persistent_agent_id)
         span.add_event("Distributed lock acquired")
         span.set_attribute("lock.acquired", True)
+        try:
+            existing_keys = list(redis_client.scan_iter(match="*agent-event-processing*"))
+            logger.info(
+                "processing_lock_acquired agent=%s resource_key=%s redis_lock_key=%s existing_keys=%s",
+                persistent_agent_id,
+                lock_key,
+                redis_lock_key,
+                existing_keys,
+            )
+        except Exception:
+            logger.debug("Failed to enumerate processing lock keys", exc_info=True)
         publish_agent_event(
             persistent_agent_id,
             kind="processing.started",
@@ -641,6 +658,17 @@ def process_agent_events(
                 lock.release()
                 logger.info("Released distributed lock for agent %s", persistent_agent_id)
                 span.add_event("Distributed lock released")
+                try:
+                    existing_keys = list(redis_client.scan_iter(match="*agent-event-processing*"))
+                    logger.info(
+                        "processing_lock_released agent=%s resource_key=%s redis_lock_key=%s remaining_keys=%s",
+                        persistent_agent_id,
+                        lock_key,
+                        redis_lock_key,
+                        existing_keys,
+                    )
+                except Exception:
+                    logger.debug("Failed to enumerate processing lock keys after release", exc_info=True)
             except Exception as e:
                 logger.warning("Failed to release lock for agent %s: %s", persistent_agent_id, str(e))
                 span.add_event("Lock release warning")
