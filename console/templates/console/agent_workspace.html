@@ -33,6 +33,17 @@
           </div>
           {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
           <div id="processing-indicator-slot" class="mt-2 px-1"></div>
+          <div id="timeline-load-newer" class="flex justify-center border-t border-slate-100 py-2 text-xs text-slate-500" {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+            {% if timeline_window.has_more_newer %}
+              <button
+                class="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
+                hx-target="#timeline-events"
+                hx-swap="beforeend">
+                Load newer
+              </button>
+            {% endif %}
+          </div>
         </div>
       </div>
 
@@ -680,6 +691,7 @@
     const getJumpButton = () => document.getElementById('jump-to-latest');
     const agentFirstName = root.dataset.agentFirstName || 'Your agent';
     const getCursorsEl = () => document.getElementById('timeline-cursors');
+    const getLoadNewerContainer = () => document.getElementById('timeline-load-newer');
 
     const limit = parseInt(root.dataset.timelineLimit || '150', 10);
     const newerUrl = root.dataset.timelineNewerUrl;
@@ -703,6 +715,7 @@
       pageBottomOffset: null,
       knownCursors: new Set(),
       processingSticky: initialProcessingActive,
+      lastNewerTrigger: null,
     };
 
     const JUMP_BUTTON_SIZE = 52; // matches 3.25rem
@@ -710,6 +723,7 @@
     const BASE_SCROLL_THRESHOLD = 140;
     const ALIGN_THRESHOLD = 160;
     const BOTTOM_ANCHOR_THRESHOLD = 48;
+    const AUTO_NEWER_TRIGGERS = new Set(['auto-newer', 'processing-finished', 'auto-newer-loop', 'manual-newer']);
 
     let openToolChip = null;
 
@@ -926,13 +940,30 @@
     const RECONNECT_MAX = 30000;
 
     function ensureProcessingSlotPosition() {
-      if (!timeline || !processingSlot) return;
-      if (processingSlot.parentNode !== timeline) {
-        timeline.appendChild(processingSlot);
-        return;
+      if (!timeline) return;
+      const loadNewerContainer = getLoadNewerContainer();
+
+      if (processingSlot) {
+        const slotParent = processingSlot.parentNode;
+        const loadParent = loadNewerContainer?.parentNode || null;
+
+        if (loadNewerContainer && loadParent === timeline) {
+          if (slotParent !== timeline) {
+            timeline.insertBefore(processingSlot, loadNewerContainer);
+          } else if (processingSlot.nextElementSibling !== loadNewerContainer) {
+            timeline.insertBefore(processingSlot, loadNewerContainer);
+          }
+        } else if (slotParent !== timeline) {
+          timeline.appendChild(processingSlot);
+        } else if (timeline.lastElementChild !== processingSlot) {
+          timeline.appendChild(processingSlot);
+        }
       }
-      if (timeline.lastElementChild !== processingSlot) {
-        timeline.appendChild(processingSlot);
+
+      if (loadNewerContainer && loadNewerContainer.parentNode === timeline) {
+        if (timeline.lastElementChild !== loadNewerContainer) {
+          timeline.appendChild(loadNewerContainer);
+        }
       }
     }
 
@@ -1104,6 +1135,23 @@
       toggleJumpButtonVisibility(show);
     }
 
+    function hasMoreNewerInDom() {
+      const cursorNode = getCursorsEl();
+      if (!cursorNode) return false;
+      return cursorNode.dataset?.hasMoreNewer === 'true';
+    }
+
+    function maybeAutoFetchBacklog() {
+      if (!hasMoreNewerInDom()) return;
+      if (state.fetchingNewer) return;
+      if (!state.autoScroll) return;
+      const trigger = state.lastNewerTrigger;
+      if (!trigger || !AUTO_NEWER_TRIGGERS.has(trigger)) {
+        return;
+      }
+      requestNewer('auto-newer-loop');
+    }
+
     function forgetCursor(node) {
       if (!node || !state.knownCursors) return;
       const cursor = node.dataset?.cursor;
@@ -1226,8 +1274,9 @@
 
     function requestNewer(trigger) {
       if (!newerUrl || !timeline) return;
+      const label = trigger || 'manual-newer';
       if (state.fetchingNewer) {
-        state.queuedNewerTrigger = trigger || 'auto-newer';
+        state.queuedNewerTrigger = label;
         return;
       }
       const params = new URLSearchParams({ limit: String(limit) });
@@ -1237,6 +1286,7 @@
 
       state.action = 'newer';
       state.fetchingNewer = true;
+      state.lastNewerTrigger = label;
       const nearBottom = isNearBottom();
       state.autoScroll = state.pendingComposerScroll ? true : nearBottom;
 
@@ -1385,8 +1435,12 @@
       if (url.includes('direction=older')) {
         state.action = 'older';
         state.previousScrollHeight = timeline?.scrollHeight || 0;
+        state.lastNewerTrigger = null;
       } else if (url.includes('direction=newer')) {
         state.action = 'newer';
+        if (!state.lastNewerTrigger) {
+          state.lastNewerTrigger = 'manual-newer';
+        }
       }
     });
 
@@ -1466,6 +1520,7 @@
       updateJumpButton();
       refreshEmptyState();
       syncProcessingFromDom();
+      maybeAutoFetchBacklog();
     });
 
     window.htmx.on('htmx:afterSettle', (event) => {

@@ -145,6 +145,8 @@ def fetch_timeline_window(
                 has_more_older = True
             events = events[:limit]
             events.sort(key=lambda e: e.sort_key)
+            if events:
+                has_more_newer = True
 
         else:  # direction == "newer"
             message_filter = Q(timestamp__gt=ts)

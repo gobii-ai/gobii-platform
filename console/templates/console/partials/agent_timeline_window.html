@@ -23,6 +23,18 @@
   {% endif %}
 </div>
 
+<div id="timeline-load-newer" hx-swap-oob="true" class="flex justify-center border-t border-slate-100 py-2 text-xs text-slate-500" {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+  {% if timeline_window.has_more_newer and timeline_window.window_newest_cursor %}
+    <button
+      class="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+      hx-get="{{ timeline_newer_url }}&cursor={{ timeline_window.window_newest_cursor|urlencode }}&limit={{ timeline_limit }}&current_newest={{ current_newest_cursor|default:''|urlencode }}"
+      hx-target="#timeline-events"
+      hx-swap="beforeend">
+      Load newer
+    </button>
+  {% endif %}
+</div>
+
 <button id="jump-to-latest" hx-swap-oob="true"
         class="jump-to-latest hidden"
         type="button"
