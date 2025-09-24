@@ -20,7 +20,7 @@
        data-agent-first-name="{{ agent_first_name }}">
 
     <div id="timeline-shell" class="relative flex-1">
-      <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto pb-44">
+      <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto">
         <div class="flex justify-center py-2 text-xs text-slate-500">
           {% if timeline_window.has_more_older %}
             <button
@@ -80,6 +80,7 @@
 
   #timeline-events {
     scroll-behavior: smooth;
+    padding-bottom: 14rem;
   }
 
   #timeline-events::-webkit-scrollbar {
@@ -146,9 +147,13 @@
   }
 
   .composer-shell {
-    position: sticky;
-    bottom: 1.25rem;
+    position: fixed;
+    left: 50%;
+    bottom: 1.5rem;
+    transform: translateX(-50%);
+    width: min(48rem, calc(100% - 3rem));
     z-index: 40;
+    pointer-events: none;
   }
 
   .composer-surface {
@@ -158,6 +163,7 @@
     border: 1px solid rgba(226, 232, 240, 0.7);
     box-shadow: 0 12px 34px rgba(15, 23, 42, 0.12);
     padding: 1.5rem;
+    pointer-events: auto;
   }
 
   .jump-to-latest {
@@ -314,13 +320,18 @@
   }
 
   @media (max-width: 768px) {
+    .composer-shell {
+      width: min(100% - 2rem, 32rem);
+      bottom: 1.1rem;
+    }
+
     .composer-surface {
       padding: 1.1rem;
       border-radius: 1rem;
     }
 
     #timeline-events {
-      padding-bottom: 12.5rem;
+      padding-bottom: 13rem;
     }
 
     .jump-to-latest {
