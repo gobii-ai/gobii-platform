@@ -548,6 +548,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         # 2️⃣  Kick off Checkout with the *existing* customer
         session = stripe.checkout.Session.create(
             customer=customer.id,                       # <-- key line
+            api_key=stripe.api_key,
             success_url=f'{request.build_absolute_uri(reverse("console-home"))}?subscribe_success=1&p={price}',
             cancel_url=request.build_absolute_uri(reverse("pages:home")),
             mode="subscription",

@@ -3989,6 +3989,7 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
 
             session = stripe.checkout.Session.create(
                 customer=customer.id,
+                api_key=stripe.api_key,
                 mode="subscription",
                 success_url=success_url,
                 cancel_url=cancel_url,
@@ -4048,6 +4049,7 @@ class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
 
             session = stripe.billing_portal.Session.create(
                 customer=billing.stripe_customer_id,
+                api_key=stripe.api_key,
                 return_url=return_url,
             )
 
