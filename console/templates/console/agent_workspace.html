@@ -826,18 +826,44 @@
       }
     }
 
-    function scrollToBottom(force) {
+    function scrollToBottom(arg) {
       if (!timeline) return;
+
+      const hasOptions = typeof arg === 'object' && arg !== null;
+      const force = hasOptions ? Boolean(arg.force) : Boolean(arg);
       const nearBefore = isNearBottom();
-      const shouldScroll = force || nearBefore;
-      if (!shouldScroll) return;
-      timeline.scrollTop = timeline.scrollHeight;
+      if (!force && !nearBefore) return;
+
+      const prefersReducedMotion = Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      const timelineBehavior = hasOptions && arg.behavior
+        ? arg.behavior
+        : (prefersReducedMotion ? 'auto' : 'smooth');
+      const pageBehavior = hasOptions && arg.pageBehavior
+        ? arg.pageBehavior
+        : (prefersReducedMotion ? 'auto' : (nearBefore ? 'auto' : 'smooth'));
+
+      if (typeof timeline.scrollTo === 'function') {
+        timeline.scrollTo({ top: timeline.scrollHeight, behavior: timelineBehavior });
+      } else {
+        timeline.scrollTop = timeline.scrollHeight;
+      }
+
       state.autoScroll = true;
-      window.requestAnimationFrame(() => {
-        const docHeight = Math.max(document.documentElement?.scrollHeight || 0, document.body?.scrollHeight || 0);
-        window.scrollTo({ top: docHeight, behavior: 'smooth' });
-        isNearBottom();
-      });
+
+      const offset = getPageBottomOffset();
+      if (offset > 1) {
+        if (typeof window.scrollBy === 'function') {
+          try {
+            window.scrollBy({ top: offset, behavior: pageBehavior });
+          } catch (err) {
+            const current = window.scrollY ?? window.pageYOffset ?? document.documentElement?.scrollTop ?? document.body?.scrollTop ?? 0;
+            window.scrollTo(0, current + offset);
+          }
+        } else {
+          const current = window.scrollY ?? window.pageYOffset ?? document.documentElement?.scrollTop ?? document.body?.scrollTop ?? 0;
+          window.scrollTo(0, current + offset);
+        }
+      }
     }
 
     const PROCESSING_NODE_ID = 'agent-processing-indicator';
@@ -1271,7 +1297,7 @@
     connectEventStream(null);
     updateTimelinePadding();
     positionJumpButton();
-    scrollToBottom(true);
+    scrollToBottom({ force: true, behavior: 'auto', pageBehavior: 'auto' });
     updateJumpButton();
     refreshEmptyState();
 
