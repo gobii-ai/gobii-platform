@@ -251,8 +251,8 @@ def handle_subscription_event(event, **kwargs):
             logger.info("Subscription %s has no linked customer; nothing to do.", sub.id)
             return
 
-        span.set_attribute('subscription.customer.id', customer.id)
-        span.set_attribute('subscription.customer.email', customer.email)
+        span.set_attribute('subscription.customer.id', getattr(customer, 'id', ''))
+        span.set_attribute('subscription.customer.email', getattr(customer, 'email', ''))
 
         owner = None
         owner_type = ""
