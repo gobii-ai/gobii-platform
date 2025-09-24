@@ -37,22 +37,6 @@
     {% endwith %}
   </div>
   <div class="chat-meta {{ meta_theme }}">{{ event.timestamp|naturaltime }}</div>
-  <details class="chat-details {{ details_theme }} group">
-    <summary>
-      Message details
-      <svg class="h-3 w-3 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-      </svg>
-    </summary>
-    <div class="chat-details-panel">
-      <div><span class="font-semibold">Channel:</span> {{ channel|channel_label }}</div>
-      <div><span class="font-semibold">Direction:</span> Agent ➝ You</div>
-      {% if message.subject %}<div><span class="font-semibold">Subject:</span> {{ message.subject }}</div>{% endif %}
-      {% if message.latest_sent_at %}<div><span class="font-semibold">Sent:</span> {{ message.latest_sent_at|date:"M j, g:i a" }}</div>{% endif %}
-      {% if message.latest_delivered_at %}<div><span class="font-semibold">Delivered:</span> {{ message.latest_delivered_at|date:"M j, g:i a" }}</div>{% endif %}
-      {% if message.latest_error_message %}<div class="text-rose-500"><span class="font-semibold">Last error:</span> {{ message.latest_error_message }}</div>{% endif %}
-    </div>
-  </details>
 </article>
   {% endwith %}
 {% else %}
@@ -87,22 +71,6 @@
     {% endwith %}
   </div>
   <div class="chat-meta {{ meta_theme }}">{{ event.timestamp|naturaltime }}</div>
-  <details class="chat-details {{ details_theme }} group">
-    <summary>
-      Message details
-      <svg class="h-3 w-3 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-      </svg>
-    </summary>
-    <div class="chat-details-panel">
-      <div><span class="font-semibold">Channel:</span> {{ channel|channel_label }}</div>
-      <div><span class="font-semibold">Direction:</span> You ➝ {{ first_name }}</div>
-      {% if message.subject %}<div><span class="font-semibold">Subject:</span> {{ message.subject }}</div>{% endif %}
-      {% if message.latest_sent_at %}<div><span class="font-semibold">Sent:</span> {{ message.latest_sent_at|date:"M j, g:i a" }}</div>{% endif %}
-      {% if message.latest_delivered_at %}<div><span class="font-semibold">Delivered:</span> {{ message.latest_delivered_at|date:"M j, g:i a" }}</div>{% endif %}
-      {% if message.latest_error_message %}<div class="text-rose-200"><span class="font-semibold">Last error:</span> {{ message.latest_error_message }}</div>{% endif %}
-    </div>
-  </details>
 </article>
   {% endwith %}
 {% endif %}
