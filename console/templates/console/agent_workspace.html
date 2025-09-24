@@ -304,10 +304,6 @@
     flex: 0 0 auto;
   }
 
-  .tool-chip.is-open {
-    flex-basis: 100%;
-  }
-
   .tool-chip-trigger {
     display: inline-flex;
     align-items: center;
@@ -332,8 +328,9 @@
   }
 
   .tool-chip.is-open .tool-chip-trigger {
-    border-color: rgba(99, 102, 241, 0.4);
-    box-shadow: 0 6px 18px rgba(99, 102, 241, 0.2);
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow: 0 6px 18px rgba(99, 102, 241, 0.22);
+    background: rgba(238, 242, 255, 0.92);
   }
 
   .tool-chip-icon {
@@ -373,7 +370,7 @@
 
   .tool-cluster-detail-host {
     width: 100%;
-    margin-top: 0.25rem;
+    margin-top: 0.65rem;
   }
 
   .tool-cluster-detail-host[hidden] {
@@ -382,6 +379,7 @@
 
   .tool-cluster-timestamp {
     align-self: flex-start;
+    margin-top: 0.25rem;
     margin-left: 0.15rem;
   }
 

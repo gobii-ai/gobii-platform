@@ -96,10 +96,10 @@
         {% endwith %}
       {% endfor %}
     </ul>
+    <div class="tool-cluster-detail-host" hidden aria-live="polite"></div>
     {% if cluster.latest_timestamp %}
       <div class="tool-cluster-timestamp chat-meta">{{ cluster.latest_timestamp|naturaltime }}</div>
     {% endif %}
-    <div class="tool-cluster-detail-host" hidden aria-live="polite"></div>
   </div>
 </article>
 {% endif %}
