@@ -12,6 +12,8 @@ from django.dispatch import receiver
 
 from djstripe.models import Subscription, Customer
 from djstripe.event_handlers import djstripe_receiver
+from observability import traced, trace
+
 from config.plans import get_plan_by_product_id
 from constants.plans import PlanNamesChoices
 from tasks.services import TaskCreditService
@@ -29,6 +31,7 @@ from util.subscription_helper import (
 )
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("gobii.utils")
 
 UTM_MAPPING = {
     'source': 'utm_source',
@@ -209,232 +212,249 @@ def handle_user_logged_out(sender, request, user, **kwargs):
 @djstripe_receiver(["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"])
 def handle_subscription_event(event, **kwargs):
     """Update user status and quota based on subscription events."""
-    payload = event.data.get("object", {})
+    with tracer.start_as_current_span("handle_subscription_event") as span:
+        payload = event.data.get("object", {})
 
-    # 1. Ignore anything that isn't a subscription (defensive, though Stripe shouldn't send it)
-    if payload.get("object") != "subscription":
-        logger.warning("Unexpected Stripe object in webhook: %s", payload.get("object"))
-        return
-
-    # Note: do not early-return on hard-deleted payloads; we still need to
-    # downgrade the user to the free plan when a subscription is deleted.
-
-    stripe.api_key = PaymentsHelper.get_stripe_key()
-    stripe_sub = None
-
-    # 3. Normal create/update flow
-    try:
-        sub = Subscription.sync_from_stripe_data(payload)  # first try the cheap way
-    except Exception as exc:
-        logger.error("Failed to sync subscription data %s", exc)
-        if "auto_paging_iter" in str(exc):
-            # Fallback – pick ONE of the fixes above
-            stripe_sub = stripe.Subscription.retrieve(  # or construct_from(...)
-                payload["id"],
-                expand=["items"],
-            )
-
-            sub = Subscription.sync_from_stripe_data(stripe_sub)
-        else:
-            logger.error("Failed to sync subscription data %s", exc)
-            # TODO: Consider a more robust fallback or retry mechanism here if needed
-            # For now, re-raising the exception might be acceptable if sync is critical
-            raise
-
-    customer: Customer | None = sub.customer
-    if not customer:
-        logger.debug("Subscription %s has no linked customer; nothing to do.", sub.id)
-        return
-
-    owner = None
-    owner_type = ""
-    organization_billing: OrganizationBilling | None = None
-
-    if customer.subscriber:
-        owner = customer.subscriber
-        owner_type = "user"
-    else:
-        organization_billing = (
-            OrganizationBilling.objects.select_related("organization")
-            .filter(stripe_customer_id=customer.id)
-            .first()
-        )
-        if organization_billing and organization_billing.organization:
-            owner = organization_billing.organization
-            owner_type = "organization"
-
-    if not owner:
-        logger.debug("Subscription %s has no linked billing owner; nothing to do.", sub.id)
-        return
-
-    # Handle explicit deletions (downgrade to free immediately)
-    try:
-        event_type = getattr(event, "type", "") or getattr(event, "event_type", "")
-    except Exception:
-        event_type = ""
-
-    if event_type == "customer.subscription.deleted" or getattr(sub, "status", "") == "canceled":
-        downgrade_owner_to_free_plan(owner)
-
-        if owner_type == "user":
-            try:
-                Analytics.track_event(
-                    user_id=owner.id,
-                    event=AnalyticsEvent.SUBSCRIPTION_CANCELLED,
-                    source=AnalyticsSource.WEB,
-                    properties={
-                        'stripe.subscription_id': getattr(sub, 'id', None),
-                    },
-                )
-            except Exception:
-                logger.exception("Failed to track subscription cancellation for user %s", owner.id)
-        else:
-            billing = organization_billing
-            if billing:
-                updates: list[str] = []
-                if billing.purchased_seats != 0:
-                    billing.purchased_seats = 0
-                    updates.append("purchased_seats")
-                if getattr(billing, "stripe_subscription_id", None):
-                    billing.stripe_subscription_id = None
-                    updates.append("stripe_subscription_id")
-                if getattr(billing, "cancel_at", None):
-                    billing.cancel_at = None
-                    updates.append("cancel_at")
-                if getattr(billing, "cancel_at_period_end", False):
-                    billing.cancel_at_period_end = False
-                    updates.append("cancel_at_period_end")
-                if updates:
-                    billing.save(update_fields=updates)
-        return
-
-    # Prefer explicit Stripe retrieve when present; otherwise use dj-stripe's cached payload
-    # from the Subscription row. This allows the normal sync_from_stripe_data path to work.
-    source_data = stripe_sub if stripe_sub is not None else (getattr(sub, "stripe_data", {}) or {})
-
-    current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
-    cancel_at_dt = _coerce_datetime(_get_stripe_data_value(source_data, "cancel_at"))
-    cancel_at_period_end_flag = _coerce_bool(_get_stripe_data_value(source_data, "cancel_at_period_end"))
-
-    if cancel_at_dt is None:
-        cancel_at_dt = _coerce_datetime(getattr(sub, "cancel_at", None))
-    if cancel_at_period_end_flag is None:
-        cancel_at_period_end_flag = _coerce_bool(getattr(sub, "cancel_at_period_end", None))
-
-    # Locate the licensed (base plan) item among subscription items
-    licensed_item = None
-    try:
-        for item in source_data.get("items", {}).get("data", []) or []:
-            if item.get("plan", {}).get("usage_type") == "licensed":
-                licensed_item = item
-                break
-    except Exception as e:
-        logger.warning("Webhook: failed to inspect subscription items for %s: %s", sub.id, e)
-
-    # Proceed only when subscription is active and we found a licensed item
-    if sub.status == 'active' and licensed_item is not None:
-        plan_id = (licensed_item.get("price", {}) or {}).get("product")
-        if not plan_id:
-            logger.warning("Webhook: missing product on licensed item for subscription %s", sub.id)
+        # 1. Ignore anything that isn't a subscription (defensive, though Stripe shouldn't send it)
+        if payload.get("object") != "subscription":
+            span.add_event('Ignoring non-subscription event')
+            logger.warning("Unexpected Stripe object in webhook: %s", payload.get("object"))
             return
 
-        plan = get_plan_by_product_id(plan_id)
+        # Note: do not early-return on hard-deleted payloads; we still need to
+        # downgrade the user to the free plan when a subscription is deleted.
+        stripe.api_key = PaymentsHelper.get_stripe_key()
+        stripe_sub = None
 
-        invoice_id = source_data.get("latest_invoice")
-
+        # 3. Normal create/update flow
         try:
-            plan_choice = PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE
-            plan_value = plan_choice.value
-        except Exception:
-            plan_value = PlanNamesChoices.FREE.value
+            sub = Subscription.sync_from_stripe_data(payload)  # first try the cheap way
+        except Exception as exc:
+            logger.error("Failed to sync subscription data %s", exc)
+            if "auto_paging_iter" in str(exc):
+                # Fallback – pick ONE of the fixes above
+                stripe_sub = stripe.Subscription.retrieve(  # or construct_from(...)
+                    payload["id"],
+                    expand=["items"],
+                )
 
-        if owner_type == "user":
-            mark_user_billing_with_plan(owner, plan_value, update_anchor=False)
-            TaskCreditService.grant_subscription_credits(
-                owner,
-                plan=plan,
-                invoice_id=invoice_id or ""
-            )
+                sub = Subscription.sync_from_stripe_data(stripe_sub)
+            else:
+                logger.error("Failed to sync subscription data %s", exc)
+                # TODO: Consider a more robust fallback or retry mechanism here if needed
+                # For now, re-raising the exception might be acceptable if sync is critical
+                raise
 
-            try:
-                ub = owner.billing
-                if current_period_start_dt:
-                    new_day = current_period_start_dt.day
-                    if ub.billing_cycle_anchor != new_day:
-                        ub.billing_cycle_anchor = new_day
-                        ub.save(update_fields=["billing_cycle_anchor"])
-            except UserBilling.DoesNotExist as ue:
-                logger.exception("UserBilling record not found for user %s during anchor alignment: %s", owner.id, ue)
-            except Exception as e:
-                logger.exception("Failed to align billing anchor with Stripe period for user %s: %s", owner.id, e)
+        customer: Customer | None = sub.customer
+        if not customer:
+            span.add_event('Ignoring subscription with no customer')
+            logger.info("Subscription %s has no linked customer; nothing to do.", sub.id)
+            return
 
-            Analytics.identify(owner.id, {
-                'plan': plan_value,
-            })
+        span.set_attribute('subscription.customer.id', customer.id)
+        span.set_attribute('subscription.customer.email', customer.email)
 
-            Analytics.track_event(
-                user_id=owner.id,
-                event=AnalyticsEvent.SUBSCRIPTION_CREATED,
-                source=AnalyticsSource.WEB,
-                properties={
-                    'plan': plan_value,
-                    'stripe.invoice_id': invoice_id,
-                }
-            )
+        owner = None
+        owner_type = ""
+        organization_billing: OrganizationBilling | None = None
+
+        if customer.subscriber:
+            owner = customer.subscriber
+            owner_type = "user"
         else:
-            seats = 0
-            try:
-                seats = int(licensed_item.get("quantity") or 0)
-            except (TypeError, ValueError):
-                seats = 0
+            organization_billing = (
+                OrganizationBilling.objects.select_related("organization")
+                .filter(stripe_customer_id=customer.id)
+                .first()
+            )
+            if organization_billing and organization_billing.organization:
+                owner = organization_billing.organization
+                owner_type = "organization"
 
-            prev_seats = 0
-            if organization_billing:
-                prev_seats = getattr(organization_billing, "purchased_seats", 0)
+        if not owner:
+            span.add_event('Ignoring subscription event with no owner')
+            logger.info("Subscription %s has no linked billing owner; nothing to do.", sub.id)
+            return
 
-            billing = mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
-            if billing:
-                updates: list[str] = []
-                if current_period_start_dt:
-                    new_day = current_period_start_dt.day
-                    if billing.billing_cycle_anchor != new_day:
-                        billing.billing_cycle_anchor = new_day
-                        updates.append("billing_cycle_anchor")
+        span.set_attribute('subscription.owner.type', owner_type)
 
-                new_subscription_id = getattr(sub, 'id', None)
-                if getattr(billing, 'stripe_subscription_id', None) != new_subscription_id:
-                    billing.stripe_subscription_id = new_subscription_id
-                    updates.append("stripe_subscription_id")
+        # Handle explicit deletions (downgrade to free immediately)
+        try:
+            event_type = getattr(event, "type", "") or getattr(event, "event_type", "")
+        except Exception:
+            event_type = ""
 
-                if seats and getattr(billing, 'purchased_seats', None) != seats:
-                    billing.purchased_seats = seats
-                    updates.append("purchased_seats")
+        span.set_attribute('subscription.event_type', event_type)
 
-                if hasattr(billing, 'cancel_at'):
-                    if billing.cancel_at != cancel_at_dt:
-                        billing.cancel_at = cancel_at_dt
-                        updates.append("cancel_at")
+        if event_type == "customer.subscription.deleted" or getattr(sub, "status", "") == "canceled":
+            downgrade_owner_to_free_plan(owner)
 
-                if hasattr(billing, 'cancel_at_period_end'):
-                    if cancel_at_period_end_flag is not None and billing.cancel_at_period_end != cancel_at_period_end_flag:
-                        billing.cancel_at_period_end = cancel_at_period_end_flag
-                        updates.append("cancel_at_period_end")
-
-                if updates:
-                    billing.save(update_fields=updates)
-
-            if seats > 0:
-                seats_to_grant = 0
-                if source_data.get("billing_reason") in {"subscription_create", "subscription_cycle"}:
-                    seats_to_grant = seats
-                elif source_data.get("billing_reason") == "subscription_update" and seats > prev_seats:
-                    seats_to_grant = seats - prev_seats
-
-                if seats_to_grant > 0:
-                    TaskCreditService.grant_subscription_credits_for_organization(
-                        owner,
-                        seats=seats_to_grant,
-                        plan=plan,
-                        invoice_id=invoice_id or "",
-                        subscription=sub,
+            if owner_type == "user":
+                try:
+                    Analytics.track_event(
+                        user_id=owner.id,
+                        event=AnalyticsEvent.SUBSCRIPTION_CANCELLED,
+                        source=AnalyticsSource.WEB,
+                        properties={
+                            'stripe.subscription_id': getattr(sub, 'id', None),
+                        },
                     )
+                except Exception:
+                    logger.exception("Failed to track subscription cancellation for user %s", owner.id)
+            else:
+                billing = organization_billing
+                if billing:
+                    updates: list[str] = []
+                    if billing.purchased_seats != 0:
+                        billing.purchased_seats = 0
+                        updates.append("purchased_seats")
+                    if getattr(billing, "stripe_subscription_id", None):
+                        billing.stripe_subscription_id = None
+                        updates.append("stripe_subscription_id")
+                    if getattr(billing, "cancel_at", None):
+                        billing.cancel_at = None
+                        updates.append("cancel_at")
+                    if getattr(billing, "cancel_at_period_end", False):
+                        billing.cancel_at_period_end = False
+                        updates.append("cancel_at_period_end")
+                    if updates:
+                        billing.save(update_fields=updates)
+            return
+
+        # Prefer explicit Stripe retrieve when present; otherwise use dj-stripe's cached payload
+        # from the Subscription row. This allows the normal sync_from_stripe_data path to work.
+        source_data = stripe_sub if stripe_sub is not None else (getattr(sub, "stripe_data", {}) or {})
+
+        current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
+        cancel_at_dt = _coerce_datetime(_get_stripe_data_value(source_data, "cancel_at"))
+        cancel_at_period_end_flag = _coerce_bool(_get_stripe_data_value(source_data, "cancel_at_period_end"))
+
+        span.set_attribute('subscription.current_period_start', str(current_period_start_dt))
+        span.set_attribute('subscription.cancel_at', str(cancel_at_dt))
+        span.set_attribute('subscription.cancel_at_period_end', str(cancel_at_period_end_flag))
+
+        if cancel_at_dt is None:
+            cancel_at_dt = _coerce_datetime(getattr(sub, "cancel_at", None))
+            span.set_attribute('subscription.cancel_at_fallback', str(cancel_at_dt))
+        if cancel_at_period_end_flag is None:
+            cancel_at_period_end_flag = _coerce_bool(getattr(sub, "cancel_at_period_end", None))
+            span.set_attribute('subscription.cancel_at_period_end_fallback', str(cancel_at_period_end_flag))
+
+        # Locate the licensed (base plan) item among subscription items
+        licensed_item = None
+        try:
+            for item in source_data.get("items", {}).get("data", []) or []:
+                if item.get("plan", {}).get("usage_type") == "licensed":
+                    licensed_item = item
+                    break
+        except Exception as e:
+            logger.warning("Webhook: failed to inspect subscription items for %s: %s", sub.id, e)
+
+        # Proceed only when subscription is active and we found a licensed item
+        span.set_attribute('subscription.status', str(sub.status))
+        if sub.status == 'active' and licensed_item is not None:
+            plan_id = (licensed_item.get("price", {}) or {}).get("product")
+            if not plan_id:
+                logger.warning("Webhook: missing product on licensed item for subscription %s", sub.id)
+                return
+
+            plan = get_plan_by_product_id(plan_id)
+
+            invoice_id = source_data.get("latest_invoice")
+
+            try:
+                plan_choice = PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE
+                plan_value = plan_choice.value
+            except Exception:
+                plan_value = PlanNamesChoices.FREE.value
+
+            if owner_type == "user":
+                mark_user_billing_with_plan(owner, plan_value, update_anchor=False)
+                TaskCreditService.grant_subscription_credits(
+                    owner,
+                    plan=plan,
+                    invoice_id=invoice_id or ""
+                )
+
+                try:
+                    ub = owner.billing
+                    if current_period_start_dt:
+                        new_day = current_period_start_dt.day
+                        if ub.billing_cycle_anchor != new_day:
+                            ub.billing_cycle_anchor = new_day
+                            ub.save(update_fields=["billing_cycle_anchor"])
+                except UserBilling.DoesNotExist as ue:
+                    logger.exception("UserBilling record not found for user %s during anchor alignment: %s", owner.id, ue)
+                except Exception as e:
+                    logger.exception("Failed to align billing anchor with Stripe period for user %s: %s", owner.id, e)
+
+                Analytics.identify(owner.id, {
+                    'plan': plan_value,
+                })
+
+                Analytics.track_event(
+                    user_id=owner.id,
+                    event=AnalyticsEvent.SUBSCRIPTION_CREATED,
+                    source=AnalyticsSource.WEB,
+                    properties={
+                        'plan': plan_value,
+                        'stripe.invoice_id': invoice_id,
+                    }
+                )
+            else:
+                seats = 0
+                try:
+                    seats = int(licensed_item.get("quantity") or 0)
+                except (TypeError, ValueError):
+                    seats = 0
+
+                prev_seats = 0
+                if organization_billing:
+                    prev_seats = getattr(organization_billing, "purchased_seats", 0)
+
+                billing = mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
+                if billing:
+                    updates: list[str] = []
+                    if current_period_start_dt:
+                        new_day = current_period_start_dt.day
+                        if billing.billing_cycle_anchor != new_day:
+                            billing.billing_cycle_anchor = new_day
+                            updates.append("billing_cycle_anchor")
+
+                    new_subscription_id = getattr(sub, 'id', None)
+                    if getattr(billing, 'stripe_subscription_id', None) != new_subscription_id:
+                        billing.stripe_subscription_id = new_subscription_id
+                        updates.append("stripe_subscription_id")
+
+                    if seats and getattr(billing, 'purchased_seats', None) != seats:
+                        billing.purchased_seats = seats
+                        updates.append("purchased_seats")
+
+                    if hasattr(billing, 'cancel_at'):
+                        if billing.cancel_at != cancel_at_dt:
+                            billing.cancel_at = cancel_at_dt
+                            updates.append("cancel_at")
+
+                    if hasattr(billing, 'cancel_at_period_end'):
+                        if cancel_at_period_end_flag is not None and billing.cancel_at_period_end != cancel_at_period_end_flag:
+                            billing.cancel_at_period_end = cancel_at_period_end_flag
+                            updates.append("cancel_at_period_end")
+
+                    if updates:
+                        billing.save(update_fields=updates)
+
+                if seats > 0:
+                    seats_to_grant = 0
+                    if source_data.get("billing_reason") in {"subscription_create", "subscription_cycle"}:
+                        seats_to_grant = seats
+                    elif source_data.get("billing_reason") == "subscription_update" and seats > prev_seats:
+                        seats_to_grant = seats - prev_seats
+
+                    if seats_to_grant > 0:
+                        TaskCreditService.grant_subscription_credits_for_organization(
+                            owner,
+                            seats=seats_to_grant,
+                            plan=plan,
+                            invoice_id=invoice_id or "",
+                            subscription=sub,
+                        )
