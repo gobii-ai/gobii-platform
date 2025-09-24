@@ -13,7 +13,7 @@
               {% with counter_fragment=forloop.counter0|stringformat:"s" %}
                 {% with raw_panel_key=cursor_fragment|add:'-'|add:counter_fragment %}
                   {% with panel_id="tool-panel-"|add:raw_panel_key|slugify %}
-                    <li class="tool-chip">
+                    <li class="tool-chip" data-detail-id="{{ panel_id }}">
                       <button type="button"
                               class="tool-chip-trigger"
                               aria-expanded="false"
@@ -96,6 +96,10 @@
         {% endwith %}
       {% endfor %}
     </ul>
+    {% if cluster.latest_timestamp %}
+      <div class="tool-cluster-timestamp chat-meta">{{ cluster.latest_timestamp|naturaltime }}</div>
+    {% endif %}
+    <div class="tool-cluster-detail-host" hidden aria-live="polite"></div>
   </div>
 </article>
 {% endif %}

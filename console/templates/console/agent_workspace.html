@@ -286,59 +286,6 @@
     gap: 0.45rem;
   }
 
-  .tool-cluster-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.72rem;
-    color: #94a3b8;
-    justify-content: space-between;
-  }
-
-  .tool-cluster-labels {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    align-items: center;
-  }
-
-  .tool-cluster-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-  }
-
-  .tool-cluster-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    border-radius: 9999px;
-    background: rgba(241, 245, 249, 0.9);
-    padding: 0.25rem 0.6rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: #475569;
-  }
-
-  .tool-cluster-chip-icon {
-    display: grid;
-    place-items: center;
-    width: 1.4rem;
-    height: 1.4rem;
-    border-radius: 9999px;
-  }
-
-  .tool-cluster-count {
-    font-size: 0.7rem;
-    color: #94a3b8;
-  }
-
-  .tool-cluster-time {
-    margin-left: auto;
-    font-size: 0.7rem;
-    color: #94a3b8;
-  }
-
   .tool-chip-list {
     list-style: none;
     margin: 0;
@@ -422,6 +369,20 @@
     background: rgba(255, 255, 255, 0.97);
     box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
     padding: 0.85rem 1rem 1rem;
+  }
+
+  .tool-cluster-detail-host {
+    width: 100%;
+    margin-top: 0.25rem;
+  }
+
+  .tool-cluster-detail-host[hidden] {
+    display: none;
+  }
+
+  .tool-cluster-timestamp {
+    align-self: flex-start;
+    margin-left: 0.15rem;
   }
 
   .tool-chip-detail-header {
@@ -537,8 +498,9 @@
   }
 
   .chat-meta.is-user {
-    color: rgba(226, 232, 240, 0.9);
+    color: rgba(148, 163, 184, 0.9);
     text-align: right;
+    align-self: flex-end;
   }
 
   .chat-attachments {
@@ -684,37 +646,77 @@
 
     function closeOpenToolChip(options = {}) {
       if (!openToolChip) return;
+      const cluster = openToolChip.closest('.tool-cluster-shell');
+      const host = cluster?.querySelector('.tool-cluster-detail-host');
       const trigger = openToolChip.querySelector('.tool-chip-trigger');
-      const detail = openToolChip.querySelector('.tool-chip-detail');
+      const detailId = openToolChip.dataset.detailId || trigger?.getAttribute('aria-controls');
+      let detail = null;
+      if (detailId) {
+        detail = cluster?.querySelector(`#${detailId}`) || document.getElementById(detailId);
+      }
+
       if (trigger) {
         trigger.setAttribute('aria-expanded', 'false');
       }
+
       if (detail) {
         detail.hidden = true;
+        if (host && detail.parentElement === host) {
+          host.removeChild(detail);
+        }
+        openToolChip.appendChild(detail);
       }
+
+      if (host && host.childElementCount === 0) {
+        host.innerHTML = '';
+        host.hidden = true;
+      }
+
       openToolChip.classList.remove('is-open');
+      delete openToolChip.dataset.detailId;
+
       if (options.restoreFocus && trigger) {
         trigger.focus();
       }
+
       openToolChip = null;
     }
 
     function openToolChipDetail(chip) {
       if (!chip) return;
+
       if (chip === openToolChip) {
         closeOpenToolChip({ restoreFocus: true });
         return;
       }
 
+      const cluster = chip.closest('.tool-cluster-shell');
+      const host = cluster?.querySelector('.tool-cluster-detail-host');
+      const trigger = chip.querySelector('.tool-chip-trigger');
+      const detailId = trigger?.getAttribute('aria-controls');
+
+      if (!cluster || !host || !trigger || !detailId) {
+        closeOpenToolChip();
+        return;
+      }
+
+      let detail = cluster.querySelector(`#${detailId}`) || document.getElementById(detailId);
+      if (!detail) {
+        closeOpenToolChip();
+        return;
+      }
+
       closeOpenToolChip();
 
-      const trigger = chip.querySelector('.tool-chip-trigger');
-      const detail = chip.querySelector('.tool-chip-detail');
-      if (!trigger || !detail) return;
-
       chip.classList.add('is-open');
-      detail.hidden = false;
+      chip.dataset.detailId = detailId;
       trigger.setAttribute('aria-expanded', 'true');
+
+      detail.hidden = false;
+      host.hidden = false;
+      host.innerHTML = '';
+      host.appendChild(detail);
+
       openToolChip = chip;
 
       window.requestAnimationFrame(() => {
@@ -1091,7 +1093,11 @@
         return;
       }
 
-      if (openToolChip && !event.target.closest('.tool-chip')) {
+      if (
+        openToolChip &&
+        !event.target.closest('.tool-chip') &&
+        !event.target.closest('.tool-cluster-detail-host')
+      ) {
         closeOpenToolChip();
       }
     });
