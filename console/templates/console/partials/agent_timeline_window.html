@@ -25,8 +25,14 @@
 
 <button id="jump-to-latest" hx-swap-oob="true"
         class="jump-to-latest hidden"
-        type="button">
-  Jump to latest
+        type="button"
+        aria-label="Jump to latest"
+        aria-hidden="true"
+        style="display:none;opacity:0">
+  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
+  </svg>
+  <span class="sr-only">Jump to latest</span>
 </button>
 
 <div id="processing-state" hx-swap-oob="true" class="hidden" style="display:none" data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>

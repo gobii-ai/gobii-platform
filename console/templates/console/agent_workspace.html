@@ -93,7 +93,12 @@
     </div>
   </div>
 </main>
-<button id="jump-to-latest" class="jump-to-latest hidden" type="button">Jump to latest</button>
+<button id="jump-to-latest" class="jump-to-latest hidden" type="button" aria-label="Jump to latest" aria-hidden="true" style="display:none;opacity:0">
+  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
+  </svg>
+  <span class="sr-only">Jump to latest</span>
+</button>
 <div id="processing-state" class="hidden" style="display:none" data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>
 {% endblock %}
 
@@ -115,7 +120,7 @@
 
   #timeline-events {
     scroll-behavior: smooth;
-    padding: 1rem 0.75rem 16rem;
+    padding: 1rem 0.75rem var(--timeline-bottom-padding, 16rem);
   }
 
   #timeline-events::-webkit-scrollbar {
@@ -207,23 +212,36 @@
 
   .jump-to-latest {
     position: fixed;
-    right: 1.75rem;
+    left: 50%;
+    z-index: 50;
+    width: 3.25rem;
+    height: 3.25rem;
     bottom: 9rem;
-    z-index: 30;
     border-radius: 9999px;
-    border: 1px solid rgba(79, 70, 229, 0.25);
-    background: white;
+    border: 1px solid rgba(79, 70, 229, 0.2);
+    background: #ffffff;
     color: #4f46e5;
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 0.5rem 0.95rem;
-    box-shadow: 0 10px 28px rgba(79, 70, 229, 0.16);
-    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 12px 32px rgba(79, 70, 229, 0.18);
+    transform: translate(-50%, 0);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.15s ease;
+  }
+
+  .jump-to-latest svg {
+    width: 1.25rem;
+    height: 1.25rem;
   }
 
   .jump-to-latest:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 14px 30px rgba(79, 70, 229, 0.22);
+    transform: translate(-50%, -4px);
+    box-shadow: 0 16px 36px rgba(79, 70, 229, 0.24);
+  }
+
+  .jump-to-latest:focus-visible {
+    outline: 3px solid rgba(59, 130, 246, 0.35);
+    outline-offset: 2px;
   }
 
   .chat-event {
@@ -377,8 +395,10 @@
     }
 
     .jump-to-latest {
-      right: 1rem;
+      width: 2.85rem;
+      height: 2.85rem;
       bottom: 8rem;
+      box-shadow: 0 10px 26px rgba(79, 70, 229, 0.2);
     }
 
     .chat-bubble {
@@ -397,7 +417,6 @@
   window.__agentWorkspaceInitialized = true;
 
   const root = document.getElementById('agent-workspace-root');
-  const log = (...args) => console.debug('[agent-workspace]', ...args);
 
   if (!root) {
     console.warn('[agent-workspace] root node missing; aborting init.');
@@ -411,7 +430,6 @@
   function ready() {
     if (typeof window.htmx === 'undefined') {
       attempts += 1;
-      log('htmx wait attempt', { attempts });
       if (attempts === 1) {
         console.warn('[agent-workspace] htmx not yet available; retrying init.');
       }
@@ -423,14 +441,12 @@
       return false;
     }
 
-    log('initializing workspace timeline', { dataset: { newerUrl: root.dataset.timelineNewerUrl, olderUrl: root.dataset.timelineOlderUrl, eventStreamUrl: root.dataset.eventStreamUrl } });
     init();
     return true;
   }
 
   function init() {
     if (initialized) {
-      log('init called after initialization; skipping');
       return;
     }
     initialized = true;
@@ -439,7 +455,8 @@
     const processingSlot = document.getElementById('processing-indicator-slot');
     const composer = document.getElementById('agent-web-compose');
     const composerCursor = document.getElementById('composer-latest-cursor');
-    const jumpButton = document.getElementById('jump-to-latest');
+    const composerSurface = document.querySelector('.composer-surface');
+    const getJumpButton = () => document.getElementById('jump-to-latest');
     const agentFirstName = root.dataset.agentFirstName || 'Your agent';
     const getCursorsEl = () => document.getElementById('timeline-cursors');
 
@@ -459,7 +476,94 @@
       processingActive: false,
     };
     state.processingActive = root.dataset.processingActive === 'true';
-    log('processing.initial-state', { fromRoot: state.processingActive, dataset: root.dataset.processingActive });
+
+    const JUMP_BUTTON_SIZE = 52; // matches 3.25rem
+    const JUMP_BUTTON_GAP = 18;
+    const BASE_SCROLL_THRESHOLD = 140;
+
+    function getTimelineBottomOffset() {
+      if (!timeline) return 0;
+      return timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight;
+    }
+
+    function updateTimelinePadding() {
+      if (!timeline) return;
+      const composerHeight = composerSurface?.offsetHeight || 0;
+      const padding = Math.max(composerHeight + 80, 220);
+      timeline.style.setProperty('--timeline-bottom-padding', `${Math.round(padding)}px`);
+    }
+
+    function positionJumpButton() {
+      const button = getJumpButton();
+      if (!button || !composerSurface) return;
+      const rect = composerSurface.getBoundingClientRect();
+      const buttonHeight = button.offsetHeight || JUMP_BUTTON_SIZE;
+      const desiredTop = rect.top - (buttonHeight + JUMP_BUTTON_GAP);
+      const boundedTop = Math.max(desiredTop, 16);
+      button.style.top = `${Math.round(boundedTop)}px`;
+      button.style.bottom = 'auto';
+    }
+
+    function toggleJumpButtonVisibility(visible) {
+      const button = getJumpButton();
+      if (!button) return;
+      if (visible) {
+        button.classList.remove('hidden');
+        button.setAttribute('aria-hidden', 'false');
+        button.style.opacity = '1';
+        button.style.display = 'flex';
+        window.requestAnimationFrame(positionJumpButton);
+      } else {
+        button.style.opacity = '0';
+        button.classList.add('hidden');
+        button.setAttribute('aria-hidden', 'true');
+        button.style.display = 'none';
+      }
+    }
+
+    function isTimelineScrollable() {
+      if (!timeline) return false;
+      return timeline.scrollHeight - timeline.clientHeight > 1;
+    }
+
+    function getScrollThreshold() {
+      const composerHeight = composerSurface?.offsetHeight || 0;
+      const threshold = Math.max(BASE_SCROLL_THRESHOLD, Math.min(composerHeight + 160, 600));
+      return threshold;
+    }
+
+    function getPageBottomOffset() {
+      const doc = document.documentElement || document.body;
+      const body = document.body || { scrollHeight: 0, offsetHeight: 0 };
+      const totalHeight = Math.max(
+        doc?.scrollHeight || 0,
+        doc?.offsetHeight || 0,
+        body.scrollHeight || 0,
+        body.offsetHeight || 0
+      );
+      const viewportHeight = window.innerHeight || doc?.clientHeight || 0;
+      const scrollY = window.scrollY ?? doc?.scrollTop ?? 0;
+      const offset = totalHeight - (scrollY + viewportHeight);
+      return offset;
+    }
+
+    function isNearBottom() {
+      if (!timeline) {
+        return true;
+      }
+
+      const threshold = getScrollThreshold();
+
+      if (isTimelineScrollable()) {
+        const bottomOffset = getTimelineBottomOffset();
+        const nearTimeline = bottomOffset <= threshold;
+        return nearTimeline;
+      }
+
+      const pageOffset = Math.max(getPageBottomOffset(), 0);
+      const nearPage = pageOffset <= threshold;
+      return nearPage;
+    }
 
     let reconnectDelay = 3000;
     const RECONNECT_MAX = 30000;
@@ -475,17 +579,18 @@
       }
     }
 
-    function isNearBottom() {
-      if (!timeline) return true;
-      const threshold = 140;
-      return timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= threshold;
-    }
-
     function scrollToBottom(force) {
       if (!timeline) return;
-      if (force || isNearBottom()) {
-        timeline.scrollTop = timeline.scrollHeight;
-      }
+      const nearBefore = isNearBottom();
+      const shouldScroll = force || nearBefore;
+      if (!shouldScroll) return;
+      timeline.scrollTop = timeline.scrollHeight;
+      state.autoScroll = true;
+      window.requestAnimationFrame(() => {
+        const docHeight = Math.max(document.documentElement?.scrollHeight || 0, document.body?.scrollHeight || 0);
+        window.scrollTo({ top: docHeight, behavior: 'smooth' });
+        isNearBottom();
+      });
     }
 
     const PROCESSING_NODE_ID = 'agent-processing-indicator';
@@ -497,25 +602,21 @@
       if (cursorNode) {
         cursorNode.dataset.processingActive = value;
       }
-      log('processing.dataset.update', { active: value, rootDataset: root.dataset.processingActive, cursorDataset: cursorNode?.dataset?.processingActive });
     }
 
     function getProcessingFlag() {
       const cursorNode = getCursorsEl();
       if (cursorNode && typeof cursorNode.dataset.processingActive !== 'undefined') {
         const flag = cursorNode.dataset.processingActive === 'true';
-        log('processing.flag.cursor', { flag, dataset: cursorNode.dataset.processingActive });
         return flag;
       }
       const fallback = root.dataset.processingActive === 'true';
-      log('processing.flag.root', { fallback, dataset: root.dataset.processingActive });
       return fallback;
     }
 
     function syncProcessingFromDom() {
       ensureProcessingSlotPosition();
       const desired = getProcessingFlag();
-      log('processing.sync', { desired, currentState: state.processingActive, hasNode: !!getProcessingNode() });
       const node = getProcessingNode();
       if (desired) {
         if (!state.processingActive || !node) {
@@ -559,7 +660,6 @@
       if (isNearBottom()) {
         scrollToBottom(true);
       }
-      log('processing.show');
     }
 
     function hideProcessingIndicator() {
@@ -569,7 +669,6 @@
         setProcessingDataset(false);
         refreshEmptyState();
         ensureEmptyState();
-        log('processing.hide.no-indicator');
         return;
       }
       indicator.classList.add('processing-indicator--fade');
@@ -580,7 +679,6 @@
         refreshEmptyState();
         ensureEmptyState();
       }, 220);
-      log('processing.hide.transition');
     }
 
     function refreshEmptyState() {
@@ -615,14 +713,11 @@
     }
 
     function updateJumpButton() {
-      if (!jumpButton) return;
-      const cursorNode = getCursorsEl();
-      const hasMoreNewer = cursorNode?.dataset.hasMoreNewer === 'true';
-      if (!hasMoreNewer || isNearBottom()) {
-        jumpButton.classList.add('hidden');
-        return;
-      }
-      jumpButton.classList.remove('hidden');
+      const button = getJumpButton();
+      if (!button) return;
+      positionJumpButton();
+      const show = !isNearBottom();
+      toggleJumpButtonVisibility(show);
     }
 
     function trimTimeline(direction) {
@@ -630,7 +725,6 @@
       const nodes = Array.from(timeline.querySelectorAll('.timeline-event[data-cursor]'));
       if (nodes.length <= limit) return;
       const excess = nodes.length - limit;
-      log('trimming timeline', { direction, excess });
       if (direction === 'older') {
         for (let i = 0; i < excess; i += 1) {
           const node = nodes[nodes.length - 1 - i];
@@ -669,7 +763,6 @@
       const queuedTrigger = state.queuedNewerTrigger;
       state.queuedNewerTrigger = null;
       if (queuedTrigger) {
-        log('consuming queued newer request', { trigger: queuedTrigger });
         requestNewer(queuedTrigger);
       }
     }
@@ -678,7 +771,6 @@
       if (!newerUrl || !timeline) return;
       if (state.fetchingNewer) {
         state.queuedNewerTrigger = trigger || 'auto-newer';
-        log('requestNewer queued', { trigger });
         return;
       }
       const params = new URLSearchParams({ limit: String(limit) });
@@ -688,9 +780,8 @@
 
       state.action = 'newer';
       state.fetchingNewer = true;
-      state.autoScroll = state.pendingComposerScroll ? true : trigger !== 'auto-newer' ? true : isNearBottom();
-
-      log('requestNewer', { trigger, cursor, autoScroll: state.autoScroll });
+      const nearBottom = isNearBottom();
+      state.autoScroll = state.pendingComposerScroll ? true : nearBottom;
 
       window.htmx.ajax('GET', `${newerUrl}&${params.toString()}`, {
         target: '#timeline-events',
@@ -700,42 +791,72 @@
 
     if (timeline) {
       timeline.addEventListener('scroll', () => {
-        state.autoScroll = isNearBottom();
-        log('scroll', { autoScroll: state.autoScroll });
+        const nearBottom = isNearBottom();
+        state.autoScroll = nearBottom;
         updateJumpButton();
       });
     }
 
+    const handleWindowScroll = () => {
+      const nearBottom = isNearBottom();
+      state.autoScroll = nearBottom;
+      updateJumpButton();
+    };
+
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+
+    const handleResize = () => {
+      updateTimelinePadding();
+      positionJumpButton();
+      updateJumpButton();
+    };
+
+    const handleOrientationChange = () => {
+      updateTimelinePadding();
+      positionJumpButton();
+      updateJumpButton();
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleOrientationChange);
+
     document.addEventListener('click', (event) => {
       const btn = event.target.closest('#jump-to-latest');
       if (!btn) return;
-      log('jump-to-latest clicked');
       scrollToBottom(true);
       state.autoScroll = true;
-      btn.classList.add('hidden');
+      toggleJumpButtonVisibility(false);
     });
 
     if (composer) {
       composer.addEventListener('htmx:beforeRequest', () => {
         state.pendingComposerScroll = true;
-        log('composer submit start');
       });
       composer.addEventListener('htmx:afterRequest', (event) => {
         if (event.detail && event.detail.xhr && event.detail.xhr.status < 400) {
           composer.reset();
-          log('composer submit success');
           showProcessingIndicator();
         } else {
           state.pendingComposerScroll = false;
-          log('composer submit error', event.detail?.xhr?.status);
         }
       });
+
+      const composerTextarea = composer.querySelector('textarea');
+      if (composerTextarea) {
+        const scheduleLayoutUpdate = () => window.requestAnimationFrame(() => {
+          updateTimelinePadding();
+          positionJumpButton();
+          updateJumpButton();
+        });
+        composerTextarea.addEventListener('input', scheduleLayoutUpdate);
+        composerTextarea.addEventListener('focus', scheduleLayoutUpdate);
+        composerTextarea.addEventListener('blur', scheduleLayoutUpdate);
+      }
     }
 
     window.htmx.on('htmx:beforeRequest', (event) => {
       if (event.detail?.target?.id !== 'timeline-events') return;
       const url = event.detail.requestConfig?.path || '';
-      log('htmx beforeRequest', { url });
       if (url.includes('direction=older')) {
         state.action = 'older';
         state.previousScrollHeight = timeline?.scrollHeight || 0;
@@ -747,9 +868,9 @@
     window.htmx.on('htmx:afterSwap', (event) => {
       if (event.detail?.target?.id !== 'timeline-events') return;
 
-      log('htmx afterSwap', { action: state.action, autoScroll: state.autoScroll });
 
       ensureProcessingSlotPosition();
+      updateTimelinePadding();
 
       if (state.action === 'older' && timeline) {
         const delta = timeline.scrollHeight - state.previousScrollHeight;
@@ -765,7 +886,6 @@
       }
 
       if (state.autoScroll) {
-        log('auto-scroll applied');
         scrollToBottom(true);
       }
 
@@ -784,8 +904,8 @@
 
     window.htmx.on('htmx:afterSettle', (event) => {
       if (event.detail?.target?.id === 'timeline-events') {
-        log('htmx afterSettle');
         ensureProcessingSlotPosition();
+        updateTimelinePadding();
         updateJumpButton();
         refreshEmptyState();
         syncProcessingFromDom();
@@ -794,13 +914,11 @@
 
     window.htmx.on('htmx:responseError', (event) => {
       if (event.detail?.target?.id !== 'timeline-events') return;
-      log('htmx responseError', { status: event.detail.xhr?.status });
       completeNewerRequest();
     });
 
     window.htmx.on('htmx:sendError', (event) => {
       if (event.detail?.target?.id !== 'timeline-events') return;
-      log('htmx sendError');
       completeNewerRequest();
     });
 
@@ -809,7 +927,6 @@
         state.lastEventId = evt.lastEventId;
       }
       reconnectDelay = 3000;
-      log('SSE processing.started', { lastId: evt?.lastEventId });
       showProcessingIndicator();
     };
 
@@ -818,7 +935,6 @@
         state.lastEventId = evt.lastEventId;
       }
       reconnectDelay = 3000;
-      log('SSE processing.finished', { lastId: evt?.lastEventId });
       hideProcessingIndicator();
       requestNewer('processing-finished');
     };
@@ -836,16 +952,13 @@
 
       let cursor = lastId;
       if (cursor && !/^[0-9]+-[0-9]+$/.test(cursor)) {
-        log('invalid_last_event_id_format', { cursor });
         cursor = null;
       }
 
       const url = cursor ? `${eventStreamUrl}?cursor=${encodeURIComponent(cursor)}` : eventStreamUrl;
-      log('connecting SSE', { url, cursor });
       const source = new EventSource(url);
 
       source.onopen = () => {
-        log('SSE open');
       };
 
       const handleMessage = (evt) => {
@@ -853,7 +966,6 @@
           state.lastEventId = evt.lastEventId;
         }
         reconnectDelay = 3000;
-        log('SSE message', { event: evt.type || 'message', lastId: evt.lastEventId });
         requestNewer('auto-newer');
       };
 
@@ -863,11 +975,9 @@
       source.addEventListener('processing.started', handleProcessingStartedEvent);
       source.addEventListener('processing.finished', handleProcessingFinishedEvent);
       source.onerror = (err) => {
-        log('SSE error', err);
         source.close();
         state.eventSource = null;
         reconnectDelay = Math.min(Math.round(reconnectDelay * 1.5), RECONNECT_MAX);
-        log('SSE reconnect scheduled', reconnectDelay);
         window.setTimeout(() => connectEventStream(state.lastEventId), reconnectDelay);
         hideProcessingIndicator();
       };
@@ -876,10 +986,11 @@
     }
 
     const initialCursor = getCursorsEl()?.dataset.newer || null;
-    log('workspace init', { cursor: initialCursor });
     ensureProcessingSlotPosition();
     syncProcessingFromDom();
     connectEventStream(null);
+    updateTimelinePadding();
+    positionJumpButton();
     scrollToBottom(true);
     updateJumpButton();
     refreshEmptyState();
@@ -889,8 +1000,10 @@
     }
 
     window.addEventListener('beforeunload', () => {
+      window.removeEventListener('scroll', handleWindowScroll);
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleOrientationChange);
       if (state.eventSource) {
-        log('closing SSE before unload');
         state.eventSource.close();
         state.eventSource = null;
       }
