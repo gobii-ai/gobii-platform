@@ -46,26 +46,19 @@
       <div id="agent-composer-shell" class="composer-shell">
         <div class="composer-surface">
           <form id="agent-web-compose" class="flex flex-col" hx-post="{% url 'agent_web_message' agent.id %}" hx-swap="none">
-            <div class="flex flex-col gap-2 rounded-3xl border border-slate-200 bg-white/95 px-2.5 py-2.5 shadow-md transition focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20">
+            <div class="composer-input-surface flex flex-col gap-2 rounded-2xl border border-slate-200/70 bg-white px-4 py-3 transition">
               <textarea name="body" rows="1" required
-                        class="block w-full resize-none border-0 bg-transparent px-0 py-0.5 text-sm leading-5 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 min-h-[1.8rem]"
+                        class="block w-full resize-none border-0 bg-transparent px-0 py-1 text-sm leading-5 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 min-h-[1.8rem]"
                         placeholder="Send a message..."></textarea>
               <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div class="flex flex-col gap-1.5 text-xs text-slate-500 sm:flex-row sm:items-center sm:gap-3.5">
-                  <div class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[0.72rem] text-slate-500 shadow-sm sm:text-sm">
-                    <span class="uppercase tracking-wide text-[0.7rem] text-slate-400">Sending to</span>
-                    <span class="font-medium text-slate-900">{{ agent.name }}</span>
+                  <div class="text-[0.75rem] text-slate-500 sm:text-sm">
+                    <span class="text-slate-400">To:</span>
+                    <span class="ml-1 font-medium text-slate-900">{{ agent.name }}</span>
                   </div>
-                  <a href="{% url 'agents' %}"
-                     class="inline-flex items-center gap-1.5 text-[0.75rem] text-slate-500 transition hover:text-indigo-600 sm:text-sm">
-                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                    </svg>
-                    Back to agents
-                  </a>
                 </div>
                 <button type="submit"
-                        class="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                        class="composer-send-button">
                   Send
                 </button>
               </div>
@@ -177,10 +170,10 @@
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0.75rem;
+    bottom: 1.75rem;
     display: flex;
     justify-content: center;
-    padding: 0 1.25rem;
+    padding: 0 1.5rem;
     z-index: 40;
     pointer-events: none;
   }
@@ -193,6 +186,45 @@
     border: 0;
     box-shadow: none;
     pointer-events: auto;
+  }
+
+  .composer-send-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.9rem;
+    padding: 0.6rem 1.65rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #ffffff;
+    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 45%, #4338ca 100%);
+    transition: transform 0.18s ease, background 0.3s ease;
+    border: 1px solid rgba(79, 70, 229, 0.24);
+    cursor: pointer;
+  }
+
+  .composer-send-button:hover {
+    transform: scale(1.03);
+    background: linear-gradient(135deg, #4f46e5 0%, #4338ca 40%, #312e81 100%);
+  }
+
+  .composer-send-button:active {
+    transform: scale(0.99);
+  }
+
+  .composer-send-button:focus-visible {
+    outline: 3px solid rgba(99, 102, 241, 0.35);
+    outline-offset: 2px;
+  }
+
+  .composer-input-surface {
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
+    transition: border-color 0.22s ease, box-shadow 0.22s ease;
+  }
+
+  .composer-input-surface:focus-within {
+    border-color: rgba(99, 102, 241, 0.5);
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
   }
 
   .jump-to-latest {
