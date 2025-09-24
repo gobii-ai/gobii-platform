@@ -7,37 +7,7 @@
 
 {% block content %}
 <main class="min-h-screen bg-slate-50">
-  <div class="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-8 sm:px-6 lg:px-10">
-    <header class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      <div class="flex flex-col gap-2">
-        <a href="{% url 'agents' %}" class="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-indigo-600">
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-          </svg>
-          Back to agents
-        </a>
-        <div>
-          <h1 class="text-2xl font-semibold text-slate-900">{{ agent.name }}</h1>
-          {% if agent.charter %}
-            <p class="mt-1 text-sm text-slate-500">{{ agent.charter|truncatechars:160 }}</p>
-          {% endif %}
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium uppercase tracking-wide text-slate-500 shadow-sm">
-          <span class="size-2 rounded-full {% if agent.is_active %}bg-emerald-500{% else %}bg-slate-300{% endif %}"></span>
-          {% if agent.is_active %}Active{% else %}Paused{% endif %}
-        </span>
-        {% if agent.schedule %}
-          <span class="hidden sm:inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium uppercase tracking-wide text-slate-500 shadow-sm">
-            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l2.5 2.5M5.25 5.25l1.5 1.5m10.5-1.5l-1.5 1.5M4 12h2m12 0h2M7.5 19.5l1.5-1.5m6 1.5l-1.5-1.5M12 4v2" />
-            </svg>
-            {{ agent.schedule }}
-          </span>
-        {% endif %}
-      </div>
-    </header>
+  <div class="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-6 sm:px-6 lg:px-10">
 
     <div id="agent-workspace-root"
          class="relative flex flex-1 flex-col gap-4"
@@ -80,7 +50,21 @@
               <textarea name="body" rows="1" required
                         class="block w-full resize-none border-0 bg-transparent px-0 pt-1 pb-1 text-sm leading-6 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 min-h-[2.2rem]"
                         placeholder="Send a message..."></textarea>
-              <div class="flex justify-end">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:gap-4">
+                  <span class="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50/70 px-3 py-1.5 text-[0.75rem] font-semibold text-indigo-600 shadow-sm sm:text-sm">
+                    <span class="size-2.5 rounded-full bg-indigo-500 shadow-[0_0_0_4px_rgba(79,70,229,0.12)]"></span>
+                    Sending to
+                    <span class="text-slate-900">{{ agent.name }}</span>
+                  </span>
+                  <a href="{% url 'agents' %}"
+                     class="inline-flex items-center gap-1.5 text-[0.75rem] font-semibold text-slate-500 transition hover:text-indigo-600 sm:text-sm">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                    </svg>
+                    Back to agents
+                  </a>
+                </div>
                 <button type="submit"
                         class="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
                   Send
