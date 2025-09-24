@@ -266,6 +266,7 @@ def get_or_create_stripe_customer(owner) -> Customer:
                 email=email,
                 name=name,
                 metadata={k: v for k, v in metadata.items() if v is not None},
+                api_key=stripe_key,
             )
 
         customer = Customer.sync_from_stripe_data(stripe_customer)
