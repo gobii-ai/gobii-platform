@@ -3,7 +3,7 @@
 {% load tz %}
 
 {% with tool=step.tool_call %}
-  {% if tool.tool_name == 'send_email' %}
+{% if tool.tool_name == 'send_email' or tool.tool_name == 'send_web_message' %}
     {# skip #}
   {% else %}
   {% comment %}Skip steps that don't provide meaningful information{% endcomment %}

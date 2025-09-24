@@ -2,76 +2,110 @@
 {% load humanize %}
 {% load tz %}
 
+{% with first_name=agent_first_name|default:'Agent' %}
 {% with channel_lower=channel|lower %}
-<article class="timeline-event bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden" data-cursor="{{ event.cursor }}">
-  <div class="p-6">
-    <header class="flex flex-wrap items-start justify-between gap-3 text-sm text-slate-600">
-      <div class="flex flex-wrap items-center gap-3">
-        <div class="flex h-8 w-8 items-center justify-center rounded-full bg-white">
-          {% if channel_lower == 'email' %}
-            <svg class="h-5 w-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-          {% elif channel_lower == 'sms' %}
-            <svg class="h-5 w-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-          {% else %}
-            <svg class="h-5 w-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-          {% endif %}
-        </div>
-        <div class="flex-1">
-          {% if message.is_outbound %}
-            <p class="text-sm font-medium text-gray-800">{{ channel|title }} sent</p>
-          {% else %}
-            <p class="text-sm font-medium text-gray-800">{{ channel|title }} received</p>
-          {% endif %}
-          {% if message.subject %}
-            <p class="text-sm text-gray-500">{{ message.subject }}</p>
-          {% endif %}
-        </div>
-      </div>
-      <time datetime="{{ event.timestamp|date:'c' }}" class="text-xs text-slate-400">{{ event.timestamp|naturaltime }}</time>
-    </header>
-
-    <div class="mt-4 prose prose-sm max-w-none text-slate-800 leading-relaxed">
+{% with is_agent=message.is_outbound %}
+{% if is_agent %}
+  {% with alignment_class='is-agent' bubble_theme='chat-bubble--agent' author_theme='chat-author--agent' meta_theme='chat-meta' details_theme='is-agent' %}
+<article class="timeline-event chat-event {{ alignment_class }}" data-cursor="{{ event.cursor }}">
+  <div class="chat-bubble {{ bubble_theme }}">
+    <div class="chat-author {{ author_theme }}">
+      {{ first_name }}
+      {% if channel_lower != 'web' %}
+        <span class="ml-2 inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
+          {{ channel|channel_label }}
+        </span>
+      {% endif %}
+    </div>
+    <div class="prose prose-sm max-w-none text-slate-800 leading-relaxed">
       {{ message.body|agent_message_html }}
     </div>
-
     {% with attachments=message.attachments.all %}
       {% if attachments %}
-        <div class="mt-4 space-y-2">
-          <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Attachments</p>
-          <div class="flex flex-wrap gap-2">
-            {% for attachment in attachments %}
-              <a href="{{ attachment.file.url }}" target="_blank" rel="noopener"
-                 class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 shadow-sm hover:bg-gray-50">
-                <svg class="h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
-                </svg>
-                <span class="truncate max-w-[160px]" title="{{ attachment.filename }}">{{ attachment.filename }}</span>
-                <span class="text-slate-400">{{ attachment.file_size|filesizeformat }}</span>
-              </a>
-            {% endfor %}
-          </div>
+        <div class="chat-attachments">
+          {% for attachment in attachments %}
+            <a href="{{ attachment.file.url }}" target="_blank" rel="noopener">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
+              </svg>
+              <span class="truncate max-w-[160px]" title="{{ attachment.filename }}">{{ attachment.filename }}</span>
+              <span class="text-slate-500">{{ attachment.file_size|filesizeformat }}</span>
+            </a>
+          {% endfor %}
         </div>
       {% endif %}
     {% endwith %}
-
-    <div class="mt-4 flex flex-wrap items-center justify-end gap-2 text-xs text-slate-500">
-      <details class="group w-full sm:w-auto">
-        <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition hover:text-slate-700">
-          <span>Message details</span>
-          <svg class="h-3 w-3 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-          </svg>
-        </summary>
-        <div class="mt-2 space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-[11px] text-slate-500 shadow-inner">
-          <div><span class="font-semibold text-slate-600">Channel:</span> {{ channel|channel_label }}</div>
-          <div><span class="font-semibold text-slate-600">Direction:</span> {% if message.is_outbound %}Outbound{% else %}Inbound{% endif %}</div>
-          {% if message.subject %}<div><span class="font-semibold text-slate-600">Subject:</span> {{ message.subject }}</div>{% endif %}
-          {% if message.latest_sent_at %}<div><span class="font-semibold text-slate-600">Sent:</span> {{ message.latest_sent_at|date:"M j, g:i a" }}</div>{% endif %}
-          {% if message.latest_delivered_at %}<div><span class="font-semibold text-slate-600">Delivered:</span> {{ message.latest_delivered_at|date:"M j, g:i a" }}</div>{% endif %}
-          {% if message.latest_error_message %}<div class="text-rose-500"><span class="font-semibold">Last error:</span> {{ message.latest_error_message }}</div>{% endif %}
-        </div>
-      </details>
-    </div>
   </div>
+  <div class="chat-meta {{ meta_theme }}">{{ event.timestamp|naturaltime }}</div>
+  <details class="chat-details {{ details_theme }} group">
+    <summary>
+      Message details
+      <svg class="h-3 w-3 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+      </svg>
+    </summary>
+    <div class="chat-details-panel">
+      <div><span class="font-semibold">Channel:</span> {{ channel|channel_label }}</div>
+      <div><span class="font-semibold">Direction:</span> Agent ➝ You</div>
+      {% if message.subject %}<div><span class="font-semibold">Subject:</span> {{ message.subject }}</div>{% endif %}
+      {% if message.latest_sent_at %}<div><span class="font-semibold">Sent:</span> {{ message.latest_sent_at|date:"M j, g:i a" }}</div>{% endif %}
+      {% if message.latest_delivered_at %}<div><span class="font-semibold">Delivered:</span> {{ message.latest_delivered_at|date:"M j, g:i a" }}</div>{% endif %}
+      {% if message.latest_error_message %}<div class="text-rose-500"><span class="font-semibold">Last error:</span> {{ message.latest_error_message }}</div>{% endif %}
+    </div>
+  </details>
 </article>
+  {% endwith %}
+{% else %}
+  {% with alignment_class='is-user' bubble_theme='chat-bubble--user' author_theme='chat-author--user' meta_theme='chat-meta is-user' details_theme='is-user' %}
+<article class="timeline-event chat-event {{ alignment_class }}" data-cursor="{{ event.cursor }}">
+  <div class="chat-bubble {{ bubble_theme }}">
+    <div class="chat-author {{ author_theme }}">
+      You
+      {% if channel_lower != 'web' %}
+        <span class="ml-2 inline-flex items-center rounded-full border border-white/40 bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/80">
+          {{ channel|channel_label }}
+        </span>
+      {% endif %}
+    </div>
+    <div class="prose prose-sm max-w-none text-white leading-relaxed">
+      {{ message.body|agent_message_html }}
+    </div>
+    {% with attachments=message.attachments.all %}
+      {% if attachments %}
+        <div class="chat-attachments">
+          {% for attachment in attachments %}
+            <a href="{{ attachment.file.url }}" target="_blank" rel="noopener">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
+              </svg>
+              <span class="truncate max-w-[160px]" title="{{ attachment.filename }}">{{ attachment.filename }}</span>
+              <span>{{ attachment.file_size|filesizeformat }}</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+  </div>
+  <div class="chat-meta {{ meta_theme }}">{{ event.timestamp|naturaltime }}</div>
+  <details class="chat-details {{ details_theme }} group">
+    <summary>
+      Message details
+      <svg class="h-3 w-3 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+      </svg>
+    </summary>
+    <div class="chat-details-panel">
+      <div><span class="font-semibold">Channel:</span> {{ channel|channel_label }}</div>
+      <div><span class="font-semibold">Direction:</span> You ➝ {{ first_name }}</div>
+      {% if message.subject %}<div><span class="font-semibold">Subject:</span> {{ message.subject }}</div>{% endif %}
+      {% if message.latest_sent_at %}<div><span class="font-semibold">Sent:</span> {{ message.latest_sent_at|date:"M j, g:i a" }}</div>{% endif %}
+      {% if message.latest_delivered_at %}<div><span class="font-semibold">Delivered:</span> {{ message.latest_delivered_at|date:"M j, g:i a" }}</div>{% endif %}
+      {% if message.latest_error_message %}<div class="text-rose-200"><span class="font-semibold">Last error:</span> {{ message.latest_error_message }}</div>{% endif %}
+    </div>
+  </details>
+</article>
+  {% endwith %}
+{% endif %}
+{% endwith %}
+{% endwith %}
 {% endwith %}

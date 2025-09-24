@@ -4,18 +4,18 @@
 
 {% if message.conversation %}
   {% with channel=message.conversation.channel %}
-    {% include "console/partials/_timeline_message_card_content.html" %}
+      {% include "console/partials/_timeline_message_card_content.html" with agent_first_name=agent_first_name %}
   {% endwith %}
 {% elif message.to_endpoint %}
   {% with channel=message.to_endpoint.channel %}
-    {% include "console/partials/_timeline_message_card_content.html" %}
+      {% include "console/partials/_timeline_message_card_content.html" with agent_first_name=agent_first_name %}
   {% endwith %}
 {% elif message.from_endpoint %}
   {% with channel=message.from_endpoint.channel %}
-    {% include "console/partials/_timeline_message_card_content.html" %}
+      {% include "console/partials/_timeline_message_card_content.html" with agent_first_name=agent_first_name %}
   {% endwith %}
 {% else %}
   {% with channel="unknown" %}
-    {% include "console/partials/_timeline_message_card_content.html" %}
+    {% include "console/partials/_timeline_message_card_content.html" with agent_first_name=agent_first_name %}
   {% endwith %}
 {% endif %}

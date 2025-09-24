@@ -1,6 +1,6 @@
 {% load agent_extras %}
 
-{% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events %}
+{% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
 
 <div id="timeline-cursors" hx-swap-oob="true"
      data-older="{{ timeline_window.window_oldest_cursor|default:'' }}"
@@ -24,7 +24,7 @@
 </div>
 
 <button id="jump-to-latest" hx-swap-oob="true"
-        class="hidden absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded border border-indigo-200 bg-white px-3 py-1 text-xs font-semibold text-indigo-600 shadow"
+        class="jump-to-latest hidden"
         type="button">
   Jump to latest
 </button>

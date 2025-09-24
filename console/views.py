@@ -5229,6 +5229,8 @@ class AgentWorkspaceView(AgentAccessMixin, TemplateView):
         window_url = reverse("agent_timeline_window", args=[agent.id])
         event_stream_url = reverse("api:agent-events-stream", args=[agent.id])
         processing_active = is_agent_processing(agent.id)
+        raw_name = (agent.name or "").strip()
+        agent_first_name = raw_name.split()[0] if raw_name else "Agent"
         logger.info(
             "AgentWorkspaceView: processing_active=%s agent=%s user=%s",
             processing_active,
@@ -5245,6 +5247,7 @@ class AgentWorkspaceView(AgentAccessMixin, TemplateView):
                 "timeline_newer_url": f"{window_url}?direction=newer",
                 "event_stream_url": event_stream_url,
                 "processing_active": processing_active,
+                "agent_first_name": agent_first_name,
             }
         )
         return context
@@ -5296,6 +5299,7 @@ class AgentTimelineWindowView(AgentAccessMixin, TemplateView):
             "timeline_older_url": f"{window_url}?direction=older",
             "timeline_newer_url": f"{window_url}?direction=newer",
             "processing_active": is_agent_processing(agent.id),
+            "agent_first_name": (agent.name or "").strip().split()[0] if (agent.name or "").strip() else "Agent",
         }
 
         logger.info(

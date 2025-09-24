@@ -10,7 +10,7 @@
 {% for event in events %}
   {% with message=event.message step=event.step %}
     {% if message %}
-      {% include "console/partials/_timeline_message_card.html" with event=event message=message %}
+      {% include "console/partials/_timeline_message_card.html" with event=event message=message agent_first_name=agent_first_name %}
     {% elif step %}
       {% include "console/partials/_timeline_step_card.html" with event=event step=step %}
     {% endif %}
