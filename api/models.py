@@ -1410,20 +1410,6 @@ class StripeConfig(models.Model):
         return entry.has_value
 
     @property
-    def live_secret_key(self) -> str:
-        return self.get_value("live_secret_key")
-
-    def set_live_secret_key(self, value: str | None) -> None:
-        self.set_value("live_secret_key", value, is_secret=True)
-
-    @property
-    def test_secret_key(self) -> str:
-        return self.get_value("test_secret_key")
-
-    def set_test_secret_key(self, value: str | None) -> None:
-        self.set_value("test_secret_key", value, is_secret=True)
-
-    @property
     def webhook_secret(self) -> str:
         return self.get_value("webhook_secret")
 

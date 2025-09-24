@@ -15,8 +15,6 @@ class PaymentsHelper:
         Returns the appropriate Stripe secret key based on the environment. See the environment variables
         STRIPE_LIVE_MODE, STRIPE_LIVE_SECRET_KEY, and STRIPE_TEST_SECRET_KEY.
 
-        Note that dj-stripe requires DB entry for secret, too
-
         Returns:
             str: The Stripe secret key for the current environment.
         """

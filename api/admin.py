@@ -83,8 +83,6 @@ class StripeConfigAdmin(admin.ModelAdmin):
     readonly_fields = (
         "created_at",
         "updated_at",
-        "live_secret_key_status",
-        "test_secret_key_status",
         "webhook_secret_status",
     )
 
@@ -94,12 +92,6 @@ class StripeConfigAdmin(admin.ModelAdmin):
             "Secrets",
             {
                 "fields": (
-                    "live_secret_key",
-                    "clear_live_secret_key",
-                    "live_secret_key_status",
-                    "test_secret_key",
-                    "clear_test_secret_key",
-                    "test_secret_key_status",
                     "webhook_secret",
                     "clear_webhook_secret",
                     "webhook_secret_status",
@@ -114,26 +106,22 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "startup_additional_task_price_id",
                     "startup_product_id",
                     "org_team_product_id",
+                    "org_team_price_id",
+                    "org_team_additional_task_price_id",
                     "task_meter_id",
                     "task_meter_event_name",
                     "org_task_meter_id",
+                    "org_team_task_meter_id",
+                    "org_team_task_meter_event_name",
                 )
             },
         ),
         ("Metadata", {"fields": ("created_at", "updated_at")}),
     )
 
-    def live_secret_key_status(self, obj):
-        return "Configured" if obj.has_value("live_secret_key") else "Not set"
-
-    def test_secret_key_status(self, obj):
-        return "Configured" if obj.has_value("test_secret_key") else "Not set"
-
     def webhook_secret_status(self, obj):
         return "Configured" if obj.has_value("webhook_secret") else "Not set"
 
-    live_secret_key_status.short_description = "Live key"
-    test_secret_key_status.short_description = "Test key"
     webhook_secret_status.short_description = "Webhook secret"
 
 
