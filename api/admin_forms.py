@@ -319,6 +319,14 @@ class StripeConfigForm(ModelForm):
         label="Org/Team product ID",
         required=False,
     )
+    org_team_price_id = forms.CharField(
+        label="Org/Team price ID",
+        required=False,
+    )
+    org_team_additional_task_price_id = forms.CharField(
+        label="Org/Team additional task price ID",
+        required=False,
+    )
     task_meter_id = forms.CharField(
         label="Task meter ID",
         required=False,
@@ -329,6 +337,14 @@ class StripeConfigForm(ModelForm):
     )
     org_task_meter_id = forms.CharField(
         label="Organization task meter ID",
+        required=False,
+    )
+    org_team_task_meter_id = forms.CharField(
+        label="Org/Team task meter ID",
+        required=False,
+    )
+    org_team_task_meter_event_name = forms.CharField(
+        label="Org/Team task meter event name",
         required=False,
     )
 
@@ -347,9 +363,13 @@ class StripeConfigForm(ModelForm):
             self.fields["startup_additional_task_price_id"].initial = instance.startup_additional_task_price_id
             self.fields["startup_product_id"].initial = instance.startup_product_id
             self.fields["org_team_product_id"].initial = instance.org_team_product_id
+            self.fields["org_team_price_id"].initial = instance.org_team_price_id
+            self.fields["org_team_additional_task_price_id"].initial = instance.org_team_additional_task_price_id
             self.fields["task_meter_id"].initial = instance.task_meter_id
             self.fields["task_meter_event_name"].initial = instance.task_meter_event_name
             self.fields["org_task_meter_id"].initial = instance.org_task_meter_id
+            self.fields["org_team_task_meter_id"].initial = instance.org_team_task_meter_id
+            self.fields["org_team_task_meter_event_name"].initial = instance.org_team_task_meter_event_name
 
     def clean_release_env(self):
         value = self.cleaned_data.get("release_env", "")
@@ -380,9 +400,13 @@ class StripeConfigForm(ModelForm):
             "startup_additional_task_price_id",
             "startup_product_id",
             "org_team_product_id",
+            "org_team_price_id",
+            "org_team_additional_task_price_id",
             "task_meter_id",
             "task_meter_event_name",
             "org_task_meter_id",
+            "org_team_task_meter_id",
+            "org_team_task_meter_event_name",
         ]
         for field_name in simple_fields:
             value = self.cleaned_data.get(field_name)

@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, Tuple
 
 from django.apps import apps
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 from django.db import OperationalError, ProgrammingError
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
@@ -37,8 +37,8 @@ def _env_defaults() -> StripeSettings:
     return StripeSettings(
         release_env=getattr(settings, "GOBII_RELEASE_ENV", "local"),
         live_mode=getattr(settings, "STRIPE_LIVE_MODE", False),
-        live_secret_key=getattr(settings, "STRIPE_LIVE_SECRET_KEY", None),
-        test_secret_key=getattr(settings, "STRIPE_TEST_SECRET_KEY", None),
+        live_secret_key=getattr(settings, "STRIPE_LIVE_SECRET_FALLBACK", None),
+        test_secret_key=getattr(settings, "STRIPE_TEST_SECRET_FALLBACK", None),
         webhook_secret=getattr(settings, "STRIPE_WEBHOOK_SECRET", None),
         startup_price_id=getattr(settings, "STRIPE_STARTUP_PRICE_ID", ""),
         startup_additional_task_price_id=getattr(settings, "STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", ""),
@@ -71,7 +71,7 @@ def _coalesce(value: str | None) -> Optional[str]:
 def _load_from_database() -> Optional[StripeSettings]:
     try:
         StripeConfig = apps.get_model("api", "StripeConfig")
-    except (LookupError, ImproperlyConfigured):
+    except (LookupError, ImproperlyConfigured, AppRegistryNotReady):
         return None
 
     release_env = getattr(settings, "GOBII_RELEASE_ENV", "local")
@@ -134,9 +134,24 @@ def get_stripe_settings(force_reload: bool = False) -> StripeSettings:
 
 def invalidate_stripe_settings_cache(*_args, **_kwargs) -> None:
     _cached_stripe_settings.cache_clear()
+    refresh_django_stripe_secret_settings()
 
 
 @receiver(post_save, sender="api.StripeConfig")
 @receiver(post_delete, sender="api.StripeConfig")
 def _stripe_config_changed(**_kwargs) -> None:
     invalidate_stripe_settings_cache()
+
+
+def load_stripe_secret_pair(force_reload: bool = False) -> Tuple[str, str]:
+    stripe_settings = get_stripe_settings(force_reload=force_reload)
+    live = stripe_settings.live_secret_key or ""
+    test = stripe_settings.test_secret_key or ""
+    return live, test
+
+
+def refresh_django_stripe_secret_settings(force_reload: bool = False) -> Tuple[str, str]:
+    live, test = load_stripe_secret_pair(force_reload=force_reload)
+    setattr(settings, "STRIPE_LIVE_SECRET_KEY", live)
+    setattr(settings, "STRIPE_TEST_SECRET_KEY", test)
+    return live, test
