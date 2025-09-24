@@ -556,8 +556,8 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = "[Gobii] "
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"
 
 # dj-stripe / Stripe configuration
-STRIPE_LIVE_SECRET_KEY = os.environ.get("STRIPE_LIVE_SECRET_KEY", "<your secret key>")
-STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY", "<your secret key>")
+STRIPE_LIVE_SECRET_KEY = os.environ.get("STRIPE_LIVE_SECRET_KEY", "<your default live env secret key>")
+STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY", "<your default test env secret key>")
 STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", default=False)  # Set to True in production
 
 DJSTRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="whsec_dummy")
