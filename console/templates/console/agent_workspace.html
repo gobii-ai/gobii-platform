@@ -274,6 +274,175 @@
     word-break: break-word;
   }
 
+  .tool-cluster {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+
+  .tool-cluster-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .tool-cluster-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.72rem;
+    color: #94a3b8;
+    justify-content: space-between;
+  }
+
+  .tool-cluster-labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .tool-cluster-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .tool-cluster-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 9999px;
+    background: rgba(241, 245, 249, 0.9);
+    padding: 0.25rem 0.6rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #475569;
+  }
+
+  .tool-cluster-chip-icon {
+    display: grid;
+    place-items: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 9999px;
+  }
+
+  .tool-cluster-count {
+    font-size: 0.7rem;
+    color: #94a3b8;
+  }
+
+  .tool-cluster-time {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: #94a3b8;
+  }
+
+  .tool-chip-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    align-items: flex-start;
+  }
+
+  .tool-chip-details {
+    border-radius: 0.9rem;
+    border: 1px solid rgba(203, 213, 225, 0.55);
+    background: rgba(255, 255, 255, 0.88);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    width: min(26rem, 100%);
+    align-self: flex-start;
+  }
+
+  .tool-chip-details[open] {
+    border-color: rgba(99, 102, 241, 0.25);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  }
+
+  .tool-chip-details summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+  }
+
+  .tool-chip-details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tool-chip-icon {
+    display: grid;
+    place-items: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 9999px;
+    flex-shrink: 0;
+  }
+
+  .tool-chip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .tool-chip-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1f2937;
+  }
+
+  .tool-chip-caption {
+    font-size: 0.72rem;
+    color: #64748b;
+  }
+
+  .tool-chip-time {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: #a1aec8;
+  }
+
+  .tool-chip-caret {
+    width: 0.85rem;
+    height: 0.85rem;
+    margin-left: 0.4rem;
+    color: #a1aec8;
+    transition: transform 0.18s ease;
+  }
+
+  .tool-chip-details[open] .tool-chip-caret {
+    transform: rotate(180deg);
+  }
+
+  .tool-chip-panel {
+    border-top: 1px solid rgba(226, 232, 240, 0.65);
+    background: rgba(248, 250, 252, 0.94);
+    padding: 0.75rem 0.9rem;
+    font-size: 0.78rem;
+    color: #475569;
+  }
+
+  .tool-chip-panel-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #4f46e5;
+  }
+
+  .tool-chip-panel-body {
+    margin-top: 0.35rem;
+    font-size: 0.86rem;
+    color: #334155;
+  }
+
   .chat-bubble--user {
     background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
     color: #fbfbff;

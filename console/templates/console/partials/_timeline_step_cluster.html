@@ -1,0 +1,105 @@
+{% load agent_extras %}
+{% load humanize %}
+{% load tz %}
+
+{% if cluster.entries %}
+<article class="timeline-event tool-cluster" data-cursor="{{ cluster.cursor }}">
+  <div class="tool-cluster-shell">
+    <div class="tool-cluster-header">
+      <div class="tool-cluster-labels">
+        {% if cluster.labels %}
+          {% for label in cluster.labels %}
+            <span class="tool-cluster-chip">
+              <span class="tool-cluster-chip-icon {{ label.icon_bg }} {{ label.icon_color }}">
+                <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {% for path in label.paths %}
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ path }}" />
+                  {% endfor %}
+                </svg>
+              </span>
+              <span>{{ label.label }}</span>
+            </span>
+          {% endfor %}
+        {% else %}
+          <span class="tool-cluster-chip">
+            <span class="tool-cluster-chip-icon bg-slate-100 text-slate-500">
+              <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </span>
+            <span>Agent action</span>
+          </span>
+        {% endif %}
+      </div>
+      <div class="tool-cluster-meta">
+        <span class="tool-cluster-count">{{ cluster.entries|length }} step{% if cluster.entries|length > 1 %}s{% endif %}</span>
+        {% if cluster.latest_timestamp %}
+          <time datetime="{{ cluster.latest_timestamp|date:'c' }}" class="tool-cluster-time">{{ cluster.latest_timestamp|naturaltime }}</time>
+        {% endif %}
+      </div>
+    </div>
+    <ul class="tool-chip-list">
+      {% for entry in cluster.entries %}
+        {% with tool=entry.tool meta=entry.meta params=tool.tool_params %}
+          <li class="tool-chip">
+            <details class="tool-chip-details">
+              <summary>
+                <span class="tool-chip-icon {{ meta.icon_bg }} {{ meta.icon_color }}">
+                  <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {% for path in meta.paths %}
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ path }}" />
+                    {% endfor %}
+                  </svg>
+                </span>
+                <span class="tool-chip-body">
+                  <span class="tool-chip-label">{{ meta.label }}</span>
+                  {% with query=params|attr:'query' url=params|attr:'url' operations=params|attr:'operations' summary=params|attr:'summary' %}
+                    {% if tool.tool_name == 'search_tools' and query %}
+                      <span class="tool-chip-caption">“{{ query|truncatechars:60 }}”</span>
+                    {% elif tool.tool_name == 'web_search' and query %}
+                      <span class="tool-chip-caption">“{{ query|truncatechars:60 }}”</span>
+                    {% elif tool.tool_name == 'search' and query %}
+                      <span class="tool-chip-caption">“{{ query|truncatechars:60 }}”</span>
+                    {% elif tool.tool_name == 'api_call' and url %}
+                      <span class="tool-chip-caption">{{ url|truncatechars:60 }}</span>
+                    {% elif tool.tool_name == 'http_request' and url %}
+                      <span class="tool-chip-caption">{{ url|truncatechars:60 }}</span>
+                    {% elif tool.tool_name == 'sqlite_batch' and operations %}
+                      <span class="tool-chip-caption">{{ operations|length }} statement{{ operations|length|pluralize }}</span>
+                    {% elif summary %}
+                      <span class="tool-chip-caption">{{ summary|truncatechars:60 }}</span>
+                    {% endif %}
+                  {% endwith %}
+                </span>
+                <span class="tool-chip-time">{{ entry.event.timestamp|naturaltime }}</span>
+                <svg class="tool-chip-caret" viewBox="0 0 20 20" fill="none" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7l3 3 3-3" />
+                </svg>
+              </summary>
+              <div class="tool-chip-panel">
+                {% if tool.tool_name == 'update_charter' %}
+                  {% with charter=params|attr:'new_charter' %}
+                    {% if not charter %}
+                      {% with charter=params|attr:'charter' %}
+                        {% if charter %}
+                          {% include "console/partials/_timeline_assignment_details.html" with charter_text=charter %}
+                        {% else %}
+                          <p class="tool-chip-panel-body text-slate-600">Assignment updated.</p>
+                        {% endif %}
+                      {% endwith %}
+                    {% else %}
+                      {% include "console/partials/_timeline_assignment_details.html" with charter_text=charter %}
+                    {% endif %}
+                  {% endwith %}
+                {% else %}
+                  {% include "console/partials/_timeline_step_details.html" with step=entry.step show_sql=entry.show_sql inline=True wrapper_class='space-y-3 text-xs text-slate-600' %}
+                {% endif %}
+              </div>
+            </details>
+          </li>
+        {% endwith %}
+      {% endfor %}
+    </ul>
+  </div>
+</article>
+{% endif %}
