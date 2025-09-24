@@ -107,6 +107,12 @@
     min-height: 24rem;
   }
 
+  #timeline-shell {
+    width: 100%;
+    max-width: 82rem;
+    margin: 0 auto;
+  }
+
   #timeline-events {
     scroll-behavior: smooth;
     padding: 1rem 0.75rem 16rem;
@@ -189,7 +195,7 @@
 
   .composer-surface {
     width: 100%;
-    max-width: 100%;
+    max-width: min(60rem, calc(100% - 2.5rem));
     border-radius: 1.2rem;
     background: rgba(255, 255, 255, 0.94);
     backdrop-filter: blur(14px);
@@ -224,6 +230,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    width: 100%;
   }
 
   .chat-event.is-user {
@@ -235,9 +242,10 @@
   }
 
   .chat-bubble {
-    max-width: min(36rem, 100%);
+    /* allow messages to use more horizontal space on wide screens while remaining readable */
+    max-width: min(60rem, 100%);
     border-radius: 1.25rem;
-    padding: 0.85rem 1.1rem;
+    padding: 1rem 1.25rem;
     font-size: 0.9375rem;
     line-height: 1.5;
     box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
