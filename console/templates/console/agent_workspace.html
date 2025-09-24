@@ -7,7 +7,7 @@
 
 {% block content %}
 <main class="min-h-screen bg-slate-50">
-  <div class="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-48 pt-8 sm:px-6 lg:px-10">
+  <div class="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-8 sm:px-6 lg:px-10">
     <header class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div class="flex flex-col gap-2">
         <a href="{% url 'agents' %}" class="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-indigo-600">
@@ -120,6 +120,10 @@
 
   #timeline-events {
     padding: 1rem 0.75rem var(--timeline-bottom-padding, 16rem);
+  }
+
+  #timeline-events.timeline-align-end {
+    justify-content: flex-end;
   }
 
   #timeline-events::-webkit-scrollbar {
@@ -248,6 +252,52 @@
     flex-direction: column;
     gap: 0.25rem;
     width: 100%;
+  }
+
+  .timeline-event {
+    position: relative;
+  }
+
+  .timeline-event--incoming {
+    animation: timelineEventIncoming 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .timeline-event--incoming .chat-bubble {
+    animation: timelineEventBubbleHighlight 340ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes timelineEventIncoming {
+    0% {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes timelineEventBubbleHighlight {
+    0% {
+      box-shadow: 0 18px 40px rgba(79, 70, 229, 0.22);
+    }
+    100% {
+      box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .timeline-event--incoming {
+      animation-duration: 1ms;
+      animation-iteration-count: 1;
+      animation-timing-function: linear;
+    }
+
+    .timeline-event--incoming .chat-bubble {
+      animation-duration: 1ms;
+      animation-iteration-count: 1;
+      animation-timing-function: linear;
+    }
   }
 
   .chat-event.is-user {
@@ -622,6 +672,10 @@
     const newerUrl = root.dataset.timelineNewerUrl;
     const eventStreamUrl = root.dataset.eventStreamUrl;
 
+    const initialProcessingActive = root.dataset.processingActive === 'true';
+
+    const composerShell = document.querySelector('.composer-shell');
+
     const state = {
       action: 'idle',
       previousScrollHeight: 0,
@@ -631,15 +685,17 @@
       eventSource: null,
       fetchingNewer: false,
       queuedNewerTrigger: null,
-      processingActive: false,
+      processingActive: initialProcessingActive,
       bottomAnchorOffset: null,
       pageBottomOffset: null,
+      knownCursors: new Set(),
+      processingSticky: initialProcessingActive,
     };
-    state.processingActive = root.dataset.processingActive === 'true';
 
     const JUMP_BUTTON_SIZE = 52; // matches 3.25rem
     const JUMP_BUTTON_GAP = 18;
     const BASE_SCROLL_THRESHOLD = 140;
+    const ALIGN_THRESHOLD = 160;
     const BOTTOM_ANCHOR_THRESHOLD = 48;
 
     let openToolChip = null;
@@ -738,8 +794,26 @@
     function updateTimelinePadding() {
       if (!timeline) return;
       const composerHeight = composerSurface?.offsetHeight || 0;
-      const padding = Math.max(composerHeight + 80, 220);
+      const slack = Math.max(timeline.scrollHeight - timeline.clientHeight, 0);
+      const fewEvents = timeline.querySelectorAll('.timeline-event[data-cursor]').length <= 6;
+      const shouldAlignEnd = slack <= ALIGN_THRESHOLD && fewEvents;
+      const timelineStyles = window.getComputedStyle(timeline);
+      const rowGap = parseFloat(timelineStyles.rowGap || timelineStyles.gap || '0') || 12;
+      const composerBottomOffset = composerShell
+        ? parseFloat(window.getComputedStyle(composerShell).bottom || '24') || 24
+        : 24;
+
+      const basePadding = composerHeight + composerBottomOffset + rowGap;
+      let padding;
+      if (shouldAlignEnd) {
+        padding = basePadding;
+      } else {
+        const defaultPadding = Math.max(composerHeight + 80, 220);
+        padding = defaultPadding;
+      }
       timeline.style.setProperty('--timeline-bottom-padding', `${Math.round(padding)}px`);
+
+      timeline.classList.toggle('timeline-align-end', shouldAlignEnd);
     }
 
     function positionJumpButton() {
@@ -913,7 +987,7 @@
         if (!state.processingActive || !node) {
           showProcessingIndicator();
         }
-      } else if (state.processingActive || node) {
+      } else if (!state.processingSticky && (state.processingActive || node)) {
         hideProcessingIndicator();
       }
     }
@@ -934,7 +1008,7 @@
       return pill;
     }
 
-    function showProcessingIndicator() {
+    function showProcessingIndicator(options = {}) {
       if (!processingSlot) return;
       ensureProcessingSlotPosition();
       let indicator = getProcessingNode();
@@ -946,6 +1020,9 @@
         indicator.classList.remove('processing-indicator--fade');
       }
       state.processingActive = true;
+      if (options && options.sticky) {
+        state.processingSticky = true;
+      }
       setProcessingDataset(true);
       refreshEmptyState();
       if (isNearBottom()) {
@@ -957,6 +1034,7 @@
       const indicator = getProcessingNode();
       if (!indicator) {
         state.processingActive = false;
+        state.processingSticky = false;
         setProcessingDataset(false);
         refreshEmptyState();
         ensureEmptyState();
@@ -966,6 +1044,7 @@
       window.setTimeout(() => {
         indicator.remove();
         state.processingActive = false;
+        state.processingSticky = false;
         setProcessingDataset(false);
         refreshEmptyState();
         ensureEmptyState();
@@ -1011,6 +1090,49 @@
       toggleJumpButtonVisibility(show);
     }
 
+    function forgetCursor(node) {
+      if (!node || !state.knownCursors) return;
+      const cursor = node.dataset?.cursor;
+      if (!cursor) return;
+      state.knownCursors.delete(cursor);
+    }
+
+    function syncKnownCursors(options = {}) {
+      if (!timeline) return;
+      const animate = Boolean(options.animate);
+      if (!state.knownCursors) {
+        state.knownCursors = new Set();
+      }
+
+      const items = timeline.querySelectorAll('.timeline-event[data-cursor]');
+      const newcomers = [];
+
+      items.forEach((node) => {
+        const cursor = node.dataset?.cursor;
+        if (!cursor) return;
+        if (!state.knownCursors.has(cursor)) {
+          state.knownCursors.add(cursor);
+          if (animate) {
+            newcomers.push(node);
+          }
+        }
+      });
+
+      if (animate && newcomers.length) {
+        window.requestAnimationFrame(() => {
+          newcomers.forEach((node) => {
+            node.classList.add('timeline-event--incoming');
+            const cleanup = () => {
+              node.classList.remove('timeline-event--incoming');
+              node.removeEventListener('animationend', cleanup);
+            };
+            node.addEventListener('animationend', cleanup, { once: true });
+            window.setTimeout(cleanup, 900);
+          });
+        });
+      }
+    }
+
     function trimTimeline(direction) {
       if (!timeline) return;
       const nodes = Array.from(timeline.querySelectorAll('.timeline-event[data-cursor]'));
@@ -1032,12 +1154,18 @@
       if (direction === 'older') {
         for (let i = 0; i < excess; i += 1) {
           const node = nodes[nodes.length - 1 - i];
-          if (node) node.remove();
+          if (node) {
+            forgetCursor(node);
+            node.remove();
+          }
         }
       } else {
         for (let i = 0; i < excess; i += 1) {
           const node = nodes[i];
-          if (node) node.remove();
+          if (node) {
+            forgetCursor(node);
+            node.remove();
+          }
         }
       }
 
@@ -1063,6 +1191,7 @@
         const cursor = node?.dataset?.cursor;
         if (!cursor) continue;
         if (seen.has(cursor)) {
+          forgetCursor(node);
           node.remove();
         } else {
           seen.add(cursor);
@@ -1180,7 +1309,7 @@
       composer.addEventListener('htmx:afterRequest', (event) => {
         if (event.detail && event.detail.xhr && event.detail.xhr.status < 400) {
           composer.reset();
-          showProcessingIndicator();
+          showProcessingIndicator({ sticky: true });
         } else {
           state.pendingComposerScroll = false;
         }
@@ -1265,6 +1394,7 @@
 
       dedupeTimeline();
       trimTimeline(state.action);
+      syncKnownCursors({ animate: state.action === 'newer' });
       updateComposerCursor();
 
       if (typeof Prism !== 'undefined') {
@@ -1313,7 +1443,7 @@
         state.lastEventId = evt.lastEventId;
       }
       reconnectDelay = 3000;
-      showProcessingIndicator();
+      showProcessingIndicator({ sticky: true });
     };
 
     const handleProcessingFinishedEvent = (evt) => {
@@ -1371,9 +1501,9 @@
       state.eventSource = source;
     }
 
-    const initialCursor = getCursorsEl()?.dataset.newer || null;
     ensureProcessingSlotPosition();
     syncProcessingFromDom();
+    syncKnownCursors({ animate: false });
     connectEventStream(null);
     updateTimelinePadding();
     positionJumpButton();
