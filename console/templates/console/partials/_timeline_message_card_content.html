@@ -17,7 +17,7 @@
         </span>
       {% endif %}
     </div>
-    <div class="prose prose-sm max-w-none text-slate-800 leading-relaxed">
+    <div class="chat-content prose prose-sm max-w-none text-slate-800 leading-relaxed">
       {{ message.body|agent_message_html }}
     </div>
     {% with attachments=message.attachments.all %}
@@ -67,7 +67,7 @@
         </span>
       {% endif %}
     </div>
-    <div class="prose prose-sm max-w-none text-white leading-relaxed">
+    <div class="chat-content prose prose-sm max-w-none text-white leading-relaxed">
       {{ message.body|agent_message_html }}
     </div>
     {% with attachments=message.attachments.all %}
