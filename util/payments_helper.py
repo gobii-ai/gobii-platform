@@ -1,4 +1,8 @@
 from config.stripe_config import get_stripe_settings
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class PaymentsHelper:
     """
@@ -18,6 +22,8 @@ class PaymentsHelper:
         """
         stripe = get_stripe_settings()
         if stripe.live_mode:
+            logger.info("PaymentsHelper: LIVE mode")
             return stripe.live_secret_key or ""
 
+        logger.info("PaymentsHelper: SANDBOX mode")
         return stripe.test_secret_key or ""

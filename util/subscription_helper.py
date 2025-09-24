@@ -229,7 +229,10 @@ def get_user_task_credit_limit(user) -> int:
 def get_or_create_stripe_customer(owner) -> Customer:
     """Return an existing Stripe customer for the owner or create a new one."""
     with traced("SUBSCRIPTION Get or Create Stripe Customer"):
-        stripe.api_key = PaymentsHelper.get_stripe_key()
+        stripe_key = PaymentsHelper.get_stripe_key()
+        stripe.api_key = stripe_key
+        logger.info("get_or_create_stripe_customer stripe %s", owner)
+
         owner_type = _resolve_owner_type(owner)
 
         if owner_type == "user":
