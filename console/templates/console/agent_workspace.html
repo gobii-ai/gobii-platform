@@ -46,19 +46,18 @@
       <div id="agent-composer-shell" class="composer-shell">
         <div class="composer-surface">
           <form id="agent-web-compose" class="flex flex-col" hx-post="{% url 'agent_web_message' agent.id %}" hx-swap="none">
-            <div class="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white/95 px-3.5 py-3.5 shadow-lg transition focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20">
+            <div class="flex flex-col gap-2 rounded-3xl border border-slate-200 bg-white/95 px-2.5 py-2.5 shadow-md transition focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20">
               <textarea name="body" rows="1" required
-                        class="block w-full resize-none border-0 bg-transparent px-0 pt-1 pb-1 text-sm leading-6 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 min-h-[2.2rem]"
+                        class="block w-full resize-none border-0 bg-transparent px-0 py-0.5 text-sm leading-5 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 min-h-[1.8rem]"
                         placeholder="Send a message..."></textarea>
-              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div class="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:gap-4">
-                  <span class="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50/70 px-3 py-1.5 text-[0.75rem] font-semibold text-indigo-600 shadow-sm sm:text-sm">
-                    <span class="size-2.5 rounded-full bg-indigo-500 shadow-[0_0_0_4px_rgba(79,70,229,0.12)]"></span>
-                    Sending to
-                    <span class="text-slate-900">{{ agent.name }}</span>
-                  </span>
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex flex-col gap-1.5 text-xs text-slate-500 sm:flex-row sm:items-center sm:gap-3.5">
+                  <div class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[0.72rem] text-slate-500 shadow-sm sm:text-sm">
+                    <span class="uppercase tracking-wide text-[0.7rem] text-slate-400">Sending to</span>
+                    <span class="font-medium text-slate-900">{{ agent.name }}</span>
+                  </div>
                   <a href="{% url 'agents' %}"
-                     class="inline-flex items-center gap-1.5 text-[0.75rem] font-semibold text-slate-500 transition hover:text-indigo-600 sm:text-sm">
+                     class="inline-flex items-center gap-1.5 text-[0.75rem] text-slate-500 transition hover:text-indigo-600 sm:text-sm">
                     <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
                     </svg>
@@ -66,7 +65,7 @@
                   </a>
                 </div>
                 <button type="submit"
-                        class="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                        class="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
                   Send
                 </button>
               </div>
@@ -104,7 +103,7 @@
   }
 
   #timeline-events {
-    padding: 1rem 0.75rem var(--timeline-bottom-padding, 16rem);
+    padding: 1rem 0.75rem var(--timeline-bottom-padding, 9rem);
   }
 
   #timeline-events.timeline-align-end {
@@ -178,7 +177,7 @@
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 1.5rem;
+    bottom: 0.75rem;
     display: flex;
     justify-content: center;
     padding: 0 1.25rem;
@@ -790,8 +789,9 @@
       if (shouldAlignEnd) {
         padding = basePadding;
       } else {
-        const defaultPadding = Math.max(composerHeight + 80, 220);
-        padding = defaultPadding;
+        const relaxedGap = Math.max(rowGap, 24);
+        const compactPadding = composerHeight + composerBottomOffset + relaxedGap;
+        padding = Math.max(compactPadding, basePadding);
       }
       timeline.style.setProperty('--timeline-bottom-padding', `${Math.round(padding)}px`);
 
