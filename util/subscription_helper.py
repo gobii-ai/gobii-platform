@@ -231,7 +231,7 @@ def get_or_create_stripe_customer(owner) -> Customer:
     with traced("SUBSCRIPTION Get or Create Stripe Customer"):
         stripe_key = PaymentsHelper.get_stripe_key()
         stripe.api_key = stripe_key
-        logger.info("get_or_create_stripe_customer stripe %s", owner)
+        logger.info("get_or_create_stripe_customer stripe %s", stripe_key)
 
         owner_type = _resolve_owner_type(owner)
 
