@@ -22,10 +22,11 @@ os.environ.setdefault("GOBII_ENABLE_TRACING", "0")
 from .settings import *
 
 # Override database to use SQLite for testing
+# Use a file-backed SQLite database so concurrent test threads share state.
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': ':memory:',
+        'NAME': str(BASE_DIR / "test_db.sqlite3"),
     }
 }
 
