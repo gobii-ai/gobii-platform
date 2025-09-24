@@ -15,6 +15,7 @@
          data-timeline-newer-url="{{ timeline_newer_url }}"
          data-timeline-older-url="{{ timeline_older_url }}"
          data-event-stream-url="{{ event_stream_url }}"
+         data-processing-status-url="{{ processing_status_url }}"
          data-processing-active="{{ processing_active|yesno:'true,false' }}"
          data-agent-first-name="{{ agent_first_name }}">
 
@@ -696,6 +697,7 @@
     const limit = parseInt(root.dataset.timelineLimit || '150', 10);
     const newerUrl = root.dataset.timelineNewerUrl;
     const eventStreamUrl = root.dataset.eventStreamUrl;
+    const processingStatusUrl = root.dataset.processingStatusUrl || null;
 
     const initialProcessingActive = root.dataset.processingActive === 'true';
 
@@ -716,6 +718,9 @@
       knownCursors: new Set(),
       processingSticky: initialProcessingActive,
       lastNewerTrigger: null,
+      processingEventId: null,
+      awaitingProcessingSync: false,
+      processingRefreshPromise: null,
     };
 
     const JUMP_BUTTON_SIZE = 52; // matches 3.25rem
@@ -1005,6 +1010,19 @@
 
     const PROCESSING_NODE_ID = 'agent-processing-indicator';
 
+    function compareEventIds(a, b) {
+      if (!a || !b || a === b) return 0;
+      const [aTime, aSeq] = String(a).split('-').map((part) => parseInt(part, 10) || 0);
+      const [bTime, bSeq] = String(b).split('-').map((part) => parseInt(part, 10) || 0);
+      if (aTime !== bTime) {
+        return aTime > bTime ? 1 : -1;
+      }
+      if (aSeq !== bSeq) {
+        return aSeq > bSeq ? 1 : -1;
+      }
+      return 0;
+    }
+
     function setProcessingDataset(active) {
       const value = active ? 'true' : 'false';
       root.dataset.processingActive = value;
@@ -1012,6 +1030,55 @@
       if (cursorNode) {
         cursorNode.dataset.processingActive = value;
       }
+    }
+
+    function refreshProcessingState(options = {}) {
+      if (!processingStatusUrl) {
+        return Promise.resolve(null);
+      }
+      if (state.processingRefreshPromise) {
+        return state.processingRefreshPromise;
+      }
+      const reason = options?.reason || 'sync';
+      state.awaitingProcessingSync = true;
+      const fetchPromise = fetch(processingStatusUrl, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`processing status request failed (${response.status})`);
+          }
+          return response.json();
+        })
+        .then((payload) => {
+          const active = Boolean(payload?.processing_active);
+          setProcessingDataset(active);
+          state.processingActive = active;
+          if (active) {
+            state.processingSticky = true;
+          } else {
+            state.processingSticky = false;
+            state.processingEventId = null;
+          }
+          return active;
+        })
+        .catch((error) => {
+          console.warn('[agent-workspace] Failed to refresh processing state', reason, error);
+          return null;
+        })
+        .finally(() => {
+          state.processingRefreshPromise = null;
+          state.awaitingProcessingSync = false;
+          syncProcessingFromDom();
+        });
+
+      state.processingRefreshPromise = fetchPromise;
+      return fetchPromise;
     }
 
     function getProcessingFlag() {
@@ -1028,11 +1095,19 @@
       ensureProcessingSlotPosition();
       const desired = getProcessingFlag();
       const node = getProcessingNode();
+      if (!desired && state.processingSticky && !state.awaitingProcessingSync && !state.processingEventId) {
+        state.processingSticky = false;
+      }
       if (desired) {
         if (!state.processingActive || !node) {
           showProcessingIndicator();
         }
-      } else if (!state.processingSticky && (state.processingActive || node)) {
+      } else if (
+        !state.processingSticky &&
+        !state.awaitingProcessingSync &&
+        !state.processingEventId &&
+        (state.processingActive || node)
+      ) {
         hideProcessingIndicator();
       }
     }
@@ -1069,6 +1144,7 @@
         state.processingSticky = true;
       }
       setProcessingDataset(true);
+      state.awaitingProcessingSync = false;
       refreshEmptyState();
       if (isNearBottom()) {
         scrollToBottom({ force: true });
@@ -1080,7 +1156,9 @@
       if (!indicator) {
         state.processingActive = false;
         state.processingSticky = false;
+        state.processingEventId = null;
         setProcessingDataset(false);
+        state.awaitingProcessingSync = false;
         refreshEmptyState();
         ensureEmptyState();
         return;
@@ -1090,7 +1168,9 @@
         indicator.remove();
         state.processingActive = false;
         state.processingSticky = false;
+        state.processingEventId = null;
         setProcessingDataset(false);
+        state.awaitingProcessingSync = false;
         refreshEmptyState();
         ensureEmptyState();
       }, 220);
@@ -1522,6 +1602,7 @@
       state.autoScroll = isNearBottom();
       updateJumpButton();
       refreshEmptyState();
+      state.awaitingProcessingSync = false;
       syncProcessingFromDom();
       maybeAutoFetchBacklog();
     });
@@ -1532,6 +1613,7 @@
         updateTimelinePadding();
         updateJumpButton();
         refreshEmptyState();
+        state.awaitingProcessingSync = false;
         syncProcessingFromDom();
       }
     });
@@ -1549,9 +1631,11 @@
     const handleProcessingStartedEvent = (evt) => {
       if (evt?.lastEventId) {
         state.lastEventId = evt.lastEventId;
+        state.processingEventId = evt.lastEventId;
       }
       reconnectDelay = 3000;
       showProcessingIndicator({ sticky: true });
+      refreshProcessingState({ reason: 'processing-started' });
     };
 
     const handleProcessingFinishedEvent = (evt) => {
@@ -1559,8 +1643,21 @@
         state.lastEventId = evt.lastEventId;
       }
       reconnectDelay = 3000;
-      hideProcessingIndicator();
-      requestNewer('processing-finished');
+      const finishId = evt?.lastEventId || null;
+      const staleFinish = Boolean(
+        finishId &&
+        state.processingEventId &&
+        compareEventIds(finishId, state.processingEventId) < 0,
+      );
+      if (staleFinish) {
+        requestNewer('processing-finished-stale');
+        return;
+      }
+      state.processingEventId = null;
+      refreshProcessingState({ reason: 'processing-finished' })
+        .finally(() => {
+          requestNewer('processing-finished');
+        });
     };
 
     function connectEventStream(lastId) {
@@ -1602,8 +1699,16 @@
         source.close();
         state.eventSource = null;
         reconnectDelay = Math.min(Math.round(reconnectDelay * 1.5), RECONNECT_MAX);
+        const indicatorVisible = Boolean(getProcessingNode());
+        const processingFlagged = getProcessingFlag();
+        if (indicatorVisible || processingFlagged) {
+          state.processingSticky = true;
+          if (!indicatorVisible && processingFlagged) {
+            showProcessingIndicator({ sticky: true });
+          }
+          refreshProcessingState({ reason: 'eventsource-error' });
+        }
         window.setTimeout(() => connectEventStream(state.lastEventId), reconnectDelay);
-        hideProcessingIndicator();
       };
 
       state.eventSource = source;

@@ -5247,6 +5247,7 @@ class AgentWorkspaceView(AgentAccessMixin, TemplateView):
                 "timeline_newer_url": f"{window_url}?direction=newer",
                 "event_stream_url": event_stream_url,
                 "processing_active": processing_active,
+                "processing_status_url": reverse("agent_processing_status", args=[agent.id]),
                 "agent_first_name": agent_first_name,
             }
         )
@@ -5335,3 +5336,13 @@ class AgentWebMessageView(AgentAccessMixin, View):
 
         messages.success(request, "Message sent to agent.")
         return redirect("agent_workspace", pk=agent.pk)
+
+
+class AgentProcessingStatusView(AgentAccessMixin, View):
+    def get(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        processing_active = is_agent_processing(agent.id)
+        return JsonResponse({
+            "processing_active": processing_active,
+            "queried_at": timezone.now().isoformat(),
+        })
