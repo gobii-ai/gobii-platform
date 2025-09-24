@@ -166,31 +166,16 @@ def get_owner_plan(owner) -> dict[str, int | str]:
     with traced("SUBSCRIPTION Get Owner Plan"):
         owner_type = _resolve_owner_type(owner)
         owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
+        logger.debug("get_owner_plan %s %s", owner_type, owner_id)
 
-        subscription = get_active_subscription(owner)
-        logger.debug("get_owner_plan %s %s: %s", owner_type, owner_id, subscription)
+        billing_record = _get_billing_record(owner)
 
-        if not subscription:
-            logger.debug("get_owner_plan %s %s: No active subscription found", owner_type, owner_id)
+        if not billing_record:
             return PLAN_CONFIG[PlanNames.FREE]
 
-        stripe_sub = subscription.stripe_data
+        sub_name = getattr(billing_record, "subscription", None)
 
-        product_id = None
-        for item_data in stripe_sub.get("items", {}).get("data", []):
-            if item_data.get("plan", {}).get("usage_type") == "licensed":
-                product_id = item_data.get("price", {}).get("product")
-                break
-
-        logger.debug("get_owner_plan %s %s product_id: %s", owner_type, owner_id, product_id)
-
-        if not product_id:
-            logger.warning("get_owner_plan %s %s: Subscription product is None", owner_type, owner_id)
-            return PLAN_CONFIG[PlanNames.FREE]
-
-        plan = get_plan_by_product_id(product_id)
-        return plan if plan else PLAN_CONFIG[PlanNames.FREE]
-
+        return PLAN_CONFIG[str(sub_name).lower()] if sub_name in PLAN_CONFIG else PLAN_CONFIG[PlanNames.FREE]
 
 def get_user_plan(user) -> dict[str, int | str]:
     return get_owner_plan(user)
