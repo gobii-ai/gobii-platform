@@ -49,7 +49,7 @@
          data-agent-first-name="{{ agent_first_name }}">
 
       <div id="timeline-shell" class="relative flex-1">
-        <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto rounded-3xl border border-slate-200/70 bg-white/90 p-4 shadow-sm">
+        <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto">
           <div class="flex justify-center py-2 text-xs text-slate-500">
             {% if timeline_window.has_more_older %}
               <button
@@ -109,7 +109,7 @@
 
   #timeline-events {
     scroll-behavior: smooth;
-    padding-bottom: 16rem;
+    padding: 1rem 0.75rem 16rem;
   }
 
   #timeline-events::-webkit-scrollbar {
