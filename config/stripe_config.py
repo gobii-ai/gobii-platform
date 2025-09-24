@@ -1,7 +1,7 @@
 """Helpers for accessing Stripe configuration with database overrides."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Optional
 
@@ -84,31 +84,28 @@ def _load_from_database() -> Optional[StripeSettings]:
         # Database not ready (e.g., during migrations or collectstatic)
         return None
 
+    env_defaults = _env_defaults()
     try:
-        live_secret = _coalesce(config.live_secret_key)
-    except Exception:
-        live_secret = None
-    try:
-        test_secret = _coalesce(config.test_secret_key)
-    except Exception:
-        test_secret = None
-    try:
+        # Webhook secret can still be managed from the admin UI
         webhook_secret = _coalesce(config.webhook_secret)
     except Exception:
         webhook_secret = None
+    try:
+        org_team_additional_price = config.org_team_additional_task_price_id or ""
+    except Exception:
+        org_team_additional_price = ""
 
-    return StripeSettings(
+    return replace(
+        env_defaults,
         release_env=config.release_env,
         live_mode=bool(config.live_mode),
-        live_secret_key=live_secret,
-        test_secret_key=test_secret,
         webhook_secret=webhook_secret,
         startup_price_id=config.startup_price_id or "",
         startup_additional_task_price_id=config.startup_additional_task_price_id or "",
         startup_product_id=config.startup_product_id or "",
         org_team_product_id=config.org_team_product_id or "",
         org_team_price_id=config.org_team_price_id or "",
-        org_team_additional_task_price_id=config.org_team_additional_task_price_id or "",
+        org_team_additional_task_price_id=org_team_additional_price,
         task_meter_id=config.task_meter_id or "",
         task_meter_event_name=config.task_meter_event_name or "",
         org_team_task_meter_id=config.org_team_task_meter_id or "",

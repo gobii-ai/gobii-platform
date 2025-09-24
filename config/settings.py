@@ -556,28 +556,13 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = "[Gobii] "
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"
 
 # dj-stripe / Stripe configuration
-STRIPE_LIVE_SECRET_KEY = os.environ.get("STRIPE_LIVE_SECRET_KEY", "<your default live env secret key>")
-STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY", "<your default test env secret key>")
+STRIPE_LIVE_SECRET_KEY = os.environ.get("STRIPE_LIVE_SECRET_KEY")
+STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY")
 STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", default=False)  # Set to True in production
 
 DJSTRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="whsec_dummy")
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = "id"
 DJSTRIPE_USE_NATIVE_JSONFIELD = True
-
-# Stripe Product and Price IDs - used for billing plans
-STRIPE_STARTUP_PRICE_ID = env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup")
-STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID = env("STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_startup_additional_task")
-STRIPE_STARTUP_PRODUCT_ID = env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup")
-STRIPE_TASK_METER_ID = env("STRIPE_TASK_METER_ID", default="meter_dummy_task")
-STRIPE_TASK_METER_EVENT_NAME = env("STRIPE_TASK_METER_EVENT_NAME", default="task")
-
-# Stripe - Orgs - Team
-STRIPE_ORG_TEAM_PRODUCT_ID=env("STRIPE_ORG_TEAM_PRODUCT_ID", default="prod_dummy_org_team")
-STRIPE_ORG_TEAM_PRICE_ID=env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team")
-STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional")
-STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task")
-STRIPE_ORG_TEAM_TASK_METER_ID=env("STRIPE_ORG_TASK_METER_ID", default="meter_dummy_org_task")
-STRIPE_ORG_TEAM_TASK_METER_EVENT_NAME=env("STRIPE_ORG_TASK_METER_EVENT_NAME", default="task_org_team_task_meter_name")
 
 # Credits configuration
 # How many credits a single task consumes from plan credits.
