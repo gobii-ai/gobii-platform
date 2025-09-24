@@ -450,7 +450,9 @@
   </script>
 </head>
 <body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
-  {% include "includes/_unified_header_nav.html" %}
+  {% block global_header %}
+    {% include "includes/_unified_header_nav.html" %}
+  {% endblock %}
   <div>
     {% if messages %}
     <div class="fixed top-18 left-1/2 transform -translate-x-1/2 w-full max-w-md p-4 z-50" id="global-messages">
@@ -483,7 +485,9 @@
     <div id="modal-container"></div>
 
     {# Global footer #}
-    {% include "includes/_footer.html" %}
+    {% block global_footer %}
+      {% include "includes/_footer.html" %}
+    {% endblock %}
   </div>
 
   {% block extra_js %}{% endblock %}

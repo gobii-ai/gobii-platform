@@ -1,86 +1,115 @@
-{% extends "console_page.html" %}
+{% extends "base.html" %}
 {% load static %}
 {% load agent_extras %}
 
-{% block console_content %}
-<div class="space-y-6">
-  <header class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
-    <div class="px-6 py-4">
-      <h1 class="text-xl font-semibold text-gray-800">Conversation with {{ agent.name }}</h1>
-    </div>
-  </header>
+{% block global_header %}{% endblock %}
+{% block global_footer %}{% endblock %}
 
-  <div id="agent-workspace-root"
-       class="relative flex h-full flex-col gap-4"
-       data-timeline-limit="{{ timeline_limit }}"
-       data-timeline-newer-url="{{ timeline_newer_url }}"
-       data-timeline-older-url="{{ timeline_older_url }}"
-       data-event-stream-url="{{ event_stream_url }}"
-       data-processing-active="{{ processing_active|yesno:'true,false' }}"
-       data-agent-first-name="{{ agent_first_name }}">
-
-    <div id="timeline-shell" class="relative flex-1">
-      <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto">
-        <div class="flex justify-center py-2 text-xs text-slate-500">
-          {% if timeline_window.has_more_older %}
-            <button
-              class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm hover:bg-gray-50"
-              hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
-              hx-target="#timeline-events"
-              hx-swap="afterbegin">
-              Load older
-            </button>
+{% block content %}
+<main class="min-h-screen bg-slate-50">
+  <div class="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-48 pt-8 sm:px-6 lg:px-10">
+    <header class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div class="flex flex-col gap-2">
+        <a href="{% url 'agents' %}" class="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-indigo-600">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to agents
+        </a>
+        <div>
+          <h1 class="text-2xl font-semibold text-slate-900">{{ agent.name }}</h1>
+          {% if agent.charter %}
+            <p class="mt-1 text-sm text-slate-500">{{ agent.charter|truncatechars:160 }}</p>
           {% endif %}
         </div>
-        {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
-        <div id="processing-indicator-slot" class="mt-2 px-1"></div>
       </div>
-    </div>
+      <div class="flex items-center gap-2">
+        <span class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium uppercase tracking-wide text-slate-500 shadow-sm">
+          <span class="size-2 rounded-full {% if agent.is_active %}bg-emerald-500{% else %}bg-slate-300{% endif %}"></span>
+          {% if agent.is_active %}Active{% else %}Paused{% endif %}
+        </span>
+        {% if agent.schedule %}
+          <span class="hidden sm:inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium uppercase tracking-wide text-slate-500 shadow-sm">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l2.5 2.5M5.25 5.25l1.5 1.5m10.5-1.5l-1.5 1.5M4 12h2m12 0h2M7.5 19.5l1.5-1.5m6 1.5l-1.5-1.5M12 4v2" />
+            </svg>
+            {{ agent.schedule }}
+          </span>
+        {% endif %}
+      </div>
+    </header>
 
-    <div id="timeline-cursors" class="hidden"
-         data-older="{{ timeline_window.window_oldest_cursor|default:'' }}"
-         data-newer="{{ timeline_window.window_newest_cursor|default:'' }}"
-         data-has-more-older="{{ timeline_window.has_more_older|yesno:'true,false' }}"
-         data-has-more-newer="{{ timeline_window.has_more_newer|yesno:'true,false' }}"
-         data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>
+    <div id="agent-workspace-root"
+         class="relative flex flex-1 flex-col gap-4"
+         data-timeline-limit="{{ timeline_limit }}"
+         data-timeline-newer-url="{{ timeline_newer_url }}"
+         data-timeline-older-url="{{ timeline_older_url }}"
+         data-event-stream-url="{{ event_stream_url }}"
+         data-processing-active="{{ processing_active|yesno:'true,false' }}"
+         data-agent-first-name="{{ agent_first_name }}">
 
-    <div id="agent-composer-shell" class="composer-shell">
-      <div class="composer-surface">
-        <form id="agent-web-compose" class="flex flex-col gap-3" hx-post="{% url 'agent_web_message' agent.id %}" hx-swap="none">
-          <textarea name="body" rows="3" required
-                    class="w-full resize-none rounded-lg border border-slate-200 bg-white/80 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                    placeholder="Send a message..."></textarea>
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs text-gray-500">Markdown supported. Shift + Enter for newline.</p>
-            <button type="submit"
-                    class="inline-flex items-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-              Send
-            </button>
+      <div id="timeline-shell" class="relative flex-1">
+        <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto rounded-3xl border border-slate-200/70 bg-white/90 p-4 shadow-sm">
+          <div class="flex justify-center py-2 text-xs text-slate-500">
+            {% if timeline_window.has_more_older %}
+              <button
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+                hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
+                hx-target="#timeline-events"
+                hx-swap="afterbegin">
+                Load older
+              </button>
+            {% endif %}
           </div>
-          <input type="hidden" name="current_newest" id="composer-latest-cursor" value="{{ timeline_window.window_newest_cursor|default:'' }}">
-        </form>
+          {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
+          <div id="processing-indicator-slot" class="mt-2 px-1"></div>
+        </div>
+      </div>
+
+      <div id="timeline-cursors" class="hidden"
+           data-older="{{ timeline_window.window_oldest_cursor|default:'' }}"
+           data-newer="{{ timeline_window.window_newest_cursor|default:'' }}"
+           data-has-more-older="{{ timeline_window.has_more_older|yesno:'true,false' }}"
+           data-has-more-newer="{{ timeline_window.has_more_newer|yesno:'true,false' }}"
+           data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>
+
+      <div id="agent-composer-shell" class="composer-shell">
+        <div class="composer-surface">
+          <form id="agent-web-compose" class="flex flex-col gap-3" hx-post="{% url 'agent_web_message' agent.id %}" hx-swap="none">
+            <textarea name="body" rows="3" required
+                      class="w-full resize-none rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                      placeholder="Send a message..."></textarea>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-xs text-slate-500">Markdown supported. Shift + Enter for newline.</p>
+              <button type="submit"
+                      class="inline-flex items-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                Send
+              </button>
+            </div>
+            <input type="hidden" name="current_newest" id="composer-latest-cursor" value="{{ timeline_window.window_newest_cursor|default:'' }}">
+          </form>
+        </div>
       </div>
     </div>
   </div>
-</div>
+</main>
 <button id="jump-to-latest" class="jump-to-latest hidden" type="button">Jump to latest</button>
 <div id="processing-state" class="hidden" style="display:none" data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>
 {% endblock %}
 
 {% block extra_js %}
-<!-- Prism.js for SQL syntax highlighting -->
 <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
 
 <style>
   #agent-workspace-root {
-    min-height: 28rem;
+    min-height: 24rem;
   }
 
   #timeline-events {
     scroll-behavior: smooth;
-    padding-bottom: 14rem;
+    padding-bottom: 16rem;
   }
 
   #timeline-events::-webkit-scrollbar {
@@ -148,28 +177,32 @@
 
   .composer-shell {
     position: fixed;
-    left: 50%;
+    left: 0;
+    right: 0;
     bottom: 1.5rem;
-    transform: translateX(-50%);
-    width: min(48rem, calc(100% - 3rem));
+    display: flex;
+    justify-content: center;
+    padding: 0 1.25rem;
     z-index: 40;
     pointer-events: none;
   }
 
   .composer-surface {
-    border-radius: 1.25rem;
-    background: rgba(255, 255, 255, 0.92);
+    width: 100%;
+    max-width: 100%;
+    border-radius: 1.2rem;
+    background: rgba(255, 255, 255, 0.94);
     backdrop-filter: blur(14px);
     border: 1px solid rgba(226, 232, 240, 0.7);
-    box-shadow: 0 12px 34px rgba(15, 23, 42, 0.12);
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
     padding: 1.5rem;
     pointer-events: auto;
   }
 
   .jump-to-latest {
     position: fixed;
-    right: 2.5rem;
-    bottom: 8.5rem;
+    right: 1.75rem;
+    bottom: 9rem;
     z-index: 30;
     border-radius: 9999px;
     border: 1px solid rgba(79, 70, 229, 0.25);
@@ -202,7 +235,7 @@
   }
 
   .chat-bubble {
-    max-width: min(32rem, 92%);
+    max-width: min(36rem, 100%);
     border-radius: 1.25rem;
     padding: 0.85rem 1.1rem;
     font-size: 0.9375rem;
@@ -321,26 +354,27 @@
 
   @media (max-width: 768px) {
     .composer-shell {
-      width: min(100% - 2rem, 32rem);
-      bottom: 1.1rem;
+      padding: 0 0.85rem;
+      bottom: 1rem;
     }
 
     .composer-surface {
       padding: 1.1rem;
       border-radius: 1rem;
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
     }
 
     #timeline-events {
-      padding-bottom: 13rem;
+      padding-bottom: 14rem;
     }
 
     .jump-to-latest {
-      right: 1.2rem;
-      bottom: 7.8rem;
+      right: 1rem;
+      bottom: 8rem;
     }
 
     .chat-bubble {
-      max-width: 90%;
+      max-width: 95%;
       font-size: 0.9rem;
     }
   }
@@ -435,7 +469,7 @@
 
     function isNearBottom() {
       if (!timeline) return true;
-      const threshold = 120;
+      const threshold = 140;
       return timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= threshold;
     }
 
