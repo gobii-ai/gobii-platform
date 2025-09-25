@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.urls import reverse
 
 from api.models import (
@@ -20,6 +20,7 @@ from tests.mocks.fake_redis import FakeRedis
 from unittest.mock import patch
 
 
+@tag("batch_agent_event_stream")
 class AgentEventStreamTests(TestCase):
     def setUp(self):
         super().setUp()

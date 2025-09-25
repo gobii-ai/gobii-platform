@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from api.agent.tools.web_message_sender import execute_send_web_message
 from api.models import (
@@ -14,6 +14,7 @@ from api.models import (
 )
 
 
+@tag("batch_send_web_message_tool")
 class SendWebMessageToolTests(TestCase):
     def setUp(self):
         super().setUp()
@@ -58,4 +59,3 @@ class SendWebMessageToolTests(TestCase):
     def test_execute_send_web_message_requires_body(self):
         with self.assertRaises(ValueError):
             execute_send_web_message(self.agent, {"user_id": str(self.owner.id), "body": ""})
-

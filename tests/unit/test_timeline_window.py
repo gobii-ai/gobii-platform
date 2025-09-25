@@ -1,13 +1,14 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentStep
 from console.timeline import fetch_timeline_window
 
 
+@tag("batch_timeline_window")
 class TimelineWindowScalabilityTests(TestCase):
     def setUp(self):
         User = get_user_model()
