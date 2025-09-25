@@ -1,5 +1,5 @@
 """Helpers for accessing Stripe configuration with database overrides."""
-from __future__ import annotations
+import environ
 
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -11,6 +11,10 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import OperationalError, ProgrammingError
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
+
+env = environ.Env(
+    DEBUG=(bool, False),
+)
 
 
 @dataclass(frozen=True)
@@ -40,25 +44,17 @@ def _env_defaults() -> StripeSettings:
         live_secret_key=getattr(settings, "STRIPE_LIVE_SECRET_KEY", None),
         test_secret_key=getattr(settings, "STRIPE_TEST_SECRET_KEY", None),
         webhook_secret=getattr(settings, "STRIPE_WEBHOOK_SECRET", None),
-        startup_price_id=getattr(settings, "STRIPE_STARTUP_PRICE_ID", ""),
-        startup_additional_task_price_id=getattr(settings, "STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", ""),
-        startup_product_id=getattr(settings, "STRIPE_STARTUP_PRODUCT_ID", ""),
-        org_team_product_id=getattr(settings, "STRIPE_ORG_TEAM_PRODUCT_ID", ""),
-        org_team_price_id=getattr(settings, "STRIPE_ORG_TEAM_PRICE_ID", ""),
-        org_team_additional_task_price_id=getattr(
-            settings,
-            "STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID",
-            "",
-        ),
-        task_meter_id=getattr(settings, "STRIPE_TASK_METER_ID", ""),
-        task_meter_event_name=getattr(settings, "STRIPE_TASK_METER_EVENT_NAME", ""),
-        org_team_task_meter_id=getattr(settings, "STRIPE_ORG_TEAM_TASK_METER_ID", ""),
-        org_team_task_meter_event_name=getattr(
-            settings,
-            "STRIPE_ORG_TEAM_TASK_METER_EVENT_NAME",
-            "",
-        ),
-        org_task_meter_id=getattr(settings, "STRIPE_ORG_TASK_METER_ID", ""),
+        startup_price_id=env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup"),
+        startup_additional_task_price_id=env("STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_startup_additional_task"),
+        startup_product_id=env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup"),
+        org_team_product_id=env("STRIPE_ORG_TEAM_PRODUCT_ID", default="prod_dummy_org_team"),
+        org_team_price_id=env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team"),
+        org_team_additional_task_price_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task"),
+        task_meter_id=env("STRIPE_TASK_METER_ID", default="meter_dummy_task"),
+        task_meter_event_name=env("STRIPE_TASK_METER_EVENT_NAME", default="task"),
+        org_team_task_meter_id=env("STRIPE_ORG_TASK_METER_ID", default="meter_dummy_org_task"),
+        org_team_task_meter_event_name=env("STRIPE_ORG_TASK_METER_EVENT_NAME", default="task_org_team_task_meter_name"),
+        org_task_meter_id=env("STRIPE_ORG_TASK_METER_ID", default="meter_dummy_org_task"),
     )
 
 
