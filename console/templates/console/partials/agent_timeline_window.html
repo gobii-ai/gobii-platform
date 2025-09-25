@@ -15,7 +15,7 @@
           data-role="load-older-button"
           class="timeline-load-button"
           hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ current_newest_cursor|default:''|urlencode }}"
-          hx-target="#timeline-events"
+          hx-target="#timeline-event-list"
           hx-swap="afterbegin"
           {% if not timeline_window.has_more_older %}hidden{% endif %}>
     <span class="timeline-load-indicator" aria-hidden="true"></span>
@@ -28,12 +28,12 @@
   </span>
 </div>
 
-<div id="timeline-load-newer" hx-swap-oob="true" class="timeline-load-control border-t border-slate-100" data-side="newer" {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+<div id="timeline-load-newer" hx-swap-oob="true" class="timeline-load-control border-t border-slate-100" data-side="newer">
   <button type="button"
           data-role="load-newer-button"
           class="timeline-load-button"
           hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ current_newest_cursor|default:''|urlencode }}"
-          hx-target="#timeline-events"
+          hx-target="#timeline-event-list"
           hx-swap="beforeend"
           {% if not timeline_window.has_more_newer %}hidden{% endif %}>
     <span class="timeline-load-indicator" aria-hidden="true"></span>

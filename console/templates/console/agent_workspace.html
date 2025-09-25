@@ -28,7 +28,7 @@
                     data-role="load-older-button"
                     class="timeline-load-button"
                     hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
-                    hx-target="#timeline-events"
+                    hx-target="#timeline-event-list"
                     hx-swap="afterbegin"
                     {% if not timeline_window.has_more_older %}hidden{% endif %}>
               <span class="timeline-load-indicator" aria-hidden="true"></span>
@@ -40,14 +40,16 @@
               Beginning of history
             </span>
           </div>
-          {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
+          <div id="timeline-event-list" class="flex flex-col gap-3">
+            {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
+          </div>
           <div id="processing-indicator-slot" class="mt-2 px-1"></div>
-          <div id="timeline-load-newer" class="timeline-load-control border-t border-slate-100" data-side="newer" {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+          <div id="timeline-load-newer" class="timeline-load-control border-t border-slate-100" data-side="newer">
             <button type="button"
                     data-role="load-newer-button"
                     class="timeline-load-button"
                     hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
-                    hx-target="#timeline-events"
+                    hx-target="#timeline-event-list"
                     hx-swap="beforeend"
                     {% if not timeline_window.has_more_newer %}hidden{% endif %}>
               <span class="timeline-load-indicator" aria-hidden="true"></span>
@@ -877,10 +879,12 @@
     initialized = true;
 
     const timeline = document.getElementById('timeline-events');
+    const timelineList = document.getElementById('timeline-event-list');
     const processingSlot = document.getElementById('processing-indicator-slot');
     const composer = document.getElementById('agent-web-compose');
     const composerCursor = document.getElementById('composer-latest-cursor');
     const composerSurface = document.querySelector('.composer-surface');
+    const eventContainer = timelineList || timeline;
     let jumpButtonDefaultLabel = null;
     const getJumpButton = () => {
       const button = document.getElementById('jump-to-latest');
@@ -929,6 +933,7 @@
       scrollAnchor: null,
       hasOlderHistory: false,
     };
+    window.__agentWorkspaceState = state;
 
     const sessionUrl = root.dataset.webSessionUrl || null;
     const sessionTtl = parseInt(root.dataset.webSessionTtl || '60', 10);
@@ -1310,17 +1315,17 @@
     function normaliseToolClusters() {
       if (!timeline) return;
 
-      let pair = timeline.querySelector('.tool-cluster[data-cluster-kind="tool"] + .tool-cluster[data-cluster-kind="tool"]');
+      let pair = eventContainer?.querySelector?.('.tool-cluster[data-cluster-kind="tool"] + .tool-cluster[data-cluster-kind="tool"]');
       while (pair) {
         const previous = pair.previousElementSibling;
         const merged = mergeToolClusters(previous, pair);
         if (!merged) {
           break;
         }
-        pair = timeline.querySelector('.tool-cluster[data-cluster-kind="tool"] + .tool-cluster[data-cluster-kind="tool"]');
+        pair = eventContainer?.querySelector?.('.tool-cluster[data-cluster-kind="tool"] + .tool-cluster[data-cluster-kind="tool"]');
       }
 
-      const clusters = timeline.querySelectorAll(TOOL_CLUSTER_SELECTOR);
+      const clusters = eventContainer ? eventContainer.querySelectorAll(TOOL_CLUSTER_SELECTOR) : [];
       clusters.forEach((cluster) => {
         if (!cluster.dataset.entryCount) {
           const count = cluster.querySelectorAll('.tool-chip').length;
@@ -1339,7 +1344,7 @@
       if (!timeline) return;
       const composerHeight = composerSurface?.offsetHeight || 0;
       const slack = Math.max(timeline.scrollHeight - timeline.clientHeight, 0);
-      const fewEvents = timeline.querySelectorAll('.timeline-event[data-cursor]').length <= 6;
+      const fewEvents = (eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : []).length <= 6;
       const shouldAlignEnd = slack <= ALIGN_THRESHOLD && fewEvents;
       const timelineStyles = window.getComputedStyle(timeline);
       const rowGap = parseFloat(timelineStyles.rowGap || timelineStyles.gap || '0') || 12;
@@ -1447,7 +1452,7 @@
       if (!timeline) return null;
       const timelineRect = timeline.getBoundingClientRect?.();
       if (!timelineRect) return null;
-      const events = Array.from(timeline.querySelectorAll('.timeline-event[data-cursor]'));
+      const events = eventContainer ? Array.from(eventContainer.querySelectorAll('.timeline-event[data-cursor]')) : [];
       if (!events.length) return null;
       const anchor = events.find((node) => {
         const rect = node.getBoundingClientRect?.();
@@ -1466,7 +1471,7 @@
     function restoreScrollAnchor(anchor) {
       if (!timeline || !anchor || !anchor.cursor) return false;
       const selector = `.timeline-event[data-cursor="${escapeCssSelector(anchor.cursor)}"]`;
-      const node = timeline.querySelector(selector);
+      const node = eventContainer?.querySelector?.(selector);
       if (!node) return false;
       const timelineRect = timeline.getBoundingClientRect?.();
       const nodeRect = node.getBoundingClientRect?.();
@@ -1738,9 +1743,9 @@
 
     function refreshEmptyState() {
       if (!timeline) return;
-      const emptyState = timeline.querySelector('.timeline-empty');
+      const emptyState = eventContainer?.querySelector?.('.timeline-empty');
       if (!emptyState) return;
-      const hasRealEvents = timeline.querySelector('.timeline-event[data-cursor]');
+      const hasRealEvents = eventContainer?.querySelector?.('.timeline-event[data-cursor]');
       if (hasRealEvents || state.processingActive) {
         emptyState.remove();
       }
@@ -1748,15 +1753,17 @@
 
     function ensureEmptyState() {
       if (!timeline) return;
-      const hasRealEvents = timeline.querySelector('.timeline-event[data-cursor]');
+      const hasRealEvents = eventContainer?.querySelector?.('.timeline-event[data-cursor]');
       if (hasRealEvents || state.processingActive) {
         return;
       }
-      if (!timeline.querySelector('.timeline-empty')) {
+      if (!eventContainer?.querySelector?.('.timeline-empty')) {
         const emptyState = document.createElement('div');
         emptyState.className = 'timeline-empty text-center text-sm text-slate-400';
         emptyState.textContent = 'No activity yet.';
-        timeline.appendChild(emptyState);
+        if (eventContainer) {
+          eventContainer.appendChild(emptyState);
+        }
       }
     }
 
@@ -1910,7 +1917,7 @@
         state.knownCursors = new Set();
       }
 
-      const items = timeline.querySelectorAll('.timeline-event[data-cursor]');
+      const items = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : [];
       const newcomers = [];
 
       items.forEach((node) => {
@@ -1941,7 +1948,7 @@
 
     function trimTimeline(direction) {
       if (!timeline) return;
-      const nodes = Array.from(timeline.querySelectorAll('.timeline-event[data-cursor]'));
+      const nodes = eventContainer ? Array.from(eventContainer.querySelectorAll('.timeline-event[data-cursor]')) : [];
       if (nodes.length <= limit) return;
 
       const excess = nodes.length - limit;
@@ -1991,7 +1998,7 @@
     function dedupeTimeline() {
       if (!timeline) return;
       const seen = new Set();
-      const items = timeline.querySelectorAll('.timeline-event[data-cursor]');
+      const items = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : [];
       for (let i = items.length - 1; i >= 0; i -= 1) {
         const node = items[i];
         const cursor = node?.dataset?.cursor;
@@ -2045,7 +2052,7 @@
       state.autoScroll = state.pendingComposerScroll ? true : nearBottom;
 
       window.htmx.ajax('GET', `${newerUrl}&${params.toString()}`, {
-        target: '#timeline-events',
+        target: '#timeline-event-list',
         swap: 'beforeend',
       });
     }
@@ -2231,7 +2238,7 @@
     }
 
     window.htmx.on('htmx:beforeRequest', (event) => {
-      if (event.detail?.target?.id !== 'timeline-events') return;
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
       closeOpenToolChip();
       const url = event.detail.requestConfig?.path || '';
       if (url.includes('direction=older')) {
@@ -2252,7 +2259,7 @@
 
     // Preserve the user's bottom offset while new timeline fragments stream in.
     window.htmx.on('htmx:beforeSwap', (event) => {
-      if (event.detail?.target?.id !== 'timeline-events') return;
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
       if (!timeline || state.action !== 'newer') {
         state.bottomAnchorOffset = null;
         state.pageBottomOffset = null;
@@ -2272,7 +2279,7 @@
     });
 
     window.htmx.on('htmx:afterSwap', (event) => {
-      if (event.detail?.target?.id !== 'timeline-events') return;
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
 
       closeOpenToolChip();
       normaliseToolClusters();
@@ -2351,7 +2358,7 @@
     });
 
     window.htmx.on('htmx:afterSettle', (event) => {
-      if (event.detail?.target?.id === 'timeline-events') {
+      if (event.detail?.target?.id === 'timeline-event-list') {
         ensureProcessingSlotPosition();
         updateTimelinePadding();
         updateJumpButton();
@@ -2363,7 +2370,7 @@
     });
 
     window.htmx.on('htmx:responseError', (event) => {
-      if (event.detail?.target?.id !== 'timeline-events') return;
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
       const hadOlder = state.action === 'older' || state.fetchingOlder;
       const hadNewer = state.action === 'newer' || state.fetchingNewer;
       if (hadOlder) {
@@ -2381,7 +2388,7 @@
     });
 
     window.htmx.on('htmx:sendError', (event) => {
-      if (event.detail?.target?.id !== 'timeline-events') return;
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
       const hadOlder = state.action === 'older' || state.fetchingOlder;
       const hadNewer = state.action === 'newer' || state.fetchingNewer;
       if (hadOlder) {
