@@ -3,11 +3,14 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from unittest.mock import patch
 
+from tests.utils.redis_test_mixin import RedisIsolationMixin
+
 
 @tag("batch_console_agents")
-class ConsoleViewsTest(TestCase):
+class ConsoleViewsTest(RedisIsolationMixin, TestCase):
     def setUp(self):
         """Set up test user and client."""
+        super().setUp()
         User = get_user_model()
         self.user = User.objects.create_user(
             username='test@example.com',

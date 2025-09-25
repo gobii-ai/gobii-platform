@@ -3,8 +3,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from unittest.mock import patch, MagicMock
 
-from config import redis_client as redis_client_module
-from tests.mocks.fake_redis import FakeRedis
+from tests.utils.redis_test_mixin import RedisIsolationMixin
 from api.models import PersistentAgent, BrowserUseAgent, UserQuota, TaskCredit, PersistentAgentStep, \
     PersistentAgentSystemStep
 from constants.grant_types import GrantTypeChoices
@@ -12,73 +11,6 @@ from django.utils import timezone
 from datetime import timedelta
 
 from constants.plans import PlanNamesChoices
-
-
-class _DummyCeleryConnection:
-    """Context manager stub that mimics Celery's connection API."""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-
-class RedisIsolationMixin:
-    """Provide an in-memory Redis stub and silence Celery beat connections."""
-
-    fake_redis: FakeRedis
-    _redis_patchers: list
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        redis_client_module.get_redis_client.cache_clear()
-
-        cls.fake_redis = FakeRedis()
-        cls._redis_patchers = [
-            patch(
-                "config.redis_client.get_redis_client",
-                side_effect=lambda *args, **kwargs: cls.fake_redis,
-            ),
-            patch(
-                "api.agent.events.get_redis_client",
-                side_effect=lambda *args, **kwargs: cls.fake_redis,
-            ),
-            patch(
-                "api.agent.core.event_processing.get_redis_client",
-                side_effect=lambda *args, **kwargs: cls.fake_redis,
-            ),
-            patch(
-                "api.agent.core.budget.get_redis_client",
-                side_effect=lambda *args, **kwargs: cls.fake_redis,
-            ),
-        ]
-        for patcher in cls._redis_patchers:
-            patcher.start()
-
-        cls._celery_connection_patcher = patch(
-            "celery.app.base.Celery.connection",
-            return_value=_DummyCeleryConnection(),
-        )
-        cls._celery_connection_patcher.start()
-
-        cls._redbeat_patcher = patch("redbeat.RedBeatSchedulerEntry")
-        cls._redbeat_patcher.start()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._redbeat_patcher.stop()
-        cls._celery_connection_patcher.stop()
-        for patcher in cls._redis_patchers:
-            patcher.stop()
-        redis_client_module.get_redis_client.cache_clear()
-        super().tearDownClass()
-
-    def setUp(self):
-        self.__class__.fake_redis = FakeRedis()
-        self.fake_redis = self.__class__.fake_redis
-        super().setUp()
 
 
 def create_browser_agent_without_proxy(user, name):
