@@ -1417,7 +1417,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                 for message_text in error_messages:
                     form.add_error(None, message_text)
             except Exception as e:
-                logger.exception(f"Error creating persistent agent:  %s", str(e))
+                logger.exception("Error creating persistent agent: %s", e)
                 messages.error(
                     request,
                     "We ran into a problem creating your agent. Please try again."
