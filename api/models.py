@@ -12,7 +12,7 @@ from django.core.exceptions import ValidationError
 from django.utils.text import get_valid_filename
 
 from django.contrib.auth import get_user_model
-from django.db.models.signals import post_save, pre_delete
+from django.db.models.signals import post_save, pre_delete, pre_save
 
 from django.dispatch import receiver
 
@@ -1931,11 +1931,7 @@ class PersistentAgent(models.Model):
         """Custom validation for the agent."""
         super().clean()
         if self.organization_id:
-            billing = getattr(self.organization, "billing", None)
-            if not billing or billing.purchased_seats <= 0:
-                raise ValidationError({
-                    "organization": "Purchase organization seats before creating org-owned agents."
-                })
+            self._validate_org_seats()
         if self.schedule:
             try:
                 # Use the same parser that's used for task scheduling to ensure consistency.
@@ -1943,6 +1939,13 @@ class PersistentAgent(models.Model):
                 ScheduleParser.parse(self.schedule)
             except ValueError as e:
                 raise ValidationError({'schedule': str(e)})
+
+    def _validate_org_seats(self):
+        billing = getattr(self.organization, "billing", None)
+        if not billing or billing.purchased_seats <= 0:
+            raise ValidationError({
+                "organization": "Purchase organization seats before creating org-owned agents."
+            })
 
     def __str__(self):
         schedule_display = self.schedule if self.schedule else "No schedule"
@@ -4357,6 +4360,22 @@ class AgentFsNode(models.Model):
 
 
 # Auto-provision a default filespace for new PersistentAgents
+@receiver(pre_save, sender=PersistentAgent)
+def enforce_org_seats_before_save(sender, instance: PersistentAgent, **kwargs):
+    """Prevent creating or reassigning org-owned agents without purchased seats."""
+    if not instance.organization_id:
+        return
+
+    original_org_id = None
+    if instance.pk:
+        original_org_id = sender.objects.filter(pk=instance.pk).values_list('organization_id', flat=True).first()
+
+    if instance.pk and original_org_id == instance.organization_id:
+        return
+
+    instance._validate_org_seats()
+
+
 @receiver(post_save, sender=PersistentAgent)
 def create_default_filespace_for_agent(sender, instance: PersistentAgent, created: bool, **kwargs):
     if not created:
