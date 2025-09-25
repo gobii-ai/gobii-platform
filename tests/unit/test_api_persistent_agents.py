@@ -2,6 +2,9 @@ from django.test import TestCase, TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from unittest.mock import patch, MagicMock
+
+from config import redis_client as redis_client_module
+from tests.mocks.fake_redis import FakeRedis
 from api.models import PersistentAgent, BrowserUseAgent, UserQuota, TaskCredit, PersistentAgentStep, \
     PersistentAgentSystemStep
 from constants.grant_types import GrantTypeChoices
@@ -11,6 +14,73 @@ from datetime import timedelta
 from constants.plans import PlanNamesChoices
 
 
+class _DummyCeleryConnection:
+    """Context manager stub that mimics Celery's connection API."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class RedisIsolationMixin:
+    """Provide an in-memory Redis stub and silence Celery beat connections."""
+
+    fake_redis: FakeRedis
+    _redis_patchers: list
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        redis_client_module.get_redis_client.cache_clear()
+
+        cls.fake_redis = FakeRedis()
+        cls._redis_patchers = [
+            patch(
+                "config.redis_client.get_redis_client",
+                side_effect=lambda *args, **kwargs: cls.fake_redis,
+            ),
+            patch(
+                "api.agent.events.get_redis_client",
+                side_effect=lambda *args, **kwargs: cls.fake_redis,
+            ),
+            patch(
+                "api.agent.core.event_processing.get_redis_client",
+                side_effect=lambda *args, **kwargs: cls.fake_redis,
+            ),
+            patch(
+                "api.agent.core.budget.get_redis_client",
+                side_effect=lambda *args, **kwargs: cls.fake_redis,
+            ),
+        ]
+        for patcher in cls._redis_patchers:
+            patcher.start()
+
+        cls._celery_connection_patcher = patch(
+            "celery.app.base.Celery.connection",
+            return_value=_DummyCeleryConnection(),
+        )
+        cls._celery_connection_patcher.start()
+
+        cls._redbeat_patcher = patch("redbeat.RedBeatSchedulerEntry")
+        cls._redbeat_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._redbeat_patcher.stop()
+        cls._celery_connection_patcher.stop()
+        for patcher in cls._redis_patchers:
+            patcher.stop()
+        redis_client_module.get_redis_client.cache_clear()
+        super().tearDownClass()
+
+    def setUp(self):
+        self.__class__.fake_redis = FakeRedis()
+        self.fake_redis = self.__class__.fake_redis
+        super().setUp()
+
+
 def create_browser_agent_without_proxy(user, name):
     """Helper to create BrowserUseAgent without triggering proxy selection."""
     with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
@@ -18,7 +88,7 @@ def create_browser_agent_without_proxy(user, name):
 
 
 @tag("batch_api_persistent_agents")
-class PersistentAgentModelTests(TestCase):
+class PersistentAgentModelTests(RedisIsolationMixin, TestCase):
     """Test suite for the PersistentAgent model."""
 
     @classmethod
@@ -166,11 +236,12 @@ class PersistentAgentModelTests(TestCase):
 
 @patch('django.db.close_old_connections')  # Mock at class level to ensure it's always mocked  
 @tag("batch_api_persistent_agents")
-class PersistentAgentCreditConsumptionTests(TransactionTestCase):
+class PersistentAgentCreditConsumptionTests(RedisIsolationMixin, TransactionTestCase):
     """Test suite for persistent agent credit consumption."""
 
     def setUp(self):
         """Set up objects for each test method."""
+        super().setUp()
         User = get_user_model()
         self.user = User.objects.create_user(username='credituser@example.com', email='credituser@example.com', password='password')
         # UserQuota is created by a signal, but we can get it and increase the limit for tests.
@@ -321,10 +392,11 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
 
 
 @tag("batch_api_persistent_agents")
-class ScheduleUpdaterTests(TestCase):
+class ScheduleUpdaterTests(RedisIsolationMixin, TestCase):
     """Test suite for the schedule updater tool."""
 
     def setUp(self):
+        super().setUp()
         self.user = get_user_model().objects.create_user(
             username="testuser", email="test@example.com", password="testpass"
         )
