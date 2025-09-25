@@ -47,6 +47,7 @@ from observability import traced
 from pages.mixins import PhoneNumberMixin
 
 from .context_helpers import build_console_context
+from .org_billing_helpers import build_org_billing_overview
 from tasks.services import TaskCreditService
 from util import sms
 from util.payments_helper import PaymentsHelper
@@ -86,6 +87,7 @@ from api.agent.comms.message_service import _get_or_create_conversation, _ensure
 from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMembership
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
+from django.apps import apps
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -96,6 +98,12 @@ tracer = trace.get_tracer("gobii.utils")
 # verified phone number on their account. Toggle this to force showing the
 # phone screen even when a verified number exists.
 SKIP_VERIFIED_SMS_SCREEN = True
+
+BILLING_MANAGE_ROLES = {
+    OrganizationMembership.OrgRole.OWNER,
+    OrganizationMembership.OrgRole.ADMIN,
+    OrganizationMembership.OrgRole.BILLING,
+}
 
 class ConsoleHome(ConsoleViewMixin, TemplateView):
     """Dashboard homepage for the console."""
@@ -547,7 +555,50 @@ class BillingView(ConsoleViewMixin, TemplateView):
     def get(self, request, *args, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        # Get the user's subscription plan (defaults to 'free' if not set)
+        current_context = context.get('current_context', {}) or {}
+        if current_context.get('type') == 'organization' and current_context.get('id'):
+            try:
+                organization = Organization.objects.select_related('billing').get(id=current_context['id'])
+            except Organization.DoesNotExist:
+                messages.error(request, 'Organization not found. Switching back to personal billing.')
+                request.session['context_type'] = 'personal'
+                request.session['context_id'] = str(request.user.id)
+                request.session['context_name'] = request.user.get_full_name() or request.user.email
+                return redirect('billing')
+            else:
+                overview = build_org_billing_overview(organization)
+                membership = context.get('current_membership')
+                allowed_roles = {
+                    OrganizationMembership.OrgRole.OWNER,
+                    OrganizationMembership.OrgRole.ADMIN,
+                    OrganizationMembership.OrgRole.BILLING,
+                }
+                can_manage_billing = bool(membership and membership.role in allowed_roles)
+
+                configured_limit = overview['extra_tasks']['configured_limit'] or 0
+                auto_purchase_state = {
+                    'enabled': configured_limit not in (0,),
+                    'infinite': configured_limit == -1,
+                    'max_tasks': configured_limit if configured_limit not in (0, -1) else 1000,
+                }
+
+                granted = Decimal(str(overview['credits']['granted'])) if overview['credits']['granted'] else Decimal('0')
+                used = Decimal(str(overview['credits']['used'])) if overview['credits']['used'] else Decimal('0')
+                usage_pct = 0
+                if granted > 0:
+                    usage_pct = min(100, float((used / granted) * 100))
+
+                context.update({
+                    'organization': organization,
+                    'org_billing_overview': overview,
+                    'org_can_manage_billing': can_manage_billing,
+                    'org_auto_purchase_state': auto_purchase_state,
+                    'org_credit_usage_pct': usage_pct,
+                    'org_can_open_stripe': can_manage_billing and bool(overview['billing_record']['stripe_customer_id']),
+                })
+                return render(request, self.template_name, context)
+
+        # Personal billing fallback
         context['subscription_plan'] = get_user_plan(self.request.user)
         sub = get_active_subscription(self.request.user)
         paid_subscriber = sub is not None
@@ -571,8 +622,7 @@ class BillingView(ConsoleViewMixin, TemplateView):
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
 
-        # Render the billing page template
-        return render(request, "billing.html", context)
+        return render(request, self.template_name, context)
 
     @tracer.start_as_current_span("CONSOLE Billing Post (not allowed)")
     def post(self, request, *args, **kwargs):
@@ -626,14 +676,53 @@ def update_billing_settings(request):
         auto_purchase = data.get('enabled', False)
         infinite = data.get('infinite', False)
         max_tasks = data.get('maxTasks', 5)
+        resolved = build_console_context(request)
 
-        # Get or create the user's billing record
-        user_billing, created = UserBilling.objects.get_or_create(
+        if resolved.current_context.type == 'organization' and resolved.current_membership:
+            membership = resolved.current_membership
+            if membership.role not in BILLING_MANAGE_ROLES:
+                return JsonResponse({'success': False, 'error': 'Not permitted'}, status=403)
+
+            OrgBilling = apps.get_model('api', 'OrganizationBilling')
+            defaults = {'max_extra_tasks': 0, 'billing_cycle_anchor': timezone.now().day}
+            org_billing, _ = OrgBilling.objects.get_or_create(
+                organization=membership.org,
+                defaults=defaults,
+            )
+
+            if not auto_purchase:
+                org_billing.max_extra_tasks = 0
+            elif infinite:
+                org_billing.max_extra_tasks = -1
+            else:
+                org_billing.max_extra_tasks = max(1, int(max_tasks))
+
+            org_billing.save(update_fields=['max_extra_tasks', 'updated_at'])
+
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.BILLING_UPDATED,
+                source=AnalyticsSource.WEB,
+                properties={
+                    'max_extra_tasks': org_billing.max_extra_tasks,
+                    'auto_purchase': auto_purchase,
+                    'infinite': infinite,
+                    'owner_type': 'organization',
+                    'organization_id': str(membership.org.id),
+                }
+            ))
+
+            return JsonResponse({
+                'success': True,
+                'max_extra_tasks': org_billing.max_extra_tasks,
+                'owner_type': 'organization',
+            })
+
+        user_billing, _ = UserBilling.objects.get_or_create(
             user=request.user,
             defaults={'max_extra_tasks': 0}
         )
 
-        # Update based on the settings
         if not auto_purchase:
             user_billing.max_extra_tasks = 0
         elif infinite:
@@ -641,22 +730,24 @@ def update_billing_settings(request):
         else:
             user_billing.max_extra_tasks = max(1, int(max_tasks))
 
-        user_billing.save()
+        user_billing.save(update_fields=['max_extra_tasks'])
 
-        transaction.on_commit(lambda : Analytics.track_event(
+        transaction.on_commit(lambda: Analytics.track_event(
             user_id=request.user.id,
             event=AnalyticsEvent.BILLING_UPDATED,
             source=AnalyticsSource.WEB,
             properties={
                 'max_extra_tasks': user_billing.max_extra_tasks,
                 'auto_purchase': auto_purchase,
-                'infinite': infinite
+                'infinite': infinite,
+                'owner_type': 'user',
             }
         ))
 
         return JsonResponse({
             'success': True,
-            'max_extra_tasks': user_billing.max_extra_tasks
+            'max_extra_tasks': user_billing.max_extra_tasks,
+            'owner_type': 'user',
         })
     except Exception as e:
         return JsonResponse({
@@ -668,15 +759,38 @@ def update_billing_settings(request):
 @tracer.start_as_current_span("BILLING Get Billing Settings")
 def get_billing_settings(request):
     try:
-        user_billing, created = UserBilling.objects.get_or_create(
+        resolved = build_console_context(request)
+
+        if resolved.current_context.type == 'organization' and resolved.current_membership:
+            membership = resolved.current_membership
+            if membership.role not in BILLING_MANAGE_ROLES and membership is not None:
+                # Allow read-only access even without manage role, but disable editing client side
+                permitted = False
+            else:
+                permitted = True
+
+            OrgBilling = apps.get_model('api', 'OrganizationBilling')
+            defaults = {'max_extra_tasks': 0, 'billing_cycle_anchor': timezone.now().day}
+            org_billing, _ = OrgBilling.objects.get_or_create(
+                organization=membership.org,
+                defaults=defaults,
+            )
+
+            return JsonResponse({
+                'max_extra_tasks': org_billing.max_extra_tasks,
+                'owner_type': 'organization',
+                'can_modify': permitted,
+            })
+
+        user_billing, _ = UserBilling.objects.get_or_create(
             user=request.user,
             defaults={'max_extra_tasks': 0}
         )
 
-        # Not submitting analytics here as this is a part of a small AJAX request on larger page
-
         return JsonResponse({
-            'max_extra_tasks': user_billing.max_extra_tasks
+            'max_extra_tasks': user_billing.max_extra_tasks,
+            'owner_type': 'user',
+            'can_modify': True,
         })
     except Exception as e:
         return JsonResponse({
@@ -2746,6 +2860,7 @@ def grant_credits(request):
     except Exception as e:
         logger.error(f"Failed to grant credits to user {user_id}: {str(e)}")
         return JsonResponse({'success': False, 'error': f"Failed to grant credits: {str(e)}"}, status=500)
+
 
 class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
     """View for displaying requested secrets that need values."""
