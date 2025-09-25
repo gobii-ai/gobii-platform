@@ -141,6 +141,8 @@ jobs:
             tag: batch_xvfb
           - batch: send_web_message_tool
             tag: batch_send_web_message_tool
+          - batch: web_sessions
+            tag: batch_web_sessions
           - batch: allowlist_direction
             tag: batch_allowlist_direction
           - batch: console_context

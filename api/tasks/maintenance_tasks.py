@@ -9,6 +9,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from observability import traced
+from api.services.web_sessions import delete_expired_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -114,3 +115,16 @@ def garbage_collect_timed_out_tasks(self) -> None:
 @shared_task(name="prune_usage_threshold_sent")
 def prune_usage_threshold_sent():
     call_command("prune_usage_threshold_sent")
+
+
+@shared_task(bind=True, ignore_result=True, name="api.tasks.web_sessions.cleanup")
+def cleanup_expired_web_sessions(self, batch_size: int = 1000) -> None:
+    """Delete expired or stale web sessions to keep the table small."""
+    with traced("MAINTENANCE Cleanup Web Sessions") as span:
+        try:
+            removed = delete_expired_sessions(batch_size=batch_size)
+            span.set_attribute("sessions_removed", removed)
+            logger.info("cleanup_expired_web_sessions removed %s sessions", removed)
+        except Exception as exc:
+            span.set_attribute("error", str(exc))
+            logger.exception("Failed to cleanup expired web sessions")

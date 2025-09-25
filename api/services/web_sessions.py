@@ -12,7 +12,11 @@ from django.utils import timezone
 
 from api.models import PersistentAgent, PersistentAgentWebSession
 
+from django.conf import settings
+
 WEB_SESSION_TTL_SECONDS = 60
+WEB_SESSION_RETENTION_DAYS = getattr(settings, "WEB_SESSION_RETENTION_DAYS", 30)
+WEB_SESSION_STALE_GRACE_MINUTES = getattr(settings, "WEB_SESSION_STALE_GRACE_MINUTES", 120)
 _HEARTBEAT_SOURCE = "heartbeat"
 _START_SOURCE = "start"
 _END_SOURCE = "end"
@@ -269,3 +273,44 @@ __all__ = [
     "get_active_web_session",
     "get_active_web_sessions",
 ]
+
+def delete_expired_sessions(*, batch_size: int = 500) -> int:
+    """Remove sessions that have passed the retention window."""
+    now = _now()
+    cutoff = now - timedelta(days=WEB_SESSION_RETENTION_DAYS)
+    stale_cutoff = now - timedelta(minutes=WEB_SESSION_STALE_GRACE_MINUTES)
+
+    total_deleted = 0
+
+    while True:
+        expired_ids = list(
+            PersistentAgentWebSession.objects.filter(
+                ended_at__isnull=False,
+                ended_at__lt=cutoff,
+            )
+            .order_by("id")
+            .values_list("id", flat=True)[:batch_size]
+        )
+
+        if not expired_ids:
+            break
+
+        deleted, _ = PersistentAgentWebSession.objects.filter(id__in=expired_ids).delete()
+        total_deleted += deleted
+        if deleted < batch_size:
+            break
+
+    # Clean stray rows that never closed but are clearly stale
+    stale_ids = list(
+        PersistentAgentWebSession.objects.filter(
+            ended_at__isnull=True,
+            last_seen_at__lt=stale_cutoff,
+        )
+        .order_by("id")
+        .values_list("id", flat=True)[:batch_size]
+    )
+    if stale_ids:
+        deleted, _ = PersistentAgentWebSession.objects.filter(id__in=stale_ids).delete()
+        total_deleted += deleted
+
+    return total_deleted

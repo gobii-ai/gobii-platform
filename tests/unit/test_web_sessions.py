@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
@@ -9,13 +10,16 @@ from django.utils import timezone
 from django.urls import reverse
 
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentWebSession
+from api.services import web_sessions
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
     end_web_session,
     get_active_web_session,
     heartbeat_web_session,
     start_web_session,
+    delete_expired_sessions,
 )
+from api.tasks.maintenance_tasks import cleanup_expired_web_sessions
 
 
 @tag("batch_web_sessions")
@@ -79,6 +83,46 @@ class WebSessionServiceTests(TestCase):
 
         session.refresh_from_db()
         self.assertIsNotNone(session.ended_at)
+
+    def test_delete_expired_sessions_handles_ended_rows(self):
+        result = start_web_session(self.agent, self.owner)
+        session = result.session
+
+        original_retention = web_sessions.WEB_SESSION_RETENTION_DAYS
+        try:
+            web_sessions.WEB_SESSION_RETENTION_DAYS = 1
+            session.ended_at = timezone.now() - timedelta(days=2)
+            session.save(update_fields=["ended_at"])
+
+            removed = delete_expired_sessions(batch_size=10)
+            self.assertEqual(removed, 1)
+            self.assertEqual(PersistentAgentWebSession.objects.count(), 0)
+        finally:
+            web_sessions.WEB_SESSION_RETENTION_DAYS = original_retention
+
+    def test_delete_expired_sessions_removes_stale_unended_rows(self):
+        result = start_web_session(self.agent, self.owner)
+        session = result.session
+
+        original_grace = web_sessions.WEB_SESSION_STALE_GRACE_MINUTES
+        try:
+            web_sessions.WEB_SESSION_STALE_GRACE_MINUTES = 0
+            past = timezone.now() - timedelta(hours=3)
+            PersistentAgentWebSession.objects.filter(pk=session.pk).update(
+                last_seen_at=past,
+                ended_at=None,
+            )
+
+            removed = delete_expired_sessions(batch_size=10)
+            self.assertEqual(removed, 1)
+            self.assertEqual(PersistentAgentWebSession.objects.count(), 0)
+        finally:
+            web_sessions.WEB_SESSION_STALE_GRACE_MINUTES = original_grace
+
+    def test_cleanup_task_calls_service(self):
+        with mock.patch("api.tasks.maintenance_tasks.delete_expired_sessions", return_value=2) as patched:
+            cleanup_expired_web_sessions()
+            patched.assert_called_once()
 
     def test_session_view_start_heartbeat_and_end(self):
         self.client.force_login(self.owner)

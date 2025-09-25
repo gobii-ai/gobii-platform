@@ -446,6 +446,14 @@ CELERY_BEAT_SCHEDULE = {
             "routing_key": "celery.single_instance",  # Use single instance routing to prevent overlaps
         },
     },
+    "cleanup-expired-web-sessions": {
+        "task": "api.tasks.maintenance_tasks.cleanup_expired_web_sessions",
+        "schedule": crontab(hour=2, minute=45),  # Daily maintenance window
+        "options": {
+            "expires": 3600,
+            "routing_key": "celery.single_instance",
+        },
+    },
 }
 
 # Conditionally enable Twilio sync task only when explicitly enabled
@@ -472,6 +480,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS = env.int("AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS", default=60)
 # Hours of grace after a user downgrades to Free before expiration checks apply
 AGENT_SOFT_EXPIRATION_DOWNGRADE_GRACE_HOURS = env.int("AGENT_SOFT_EXPIRATION_DOWNGRADE_GRACE_HOURS", default=48)
+
+# Persistent web session cleanup settings
+WEB_SESSION_RETENTION_DAYS = env.int("WEB_SESSION_RETENTION_DAYS", default=30)
+WEB_SESSION_STALE_GRACE_MINUTES = env.int("WEB_SESSION_STALE_GRACE_MINUTES", default=120)
 
 # Feature flags (django-waffle)
 # Default to explicit management in admin; core features are not gated anymore.
