@@ -29,7 +29,7 @@
                     class="timeline-load-button"
                     hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
                     hx-target="#timeline-event-list"
-                    hx-swap="afterbegin"
+                    hx-swap="innerHTML"
                     {% if not timeline_window.has_more_older %}hidden{% endif %}>
               <span class="timeline-load-indicator" aria-hidden="true"></span>
               <span class="timeline-load-label">Load older</span>
@@ -50,7 +50,7 @@
                     class="timeline-load-button"
                     hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
                     hx-target="#timeline-event-list"
-                    hx-swap="beforeend"
+                    hx-swap="innerHTML"
                     {% if not timeline_window.has_more_newer %}hidden{% endif %}>
               <span class="timeline-load-indicator" aria-hidden="true"></span>
               <span class="timeline-load-label">Load newer</span>
@@ -2027,7 +2027,7 @@
 
       window.htmx.ajax('GET', `${newerUrl}&${params.toString()}`, {
         target: '#timeline-event-list',
-        swap: 'beforeend',
+        swap: 'innerHTML',
       });
     }
 
