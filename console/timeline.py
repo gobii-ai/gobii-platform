@@ -209,8 +209,9 @@ def fetch_timeline_window(
     window_oldest_cursor = events[0].cursor if events else None
     window_newest_cursor = events[-1].cursor if events else None
 
-    if events and not has_more_older:
-        if _has_history_before_cursor(messages_qs, steps_qs, window_oldest_cursor):
+    cursor_for_history = window_oldest_cursor or cursor
+    if not has_more_older and cursor_for_history:
+        if _has_history_before_cursor(messages_qs, steps_qs, cursor_for_history):
             has_more_older = True
 
     return TimelineWindow(

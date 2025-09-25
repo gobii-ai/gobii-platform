@@ -88,6 +88,34 @@ class TimelineWindowScalabilityTests(TestCase):
         )
         self.assertEqual(initial_window.events[-1].payload, latest_step)
 
+    def test_newer_window_empty_preserves_has_more_older(self):
+        # Create timeline and fetch older slice so cursor points to middle.
+        steps = [
+            self._make_step(-5, "oldest step"),
+            self._make_step(-4, "step -4"),
+            self._make_step(-3, "step -3"),
+            self._make_step(-2, "step -2"),
+            self._make_step(-1, "newest step"),
+            self._make_step(0, "latest step"),
+        ]
+
+        initial_window = fetch_timeline_window(self.agent, limit=3)
+        self.assertTrue(initial_window.has_more_older)
+
+        # Ask for newer events beyond the newest cursor (there aren't any yet).
+        newer_window = fetch_timeline_window(
+            self.agent,
+            limit=3,
+            direction="newer",
+            cursor=initial_window.window_newest_cursor,
+        )
+
+        self.assertEqual(newer_window.events, [])
+        self.assertTrue(
+            newer_window.has_more_older,
+            "Even when no newer events exist, older history should remain accessible.",
+        )
+
     def test_multiple_older_windows_exhaust_history(self):
         # Build a short timeline of five steps spaced a minute apart.
         steps = [
