@@ -85,6 +85,9 @@ class SmsWebhookWhitelistTests(TestCase):
     def test_default_policy_org_owned_sender(self, mock_ingest):
         # Make agent org-owned and add an active member with a verified phone
         org = Organization.objects.create(name="Acme", slug="acme", created_by=self.owner)
+        billing = org.billing
+        billing.purchased_seats = 1
+        billing.save(update_fields=["purchased_seats"])
         self.agent.organization = org
         self.agent.save(update_fields=["organization"])
 
