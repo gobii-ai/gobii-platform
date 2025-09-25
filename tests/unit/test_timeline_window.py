@@ -87,3 +87,69 @@ class TimelineWindowScalabilityTests(TestCase):
             "No additional events should be returned when history is exhausted.",
         )
         self.assertEqual(initial_window.events[-1].payload, latest_step)
+
+    def test_multiple_older_windows_exhaust_history(self):
+        # Build a short timeline of five steps spaced a minute apart.
+        steps = [
+            self._make_step(-5, "oldest step"),
+            self._make_step(-4, "step -4"),
+            self._make_step(-3, "step -3"),
+            self._make_step(-2, "step -2"),
+            self._make_step(-1, "newest step"),
+        ]
+
+        initial_window = fetch_timeline_window(self.agent, limit=2)
+
+        self.assertEqual(len(initial_window.events), 2)
+        self.assertTrue(initial_window.has_more_older)
+        self.assertEqual(
+            [event.payload for event in initial_window.events],
+            [steps[3], steps[4]],
+        )
+
+        first_cursor = initial_window.window_oldest_cursor
+        self.assertIsNotNone(first_cursor)
+
+        first_older = fetch_timeline_window(
+            self.agent,
+            limit=2,
+            direction="older",
+            cursor=first_cursor,
+        )
+
+        self.assertEqual(len(first_older.events), 2)
+        self.assertTrue(first_older.has_more_older)
+        self.assertTrue(first_older.has_more_newer)
+        self.assertEqual(
+            [event.payload for event in first_older.events],
+            [steps[1], steps[2]],
+        )
+
+        second_cursor = first_older.window_oldest_cursor
+        self.assertIsNotNone(second_cursor)
+
+        second_older = fetch_timeline_window(
+            self.agent,
+            limit=2,
+            direction="older",
+            cursor=second_cursor,
+        )
+
+        self.assertEqual(len(second_older.events), 1)
+        self.assertFalse(second_older.has_more_older)
+        self.assertTrue(second_older.has_more_newer)
+        self.assertEqual(second_older.events[0].payload, steps[0])
+
+        final_cursor = second_older.window_oldest_cursor
+        self.assertIsNotNone(final_cursor)
+
+        exhausted = fetch_timeline_window(
+            self.agent,
+            limit=2,
+            direction="older",
+            cursor=final_cursor,
+        )
+
+        self.assertEqual(exhausted.events, [])
+        self.assertFalse(exhausted.has_more_older)
+        self.assertFalse(exhausted.has_more_newer)

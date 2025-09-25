@@ -23,15 +23,17 @@
 
       <div id="timeline-shell" class="relative flex-1">
         <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto">
-          <div class="flex justify-center py-2 text-xs text-slate-500">
+          <div id="timeline-load-older" class="flex justify-center border-b border-slate-100 py-2 text-xs text-slate-500">
             {% if timeline_window.has_more_older %}
               <button
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+                class="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
                 hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
                 hx-target="#timeline-events"
                 hx-swap="afterbegin">
                 Load older
               </button>
+            {% else %}
+              <span>Beginning of history</span>
             {% endif %}
           </div>
           {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
@@ -273,6 +275,44 @@
   .jump-to-latest:focus-visible {
     outline: 3px solid rgba(59, 130, 246, 0.35);
     outline-offset: 2px;
+  }
+
+  .jump-to-latest[data-pending="true"] {
+    background: linear-gradient(135deg, #4338ca 0%, #6366f1 100%);
+    color: #ffffff;
+    border-color: rgba(99, 102, 241, 0.4);
+    box-shadow: 0 20px 40px rgba(79, 70, 229, 0.28);
+  }
+
+  .jump-to-latest[data-pending="true"] svg {
+    color: inherit;
+  }
+
+  .jump-to-latest[data-pending="true"]::after {
+    content: attr(data-pending-count);
+    position: absolute;
+    top: -0.35rem;
+    right: -0.3rem;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.25rem;
+    border-radius: 9999px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 8px rgba(239, 68, 68, 0.35);
+  }
+
+  .jump-to-latest[data-pending="true"][data-pending-count=""]::after {
+    content: '';
+    width: 0.6rem;
+    min-width: 0.6rem;
+    height: 0.6rem;
+    padding: 0;
   }
 
   .chat-event {
@@ -756,7 +796,17 @@
     const composer = document.getElementById('agent-web-compose');
     const composerCursor = document.getElementById('composer-latest-cursor');
     const composerSurface = document.querySelector('.composer-surface');
-    const getJumpButton = () => document.getElementById('jump-to-latest');
+    let jumpButtonDefaultLabel = null;
+    const getJumpButton = () => {
+      const button = document.getElementById('jump-to-latest');
+      if (button && jumpButtonDefaultLabel === null) {
+        jumpButtonDefaultLabel = button.getAttribute('aria-label') || 'Jump to latest';
+        if (!button.dataset.defaultLabel) {
+          button.dataset.defaultLabel = jumpButtonDefaultLabel;
+        }
+      }
+      return button;
+    };
     const agentFirstName = root.dataset.agentFirstName || 'Your agent';
     const getCursorsEl = () => document.getElementById('timeline-cursors');
     const getLoadNewerContainer = () => document.getElementById('timeline-load-newer');
@@ -788,6 +838,7 @@
       processingEventId: null,
       awaitingProcessingSync: false,
       processingRefreshPromise: null,
+      pendingRealtime: 0,
     };
 
     const sessionUrl = root.dataset.webSessionUrl || null;
@@ -960,7 +1011,7 @@
     const BASE_SCROLL_THRESHOLD = 140;
     const ALIGN_THRESHOLD = 160;
     const BOTTOM_ANCHOR_THRESHOLD = 48;
-    const AUTO_NEWER_TRIGGERS = new Set(['auto-newer', 'processing-finished', 'auto-newer-loop', 'manual-newer', 'jump-to-latest']);
+    const AUTO_NEWER_TRIGGERS = new Set(['auto-newer', 'processing-finished', 'auto-newer-loop', 'manual-newer', 'jump-to-latest', 'queued-realtime']);
     const TOOL_CLUSTER_SELECTOR = '.tool-cluster[data-cluster-kind="tool"]';
 
     let openToolChip = null;
@@ -1362,6 +1413,7 @@
       state.autoScroll = true;
 
       if (!alignPage) {
+        drainPendingRealtime();
         return;
       }
 
@@ -1370,6 +1422,8 @@
       if (Math.abs(targetOffset - currentOffset) > 1) {
         scrollPageToBottomOffset(targetOffset, pageBehavior);
       }
+
+      drainPendingRealtime();
     }
 
     const PROCESSING_NODE_ID = 'agent-processing-indicator';
@@ -1575,8 +1629,38 @@
       const button = getJumpButton();
       if (!button) return;
       positionJumpButton();
-      const show = !isNearBottom();
+      const nearBottom = isNearBottom();
+      const backlog = hasMoreNewerInDom() || (state.pendingRealtime > 0);
+      const show = backlog || !nearBottom;
       toggleJumpButtonVisibility(show);
+      updateJumpButtonPending();
+    }
+
+    function updateJumpButtonPending() {
+      const button = getJumpButton();
+      if (!button) return;
+      if (!jumpButtonDefaultLabel) {
+        jumpButtonDefaultLabel = button.dataset.defaultLabel || button.getAttribute('aria-label') || 'Jump to latest';
+      }
+      const pendingCount = state.pendingRealtime || 0;
+      const backlog = hasMoreNewerInDom();
+      const pending = backlog || pendingCount > 0;
+      button.dataset.pending = pending ? 'true' : 'false';
+
+      if (pendingCount > 0) {
+        const clamped = Math.min(pendingCount, 99);
+        button.dataset.pendingCount = String(clamped);
+        const label = `${jumpButtonDefaultLabel} (${clamped} new ${clamped === 1 ? 'update' : 'updates'})`;
+        button.setAttribute('aria-label', label);
+        return;
+      }
+
+      button.dataset.pendingCount = '';
+      if (backlog) {
+        button.setAttribute('aria-label', `${jumpButtonDefaultLabel} (newer items available)`);
+      } else {
+        button.setAttribute('aria-label', jumpButtonDefaultLabel);
+      }
     }
 
     function hasMoreNewerInDom() {
@@ -1585,10 +1669,32 @@
       return cursorNode.dataset?.hasMoreNewer === 'true';
     }
 
+    function shouldDeferRealtime() {
+      if (!timeline) return false;
+      if (hasMoreNewerInDom()) return true;
+      return !state.autoScroll;
+    }
+
+    function queueRealtimeUpdate() {
+      const current = Number.isFinite(state.pendingRealtime) ? state.pendingRealtime : 0;
+      state.pendingRealtime = Math.min(current + 1, 99);
+      updateJumpButton();
+    }
+
+    function drainPendingRealtime() {
+      if (!state.pendingRealtime) return;
+      if (state.fetchingNewer) return;
+      if (shouldDeferRealtime()) return;
+      state.pendingRealtime = 0;
+      updateJumpButton();
+      requestNewer('queued-realtime');
+    }
+
     function maybeAutoFetchBacklog() {
       if (!hasMoreNewerInDom()) return;
       if (state.fetchingNewer) return;
       if (!state.autoScroll) return;
+      if (state.pendingRealtime > 0) return;
       const trigger = state.lastNewerTrigger;
       if (!trigger || !AUTO_NEWER_TRIGGERS.has(trigger)) {
         return;
@@ -1745,6 +1851,7 @@
         const nearBottom = isNearBottom();
         state.autoScroll = nearBottom;
         updateJumpButton();
+        drainPendingRealtime();
       });
     }
 
@@ -1752,6 +1859,7 @@
       const nearBottom = isNearBottom();
       state.autoScroll = nearBottom;
       updateJumpButton();
+      drainPendingRealtime();
     };
 
     window.addEventListener('scroll', handleWindowScroll, { passive: true });
@@ -1786,7 +1894,11 @@
       state.autoScroll = true;
       toggleJumpButtonVisibility(false);
       if (hasMoreNewerInDom()) {
+        state.pendingRealtime = 0;
+        updateJumpButtonPending();
         requestNewer('jump-to-latest');
+      } else {
+        drainPendingRealtime();
       }
       scrollToBottom({ force: true });
     });
@@ -1970,6 +2082,11 @@
         completeNewerRequest();
       }
 
+      if (state.action === 'newer' && !hasMoreNewerInDom()) {
+        state.pendingRealtime = 0;
+      }
+      updateJumpButtonPending();
+
       state.action = 'idle';
       state.previousScrollHeight = 0;
       state.pendingComposerScroll = false;
@@ -2057,10 +2174,14 @@
       };
 
       const handleMessage = (evt) => {
-        if (evt.lastEventId) {
+        if (evt && evt.lastEventId) {
           state.lastEventId = evt.lastEventId;
         }
         reconnectDelay = 3000;
+        if (shouldDeferRealtime()) {
+          queueRealtimeUpdate();
+          return;
+        }
         requestNewer('auto-newer');
       };
 
