@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 User = get_user_model()
 
 
-@tag('org_billing_batch')
+@tag('batch_org_billing')
 class OrganizationBillingHelperTests(TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
