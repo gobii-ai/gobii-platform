@@ -2589,7 +2589,10 @@ class CommsAllowlistEntry(models.Model):
         if self.is_active and self._state.adding:
             # Get the plan-based limit for this agent's owner
             from util.subscription_helper import get_user_max_contacts_per_agent
-            cap = get_user_max_contacts_per_agent(self.agent.user)
+            cap = get_user_max_contacts_per_agent(
+                self.agent.user,
+                organization=self.agent.organization,
+            )
             
             try:
                 # Count both active entries and pending invitations
@@ -2684,7 +2687,10 @@ class AgentAllowlistInvite(models.Model):
         if self._state.adding and self.status == self.InviteStatus.PENDING:
             # Get the plan-based limit for this agent's owner
             from util.subscription_helper import get_user_max_contacts_per_agent
-            cap = get_user_max_contacts_per_agent(self.agent.user)
+            cap = get_user_max_contacts_per_agent(
+                self.agent.user,
+                organization=self.agent.organization,
+            )
             
             try:
                 # Count both active entries and pending invitations

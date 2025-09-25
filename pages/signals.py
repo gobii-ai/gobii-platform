@@ -451,10 +451,14 @@ def handle_subscription_event(event, **kwargs):
                         seats_to_grant = seats - prev_seats
 
                     if seats_to_grant > 0:
+                        # For cycle starts we want to reset the active monthly block
+                        # instead of stacking an extra TaskCredit record.
+                        replace_current = source_data.get("billing_reason") in {"subscription_create", "subscription_cycle"}
                         TaskCreditService.grant_subscription_credits_for_organization(
                             owner,
                             seats=seats_to_grant,
                             plan=plan,
                             invoice_id=invoice_id or "",
                             subscription=sub,
+                            replace_current=replace_current,
                         )
