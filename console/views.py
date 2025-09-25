@@ -555,6 +555,17 @@ class BillingView(ConsoleViewMixin, TemplateView):
     def get(self, request, *args, **kwargs):
         context = super().get_context_data(**kwargs)
 
+        if request.GET.get("seats_success"):
+            messages.success(
+                request,
+                "Seat checkout started successfully. Features will unlock once payment completes.",
+            )
+        if request.GET.get("seats_cancelled"):
+            messages.info(
+                request,
+                "Seat checkout was cancelled before completion.",
+            )
+
         current_context = context.get('current_context', {}) or {}
         if current_context.get('type') == 'organization' and current_context.get('id'):
             try:
@@ -582,6 +593,10 @@ class BillingView(ConsoleViewMixin, TemplateView):
                     'max_tasks': configured_limit if configured_limit not in (0, -1) else 1000,
                 }
 
+                billing = getattr(organization, "billing", None)
+                seat_purchase_required = bool(getattr(billing, "purchased_seats", 0) <= 0)
+                seat_purchase_form = OrganizationSeatPurchaseForm(org=organization)
+
                 granted = Decimal(str(overview['credits']['granted'])) if overview['credits']['granted'] else Decimal('0')
                 used = Decimal(str(overview['credits']['used'])) if overview['credits']['used'] else Decimal('0')
                 usage_pct = 0
@@ -595,6 +610,9 @@ class BillingView(ConsoleViewMixin, TemplateView):
                     'org_auto_purchase_state': auto_purchase_state,
                     'org_credit_usage_pct': usage_pct,
                     'org_can_open_stripe': can_manage_billing and bool(overview['billing_record']['stripe_customer_id']),
+                    'seat_purchase_form': seat_purchase_form,
+                    'seat_purchase_required': seat_purchase_required,
+                    'org_has_stripe_subscription': bool(getattr(billing, "stripe_subscription_id", None)),
                 })
                 return render(request, self.template_name, context)
 
@@ -3724,17 +3742,6 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        if self.request.GET.get("seats_success"):
-            messages.success(
-                self.request,
-                "Seat checkout started successfully. Features will unlock once payment completes.",
-            )
-        if self.request.GET.get("seats_cancelled"):
-            messages.info(
-                self.request,
-                "Seat checkout was cancelled before completion.",
-            )
-
         members = OrganizationMembership.objects.filter(
             org=self.org, status=OrganizationMembership.OrgStatus.ACTIVE
         ).select_related("user")
@@ -3773,8 +3780,6 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         else:
             allowed_role_choices = []
 
-        seat_purchase_required = bool(billing and billing.purchased_seats <= 0)
-
         context.update(
             {
                 "org": self.org,
@@ -3787,8 +3792,6 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 "is_org_owner": bool(my_membership and my_membership.role == OrganizationMembership.OrgRole.OWNER),
                 "is_org_admin": bool(my_membership and my_membership.role == OrganizationMembership.OrgRole.ADMIN),
                 "org_billing": billing,
-                "seat_purchase_required": seat_purchase_required,
-                "seat_purchase_form": OrganizationSeatPurchaseForm(org=self.org),
             }
         )
         return context
@@ -4059,13 +4062,13 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
         if not form.is_valid():
             for error in form.errors.get("seats", []):
                 messages.error(request, error)
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
         billing = getattr(org, "billing", None)
         seat_count = form.cleaned_data["seats"]
         if seat_count <= 0:
             messages.error(request, "Please select at least one seat to purchase.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
         stripe_settings = get_stripe_settings()
         seat_price_id = stripe_settings.org_team_price_id
@@ -4094,7 +4097,7 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                         request,
                         "We couldn't find a seat item on the active subscription. Please contact support.",
                     )
-                    return redirect("organization_detail", org_id=org.id)
+                    return redirect("billing")
 
                 current_quantity = int(licensed_item.get("quantity") or 0)
                 if current_quantity < 0:
@@ -4132,22 +4135,22 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                     "We weren't able to update the seat count. Please try again or contact support.",
                 )
 
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
         price_id = seat_price_id
         if not price_id:
             messages.error(request, "Stripe price not configured. Please contact support.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
         try:
             stripe.api_key = PaymentsHelper.get_stripe_key()
             customer = get_or_create_stripe_customer(org)
 
             success_url = request.build_absolute_uri(
-                reverse("organization_detail", kwargs={"org_id": org.id})
+                reverse("billing")
             ) + "?seats_success=1"
             cancel_url = request.build_absolute_uri(
-                reverse("organization_detail", kwargs={"org_id": org.id})
+                reverse("billing")
             ) + "?seats_cancelled=1"
 
             line_items = [
@@ -4182,7 +4185,7 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                 request,
                 "We weren’t able to start the checkout flow. Please try again or contact support.",
             )
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
 
 class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
@@ -4212,14 +4215,12 @@ class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
         billing = getattr(org, "billing", None)
         if not billing or not billing.stripe_customer_id:
             messages.error(request, "This organization does not have an active Stripe subscription yet.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
         try:
             stripe.api_key = PaymentsHelper.get_stripe_key()
 
-            return_url = request.build_absolute_uri(
-                reverse("organization_detail", kwargs={"org_id": org.id})
-            )
+            return_url = request.build_absolute_uri(reverse("billing"))
 
             session = stripe.billing_portal.Session.create(
                 customer=billing.stripe_customer_id,
@@ -4234,7 +4235,7 @@ class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
                 request,
                 "We weren’t able to open the Stripe billing portal. Please try again or contact support.",
             )
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
 
 class _OrgPermissionMixin:
