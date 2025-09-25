@@ -339,34 +339,22 @@ class TaskCreditService:
 
                 if existing_credit:
                     updates: list[str] = []
-
                     target_plan = PlanNamesChoices(plan_id) if plan_id else PlanNamesChoices.FREE
 
-                    if existing_credit.credits != credits_to_grant:
-                        existing_credit.credits = credits_to_grant
-                        updates.append("credits")
+                    update_map = {
+                        "credits": credits_to_grant,
+                        "credits_used": 0,  # Renewal replenishes the block
+                        "granted_date": grant_date,
+                        "expiration_date": expiration_date,
+                        "plan": target_plan,
+                    }
+                    if invoice_id:
+                        update_map["stripe_invoice_id"] = invoice_id
 
-                    # Renewal replenishes the block, so reset usage.
-                    if existing_credit.credits_used != 0:
-                        existing_credit.credits_used = 0
-                        updates.append("credits_used")
-
-                    if existing_credit.granted_date != grant_date:
-                        existing_credit.granted_date = grant_date
-                        updates.append("granted_date")
-
-                    if existing_credit.expiration_date != expiration_date:
-                        existing_credit.expiration_date = expiration_date
-                        updates.append("expiration_date")
-
-                    if existing_credit.plan != target_plan:
-                        existing_credit.plan = target_plan
-                        updates.append("plan")
-
-                    if invoice_id and existing_credit.stripe_invoice_id != invoice_id:
-                        existing_credit.stripe_invoice_id = invoice_id
-                        updates.append("stripe_invoice_id")
-
+                    for field, value in update_map.items():
+                        if getattr(existing_credit, field) != value:
+                            setattr(existing_credit, field, value)
+                            updates.append(field)
                     if updates:
                         existing_credit.save(update_fields=updates)
 

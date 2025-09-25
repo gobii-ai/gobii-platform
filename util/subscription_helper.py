@@ -959,7 +959,7 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
 
         try:
             return int(plan.get("max_contacts_per_agent", default_limit))
-        except Exception:
+        except (ValueError, TypeError):
             return default_limit
 
     # Check for per-user override on quota
@@ -986,5 +986,5 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
 
     try:
         return int(plan.get("max_contacts_per_agent", default_limit))
-    except Exception:
+    except (ValueError, TypeError):
         return default_limit
