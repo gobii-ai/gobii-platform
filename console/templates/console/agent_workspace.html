@@ -62,7 +62,8 @@
            data-newer="{{ timeline_window.window_newest_cursor|default:'' }}"
            data-has-more-older="{{ timeline_window.has_more_older|yesno:'true,false' }}"
            data-has-more-newer="{{ timeline_window.has_more_newer|yesno:'true,false' }}"
-           data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>
+           data-processing-active="{{ processing_active|yesno:'true,false' }}"
+           data-direction="initial"></div>
 
       <div id="agent-composer-shell" class="composer-shell">
         <div class="composer-surface">
@@ -926,11 +927,20 @@
       processingRefreshPromise: null,
       pendingRealtime: 0,
       scrollAnchor: null,
+      hasOlderHistory: false,
     };
 
     const sessionUrl = root.dataset.webSessionUrl || null;
     const sessionTtl = parseInt(root.dataset.webSessionTtl || '60', 10);
     const heartbeatIntervalMs = Math.max(10000, Math.min(25000, Math.max(5000, (sessionTtl - 10) * 1000)));
+
+    const initialCursorNode = getCursorsEl();
+    if (initialCursorNode) {
+      state.hasOlderHistory = initialCursorNode.dataset?.hasMoreOlder === 'true';
+      if (!initialCursorNode.dataset.direction) {
+        initialCursorNode.dataset.direction = 'initial';
+      }
+    }
     const sessionState = {
       id: null,
       inflight: false,
@@ -1757,11 +1767,33 @@
       }
     }
 
+    function refreshOlderHistoryState() {
+      const cursorNode = getCursorsEl();
+      if (!cursorNode) return;
+      const direction = cursorNode.dataset?.direction || 'idle';
+      const incoming = cursorNode.dataset?.hasMoreOlder === 'true';
+
+      if (direction === 'older' || direction === 'initial') {
+        state.hasOlderHistory = incoming;
+      } else if (direction === 'newer') {
+        if (incoming) {
+          state.hasOlderHistory = true;
+        }
+      } else if (typeof state.hasOlderHistory !== 'boolean') {
+        state.hasOlderHistory = incoming;
+      }
+
+      cursorNode.dataset.direction = 'idle';
+    }
+
     function syncLoadControls() {
+      refreshOlderHistoryState();
       const cursorNode = getCursorsEl();
       const loadOlder = getLoadOlderContainer();
       if (loadOlder) {
-        const hasOlder = cursorNode?.dataset?.hasMoreOlder === 'true';
+        const hasOlder = typeof state.hasOlderHistory === 'boolean'
+          ? state.hasOlderHistory
+          : cursorNode?.dataset?.hasMoreOlder === 'true';
         const button = loadOlder.querySelector('[data-role="load-older-button"]');
         const label = loadOlder.querySelector('[data-role="history-start"]');
         if (button) {
