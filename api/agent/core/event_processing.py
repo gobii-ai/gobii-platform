@@ -18,6 +18,8 @@ from uuid import UUID
 import litellm
 from litellm import token_counter
 import redis
+from django.utils import timezone as dj_timezone
+from django.utils.timesince import timesince
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
@@ -72,6 +74,10 @@ from ..events import (
     publish_agent_event,
     get_agent_processing_lock_key,
     get_agent_processing_resource_key,
+)
+from api.services.web_sessions import (
+    WEB_SESSION_TTL_SECONDS,
+    get_active_web_sessions,
 )
 from ...models import (
     BrowserUseAgent,
@@ -1571,7 +1577,8 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     # Gather all user endpoints seen in conversations with this agent
     user_eps_qs = (
         PersistentAgentCommsEndpoint.objects.filter(
-            conversation_memberships__conversation__owner_agent=agent
+            conversation_memberships__conversation__owner_agent=agent,
+            conversation_memberships__role=PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
         )
         .exclude(owner_agent=agent)
         .distinct()
@@ -1584,7 +1591,7 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         for ep in user_eps_qs:
             label = " (preferred)" if ep.id == pref_id else ""
             user_lines.append(f"- {ep.channel}: {ep.address}{label}")
-        
+
         contacts_group.section_text(
             "user_endpoints",
             "\n".join(user_lines),
@@ -1685,6 +1692,8 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         endpoint = participant.endpoint
         address = endpoint.address
         parsed = parse_web_address(address)
+        if not parsed or parsed[0] != "user":
+            continue
         label: str = participant.conversation.display_name or address
         if parsed and parsed[0] == "user":
             try:
@@ -1704,6 +1713,36 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         "\n".join(allowed_lines + ( ["Web console contacts:"] + web_contacts if web_contacts else [] )),
         weight=2  # Higher weight since these are explicitly allowed
     )
+
+    active_sessions = list(get_active_web_sessions(agent))
+    if active_sessions:
+        ttl_seconds = WEB_SESSION_TTL_SECONDS
+        now = dj_timezone.now()
+        session_lines: list[str] = [
+            (
+                "Active web sessions (a session expires if idle for more than "
+                f"{ttl_seconds} seconds):"
+            )
+        ]
+
+        for session in active_sessions:
+            user_obj = session.user
+            display_name = (
+                getattr(user_obj, "get_full_name", lambda: "")()
+                or getattr(user_obj, "email", "")
+                or getattr(user_obj, "username", "")
+                or str(user_obj.id)
+            )
+            seen_phrase = timesince(session.last_seen_at, now) if session.last_seen_at else "just now"
+            session_lines.append(
+                f"- {display_name} • last seen {seen_phrase} ago"
+            )
+
+        contacts_group.section_text(
+            "active_web_sessions",
+            "\n".join(session_lines),
+            weight=2,
+        )
 
     # Add the helpful note as a separate section
     contacts_group.section_text(
@@ -1855,7 +1894,8 @@ def _get_system_instruction(
         "You will typically want to contact the user and let them know that you updated your charter/schedule if relevant, so they can give you corrections if needed. "
         "Don't use the word 'charter' when talking to the user, just talk as if you are human --as far as they are concerned, you are an employee/intern with a job. "
         "If you contact the user with information, make sure it is *new* information, do not repeat things you have already sent to the user. "
-        "When replying inside the Gobii console web chat, ALWAYS call the 'send_web_message' tool. "
+        "When replying inside the Gobii console web chat, only call the 'send_web_message' tool if the person has an ACTIVE web session listed in your context. "
+        "If no active session is available, continue using their preferred or recent channel (email, SMS, etc.) instead of web chat. "
         "Multiple humans may share your console workspace simultaneously, so you must pass the exact person you are speaking with by providing the 'user_id' from their inbound web message (raw_payload.user_id) or by parsing the conversation address (for example, 'web:user:<uuid>'). Never guess or reuse another person's identifier. "
         "You may not even need to send a message at all if there is nothing new."
         "You may break work down into multiple web agent tasks. "

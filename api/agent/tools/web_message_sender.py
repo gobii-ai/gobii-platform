@@ -15,6 +15,7 @@ from api.models import (
     parse_web_address,
 )
 from api.agent.comms.message_service import _ensure_web_channel_context
+from api.services.web_sessions import get_active_web_session
 
 
 def get_send_web_message_tool() -> Dict[str, Any]:
@@ -127,6 +128,13 @@ def execute_send_web_message(agent: PersistentAgent, params: Dict[str, Any]) -> 
     subject = (params.get("subject") or "").strip() or None
 
     user = _resolve_user_from_params(agent, params)
+
+    session = get_active_web_session(agent, user)
+    if session is None:
+        raise ValueError(
+            "The user is not currently active in the web console. "
+            "Ask them to reopen the workspace or use another approved contact channel."
+        )
 
     agent_ep, user_ep, conversation = _ensure_web_channel_context(agent, user)
 

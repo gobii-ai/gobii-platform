@@ -30,6 +30,7 @@ from ...models import (
     make_web_agent_address,
     make_web_user_address,
 )
+from api.services.web_sessions import touch_web_session
 
 from .adapters import ParsedMessage
 from observability import traced
@@ -340,6 +341,7 @@ def ingest_web_message(agent: PersistentAgent, user, *, body: str, subject: str 
     """Persist a console-authored web message and trigger processing."""
 
     agent_ep, user_ep, _ = _ensure_web_channel_context(agent, user)
+    touch_web_session(agent, user, source="message", create=True)
 
     parsed = ParsedMessage(
         sender=user_ep.address,

@@ -9,7 +9,7 @@
 <main class="min-h-screen bg-slate-50">
   <div class="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-6 sm:px-6 lg:px-10">
 
-    <div id="agent-workspace-root"
+      <div id="agent-workspace-root"
          class="relative flex flex-1 flex-col gap-4"
          data-timeline-limit="{{ timeline_limit }}"
          data-timeline-newer-url="{{ timeline_newer_url }}"
@@ -17,6 +17,8 @@
          data-event-stream-url="{{ event_stream_url }}"
          data-processing-status-url="{{ processing_status_url }}"
          data-processing-active="{{ processing_active|yesno:'true,false' }}"
+         data-web-session-url="{{ web_session_url }}"
+         data-web-session-ttl="{{ web_session_ttl }}"
          data-agent-first-name="{{ agent_first_name }}">
 
       <div id="timeline-shell" class="relative flex-1">
@@ -787,6 +789,171 @@
       awaitingProcessingSync: false,
       processingRefreshPromise: null,
     };
+
+    const sessionUrl = root.dataset.webSessionUrl || null;
+    const sessionTtl = parseInt(root.dataset.webSessionTtl || '60', 10);
+    const heartbeatIntervalMs = Math.max(10000, Math.min(25000, Math.max(5000, (sessionTtl - 10) * 1000)));
+    const sessionState = {
+      id: null,
+      inflight: false,
+      heartbeatTimer: null,
+      retryTimer: null,
+    };
+
+    function getCsrfToken() {
+      const match = document.cookie.match(/csrftoken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+
+    function clearHeartbeat() {
+      if (sessionState.heartbeatTimer) {
+        window.clearInterval(sessionState.heartbeatTimer);
+        sessionState.heartbeatTimer = null;
+      }
+    }
+
+    function clearSessionRestart() {
+      if (sessionState.retryTimer) {
+        window.clearTimeout(sessionState.retryTimer);
+        sessionState.retryTimer = null;
+      }
+    }
+
+    function markSessionInactive() {
+      clearHeartbeat();
+      sessionState.id = null;
+    }
+
+    function scheduleSessionRestart(delay = 8000) {
+      if (sessionState.retryTimer) {
+        return;
+      }
+      sessionState.retryTimer = window.setTimeout(() => {
+        sessionState.retryTimer = null;
+        startWebSession();
+      }, delay);
+    }
+
+    function postSession(action, extra = {}, fetchOptions = {}) {
+      if (!sessionUrl) {
+        return Promise.resolve(null);
+      }
+
+      const body = { action, ...extra };
+      if (sessionState.id && action !== 'start' && !body.session_id) {
+        body.session_id = sessionState.id;
+      }
+      if (!body.source) {
+        body.source = action;
+      }
+
+      const init = {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+        ...fetchOptions,
+      };
+      const defaultHeaders = {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRFToken': getCsrfToken(),
+        Accept: 'application/json',
+      };
+      init.headers = {
+        ...defaultHeaders,
+        ...(fetchOptions.headers || {}),
+      };
+
+      return fetch(sessionUrl, init).then((response) => {
+        if (!response.ok) {
+          return response
+            .json()
+            .catch(() => ({}))
+            .then((payload) => {
+              const errorMessage = payload?.error || `web session ${action} failed (${response.status})`;
+              throw new Error(errorMessage);
+            });
+        }
+        return response.json();
+      });
+    }
+
+    function scheduleHeartbeat() {
+      clearHeartbeat();
+      if (!sessionState.id) {
+        return;
+      }
+      sessionState.heartbeatTimer = window.setInterval(() => {
+        sendHeartbeat({ silent: true });
+      }, heartbeatIntervalMs);
+    }
+
+    function startWebSession() {
+      if (!sessionUrl || sessionState.inflight) {
+        return;
+      }
+
+      sessionState.inflight = true;
+      clearSessionRestart();
+
+      postSession('start', { source: 'ui' })
+        .then((data) => {
+          sessionState.id = data?.session_id || null;
+          if (sessionState.id) {
+            scheduleHeartbeat();
+          } else {
+            markSessionInactive();
+          }
+        })
+        .catch((error) => {
+          console.warn('[agent-workspace] Failed to create web session', error);
+          markSessionInactive();
+          scheduleSessionRestart();
+        })
+        .finally(() => {
+          sessionState.inflight = false;
+        });
+    }
+
+    function sendHeartbeat(options = {}) {
+      if (!sessionState.id) {
+        return Promise.resolve(null);
+      }
+
+      return postSession('heartbeat', { session_id: sessionState.id, source: options?.source || 'heartbeat' })
+        .then((data) => {
+          if (data?.session_id) {
+            sessionState.id = data.session_id;
+          }
+          return data;
+        })
+        .catch((error) => {
+          if (!options?.silent) {
+            console.warn('[agent-workspace] Web session heartbeat failed', error);
+          }
+          markSessionInactive();
+          scheduleSessionRestart();
+          return null;
+        });
+    }
+
+    function endWebSession(reason = 'end') {
+      if (!sessionUrl || !sessionState.id) {
+        return;
+      }
+
+      const sessionId = sessionState.id;
+      markSessionInactive();
+      clearSessionRestart();
+
+      postSession(
+        'end',
+        { session_id: sessionId, source: reason },
+        { keepalive: true }
+      ).catch(() => {
+        /* swallow */
+      });
+    }
 
     const JUMP_BUTTON_SIZE = 52; // matches 3.25rem
     const JUMP_BUTTON_GAP = 18;
@@ -1921,6 +2088,34 @@
       state.eventSource = source;
     }
 
+    if (sessionUrl) {
+      startWebSession();
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          if (sessionState.id) {
+            sendHeartbeat({ silent: true, source: 'visibility' });
+          } else {
+            startWebSession();
+          }
+        }
+      });
+
+      window.addEventListener('focus', () => {
+        if (sessionState.id) {
+          sendHeartbeat({ silent: true, source: 'focus' });
+        } else {
+          startWebSession();
+        }
+      });
+
+      window.addEventListener('pagehide', (event) => {
+        if (!event.persisted) {
+          endWebSession('pagehide');
+        }
+      });
+    }
+
     ensureProcessingSlotPosition();
     syncProcessingFromDom();
     syncKnownCursors({ animate: false });
@@ -1937,6 +2132,7 @@
     }
 
     window.addEventListener('beforeunload', () => {
+      endWebSession('beforeunload');
       window.removeEventListener('scroll', handleWindowScroll);
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('orientationchange', handleOrientationChange);

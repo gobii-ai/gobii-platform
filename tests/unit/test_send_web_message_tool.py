@@ -12,6 +12,7 @@ from api.models import (
     make_web_agent_address,
     make_web_user_address,
 )
+from api.services.web_sessions import start_web_session
 
 
 @tag("batch_send_web_message_tool")
@@ -36,6 +37,7 @@ class SendWebMessageToolTests(TestCase):
         )
 
     def test_execute_send_web_message_creates_outbound_message(self):
+        start_web_session(self.agent, self.owner)
         params = {
             "user_id": str(self.owner.id),
             "body": "Thanks for the update!",
@@ -59,3 +61,14 @@ class SendWebMessageToolTests(TestCase):
     def test_execute_send_web_message_requires_body(self):
         with self.assertRaises(ValueError):
             execute_send_web_message(self.agent, {"user_id": str(self.owner.id), "body": ""})
+
+    def test_execute_send_web_message_requires_active_session(self):
+        params = {
+            "user_id": str(self.owner.id),
+            "body": "Hello via web",
+        }
+
+        with self.assertRaises(ValueError) as exc:
+            execute_send_web_message(self.agent, params)
+
+        self.assertIn("not currently active", str(exc.exception))

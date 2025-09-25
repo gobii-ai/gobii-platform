@@ -2797,6 +2797,42 @@ class CommsAllowlistEntry(models.Model):
         return f"Allow<{self.channel}:{self.address}> for {self.agent_id}"
 
 
+class PersistentAgentWebSession(models.Model):
+    """Tracks live console web sessions per user-agent pair."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="web_sessions",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agent_web_sessions",
+    )
+    session_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    started_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now_add=True)
+    last_seen_source = models.CharField(max_length=32, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "user"],
+                name="uniq_web_session_agent_user",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "last_seen_at"], name="pa_web_session_last_seen_idx"),
+        ]
+        ordering = ["-last_seen_at"]
+
+    def __str__(self):
+        status = "active" if self.ended_at is None else "ended"
+        return f"WebSession<{self.agent_id}:{self.user_id}:{status}>"
+
 class AgentAllowlistInvite(models.Model):
     """Pending invitation for someone to join an agent's allowlist."""
     

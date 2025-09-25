@@ -61,6 +61,7 @@ from console.views import (
     AgentWorkspaceView,
     AgentTimelineWindowView,
     AgentWebMessageView,
+    AgentWebSessionView,
     AgentProcessingStatusView,
 )
 from console.context_views import SwitchContextView
@@ -99,6 +100,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/workspace/status/", AgentProcessingStatusView.as_view(), name="agent_processing_status"),
     path("console/agents/<uuid:pk>/timeline/window/", AgentTimelineWindowView.as_view(), name="agent_timeline_window"),
     path("console/agents/<uuid:pk>/messages/web/", AgentWebMessageView.as_view(), name="agent_web_message"),
+    path("console/agents/<uuid:pk>/sessions/web/", AgentWebSessionView.as_view(), name="agent_web_session"),
     path("console/agents/<uuid:pk>/welcome/", AgentWelcomeView.as_view(), name="agent_welcome"),
     path("console/agents/<uuid:pk>/enable-sms/", AgentEnableSmsView.as_view(), name="agent_enable_sms"),
     path("console/agents/<uuid:pk>/delete/", AgentDeleteView.as_view(), name="agent_delete"),

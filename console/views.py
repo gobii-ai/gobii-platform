@@ -99,6 +99,12 @@ from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
 from console.timeline import fetch_timeline_window
+from api.services.web_sessions import (
+    WEB_SESSION_TTL_SECONDS,
+    heartbeat_web_session,
+    end_web_session,
+    start_web_session,
+)
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -5249,6 +5255,8 @@ class AgentWorkspaceView(AgentAccessMixin, TemplateView):
                 "processing_active": processing_active,
                 "processing_status_url": reverse("agent_processing_status", args=[agent.id]),
                 "agent_first_name": agent_first_name,
+                "web_session_url": reverse("agent_web_session", args=[agent.id]),
+                "web_session_ttl": WEB_SESSION_TTL_SECONDS,
             }
         )
         return context
@@ -5313,6 +5321,67 @@ class AgentTimelineWindowView(AgentAccessMixin, TemplateView):
         )
 
         return render(request, self.template_name, context)
+
+
+class AgentWebSessionView(AgentAccessMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        try:
+            payload = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON payload."}, status=400)
+
+        action = payload.get("action")
+        if action not in {"start", "heartbeat", "end"}:
+            return JsonResponse({"error": "Unknown action."}, status=400)
+
+        session_id = payload.get("session_id")
+        source = payload.get("source")
+
+        try:
+            if action == "start":
+                result = start_web_session(agent, request.user, source=source or "ui")
+                status = 201
+            elif action == "heartbeat":
+                if not session_id:
+                    return JsonResponse({"error": "session_id is required for heartbeat."}, status=400)
+                result = heartbeat_web_session(
+                    session_key=session_id,
+                    agent=agent,
+                    user=request.user,
+                    source=source or "heartbeat",
+                )
+                status = 200
+            else:  # action == "end"
+                if not session_id:
+                    return JsonResponse({"error": "session_id is required to end a session."}, status=400)
+                result = end_web_session(
+                    session_key=session_id,
+                    agent=agent,
+                    user=request.user,
+                    source=source or "end",
+                )
+                status = 200
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+
+        return JsonResponse(_serialize_session_response(result), status=status)
+
+
+def _serialize_session_response(result):
+    session = result.session
+    payload = {
+        "session_id": str(session.session_key),
+        "started_at": session.started_at.isoformat(),
+        "last_seen_at": session.last_seen_at.isoformat(),
+        "ttl_seconds": result.ttl_seconds,
+        "expires_at": result.expires_at.isoformat(),
+    }
+    if session.ended_at:
+        payload["ended_at"] = session.ended_at.isoformat()
+    return payload
 
 
 class AgentWebMessageView(AgentAccessMixin, View):
