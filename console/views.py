@@ -4062,20 +4062,79 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
             return redirect("organization_detail", org_id=org.id)
 
         billing = getattr(org, "billing", None)
-        if billing and billing.purchased_seats > 0 and getattr(billing, "stripe_subscription_id", None):
-            messages.info(
-                request,
-                "This organization already has an active subscription. Use the Stripe management button to adjust seats.",
-            )
-            return redirect("organization_detail", org_id=org.id)
-
         seat_count = form.cleaned_data["seats"]
         if seat_count <= 0:
             messages.error(request, "Please select at least one seat to purchase.")
             return redirect("organization_detail", org_id=org.id)
 
         stripe_settings = get_stripe_settings()
-        price_id = stripe_settings.org_team_price_id
+        seat_price_id = stripe_settings.org_team_price_id
+
+        if billing and getattr(billing, "stripe_subscription_id", None):
+            # Organization already has an active subscription; treat the input as
+            # additional seats to add to the existing licensed item quantity.
+            try:
+                stripe.api_key = PaymentsHelper.get_stripe_key()
+                subscription = stripe.Subscription.retrieve(
+                    billing.stripe_subscription_id,
+                    expand=["items.data.price"],
+                )
+
+                licensed_item = None
+                for item in subscription.get("items", {}).get("data", []) or []:
+                    price = item.get("price", {}) or {}
+                    price_usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
+                    price_id = price.get("id")
+                    if price_usage_type == "licensed" or (seat_price_id and price_id == seat_price_id):
+                        licensed_item = item
+                        break
+
+                if not licensed_item:
+                    messages.error(
+                        request,
+                        "We couldn't find a seat item on the active subscription. Please contact support.",
+                    )
+                    return redirect("organization_detail", org_id=org.id)
+
+                current_quantity = int(licensed_item.get("quantity") or 0)
+                if current_quantity < 0:
+                    current_quantity = 0
+                new_quantity = current_quantity + seat_count
+
+                stripe.Subscription.modify(
+                    subscription.get("id"),
+                    items=[
+                        {
+                            "id": licensed_item.get("id"),
+                            "quantity": new_quantity,
+                        }
+                    ],
+                    metadata={
+                        **(subscription.get("metadata") or {}),
+                        "seat_requestor_id": str(request.user.id),
+                    },
+                    proration_behavior="create_prorations",
+                )
+
+                messages.success(
+                    request,
+                    "Seat update submitted. Additional seats will activate once Stripe processes the change.",
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Failed to update Stripe subscription %s for org %s: %s",
+                    getattr(billing, "stripe_subscription_id", None),
+                    org.id,
+                    exc,
+                )
+                messages.error(
+                    request,
+                    "We weren't able to update the seat count. Please try again or contact support.",
+                )
+
+            return redirect("organization_detail", org_id=org.id)
+
+        price_id = seat_price_id
         if not price_id:
             messages.error(request, "Stripe price not configured. Please contact support.")
             return redirect("organization_detail", org_id=org.id)

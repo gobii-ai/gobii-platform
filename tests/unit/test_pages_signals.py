@@ -24,11 +24,10 @@ def _build_event_payload(
     billing_reason="subscription_update",
     product="prod_123",
 ):
-    return {
+    payload = {
         "object": "subscription",
         "id": "sub_123",
         "latest_invoice": invoice_id,
-        "billing_reason": billing_reason,
         "items": {
             "data": [
                 {
@@ -44,6 +43,11 @@ def _build_event_payload(
         "current_period_start": None,
         "current_period_end": None,
     }
+
+    if billing_reason is not None:
+        payload["billing_reason"] = billing_reason
+
+    return payload
 
 
 def _build_djstripe_event(payload, event_type="customer.subscription.updated"):
@@ -68,6 +72,7 @@ class SubscriptionSignalTests(TestCase):
         sub.status = "active"
         sub.id = "sub_123"
         sub.customer = SimpleNamespace(subscriber=subscriber)
+        sub.billing_reason = None
         sub.stripe_data = _build_event_payload()
         sub.stripe_data['current_period_start'] = str(aware_start)
         sub.stripe_data['current_period_end'] = str(aware_end)
@@ -149,6 +154,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
         sub.status = "active"
         sub.id = "sub_org"
         sub.customer = SimpleNamespace(id="cus_org", subscriber=None)
+        sub.billing_reason = billing_reason
         payload = _build_event_payload(
             invoice_id=payload_invoice,
             quantity=quantity,
@@ -167,12 +173,26 @@ class SubscriptionSignalOrganizationTests(TestCase):
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_create_sets_seats_and_grants(self, mock_sync, mock_plan, mock_grant):
-        sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_create")
+        sub, payload = self._mock_subscription(quantity=2, billing_reason=None)
         mock_sync.return_value = sub
         mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
         event = _build_djstripe_event(payload, event_type="customer.subscription.created")
 
-        handle_subscription_event(event)
+        invoice_payload = {
+            "id": payload["latest_invoice"],
+            "object": "invoice",
+            "billing_reason": "subscription_create",
+        }
+        invoice_obj = SimpleNamespace(billing_reason="subscription_create", stripe_data=invoice_payload)
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.stripe.Invoice.retrieve", return_value=invoice_payload) as mock_invoice_retrieve, \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj) as mock_invoice_sync:
+
+            handle_subscription_event(event)
+
+        mock_invoice_retrieve.assert_called_once_with(payload["latest_invoice"])
+        mock_invoice_sync.assert_called_once()
 
         billing = self.org.billing
         billing.refresh_from_db()
@@ -180,6 +200,40 @@ class SubscriptionSignalOrganizationTests(TestCase):
         mock_grant.assert_called_once()
         _, kwargs = mock_grant.call_args
         self.assertEqual(kwargs.get("seats"), 2)
+        self.assertEqual(kwargs.get("invoice_id"), invoice_payload["id"])
+
+    @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
+    @patch("pages.signals.get_plan_by_product_id")
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_create_with_existing_seats_grants_delta(self, mock_sync, mock_plan, mock_grant):
+        billing = self.org.billing
+        billing.purchased_seats = 3
+        billing.save(update_fields=["purchased_seats"])
+
+        sub, payload = self._mock_subscription(quantity=5, billing_reason=None, payload_invoice="in_seat_add")
+        mock_sync.return_value = sub
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
+
+        invoice_payload = {
+            "id": payload["latest_invoice"],
+            "object": "invoice",
+            "billing_reason": "subscription_create",
+        }
+        invoice_obj = SimpleNamespace(billing_reason="subscription_create", stripe_data=invoice_payload)
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.stripe.Invoice.retrieve", return_value=invoice_payload), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj):
+
+            handle_subscription_event(event)
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.purchased_seats, 5)
+        mock_grant.assert_called_once()
+        _, kwargs = mock_grant.call_args
+        self.assertEqual(kwargs.get("seats"), 2)
+        self.assertEqual(kwargs.get("invoice_id"), "")
 
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
@@ -189,18 +243,32 @@ class SubscriptionSignalOrganizationTests(TestCase):
         billing.purchased_seats = 2
         billing.save(update_fields=["purchased_seats"])
 
-        sub, payload = self._mock_subscription(quantity=3, billing_reason="subscription_update", payload_invoice="in_upgrade")
+        sub, payload = self._mock_subscription(quantity=3, billing_reason=None, payload_invoice="in_upgrade")
         mock_sync.return_value = sub
         mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
         event = _build_djstripe_event(payload)
 
-        handle_subscription_event(event)
+        invoice_payload = {
+            "id": payload["latest_invoice"],
+            "object": "invoice",
+            "billing_reason": "subscription_update",
+        }
+        invoice_obj = SimpleNamespace(billing_reason="subscription_update", stripe_data=invoice_payload)
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.stripe.Invoice.retrieve", return_value=invoice_payload) as mock_invoice_retrieve, \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj):
+
+            handle_subscription_event(event)
+
+        mock_invoice_retrieve.assert_called_once()
 
         billing.refresh_from_db()
         self.assertEqual(billing.purchased_seats, 3)
         mock_grant.assert_called_once()
         _, kwargs = mock_grant.call_args
         self.assertEqual(kwargs.get("seats"), 1)
+        self.assertEqual(kwargs.get("invoice_id"), "")
 
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
@@ -210,12 +278,23 @@ class SubscriptionSignalOrganizationTests(TestCase):
         billing.purchased_seats = 3
         billing.save(update_fields=["purchased_seats"])
 
-        sub, payload = self._mock_subscription(quantity=1, billing_reason="subscription_update", payload_invoice="in_downgrade")
+        sub, payload = self._mock_subscription(quantity=1, billing_reason=None, payload_invoice="in_downgrade")
         mock_sync.return_value = sub
         mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
         event = _build_djstripe_event(payload)
 
-        handle_subscription_event(event)
+        invoice_payload = {
+            "id": payload["latest_invoice"],
+            "object": "invoice",
+            "billing_reason": "subscription_update",
+        }
+        invoice_obj = SimpleNamespace(billing_reason="subscription_update", stripe_data=invoice_payload)
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.stripe.Invoice.retrieve", return_value=invoice_payload), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj):
+
+            handle_subscription_event(event)
 
         billing.refresh_from_db()
         self.assertEqual(billing.purchased_seats, 1)
