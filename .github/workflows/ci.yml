@@ -147,6 +147,8 @@ jobs:
             tag: batch_allowlist_direction
           - batch: console_context
             tag: batch_console_context
+          - batch: console_message_formatting
+            tag: console_message_formatting_batch
           - batch: token_usage
             tag: batch_token_usage
           - batch: batch_sqlite

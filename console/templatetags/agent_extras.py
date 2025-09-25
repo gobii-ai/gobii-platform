@@ -51,7 +51,7 @@ def pretty_json(value) -> str:
         return str(value)
 
 
-_BASIC_HTML_RE = re.compile(r"<[a-zA-Z][^>]*>")
+_BASIC_HTML_RE = re.compile(r"</?([a-zA-Z][\w-]*)(?=[\s>/])[^>]*>")
 _ALLOWED_TAGS = {
     "p",
     "br",
@@ -67,13 +67,19 @@ _ALLOWED_TAGS = {
     "pre",
     "span",
     "a",
+    "del",
+    "s",
+    "input",
 }
-_SELF_CLOSING_TAGS = {"br"}
+_SELF_CLOSING_TAGS = {"br", "input"}
 _ALLOWED_ATTRS = {
     "a": {"href", "title"},
     "span": set(),
+    "input": {"type", "checked", "disabled"},
 }
 _ALLOWED_PROTOCOLS = {"http", "https", "mailto", "tel", ""}
+_TAG_FINDER_RE = re.compile(r"</?([a-zA-Z0-9]+)[^>]*>")
+_INLINE_ONLY_TAGS = {"strong", "em", "b", "i", "code", "span", "a", "br", "del", "s", "input"}
 
 
 def _is_safe_href(value: str) -> bool:
@@ -96,13 +102,23 @@ class _BasicHTMLSanitizer(HTMLParser):
 
         allowed = _ALLOWED_ATTRS.get(tag_lower)
         attr_parts: list[str] = []
+        attr_dict = dict(attrs or [])
+
+        if tag_lower == "input":
+            type_value = (attr_dict.get("type") or "").strip().lower()
+            if type_value != "checkbox":
+                return
+
         if allowed:
             for name, value in attrs:
-                if name not in allowed or value is None:
+                if name not in allowed:
                     continue
-                if name == "href" and not _is_safe_href(value):
+                if name == "href" and value is not None and not _is_safe_href(value):
                     continue
-                attr_parts.append(f'{name}="{escape(value, quote=True)}"')
+                if value is None:
+                    attr_parts.append(name)
+                else:
+                    attr_parts.append(f'{name}="{escape(value, quote=True)}"')
 
         attr_str = f" {' '.join(attr_parts)}" if attr_parts else ""
         self.parts.append(f"<{tag_lower}{attr_str}>")
@@ -137,12 +153,34 @@ def _render_agent_html(value: str) -> str:
     return sanitizer.get_html()
 
 
+def _contains_only_inline_tags(html: str) -> bool:
+    for name in _TAG_FINDER_RE.findall(html):
+        if name and name.lower() not in _INLINE_ONLY_TAGS:
+            return False
+    return True
+
+
+def _preserve_plaintext_linebreaks(html: str) -> str:
+    if not html:
+        return ""
+
+    normalized = html.replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" not in normalized:
+        return normalized
+
+    if _contains_only_inline_tags(normalized):
+        return normalized.replace("\n", "<br />")
+
+    return normalized
+
+
 @register.filter
 def agent_message_html(value: str | None) -> str:
     if not value:
         return ""
     if _BASIC_HTML_RE.search(value):
-        return mark_safe(_render_agent_html(value))
+        sanitized = _render_agent_html(value)
+        return mark_safe(_preserve_plaintext_linebreaks(sanitized))
     return agent_markdown(value)
 
 
