@@ -2025,9 +2025,13 @@
       const nearBottom = isNearBottom();
       state.autoScroll = state.pendingComposerScroll ? true : nearBottom;
 
+      const swapStrategy = state.action === 'newer' && state.autoScroll
+        ? 'beforeend'
+        : 'innerHTML';
+
       window.htmx.ajax('GET', `${newerUrl}&${params.toString()}`, {
         target: '#timeline-event-list',
-        swap: 'innerHTML',
+        swap: swapStrategy,
       });
     }
 
