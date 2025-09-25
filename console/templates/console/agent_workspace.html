@@ -233,6 +233,11 @@
     outline-offset: 2px;
   }
 
+  .composer-send-button[disabled] {
+    cursor: wait;
+    opacity: 0.7;
+  }
+
   .composer-input-surface {
     box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
     transition: border-color 0.22s ease, box-shadow 0.22s ease;
@@ -1935,6 +1940,20 @@
     });
 
     if (composer) {
+      const composerSendButton = composer.querySelector('.composer-send-button');
+      const setComposerSending = (sending) => {
+        if (!composerSendButton) {
+          return;
+        }
+        composerSendButton.disabled = Boolean(sending);
+        composerSendButton.setAttribute('aria-busy', sending ? 'true' : 'false');
+        if (!sending) {
+          composerSendButton.removeAttribute('data-state');
+          return;
+        }
+        composerSendButton.dataset.state = 'sending';
+      };
+
       const scheduleComposerLayoutUpdate = () => window.requestAnimationFrame(() => {
         updateTimelinePadding();
         positionJumpButton();
@@ -1945,9 +1964,11 @@
 
       composer.addEventListener('htmx:beforeRequest', () => {
         state.pendingComposerScroll = true;
+        setComposerSending(true);
       });
       composer.addEventListener('htmx:afterRequest', (event) => {
-        if (event.detail && event.detail.xhr && event.detail.xhr.status < 400) {
+        const succeeded = Boolean(event.detail && event.detail.xhr && event.detail.xhr.status < 400);
+        if (succeeded) {
           composer.reset();
           if (typeof resizeComposerTextarea === 'function') {
             resizeComposerTextarea({ reset: true });
@@ -1956,9 +1977,23 @@
             scheduleComposerLayoutUpdate();
           }
           showProcessingIndicator({ sticky: true });
+          requestNewer('composer-submit');
         } else {
           state.pendingComposerScroll = false;
         }
+        setComposerSending(false);
+      });
+
+      window.htmx.on('htmx:responseError', (event) => {
+        if (event.detail?.target?.id !== 'agent-web-compose') return;
+        state.pendingComposerScroll = false;
+        setComposerSending(false);
+      });
+
+      window.htmx.on('htmx:sendError', (event) => {
+        if (event.detail?.target?.id !== 'agent-web-compose') return;
+        state.pendingComposerScroll = false;
+        setComposerSending(false);
       });
 
       const composerTextarea = composer.querySelector('textarea');
