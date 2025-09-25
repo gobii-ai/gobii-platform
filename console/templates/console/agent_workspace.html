@@ -833,6 +833,7 @@
       autoScroll: true,
       eventSource: null,
       fetchingNewer: false,
+      fetchingOlder: false,
       queuedNewerTrigger: null,
       processingActive: initialProcessingActive,
       bottomAnchorOffset: null,
@@ -844,6 +845,7 @@
       awaitingProcessingSync: false,
       processingRefreshPromise: null,
       pendingRealtime: 0,
+      scrollAnchor: null,
     };
 
     const sessionUrl = root.dataset.webSessionUrl || null;
@@ -1343,6 +1345,51 @@
       }
     }
 
+    function escapeCssSelector(value) {
+      if (!value) return '';
+      if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+        return CSS.escape(value);
+      }
+      return value.replace(/([\.\#\[\]\s,:>+~'"\\])/g, '\\$1');
+    }
+
+    function captureScrollAnchor() {
+      if (!timeline) return null;
+      const timelineRect = timeline.getBoundingClientRect?.();
+      if (!timelineRect) return null;
+      const events = Array.from(timeline.querySelectorAll('.timeline-event[data-cursor]'));
+      if (!events.length) return null;
+      const anchor = events.find((node) => {
+        const rect = node.getBoundingClientRect?.();
+        if (!rect) return false;
+        return rect.bottom > timelineRect.top + 1;
+      }) || events[0];
+      if (!anchor) return null;
+      const anchorRect = anchor.getBoundingClientRect?.();
+      if (!anchorRect) return null;
+      return {
+        cursor: anchor.dataset?.cursor || null,
+        offset: anchorRect.top - timelineRect.top,
+      };
+    }
+
+    function restoreScrollAnchor(anchor) {
+      if (!timeline || !anchor || !anchor.cursor) return false;
+      const selector = `.timeline-event[data-cursor="${escapeCssSelector(anchor.cursor)}"]`;
+      const node = timeline.querySelector(selector);
+      if (!node) return false;
+      const timelineRect = timeline.getBoundingClientRect?.();
+      const nodeRect = node.getBoundingClientRect?.();
+      if (!timelineRect || !nodeRect) return false;
+      const currentOffset = nodeRect.top - timelineRect.top;
+      const delta = currentOffset - anchor.offset;
+      if (Math.abs(delta) < 1) {
+        return true;
+      }
+      timeline.scrollTop += delta;
+      return true;
+    }
+
     function isNearBottom() {
       if (!timeline) {
         return true;
@@ -1698,6 +1745,7 @@
     function maybeAutoFetchBacklog() {
       if (!hasMoreNewerInDom()) return;
       if (state.fetchingNewer) return;
+      if (state.fetchingOlder) return;
       if (!state.autoScroll) return;
       if (state.pendingRealtime > 0) return;
       const trigger = state.lastNewerTrigger;
@@ -1827,10 +1875,20 @@
       }
     }
 
+    function completeOlderRequest() {
+      state.fetchingOlder = false;
+      state.scrollAnchor = null;
+      if (state.queuedNewerTrigger && !state.fetchingNewer) {
+        const queuedTrigger = state.queuedNewerTrigger;
+        state.queuedNewerTrigger = null;
+        requestNewer(queuedTrigger);
+      }
+    }
+
     function requestNewer(trigger) {
       if (!newerUrl || !timeline) return;
       const label = trigger || 'manual-newer';
-      if (state.fetchingNewer) {
+      if (state.fetchingNewer || state.fetchingOlder) {
         state.queuedNewerTrigger = label;
         return;
       }
@@ -2037,10 +2095,13 @@
       const url = event.detail.requestConfig?.path || '';
       if (url.includes('direction=older')) {
         state.action = 'older';
+        state.fetchingOlder = true;
         state.previousScrollHeight = timeline?.scrollHeight || 0;
+        state.scrollAnchor = captureScrollAnchor();
         state.lastNewerTrigger = null;
       } else if (url.includes('direction=newer')) {
         state.action = 'newer';
+        state.fetchingNewer = true;
         if (!state.lastNewerTrigger) {
           state.lastNewerTrigger = 'manual-newer';
         }
@@ -2096,8 +2157,16 @@
       }
 
       if (state.action === 'older' && timeline) {
-        const delta = timeline.scrollHeight - state.previousScrollHeight;
-        timeline.scrollTop = Math.max(delta, 0);
+        const restored = restoreScrollAnchor(state.scrollAnchor);
+        if (!restored) {
+          const delta = timeline.scrollHeight - state.previousScrollHeight;
+          const target = Math.max(delta, 0);
+          if (typeof timeline.scrollTo === 'function') {
+            timeline.scrollTo({ top: target, behavior: 'auto' });
+          } else {
+            timeline.scrollTop = target;
+          }
+        }
       }
 
       dedupeTimeline();
@@ -2111,6 +2180,10 @@
 
       if (state.autoScroll) {
         scrollToBottom({ force: true });
+      }
+
+      if (state.action === 'older' || state.fetchingOlder) {
+        completeOlderRequest();
       }
 
       if (state.action === 'newer' || state.fetchingNewer) {
@@ -2146,12 +2219,36 @@
 
     window.htmx.on('htmx:responseError', (event) => {
       if (event.detail?.target?.id !== 'timeline-events') return;
-      completeNewerRequest();
+      const hadOlder = state.action === 'older' || state.fetchingOlder;
+      const hadNewer = state.action === 'newer' || state.fetchingNewer;
+      if (hadOlder) {
+        completeOlderRequest();
+      }
+      if (hadNewer) {
+        completeNewerRequest();
+      }
+      state.action = 'idle';
+      state.previousScrollHeight = 0;
+      state.scrollAnchor = null;
+      state.pendingComposerScroll = false;
+      updateJumpButton();
     });
 
     window.htmx.on('htmx:sendError', (event) => {
       if (event.detail?.target?.id !== 'timeline-events') return;
-      completeNewerRequest();
+      const hadOlder = state.action === 'older' || state.fetchingOlder;
+      const hadNewer = state.action === 'newer' || state.fetchingNewer;
+      if (hadOlder) {
+        completeOlderRequest();
+      }
+      if (hadNewer) {
+        completeNewerRequest();
+      }
+      state.action = 'idle';
+      state.previousScrollHeight = 0;
+      state.scrollAnchor = null;
+      state.pendingComposerScroll = false;
+      updateJumpButton();
     });
 
     const handleProcessingStartedEvent = (evt) => {
