@@ -931,7 +931,6 @@
       processingRefreshPromise: null,
       pendingRealtime: 0,
       scrollAnchor: null,
-      hasOlderHistory: false,
     };
     window.__agentWorkspaceState = state;
 
@@ -940,11 +939,8 @@
     const heartbeatIntervalMs = Math.max(10000, Math.min(25000, Math.max(5000, (sessionTtl - 10) * 1000)));
 
     const initialCursorNode = getCursorsEl();
-    if (initialCursorNode) {
-      state.hasOlderHistory = initialCursorNode.dataset?.hasMoreOlder === 'true';
-      if (!initialCursorNode.dataset.direction) {
-        initialCursorNode.dataset.direction = 'initial';
-      }
+    if (initialCursorNode && !initialCursorNode.dataset.direction) {
+      initialCursorNode.dataset.direction = 'initial';
     }
     const sessionState = {
       id: null,
@@ -1774,33 +1770,11 @@
       }
     }
 
-    function refreshOlderHistoryState() {
-      const cursorNode = getCursorsEl();
-      if (!cursorNode) return;
-      const direction = cursorNode.dataset?.direction || 'idle';
-      const incoming = cursorNode.dataset?.hasMoreOlder === 'true';
-
-      if (direction === 'older' || direction === 'initial') {
-        state.hasOlderHistory = incoming;
-      } else if (direction === 'newer') {
-        if (incoming) {
-          state.hasOlderHistory = true;
-        }
-      } else if (typeof state.hasOlderHistory !== 'boolean') {
-        state.hasOlderHistory = incoming;
-      }
-
-      cursorNode.dataset.direction = 'idle';
-    }
-
     function syncLoadControls() {
-      refreshOlderHistoryState();
       const cursorNode = getCursorsEl();
       const loadOlder = getLoadOlderContainer();
       if (loadOlder) {
-        const hasOlder = typeof state.hasOlderHistory === 'boolean'
-          ? state.hasOlderHistory
-          : cursorNode?.dataset?.hasMoreOlder === 'true';
+        const hasOlder = cursorNode?.dataset?.hasMoreOlder === 'true';
         const button = loadOlder.querySelector('[data-role="load-older-button"]');
         const label = loadOlder.querySelector('[data-role="history-start"]');
         if (button) {
