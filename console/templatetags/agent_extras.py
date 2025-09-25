@@ -170,6 +170,8 @@ _SKIP_TOOL_NAMES = {
     None,
 }
 
+_TOOL_CLUSTER_COLLAPSE_THRESHOLD = 5
+
 
 def _should_skip_tool(tool_call: Any) -> bool:
     name = getattr(tool_call, "tool_name", None)
@@ -343,24 +345,31 @@ def group_timeline_events(events: Iterable[Any]) -> list[dict[str, Any]]:
     grouped: list[dict[str, Any]] = []
     step_buffer: list[dict[str, Any]] = []
     latest_timestamp = None
+    earliest_timestamp = None
     latest_cursor = None
     label_tracker: dict[str, dict[str, Any]] = {}
 
     def flush() -> None:
-        nonlocal step_buffer, latest_timestamp, latest_cursor, label_tracker
+        nonlocal step_buffer, latest_timestamp, earliest_timestamp, latest_cursor, label_tracker
         if not step_buffer:
             return
+        entry_count = len(step_buffer)
         grouped.append(
             {
                 "type": "steps",
                 "entries": step_buffer,
                 "latest_timestamp": latest_timestamp,
+                "earliest_timestamp": earliest_timestamp,
                 "cursor": latest_cursor,
                 "labels": list(label_tracker.values()),
+                "entry_count": entry_count,
+                "collapsible": entry_count >= _TOOL_CLUSTER_COLLAPSE_THRESHOLD,
+                "collapse_threshold": _TOOL_CLUSTER_COLLAPSE_THRESHOLD,
             }
         )
         step_buffer = []
         latest_timestamp = None
+        earliest_timestamp = None
         latest_cursor = None
         label_tracker = {}
 
@@ -381,6 +390,12 @@ def group_timeline_events(events: Iterable[Any]) -> list[dict[str, Any]]:
             latest_cursor = getattr(event, "cursor", None)
             step_buffer.append(entry)
             latest_timestamp = getattr(event, "timestamp", None)
+            if earliest_timestamp is None:
+                earliest_timestamp = getattr(event, "timestamp", None)
+            else:
+                current_ts = getattr(event, "timestamp", None)
+                if current_ts and earliest_timestamp and current_ts < earliest_timestamp:
+                    earliest_timestamp = current_ts
             if meta.label not in label_tracker:
                 label_tracker[meta.label] = meta.as_dict()
             continue

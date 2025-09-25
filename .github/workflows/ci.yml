@@ -153,6 +153,8 @@ jobs:
             tag: batch_pa_step_credits
           - batch: timeline_window
             tag: batch_timeline_window
+          - batch: group_timeline_events
+            tag: batch_group_timeline_events
           - batch: tool_costs
             tag: batch_tool_costs
           - batch: billing_rollup

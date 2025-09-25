@@ -361,6 +361,48 @@
     gap: 0.45rem;
   }
 
+  .tool-cluster-summary {
+    display: none;
+  }
+
+  .tool-cluster-batch-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(148, 163, 184, 0.55);
+    background: rgba(248, 250, 252, 0.92);
+    padding: 0.35rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #0f172a;
+    cursor: pointer;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  }
+
+  .tool-cluster-batch-toggle:hover,
+  .tool-cluster-batch-toggle:focus-visible {
+    border-color: rgba(99, 102, 241, 0.35);
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.16);
+    outline: none;
+  }
+
+  .tool-cluster-batch-icon {
+    display: grid;
+    place-items: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 9999px;
+    background: rgba(79, 70, 229, 0.08);
+    color: #4338ca;
+  }
+
+  .tool-cluster-batch-label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.25rem;
+  }
+
   .tool-chip-list {
     list-style: none;
     margin: 0;
@@ -369,6 +411,29 @@
     flex-wrap: wrap;
     gap: 0.6rem;
     align-items: flex-start;
+  }
+
+  .tool-cluster--collapsible .tool-cluster-summary {
+    display: inline-flex;
+  }
+
+  .tool-cluster--collapsible.tool-cluster--collapsed .tool-chip-list,
+  .tool-cluster--collapsible.tool-cluster--collapsed .tool-cluster-detail-host {
+    display: none;
+  }
+
+  .tool-cluster--collapsible:not(.tool-cluster--collapsed) .tool-cluster-batch-toggle {
+    background: rgba(238, 242, 255, 0.92);
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow: 0 6px 18px rgba(99, 102, 241, 0.22);
+  }
+
+  .tool-cluster--collapsible .tool-cluster-timestamp {
+    display: none;
+  }
+
+  .tool-cluster--collapsible.tool-cluster--collapsed .tool-cluster-timestamp {
+    display: block;
   }
 
   .tool-chip {
@@ -729,6 +794,7 @@
     const ALIGN_THRESHOLD = 160;
     const BOTTOM_ANCHOR_THRESHOLD = 48;
     const AUTO_NEWER_TRIGGERS = new Set(['auto-newer', 'processing-finished', 'auto-newer-loop', 'manual-newer', 'jump-to-latest']);
+    const TOOL_CLUSTER_SELECTOR = '.tool-cluster[data-cluster-kind="tool"]';
 
     let openToolChip = null;
 
@@ -815,6 +881,137 @@
         if (typeof detail.scrollIntoView === 'function') {
           detail.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
+      });
+    }
+
+    function getClusterThreshold(cluster) {
+      if (!cluster) return 5;
+      const raw = parseInt(cluster.dataset.collapseThreshold || '5', 10);
+      return Number.isFinite(raw) && raw > 0 ? raw : 5;
+    }
+
+    function getClusterCount(cluster) {
+      if (!cluster) return 0;
+      const raw = parseInt(cluster.dataset.entryCount || '0', 10);
+      if (Number.isFinite(raw) && raw >= 0) {
+        return raw;
+      }
+      const chips = cluster.querySelectorAll('.tool-chip');
+      const count = chips.length;
+      cluster.dataset.entryCount = String(count);
+      return count;
+    }
+
+    function updateClusterCountLabel(cluster) {
+      if (!cluster) return;
+      const count = getClusterCount(cluster);
+      const countNode = cluster.querySelector('[data-role="cluster-count"]');
+      if (countNode) {
+        countNode.textContent = String(count);
+      }
+    }
+
+    function setToolClusterCollapsed(cluster, collapsed) {
+      if (!cluster) return;
+      const toggle = cluster.querySelector('[data-role="cluster-toggle"]');
+      if (collapsed) {
+        cluster.classList.add('tool-cluster--collapsed');
+        if (openToolChip && cluster.contains(openToolChip)) {
+          closeOpenToolChip();
+        }
+        if (toggle) {
+          toggle.setAttribute('aria-expanded', 'false');
+        }
+      } else {
+        cluster.classList.remove('tool-cluster--collapsed');
+        if (toggle) {
+          toggle.setAttribute('aria-expanded', 'true');
+        }
+      }
+    }
+
+    function evaluateToolCluster(cluster) {
+      if (!cluster) return;
+      const count = getClusterCount(cluster);
+      const threshold = getClusterThreshold(cluster);
+      const shouldCollapse = count >= threshold;
+      updateClusterCountLabel(cluster);
+
+      if (shouldCollapse) {
+        cluster.dataset.collapsible = 'true';
+        cluster.classList.add('tool-cluster--collapsible');
+        setToolClusterCollapsed(cluster, true);
+      } else {
+        cluster.dataset.collapsible = 'false';
+        cluster.classList.remove('tool-cluster--collapsible');
+        setToolClusterCollapsed(cluster, false);
+      }
+    }
+
+    function mergeToolClusters(previous, current) {
+      if (!previous || !current) return false;
+      if (previous.dataset.clusterKind !== 'tool' || current.dataset.clusterKind !== 'tool') {
+        return false;
+      }
+
+      const prevList = previous.querySelector('.tool-chip-list');
+      const currentList = current.querySelector('.tool-chip-list');
+      if (!prevList || !currentList) {
+        return false;
+      }
+
+      const chipsToMove = Array.from(currentList.children);
+      if (!chipsToMove.length) {
+        forgetCursor(current);
+        current.remove();
+        evaluateToolCluster(previous);
+        return true;
+      }
+
+      closeOpenToolChip();
+
+      const previousCount = getClusterCount(previous);
+      const currentCount = parseInt(current.dataset.entryCount || String(chipsToMove.length), 10) || chipsToMove.length;
+
+      const currentEarliest = current.dataset.earliest;
+      const previousEarliest = previous.dataset.earliest;
+      if (currentEarliest && (!previousEarliest || currentEarliest < previousEarliest)) {
+        previous.dataset.earliest = currentEarliest;
+      }
+
+      chipsToMove.forEach((item) => {
+        prevList.appendChild(item);
+      });
+
+      forgetCursor(current);
+      current.remove();
+
+      const newCount = previousCount + currentCount;
+      previous.dataset.entryCount = String(newCount);
+      evaluateToolCluster(previous);
+      return true;
+    }
+
+    function normaliseToolClusters() {
+      if (!timeline) return;
+
+      let pair = timeline.querySelector('.tool-cluster[data-cluster-kind="tool"] + .tool-cluster[data-cluster-kind="tool"]');
+      while (pair) {
+        const previous = pair.previousElementSibling;
+        const merged = mergeToolClusters(previous, pair);
+        if (!merged) {
+          break;
+        }
+        pair = timeline.querySelector('.tool-cluster[data-cluster-kind="tool"] + .tool-cluster[data-cluster-kind="tool"]');
+      }
+
+      const clusters = timeline.querySelectorAll(TOOL_CLUSTER_SELECTOR);
+      clusters.forEach((cluster) => {
+        if (!cluster.dataset.entryCount) {
+          const count = cluster.querySelectorAll('.tool-chip').length;
+          cluster.dataset.entryCount = String(count);
+        }
+        evaluateToolCluster(cluster);
       });
     }
 
@@ -1408,6 +1605,15 @@
     window.addEventListener('orientationchange', handleOrientationChange);
 
     document.addEventListener('click', (event) => {
+      const toggle = event.target.closest('[data-role="cluster-toggle"]');
+      if (!toggle) return;
+      const cluster = toggle.closest('.tool-cluster');
+      if (!cluster || cluster.dataset.collapsible !== 'true') return;
+      const isCollapsed = cluster.classList.contains('tool-cluster--collapsed');
+      setToolClusterCollapsed(cluster, !isCollapsed);
+    });
+
+    document.addEventListener('click', (event) => {
       const btn = event.target.closest('#jump-to-latest');
       if (!btn) return;
       state.autoScroll = true;
@@ -1552,6 +1758,7 @@
       if (event.detail?.target?.id !== 'timeline-events') return;
 
       closeOpenToolChip();
+      normaliseToolClusters();
 
       const anchorOffset = typeof state.bottomAnchorOffset === 'number' ? state.bottomAnchorOffset : null;
       const pageOffset = typeof state.pageBottomOffset === 'number' ? state.pageBottomOffset : null;
@@ -1717,6 +1924,7 @@
     ensureProcessingSlotPosition();
     syncProcessingFromDom();
     syncKnownCursors({ animate: false });
+    normaliseToolClusters();
     connectEventStream(null);
     updateTimelinePadding();
     positionJumpButton();

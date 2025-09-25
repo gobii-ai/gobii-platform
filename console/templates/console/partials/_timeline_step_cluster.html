@@ -3,8 +3,32 @@
 {% load tz %}
 
 {% if cluster.entries %}
-<article class="timeline-event tool-cluster" data-cursor="{{ cluster.cursor }}">
+{% with entry_count=cluster.entry_count|default:cluster.entries|length collapse_threshold=cluster.collapse_threshold|default:5 %}
+<article class="timeline-event tool-cluster{% if cluster.collapsible %} tool-cluster--collapsible tool-cluster--collapsed{% endif %}"
+         data-cursor="{{ cluster.cursor }}"
+         data-entry-count="{{ entry_count }}"
+         {% if cluster.earliest_timestamp %}data-earliest="{{ cluster.earliest_timestamp|date:'c' }}"{% endif %}
+         data-collapsible="{{ cluster.collapsible|yesno:'true,false' }}"
+         data-collapse-threshold="{{ collapse_threshold }}"
+         data-cluster-kind="tool">
   <div class="tool-cluster-shell">
+    <div class="tool-cluster-summary">
+      <button type="button"
+              class="tool-cluster-batch-toggle"
+              data-role="cluster-toggle"
+              aria-expanded="{% if cluster.collapsible %}false{% else %}true{% endif %}">
+        <span class="tool-cluster-batch-icon">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h10v10H7z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 5h10v10H5z" opacity="0.55" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 9h10v10H9z" opacity="0.4" />
+          </svg>
+        </span>
+        <span class="tool-cluster-batch-label">
+          <span data-role="cluster-count">{{ entry_count }}</span> tools called
+        </span>
+      </button>
+    </div>
     <ul class="tool-chip-list" role="list">
       {% for entry in cluster.entries %}
         {% with tool=entry.tool meta=entry.meta params=tool.tool_params %}
@@ -98,8 +122,15 @@
     </ul>
     <div class="tool-cluster-detail-host" hidden aria-live="polite"></div>
     {% if cluster.latest_timestamp %}
-      <div class="tool-cluster-timestamp chat-meta">{{ cluster.latest_timestamp|naturaltime }}</div>
+      <div class="tool-cluster-timestamp chat-meta" data-role="cluster-timestamp">
+        {% if cluster.collapsible and cluster.earliest_timestamp %}
+          {{ cluster.earliest_timestamp|naturaltime }}
+        {% else %}
+          {{ cluster.latest_timestamp|naturaltime }}
+        {% endif %}
+      </div>
     {% endif %}
   </div>
 </article>
+{% endwith %}
 {% endif %}
