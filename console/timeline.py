@@ -52,6 +52,32 @@ def _decode_cursor(cursor: str) -> CursorTuple:
     return datetime.fromisoformat(ts_str), kind, discriminator
 
 
+def _has_history_before_cursor(
+    messages_qs,
+    steps_qs,
+    cursor: str | None,
+) -> bool:
+    """Return True if there are timeline records older than the given cursor."""
+
+    if not cursor:
+        return False
+
+    ts, kind, discriminator = _decode_cursor(cursor)
+
+    message_filter = Q(timestamp__lt=ts)
+    step_filter = Q(created_at__lt=ts)
+
+    if kind == "message":
+        message_filter |= Q(timestamp=ts, seq__lt=discriminator)
+    elif kind == "step":
+        step_filter |= Q(created_at=ts, id__lt=discriminator)
+
+    return (
+        messages_qs.filter(message_filter).exists()
+        or steps_qs.filter(step_filter).exists()
+    )
+
+
 def _build_message_event(message: PersistentAgentMessage) -> TimelineEvent:
     timestamp = message.timestamp or timezone.now()
     discriminator = message.seq or str(message.id)
@@ -182,6 +208,10 @@ def fetch_timeline_window(
 
     window_oldest_cursor = events[0].cursor if events else None
     window_newest_cursor = events[-1].cursor if events else None
+
+    if events and not has_more_older:
+        if _has_history_before_cursor(messages_qs, steps_qs, window_oldest_cursor):
+            has_more_older = True
 
     return TimelineWindow(
         events=events,
