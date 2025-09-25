@@ -23,31 +23,36 @@
 
       <div id="timeline-shell" class="relative flex-1">
         <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto">
-          <div id="timeline-load-older" class="flex justify-center border-b border-slate-100 py-2 text-xs text-slate-500">
-            {% if timeline_window.has_more_older %}
-              <button
-                class="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
-                hx-target="#timeline-events"
-                hx-swap="afterbegin">
-                Load older
-              </button>
-            {% else %}
-              <span>Beginning of history</span>
-            {% endif %}
+          <div id="timeline-load-older" class="timeline-load-control border-b border-slate-100" data-side="older">
+            <button type="button"
+                    data-role="load-older-button"
+                    class="timeline-load-button"
+                    hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
+                    hx-target="#timeline-events"
+                    hx-swap="afterbegin"
+                    {% if not timeline_window.has_more_older %}hidden{% endif %}>
+              <span class="timeline-load-indicator" aria-hidden="true"></span>
+              <span class="timeline-load-label">Load older</span>
+            </button>
+            <span data-role="history-start"
+                  class="timeline-history-label"
+                  {% if timeline_window.has_more_older %}hidden{% endif %}>
+              Beginning of history
+            </span>
           </div>
           {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
           <div id="processing-indicator-slot" class="mt-2 px-1"></div>
-          <div id="timeline-load-newer" class="flex justify-center border-t border-slate-100 py-2 text-xs text-slate-500" {% if not timeline_window.has_more_newer %}hidden{% endif %}>
-            {% if timeline_window.has_more_newer %}
-              <button
-                class="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
-                hx-target="#timeline-events"
-                hx-swap="beforeend">
-                Load newer
-              </button>
-            {% endif %}
+          <div id="timeline-load-newer" class="timeline-load-control border-t border-slate-100" data-side="newer" {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+            <button type="button"
+                    data-role="load-newer-button"
+                    class="timeline-load-button"
+                    hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
+                    hx-target="#timeline-events"
+                    hx-swap="beforeend"
+                    {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+              <span class="timeline-load-indicator" aria-hidden="true"></span>
+              <span class="timeline-load-label">Load newer</span>
+            </button>
           </div>
         </div>
       </div>
@@ -318,6 +323,80 @@
     min-width: 0.6rem;
     height: 0.6rem;
     padding: 0;
+  }
+
+  .jump-to-latest[data-backlog="true"] {
+    border-color: rgba(99, 102, 241, 0.32);
+    box-shadow: 0 12px 30px rgba(99, 102, 241, 0.18);
+    color: #4f46e5;
+    background: #ffffff;
+  }
+
+  .timeline-load-control {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem 0;
+    min-height: 2.75rem;
+    text-transform: none;
+    font-size: 0.75rem;
+    color: #64748b;
+  }
+
+  .timeline-load-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(99, 102, 241, 0.22);
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(79, 70, 229, 0.16));
+    color: #4338ca;
+    padding: 0.45rem 1.15rem;
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.01em;
+    box-shadow: 0 10px 24px rgba(99, 102, 241, 0.16);
+    transition: transform 0.18s ease, box-shadow 0.2s ease, background 0.2s ease;
+    cursor: pointer;
+  }
+
+  .timeline-load-button:hover,
+  .timeline-load-button:focus-visible {
+    transform: translateY(-1px);
+    background: linear-gradient(135deg, rgba(79, 70, 229, 0.16), rgba(55, 48, 163, 0.22));
+    box-shadow: 0 14px 34px rgba(79, 70, 229, 0.25);
+    outline: none;
+  }
+
+  .timeline-load-button:focus-visible {
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.18), 0 16px 34px rgba(79, 70, 229, 0.25);
+  }
+
+  .timeline-load-button[hidden] {
+    display: none;
+  }
+
+  .timeline-load-indicator {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 9999px;
+    background: currentColor;
+    opacity: 0.65;
+    box-shadow: 0 0 0 6px rgba(79, 70, 229, 0.08);
+  }
+
+  .timeline-load-label {
+    font-weight: 600;
+    letter-spacing: 0.015em;
+  }
+
+  .timeline-history-label {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
   .chat-event {
@@ -815,6 +894,7 @@
     const agentFirstName = root.dataset.agentFirstName || 'Your agent';
     const getCursorsEl = () => document.getElementById('timeline-cursors');
     const getLoadNewerContainer = () => document.getElementById('timeline-load-newer');
+    const getLoadOlderContainer = () => document.getElementById('timeline-load-older');
 
     const limit = parseInt(root.dataset.timelineLimit || '150', 10);
     const newerUrl = root.dataset.timelineNewerUrl;
@@ -1677,6 +1757,34 @@
       }
     }
 
+    function syncLoadControls() {
+      const cursorNode = getCursorsEl();
+      const loadOlder = getLoadOlderContainer();
+      if (loadOlder) {
+        const hasOlder = cursorNode?.dataset?.hasMoreOlder === 'true';
+        const button = loadOlder.querySelector('[data-role="load-older-button"]');
+        const label = loadOlder.querySelector('[data-role="history-start"]');
+        if (button) {
+          button.hidden = !hasOlder;
+        }
+        if (label) {
+          label.hidden = Boolean(hasOlder);
+        }
+        loadOlder.dataset.state = hasOlder ? 'has-more' : 'exhausted';
+      }
+
+      const loadNewer = getLoadNewerContainer();
+      if (loadNewer) {
+        const hasNewer = cursorNode?.dataset?.hasMoreNewer === 'true';
+        const button = loadNewer.querySelector('[data-role="load-newer-button"]');
+        if (button) {
+          button.hidden = !hasNewer;
+        }
+        loadNewer.hidden = !hasNewer;
+        loadNewer.dataset.state = hasNewer ? 'has-more' : 'exhausted';
+      }
+    }
+
     function updateJumpButton() {
       const button = getJumpButton();
       if (!button) return;
@@ -1696,10 +1804,11 @@
       }
       const pendingCount = state.pendingRealtime || 0;
       const backlog = hasMoreNewerInDom();
-      const pending = backlog || pendingCount > 0;
-      button.dataset.pending = pending ? 'true' : 'false';
+      const hasRealtime = pendingCount > 0;
+      button.dataset.pending = hasRealtime ? 'true' : 'false';
+      button.dataset.backlog = !hasRealtime && backlog ? 'true' : 'false';
 
-      if (pendingCount > 0) {
+      if (hasRealtime) {
         const clamped = Math.min(pendingCount, 99);
         button.dataset.pendingCount = String(clamped);
         const label = `${jumpButtonDefaultLabel} (${clamped} new ${clamped === 1 ? 'update' : 'updates'})`;
@@ -2106,6 +2215,7 @@
           state.lastNewerTrigger = 'manual-newer';
         }
       }
+      syncLoadControls();
     });
 
     // Preserve the user's bottom offset while new timeline fragments stream in.
@@ -2142,6 +2252,7 @@
 
       ensureProcessingSlotPosition();
       updateTimelinePadding();
+      syncLoadControls();
 
       if (state.action === 'newer' && anchorOffset !== null) {
         const target = Math.max(timeline.scrollHeight - timeline.clientHeight - anchorOffset, 0);
@@ -2204,6 +2315,7 @@
       state.awaitingProcessingSync = false;
       syncProcessingFromDom();
       maybeAutoFetchBacklog();
+      syncLoadControls();
     });
 
     window.htmx.on('htmx:afterSettle', (event) => {
@@ -2214,6 +2326,7 @@
         refreshEmptyState();
         state.awaitingProcessingSync = false;
         syncProcessingFromDom();
+        syncLoadControls();
       }
     });
 
@@ -2232,6 +2345,7 @@
       state.scrollAnchor = null;
       state.pendingComposerScroll = false;
       updateJumpButton();
+      syncLoadControls();
     });
 
     window.htmx.on('htmx:sendError', (event) => {
@@ -2249,6 +2363,7 @@
       state.scrollAnchor = null;
       state.pendingComposerScroll = false;
       updateJumpButton();
+      syncLoadControls();
     });
 
     const handleProcessingStartedEvent = (evt) => {
@@ -2378,6 +2493,7 @@
     positionJumpButton();
     scrollToBottom({ force: true, behavior: 'auto', pageBehavior: 'auto' });
     updateJumpButton();
+    syncLoadControls();
     refreshEmptyState();
 
     if (typeof Prism !== 'undefined') {

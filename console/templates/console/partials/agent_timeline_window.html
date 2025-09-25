@@ -9,30 +9,35 @@
      data-has-more-newer="{{ timeline_window.has_more_newer|yesno:'true,false' }}"
      data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>
 
-<div id="timeline-load-older" hx-swap-oob="true" class="flex justify-center border-b border-slate-100 py-2 text-xs text-slate-500">
-  {% if timeline_window.has_more_older %}
-    <button
-      class="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
-      hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ current_newest_cursor|default:''|urlencode }}"
-      hx-target="#timeline-events"
-      hx-swap="afterbegin">
-      Load older
-    </button>
-  {% else %}
-    <span>Beginning of history</span>
-  {% endif %}
+<div id="timeline-load-older" hx-swap-oob="true" class="timeline-load-control border-b border-slate-100" data-side="older">
+  <button type="button"
+          data-role="load-older-button"
+          class="timeline-load-button"
+          hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ current_newest_cursor|default:''|urlencode }}"
+          hx-target="#timeline-events"
+          hx-swap="afterbegin"
+          {% if not timeline_window.has_more_older %}hidden{% endif %}>
+    <span class="timeline-load-indicator" aria-hidden="true"></span>
+    <span class="timeline-load-label">Load older</span>
+  </button>
+  <span data-role="history-start"
+        class="timeline-history-label"
+        {% if timeline_window.has_more_older %}hidden{% endif %}>
+    Beginning of history
+  </span>
 </div>
 
-<div id="timeline-load-newer" hx-swap-oob="true" class="flex justify-center border-t border-slate-100 py-2 text-xs text-slate-500" {% if not timeline_window.has_more_newer %}hidden{% endif %}>
-  {% if timeline_window.has_more_newer and timeline_window.window_newest_cursor %}
-    <button
-      class="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
-      hx-get="{{ timeline_newer_url }}&cursor={{ timeline_window.window_newest_cursor|urlencode }}&limit={{ timeline_limit }}&current_newest={{ current_newest_cursor|default:''|urlencode }}"
-      hx-target="#timeline-events"
-      hx-swap="beforeend">
-      Load newer
-    </button>
-  {% endif %}
+<div id="timeline-load-newer" hx-swap-oob="true" class="timeline-load-control border-t border-slate-100" data-side="newer" {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+  <button type="button"
+          data-role="load-newer-button"
+          class="timeline-load-button"
+          hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ current_newest_cursor|default:''|urlencode }}"
+          hx-target="#timeline-events"
+          hx-swap="beforeend"
+          {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+    <span class="timeline-load-indicator" aria-hidden="true"></span>
+    <span class="timeline-load-label">Load newer</span>
+  </button>
 </div>
 
 <button id="jump-to-latest" hx-swap-oob="true"
