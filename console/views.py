@@ -579,12 +579,7 @@ class BillingView(ConsoleViewMixin, TemplateView):
             else:
                 overview = build_org_billing_overview(organization)
                 membership = context.get('current_membership')
-                allowed_roles = {
-                    OrganizationMembership.OrgRole.OWNER,
-                    OrganizationMembership.OrgRole.ADMIN,
-                    OrganizationMembership.OrgRole.BILLING,
-                }
-                can_manage_billing = bool(membership and membership.role in allowed_roles)
+                can_manage_billing = bool(membership and membership.role in BILLING_MANAGE_ROLES)
 
                 configured_limit = overview['extra_tasks']['configured_limit'] or 0
                 auto_purchase_state = {
