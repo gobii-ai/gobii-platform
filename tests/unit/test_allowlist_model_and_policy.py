@@ -104,6 +104,9 @@ class WhitelistPolicyAndFlagsTests(TestCase):
     def test_default_policy_user_owned(self):
         org_owner = self.owner
         org = Organization.objects.create(name="Acme", slug="acme", created_by=org_owner)
+        billing = org.billing
+        billing.purchased_seats = 1
+        billing.save(update_fields=["purchased_seats"])
         member = User.objects.create_user(username="mem", email="mem@example.com", password="pw")
         OrganizationMembership.objects.create(
             org=org,
@@ -140,6 +143,9 @@ class WhitelistPolicyAndFlagsTests(TestCase):
         # Setup org and membership
         org_owner = self.owner
         org = Organization.objects.create(name="Acme", slug="acme", created_by=org_owner)
+        billing = org.billing
+        billing.purchased_seats = 1
+        billing.save(update_fields=["purchased_seats"])
         member = User.objects.create_user(username="mem", email="mem@example.com", password="pw")
         OrganizationMembership.objects.create(
             org=org,

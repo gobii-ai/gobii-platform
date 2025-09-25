@@ -99,6 +99,9 @@ class OrgDefaultAllowlistEmailTests(TestCase):
         self.org = Organization.objects.create(
             name="Acme", slug="acme", created_by=self.owner
         )
+        billing = self.org.billing
+        billing.purchased_seats = 1
+        billing.save(update_fields=["purchased_seats"])
         OrganizationMembership.objects.create(
             org=self.org,
             user=self.member,
