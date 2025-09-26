@@ -4984,10 +4984,10 @@ class OrganizationSeatScheduleView(WaffleFlagMixin, LoginRequiredMixin, View):
                 ]
             )
 
-           messages.success(
-               request,
-               "Seat reduction scheduled. The new total will apply at the start of the next billing period.",
-           )
+            messages.success(
+                request,
+                "Seat reduction scheduled. The new total will apply at the start of the next billing period.",
+            )
             _track_org_event_for_console(
                 request,
                 AnalyticsEvent.ORGANIZATION_SEAT_REMOVED,
