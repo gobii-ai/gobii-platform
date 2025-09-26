@@ -557,10 +557,14 @@ class BillingView(ConsoleViewMixin, TemplateView):
         context = super().get_context_data(**kwargs)
 
         if request.GET.get("seats_success"):
-            messages.success(
-                request,
-                "Seat checkout started successfully. Features will unlock once payment completes.",
-            )
+            target_info = request.session.pop("org_seat_portal_target", None)
+            success_message = "Seat checkout started successfully. Features will unlock once payment completes."
+            if target_info and target_info.get("requested"):
+                requested = target_info.get("requested")
+                success_message = (
+                    f"Seat checkout started successfully. In Stripe, update your licensed seat quantity to {requested}."
+                )
+            messages.success(request, success_message)
         if request.GET.get("seats_cancelled"):
             messages.info(
                 request,
@@ -4081,8 +4085,8 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
         seat_price_id = stripe_settings.org_team_price_id
 
         if billing and getattr(billing, "stripe_subscription_id", None):
-            # Organization already has an active subscription; treat the input as
-            # additional seats to add to the existing licensed item quantity.
+            # Organization already has an active subscription; push the user through
+            # Stripe Checkout so they explicitly confirm the updated quantity.
             try:
                 stripe.api_key = PaymentsHelper.get_stripe_key()
                 subscription = stripe.Subscription.retrieve(
@@ -4090,8 +4094,9 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                     expand=["items.data.price"],
                 )
 
+                subscription_items = subscription.get("items", {}).get("data", []) or []
                 licensed_item = None
-                for item in subscription.get("items", {}).get("data", []) or []:
+                for item in subscription_items:
                     price = item.get("price", {}) or {}
                     price_usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
                     price_id = price.get("id")
@@ -4111,35 +4116,89 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                     current_quantity = 0
                 new_quantity = current_quantity + seat_count
 
-                stripe.Subscription.modify(
-                    subscription.get("id"),
-                    items=[
-                        {
-                            "id": licensed_item.get("id"),
-                            "quantity": new_quantity,
-                        }
-                    ],
-                    metadata={
-                        **(subscription.get("metadata") or {}),
-                        "seat_requestor_id": str(request.user.id),
-                    },
-                    proration_behavior="create_prorations",
-                )
+                request.session["org_seat_portal_target"] = {
+                    "org_id": str(org.id),
+                    "current": current_quantity,
+                    "requested": new_quantity,
+                }
 
-                messages.success(
-                    request,
-                    "Seat update submitted. Additional seats will activate once Stripe processes the change.",
-                )
+                return_url = request.build_absolute_uri(reverse("billing")) + "?seats_success=1"
+
+                try:
+                    session = stripe.billing_portal.Session.create(
+                        api_key=stripe.api_key,
+                        customer=subscription.get("customer"),
+                        flow_data={
+                            "type": "subscription_update_confirm",
+                            "subscription_update_confirm": {
+                                "subscription": subscription.get("id"),
+                                "items": [
+                                    {
+                                        "id": licensed_item.get("id"),
+                                        "quantity": new_quantity,
+                                    }
+                                ],
+                            },
+                        },
+                        return_url=return_url,
+                    )
+
+                    return redirect(session.url)
+                except stripe.error.InvalidRequestError as portal_exc:
+                    logger.warning(
+                        "Stripe portal seat update unavailable for subscription %s on org %s. Falling back to direct seat update: %s",
+                        getattr(billing, "stripe_subscription_id", None),
+                        org.id,
+                        portal_exc,
+                    )
+                    request.session.pop("org_seat_portal_target", None)
+
+                    try:
+                        stripe.Subscription.modify(
+                            subscription.get("id"),
+                            items=[
+                                {
+                                    "id": licensed_item.get("id"),
+                                    "quantity": new_quantity,
+                                }
+                            ],
+                            metadata={
+                                **(subscription.get("metadata") or {}),
+                                "seat_requestor_id": str(request.user.id),
+                            },
+                            proration_behavior="create_prorations",
+                        )
+
+                        messages.warning(
+                            request,
+                            "Stripe portal seat updates are disabled, so we applied the seat change immediately. Additional seats will activate once Stripe processes the change.",
+                        )
+                    except Exception as modify_exc:
+                        logger.exception(
+                            "Failed to update Stripe subscription %s for org %s after portal fallback: %s",
+                            getattr(billing, "stripe_subscription_id", None),
+                            org.id,
+                            modify_exc,
+                        )
+                        messages.error(
+                            request,
+                            "We weren't able to update the seat count. Please try again or contact support.",
+                        )
+
+                    return redirect("billing")
+                except Exception as portal_exc:
+                    raise portal_exc
             except Exception as exc:
                 logger.exception(
-                    "Failed to update Stripe subscription %s for org %s: %s",
+                    "Failed to start Stripe portal update for subscription %s on org %s: %s",
                     getattr(billing, "stripe_subscription_id", None),
                     org.id,
                     exc,
                 )
+                request.session.pop("org_seat_portal_target", None)
                 messages.error(
                     request,
-                    "We weren't able to update the seat count. Please try again or contact support.",
+                    "We weren't able to start the checkout flow. Please try again or contact support.",
                 )
 
             return redirect("billing")
@@ -4166,10 +4225,6 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                     "quantity": seat_count,
                 }
             ]
-
-            overage_price_id = stripe_settings.org_team_additional_task_price_id
-            if overage_price_id:
-                line_items.append({"price": overage_price_id})
 
             session = stripe.checkout.Session.create(
                 customer=customer.id,
