@@ -130,6 +130,26 @@ def _org_event_properties(request, properties: dict | None = None, *, organizati
     return Analytics.with_org_properties(properties, organization=org)
 
 
+def _track_org_event_for_console(
+    request,
+    event: AnalyticsEvent,
+    extra_props: dict | None = None,
+    *,
+    organization=None,
+) -> dict:
+    """Track an analytics event with organization context for console actions."""
+    props = _org_event_properties(request, extra_props or {}, organization=organization)
+
+    transaction.on_commit(lambda: Analytics.track_event(
+        user_id=request.user.id,
+        event=event,
+        source=AnalyticsSource.WEB,
+        properties=props.copy(),
+    ))
+
+    return props
+
+
 def _set_overage_detach_session(request, org_id: str, subscription_id: str, price_id: str) -> None:
     """Record that the org's overage SKU was temporarily detached for seat updates."""
     if not subscription_id or not price_id:
@@ -4487,22 +4507,6 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
         if membership is None:
             return HttpResponseForbidden()
 
-        def _track_org_event(event: AnalyticsEvent, extra_props: dict) -> dict:
-            props = Analytics.with_org_properties(
-                {
-                    'actor_id': str(request.user.id),
-                    **extra_props,
-                },
-                organization=org,
-            )
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=event,
-                source=AnalyticsSource.WEB,
-                properties=props.copy(),
-            ))
-            return props
-
         form = OrganizationSeatPurchaseForm(request.POST, org=org)
         if not form.is_valid():
             for error in form.errors.get("seats", []):
@@ -4585,21 +4589,27 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                         return_url=return_url,
                     )
 
-                    _track_org_event(
+                    _track_org_event_for_console(
+                        request,
                         AnalyticsEvent.ORGANIZATION_SEAT_ADDED,
                         {
+                            'actor_id': str(request.user.id),
                             'seats_requested': seat_count,
                             'current_quantity': current_quantity,
                             'target_quantity': new_quantity,
                             'method': 'portal',
                         },
+                        organization=org,
                     )
-                    _track_org_event(
+                    _track_org_event_for_console(
+                        request,
                         AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
                         {
+                            'actor_id': str(request.user.id),
                             'update_type': 'seats_portal_increase',
                             'seats_requested': seat_count,
                         },
+                        organization=org,
                     )
                     return redirect(session.url)
                 except stripe.error.InvalidRequestError as portal_exc:
@@ -4640,21 +4650,27 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                             request,
                             "Stripe portal seat updates are disabled, so we applied the seat change immediately. Additional seats will activate once Stripe processes the change.",
                         )
-                        _track_org_event(
+                        _track_org_event_for_console(
+                            request,
                             AnalyticsEvent.ORGANIZATION_SEAT_ADDED,
                             {
+                                'actor_id': str(request.user.id),
                                 'seats_requested': seat_count,
                                 'current_quantity': current_quantity,
                                 'target_quantity': new_quantity,
                                 'method': 'direct_update',
                             },
+                            organization=org,
                         )
-                        _track_org_event(
+                        _track_org_event_for_console(
+                            request,
                             AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
                             {
+                                'actor_id': str(request.user.id),
                                 'update_type': 'seats_direct_increase',
                                 'seats_requested': seat_count,
                             },
+                            organization=org,
                         )
                     except Exception as modify_exc:
                         logger.exception(
@@ -4737,19 +4753,25 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                 },
             )
 
-            _track_org_event(
+            _track_org_event_for_console(
+                request,
                 AnalyticsEvent.ORGANIZATION_SEAT_ADDED,
                 {
+                    'actor_id': str(request.user.id),
                     'seats_requested': seat_count,
                     'method': 'checkout',
                 },
+                organization=org,
             )
-            _track_org_event(
+            _track_org_event_for_console(
+                request,
                 AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
                 {
+                    'actor_id': str(request.user.id),
                     'update_type': 'seats_checkout_initiated',
                     'seats_requested': seat_count,
                 },
+                organization=org,
             )
             return redirect(session.url)
         except Exception as exc:
@@ -4784,22 +4806,6 @@ class OrganizationSeatScheduleView(WaffleFlagMixin, LoginRequiredMixin, View):
 
         if membership is None:
             return HttpResponseForbidden()
-
-        def _track_org_event(event: AnalyticsEvent, extra_props: dict) -> dict:
-            props = Analytics.with_org_properties(
-                {
-                    'actor_id': str(request.user.id),
-                    **extra_props,
-                },
-                organization=org,
-            )
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=event,
-                source=AnalyticsSource.WEB,
-                properties=props.copy(),
-            ))
-            return props
 
         form = OrganizationSeatReductionForm(request.POST, org=org)
         if not form.is_valid():
@@ -4978,24 +4984,30 @@ class OrganizationSeatScheduleView(WaffleFlagMixin, LoginRequiredMixin, View):
                 ]
             )
 
-            messages.success(
+           messages.success(
+               request,
+               "Seat reduction scheduled. The new total will apply at the start of the next billing period.",
+           )
+            _track_org_event_for_console(
                 request,
-                "Seat reduction scheduled. The new total will apply at the start of the next billing period.",
-            )
-            _track_org_event(
                 AnalyticsEvent.ORGANIZATION_SEAT_REMOVED,
                 {
+                    'actor_id': str(request.user.id),
                     'target_quantity': target_quantity,
                     'current_quantity': current_quantity,
                     'method': 'schedule',
                 },
+                organization=org,
             )
-            _track_org_event(
+            _track_org_event_for_console(
+                request,
                 AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
                 {
+                    'actor_id': str(request.user.id),
                     'update_type': 'seats_schedule_reduction',
                     'target_quantity': target_quantity,
                 },
+                organization=org,
             )
         except Exception as exc:  # pragma: no cover - unexpected Stripe error
             logger.exception(
@@ -5036,22 +5048,6 @@ class OrganizationSeatScheduleCancelView(WaffleFlagMixin, LoginRequiredMixin, Vi
         if membership is None:
             return HttpResponseForbidden()
 
-        def _track_org_event(event: AnalyticsEvent, extra_props: dict) -> dict:
-            props = Analytics.with_org_properties(
-                {
-                    'actor_id': str(request.user.id),
-                    **extra_props,
-                },
-                organization=org,
-            )
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=event,
-                source=AnalyticsSource.WEB,
-                properties=props.copy(),
-            ))
-            return props
-
         billing = getattr(org, "billing", None)
         schedule_id = getattr(billing, "pending_seat_schedule_id", "") if billing else ""
 
@@ -5086,11 +5082,14 @@ class OrganizationSeatScheduleCancelView(WaffleFlagMixin, LoginRequiredMixin, Vi
             ]
         )
 
-        _track_org_event(
+        _track_org_event_for_console(
+            request,
             AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
             {
+                'actor_id': str(request.user.id),
                 'update_type': 'seats_schedule_cancelled',
             },
+            organization=org,
         )
         messages.success(request, "Scheduled seat changes were cancelled.")
         return redirect("billing")
