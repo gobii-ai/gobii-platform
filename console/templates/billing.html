@@ -185,7 +185,7 @@
       </div>
 
       <div class="bg-white/90 backdrop-blur-sm border border-slate-200 shadow rounded-xl p-6"
-           x-data="Object.assign(billingSettings(), { enabled: {{ org_auto_purchase_state.enabled|yesno:'true,false' }}, infinite: {{ org_auto_purchase_state.infinite|yesno:'true,false' }}, maxTasks: {{ org_auto_purchase_state.max_tasks }}, canModify: {{ org_can_manage_billing|yesno:'true,false' }} })"
+           x-data="billingSettings({ enabled: {{ org_auto_purchase_state.enabled|yesno:'true,false' }}, infinite: {{ org_auto_purchase_state.infinite|yesno:'true,false' }}, maxTasks: {{ org_auto_purchase_state.max_tasks }}, canModify: {{ org_can_manage_billing|yesno:'true,false' }} })"
            x-init="loadSettings()">
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
@@ -436,8 +436,8 @@
 {% block extra_js %}
   {{ block.super }}
   <script>
-    function billingSettings() {
-      return {
+    function billingSettings(initialState) {
+      const state = {
         enabled: false,
         infinite: false,
         maxTasks: 1000,
@@ -535,7 +535,17 @@
           const parts = value.split(`; ${name}=`);
           if (parts.length === 2) return parts.pop().split(';').shift();
         }
+      };
+
+      if (initialState && typeof initialState === 'object') {
+        for (const key in initialState) {
+          if (Object.prototype.hasOwnProperty.call(initialState, key)) {
+            state[key] = initialState[key];
+          }
+        }
       }
+
+      return state;
     }
   </script>
 {% endblock %}
