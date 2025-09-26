@@ -13,6 +13,7 @@
          class="relative flex flex-1 flex-col gap-4"
          data-timeline-limit="{{ timeline_limit }}"
          data-timeline-newer-url="{{ timeline_newer_url }}"
+         data-timeline-window-url="{{ timeline_window_url }}"
          data-timeline-older-url="{{ timeline_older_url }}"
          data-event-stream-url="{{ event_stream_url }}"
          data-processing-status-url="{{ processing_status_url }}"
@@ -26,32 +27,36 @@
           <div id="timeline-load-older" class="timeline-load-control border-b border-slate-100" data-side="older">
             <button type="button"
                     data-role="load-older-button"
+                    data-direction="older"
+                    data-action="timeline-fetch"
+                    data-url="{{ timeline_older_url }}"
+                    data-target="#timeline-event-list"
+                    data-swap="afterbegin"
                     class="timeline-load-button"
-                    hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
-                    hx-target="#timeline-event-list"
-                    hx-swap="innerHTML"
-                    {% if not timeline_window.has_more_older %}hidden{% endif %}>
+                    {% if not timeline_has_more_older %}hidden{% endif %}>
               <span class="timeline-load-indicator" aria-hidden="true"></span>
               <span class="timeline-load-label">Load older</span>
             </button>
             <span data-role="history-start"
                   class="timeline-history-label"
-                  {% if timeline_window.has_more_older %}hidden{% endif %}>
+                  {% if timeline_has_more_older %}hidden{% endif %}>
               Beginning of history
             </span>
           </div>
           <div id="timeline-event-list" class="flex flex-col gap-3">
-            {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
+            {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name suppress_empty=suppress_empty %}
           </div>
           <div id="processing-indicator-slot" class="mt-2 px-1"></div>
           <div id="timeline-load-newer" class="timeline-load-control border-t border-slate-100" data-side="newer">
             <button type="button"
                     data-role="load-newer-button"
+                    data-direction="newer"
+                    data-action="timeline-fetch"
+                    data-url="{{ timeline_newer_url }}"
+                    data-target="#timeline-event-list"
+                    data-swap="beforeend"
                     class="timeline-load-button"
-                    hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ timeline_window.window_newest_cursor|default:''|urlencode }}"
-                    hx-target="#timeline-event-list"
-                    hx-swap="innerHTML"
-                    {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+                    {% if not timeline_has_more_newer %}hidden{% endif %}>
               <span class="timeline-load-indicator" aria-hidden="true"></span>
               <span class="timeline-load-label">Load newer</span>
             </button>
@@ -60,12 +65,13 @@
       </div>
 
       <div id="timeline-cursors" class="hidden"
-           data-older="{{ timeline_window.window_oldest_cursor|default:'' }}"
-           data-newer="{{ timeline_window.window_newest_cursor|default:'' }}"
-           data-has-more-older="{{ timeline_window.has_more_older|yesno:'true,false' }}"
-           data-has-more-newer="{{ timeline_window.has_more_newer|yesno:'true,false' }}"
+           data-older="{{ timeline_oldest_cursor|default:'' }}"
+           data-newer="{{ timeline_newest_cursor|default:'' }}"
+           data-has-more-older="{{ timeline_has_more_older|yesno:'true,false' }}"
+           data-has-more-newer="{{ timeline_has_more_newer|yesno:'true,false' }}"
            data-processing-active="{{ processing_active|yesno:'true,false' }}"
-           data-direction="initial"></div>
+           data-direction="initial"
+           data-mode="snapshot"></div>
 
       <div id="agent-composer-shell" class="composer-shell">
         <div class="composer-surface">
@@ -919,7 +925,9 @@
       eventSource: null,
       fetchingNewer: false,
       fetchingOlder: false,
+      resyncing: false,
       queuedNewerTrigger: null,
+      queuedOlder: false,
       processingActive: initialProcessingActive,
       bottomAnchorOffset: null,
       pageBottomOffset: null,
@@ -931,6 +939,9 @@
       processingRefreshPromise: null,
       pendingRealtime: 0,
       scrollAnchor: null,
+      inflightDirection: null,
+      pendingResync: false,
+      justResynced: false,
     };
     window.__agentWorkspaceState = state;
 
@@ -1845,6 +1856,7 @@
 
     function shouldDeferRealtime() {
       if (!timeline) return false;
+      if (state.fetchingOlder || state.resyncing) return true;
       if (hasMoreNewerInDom()) return true;
       return !state.autoScroll;
     }
@@ -1858,6 +1870,7 @@
     function drainPendingRealtime() {
       if (!state.pendingRealtime) return;
       if (state.fetchingNewer) return;
+      if (state.resyncing) return;
       if (shouldDeferRealtime()) return;
       state.pendingRealtime = 0;
       updateJumpButton();
@@ -1868,6 +1881,7 @@
       if (!hasMoreNewerInDom()) return;
       if (state.fetchingNewer) return;
       if (state.fetchingOlder) return;
+      if (state.resyncing) return;
       if (!state.autoScroll) return;
       if (state.pendingRealtime > 0) return;
       const trigger = state.lastNewerTrigger;
@@ -1990,45 +2004,172 @@
 
     function completeNewerRequest() {
       state.fetchingNewer = false;
+      state.inflightDirection = null;
       const queuedTrigger = state.queuedNewerTrigger;
       state.queuedNewerTrigger = null;
       if (queuedTrigger) {
         requestNewer(queuedTrigger);
+        return;
       }
+      flushQueuedRequests();
     }
 
-    function completeOlderRequest() {
-      state.fetchingOlder = false;
-      state.scrollAnchor = null;
-      if (state.queuedNewerTrigger && !state.fetchingNewer) {
+    const olderUrl = root.dataset.timelineOlderUrl || null;
+    const windowUrl = root.dataset.timelineWindowUrl || null;
+
+    function buildTimelineRequest(direction, { trigger = direction, mode } = {}) {
+      const baseMode = mode || (direction === 'snapshot' ? 'snapshot' : 'delta');
+      const params = new URLSearchParams({ limit: String(limit), mode: baseMode });
+      const cursorNode = getCursorsEl();
+      const oldest = cursorNode?.dataset?.older || '';
+      const newest = cursorNode?.dataset?.newer || '';
+
+      let baseUrl = null;
+      if (direction === 'older') {
+        baseUrl = olderUrl;
+        if (oldest) {
+          params.set('cursor', oldest);
+          params.set('current_oldest', oldest);
+        }
+        if (newest) {
+          params.set('current_newest', newest);
+        }
+      } else if (direction === 'newer') {
+        baseUrl = newerUrl;
+        if (newest) {
+          params.set('cursor', newest);
+          params.set('current_newest', newest);
+        }
+        if (oldest) {
+          params.set('current_oldest', oldest);
+        }
+      } else {
+        baseUrl = windowUrl || newerUrl || olderUrl;
+        params.set('direction', 'initial');
+      }
+
+      if (!baseUrl) {
+        console.warn('[agent-workspace] Missing base URL for timeline request', direction);
+        return null;
+      }
+
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      const url = `${baseUrl}${separator}${params.toString()}`;
+      const swap = direction === 'older' ? 'afterbegin' : direction === 'newer' ? 'beforeend' : 'innerHTML';
+
+      return {
+        url,
+        swap,
+        target: '#timeline-event-list',
+        headers: {
+          'X-Timeline-Action': direction,
+          'X-Timeline-Trigger': trigger,
+        },
+      };
+    }
+
+    function sendTimelineRequest(config) {
+      if (!config) return;
+      window.htmx.ajax('GET', config.url, {
+        target: config.target,
+        swap: config.swap,
+        headers: config.headers,
+      });
+    }
+
+    function flushQueuedRequests() {
+      if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        return;
+      }
+      if (state.pendingResync) {
+        state.pendingResync = false;
+        requestTimelineSnapshot('queued-resync');
+        return;
+      }
+      if (state.queuedOlder) {
+        state.queuedOlder = false;
+        requestOlder('queued-older');
+        return;
+      }
+      if (state.queuedNewerTrigger) {
         const queuedTrigger = state.queuedNewerTrigger;
         state.queuedNewerTrigger = null;
         requestNewer(queuedTrigger);
       }
     }
 
-    function requestNewer(trigger) {
-      if (!newerUrl || !timeline) return;
-      const label = trigger || 'manual-newer';
-      if (state.fetchingNewer || state.fetchingOlder) {
-        state.queuedNewerTrigger = label;
+    function requestOlder(trigger = 'manual-older') {
+      if (!olderUrl || !timeline) return;
+      state.justResynced = false;
+      if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        state.queuedOlder = true;
         return;
       }
-      const params = new URLSearchParams({ limit: String(limit) });
-      const cursorNode = getCursorsEl();
-      const cursor = cursorNode?.dataset.newer;
-      if (cursor) params.set('cursor', cursor);
+      const request = buildTimelineRequest('older', { trigger });
+      if (!request) return;
+
+      state.action = 'older';
+      state.fetchingOlder = true;
+      state.inflightDirection = 'older';
+      state.previousScrollHeight = timeline?.scrollHeight || 0;
+      state.scrollAnchor = captureScrollAnchor();
+
+      sendTimelineRequest(request);
+    }
+
+    function requestNewer(trigger = 'manual-newer') {
+      if (!newerUrl || !timeline) return;
+      state.justResynced = false;
+      if (state.fetchingNewer || state.fetchingOlder || state.resyncing) {
+        state.queuedNewerTrigger = trigger;
+        return;
+      }
+      const request = buildTimelineRequest('newer', { trigger });
+      if (!request) return;
 
       state.action = 'newer';
       state.fetchingNewer = true;
-      state.lastNewerTrigger = label;
+      state.inflightDirection = 'newer';
+      state.lastNewerTrigger = trigger;
       const nearBottom = isNearBottom();
       state.autoScroll = state.pendingComposerScroll ? true : nearBottom;
 
-      window.htmx.ajax('GET', `${newerUrl}&${params.toString()}`, {
-        target: '#timeline-event-list',
-        swap: 'beforeend',
-      });
+      sendTimelineRequest(request);
+    }
+
+    function requestTimelineSnapshot(trigger = 'snapshot') {
+      if (!timeline) return;
+      state.justResynced = false;
+      if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        state.pendingResync = true;
+        return;
+      }
+
+      state.pendingResync = false;
+      const request = buildTimelineRequest('snapshot', { trigger, mode: 'snapshot' });
+      if (!request) return;
+
+      state.action = 'snapshot';
+      state.resyncing = true;
+      state.inflightDirection = 'snapshot';
+      state.previousScrollHeight = timeline?.scrollHeight || 0;
+
+      sendTimelineRequest(request);
+    }
+
+    function completeOlderRequest() {
+      state.fetchingOlder = false;
+      state.inflightDirection = null;
+      state.scrollAnchor = null;
+      flushQueuedRequests();
+    }
+
+    function completeSnapshotRequest() {
+      state.resyncing = false;
+      state.inflightDirection = null;
+      state.justResynced = true;
+      state.pendingResync = false;
+      flushQueuedRequests();
     }
 
     if (timeline) {
@@ -2063,6 +2204,18 @@
 
     window.addEventListener('resize', handleResize);
     window.addEventListener('orientationchange', handleOrientationChange);
+
+    document.addEventListener('click', (event) => {
+      const fetchButton = event.target.closest('[data-action="timeline-fetch"]');
+      if (!fetchButton) return;
+      event.preventDefault();
+      const direction = fetchButton.dataset.direction;
+      if (direction === 'older') {
+        requestOlder('manual-older');
+      } else if (direction === 'newer') {
+        requestNewer('manual-newer');
+      }
+    });
 
     document.addEventListener('click', (event) => {
       const toggle = event.target.closest('[data-role="cluster-toggle"]');
@@ -2214,20 +2367,48 @@
     window.htmx.on('htmx:beforeRequest', (event) => {
       if (event.detail?.target?.id !== 'timeline-event-list') return;
       closeOpenToolChip();
-      const url = event.detail.requestConfig?.path || '';
-      if (url.includes('direction=older')) {
+
+      const sourceEl = event.detail.elt;
+      const headers = event.detail.requestConfig?.headers || {};
+      const params = event.detail.requestConfig?.parameters || {};
+
+      const headerLookup = (name) => {
+        const lower = name.toLowerCase();
+        return headers[name] ?? headers[lower] ?? headers[lower.replace(/-/g, '_')];
+      };
+
+      let direction = sourceEl?.dataset?.direction || headerLookup('X-Timeline-Action') || params.direction || state.action || 'idle';
+      if (direction === 'initial') {
+        direction = 'snapshot';
+      }
+
+      const triggerLabel = headerLookup('X-Timeline-Trigger');
+
+      if (direction === 'older') {
         state.action = 'older';
         state.fetchingOlder = true;
+        state.inflightDirection = 'older';
         state.previousScrollHeight = timeline?.scrollHeight || 0;
         state.scrollAnchor = captureScrollAnchor();
         state.lastNewerTrigger = null;
-      } else if (url.includes('direction=newer')) {
+      } else if (direction === 'newer') {
         state.action = 'newer';
         state.fetchingNewer = true;
-        if (!state.lastNewerTrigger) {
+        state.inflightDirection = 'newer';
+        if (triggerLabel) {
+          state.lastNewerTrigger = triggerLabel;
+        } else if (!state.lastNewerTrigger) {
           state.lastNewerTrigger = 'manual-newer';
         }
+      } else if (direction === 'snapshot') {
+        state.action = 'snapshot';
+        state.resyncing = true;
+        state.inflightDirection = 'snapshot';
+        state.previousScrollHeight = timeline?.scrollHeight || 0;
+      } else {
+        state.action = direction;
       }
+
       syncLoadControls();
     });
 
@@ -2294,7 +2475,11 @@
       }
 
       dedupeTimeline();
-      trimTimeline(state.action);
+      if (state.action === 'older' || state.action === 'newer') {
+        trimTimeline(state.action);
+      } else if (state.action === 'snapshot') {
+        trimTimeline('snapshot');
+      }
       syncKnownCursors({ animate: state.action === 'newer' });
       updateComposerCursor();
 
@@ -2314,8 +2499,15 @@
         completeNewerRequest();
       }
 
+      if (state.action === 'snapshot' || state.resyncing) {
+        completeSnapshotRequest();
+      }
+
       if (state.action === 'newer' && !hasMoreNewerInDom()) {
         state.pendingRealtime = 0;
+      } else if (state.action === 'snapshot') {
+        state.pendingRealtime = 0;
+        state.lastNewerTrigger = null;
       }
       updateJumpButtonPending();
 
@@ -2343,15 +2535,32 @@
       }
     });
 
+    document.body.addEventListener('timeline:resync', () => {
+      state.pendingRealtime = 0;
+      if (state.justResynced) {
+        state.justResynced = false;
+        return;
+      }
+      if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        state.pendingResync = true;
+        return;
+      }
+      requestTimelineSnapshot('trigger-resync');
+    });
+
     window.htmx.on('htmx:responseError', (event) => {
       if (event.detail?.target?.id !== 'timeline-event-list') return;
       const hadOlder = state.action === 'older' || state.fetchingOlder;
       const hadNewer = state.action === 'newer' || state.fetchingNewer;
+      const hadSnapshot = state.action === 'snapshot' || state.resyncing;
       if (hadOlder) {
         completeOlderRequest();
       }
       if (hadNewer) {
         completeNewerRequest();
+      }
+      if (hadSnapshot) {
+        completeSnapshotRequest();
       }
       state.action = 'idle';
       state.previousScrollHeight = 0;
@@ -2365,11 +2574,15 @@
       if (event.detail?.target?.id !== 'timeline-event-list') return;
       const hadOlder = state.action === 'older' || state.fetchingOlder;
       const hadNewer = state.action === 'newer' || state.fetchingNewer;
+      const hadSnapshot = state.action === 'snapshot' || state.resyncing;
       if (hadOlder) {
         completeOlderRequest();
       }
       if (hadNewer) {
         completeNewerRequest();
+      }
+      if (hadSnapshot) {
+        completeSnapshotRequest();
       }
       state.action = 'idle';
       state.previousScrollHeight = 0;

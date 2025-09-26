@@ -52,6 +52,29 @@ def _decode_cursor(cursor: str) -> CursorTuple:
     return datetime.fromisoformat(ts_str), kind, discriminator
 
 
+def compare_cursors(cursor_a: str | None, cursor_b: str | None) -> int:
+    """Compare two timeline cursors, returning -1, 0, or 1."""
+
+    if cursor_a is None and cursor_b is None:
+        return 0
+    if cursor_a is None:
+        return -1
+    if cursor_b is None:
+        return 1
+
+    ts_a, kind_a, discr_a = _decode_cursor(cursor_a)
+    ts_b, kind_b, discr_b = _decode_cursor(cursor_b)
+
+    key_a = (ts_a, kind_a, discr_a)
+    key_b = (ts_b, kind_b, discr_b)
+
+    if key_a < key_b:
+        return -1
+    if key_a > key_b:
+        return 1
+    return 0
+
+
 def _has_history_before_cursor(
     messages_qs,
     steps_qs,
@@ -71,6 +94,35 @@ def _has_history_before_cursor(
         message_filter |= Q(timestamp=ts, seq__lt=discriminator)
     elif kind == "step":
         step_filter |= Q(created_at=ts, id__lt=discriminator)
+
+    return (
+        messages_qs.filter(message_filter).exists()
+        or steps_qs.filter(step_filter).exists()
+    )
+
+
+def _has_history_after_cursor(
+    messages_qs,
+    steps_qs,
+    cursor: str | None,
+) -> bool:
+    """Return True if there are timeline records newer than the given cursor."""
+
+    if not cursor:
+        return (
+            messages_qs.exists()
+            or steps_qs.exists()
+        )
+
+    ts, kind, discriminator = _decode_cursor(cursor)
+
+    message_filter = Q(timestamp__gt=ts)
+    step_filter = Q(created_at__gt=ts)
+
+    if kind == "message":
+        message_filter |= Q(timestamp=ts, seq__gt=discriminator)
+    elif kind == "step":
+        step_filter |= Q(created_at=ts, id__gt=discriminator)
 
     return (
         messages_qs.filter(message_filter).exists()
@@ -221,3 +273,67 @@ def fetch_timeline_window(
         window_oldest_cursor=window_oldest_cursor,
         window_newest_cursor=window_newest_cursor,
     )
+
+
+def has_timeline_history_before(agent: PersistentAgent, cursor: str | None) -> bool:
+    """Public helper that mirrors the internal before-cursor check."""
+
+    messages_qs = _get_base_message_qs(agent)
+    steps_qs = _get_base_step_qs(agent)
+    return _has_history_before_cursor(messages_qs, steps_qs, cursor)
+
+
+def has_timeline_history_after(agent: PersistentAgent, cursor: str | None) -> bool:
+    """Return True if the agent has events newer than the provided cursor."""
+
+    messages_qs = _get_base_message_qs(agent)
+    steps_qs = _get_base_step_qs(agent)
+    return _has_history_after_cursor(messages_qs, steps_qs, cursor)
+
+
+def get_timeline_extents(agent: PersistentAgent) -> tuple[str | None, str | None]:
+    """Return a tuple of (oldest_cursor, newest_cursor) for the agent timeline."""
+
+    messages_oldest = (
+        _get_base_message_qs(agent)
+        .order_by("timestamp", "id")
+        .first()
+    )
+    messages_newest = (
+        _get_base_message_qs(agent)
+        .order_by("-timestamp", "-id")
+        .first()
+    )
+
+    steps_oldest = (
+        _get_base_step_qs(agent)
+        .order_by("created_at", "id")
+        .first()
+    )
+    steps_newest = (
+        _get_base_step_qs(agent)
+        .order_by("-created_at", "-id")
+        .first()
+    )
+
+    oldest_candidates = []
+    newest_candidates = []
+
+    if messages_oldest:
+        oldest_candidates.append(_build_message_event(messages_oldest))
+    if steps_oldest:
+        oldest_candidates.append(_build_step_event(steps_oldest))
+    if messages_newest:
+        newest_candidates.append(_build_message_event(messages_newest))
+    if steps_newest:
+        newest_candidates.append(_build_step_event(steps_newest))
+
+    oldest_cursor = None
+    if oldest_candidates:
+        oldest_cursor = min(oldest_candidates, key=lambda e: e.sort_key).cursor
+
+    newest_cursor = None
+    if newest_candidates:
+        newest_cursor = max(newest_candidates, key=lambda e: e.sort_key).cursor
+
+    return oldest_cursor, newest_cursor

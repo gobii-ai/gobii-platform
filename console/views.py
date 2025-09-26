@@ -98,7 +98,13 @@ from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMe
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
-from console.timeline import fetch_timeline_window
+from console.timeline import (
+    compare_cursors,
+    fetch_timeline_window,
+    get_timeline_extents,
+    has_timeline_history_after,
+    has_timeline_history_before,
+)
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
     heartbeat_web_session,
@@ -5232,6 +5238,27 @@ class AgentWorkspaceView(AgentAccessMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         agent = self.get_agent()
         timeline_window = fetch_timeline_window(agent, limit=TIMELINE_DEFAULT_LIMIT)
+        timeline_oldest_cursor = timeline_window.window_oldest_cursor
+        timeline_newest_cursor = timeline_window.window_newest_cursor
+        timeline_has_more_older = timeline_window.has_more_older
+        timeline_has_more_newer = timeline_window.has_more_newer
+
+        if timeline_oldest_cursor is None or timeline_newest_cursor is None:
+            fallback_oldest, fallback_newest = get_timeline_extents(agent)
+            if timeline_oldest_cursor is None:
+                timeline_oldest_cursor = fallback_oldest
+            if timeline_newest_cursor is None:
+                timeline_newest_cursor = fallback_newest
+
+        timeline_has_more_older = (
+            timeline_has_more_older
+            or has_timeline_history_before(agent, timeline_oldest_cursor)
+        )
+        timeline_has_more_newer = (
+            timeline_has_more_newer
+            or has_timeline_history_after(agent, timeline_newest_cursor)
+        )
+
         window_url = reverse("agent_timeline_window", args=[agent.id])
         event_stream_url = reverse("api:agent-events-stream", args=[agent.id])
         processing_active = is_agent_processing(agent.id)
@@ -5247,6 +5274,12 @@ class AgentWorkspaceView(AgentAccessMixin, TemplateView):
             {
                 "timeline_window": timeline_window,
                 "timeline_limit": TIMELINE_DEFAULT_LIMIT,
+                "timeline_oldest_cursor": timeline_oldest_cursor,
+                "timeline_newest_cursor": timeline_newest_cursor,
+                "timeline_has_more_older": timeline_has_more_older,
+                "timeline_has_more_newer": timeline_has_more_newer,
+                "timeline_mode": "snapshot",
+                "suppress_empty": False,
                 "channel_labels": CHANNEL_LABELS,
                 "timeline_window_url": window_url,
                 "timeline_older_url": f"{window_url}?direction=older",
@@ -5264,6 +5297,7 @@ class AgentWorkspaceView(AgentAccessMixin, TemplateView):
 
 class AgentTimelineWindowView(AgentAccessMixin, TemplateView):
     template_name = "console/partials/agent_timeline_window.html"
+    delta_template_name = "console/partials/agent_timeline_delta.html"
 
     def get(self, request, *args, **kwargs):
         agent = self.get_agent()
@@ -5272,6 +5306,9 @@ class AgentTimelineWindowView(AgentAccessMixin, TemplateView):
             direction = "initial"
 
         cursor = request.GET.get("cursor") or None
+        requested_current_newest = request.GET.get("current_newest") or None
+        requested_current_oldest = request.GET.get("current_oldest") or None
+        requested_mode = request.GET.get("mode") or None
 
         limit_param = request.GET.get("limit")
         try:
@@ -5279,48 +5316,110 @@ class AgentTimelineWindowView(AgentAccessMixin, TemplateView):
         except (TypeError, ValueError):
             limit = TIMELINE_DEFAULT_LIMIT
 
-        window = fetch_timeline_window(
-            agent,
-            limit=limit,
-            direction=direction,
-            cursor=cursor,
-        )
+        default_mode = "delta" if direction in {"older", "newer"} else "snapshot"
+        mode = requested_mode or default_mode
+        if mode not in {"delta", "snapshot"}:
+            mode = default_mode
 
-        requested_current_newest = request.GET.get("current_newest") or None
-        window_newest_cursor = window.window_newest_cursor
+        requires_resync = False
+        if direction == "older" and mode == "delta" and cursor is None:
+            requires_resync = True
+        if direction == "newer" and mode == "delta":
+            if cursor is None or requested_current_newest is None:
+                requires_resync = True
+            elif compare_cursors(cursor, requested_current_newest) != 0:
+                requires_resync = True
 
-        if direction in {"initial", "newer"} and window_newest_cursor:
-            current_newest_cursor = window_newest_cursor
+        if mode == "snapshot" or requires_resync or direction == "initial":
+            window = fetch_timeline_window(
+                agent,
+                limit=limit,
+                direction="initial",
+                cursor=None,
+            )
+            timeline_oldest_cursor = window.window_oldest_cursor
+            timeline_newest_cursor = window.window_newest_cursor
+            timeline_has_more_older = window.has_more_older
+            timeline_has_more_newer = window.has_more_newer
+            template_name = self.template_name
+            response_mode = "snapshot"
+            events = window.events
         else:
-            current_newest_cursor = requested_current_newest or window_newest_cursor
+            window = fetch_timeline_window(
+                agent,
+                limit=limit,
+                direction=direction,
+                cursor=cursor,
+            )
+            events = window.events
+            template_name = self.delta_template_name
+            response_mode = "delta"
+
+            # Establish effective bounds after applying the delta.
+            if direction == "older":
+                effective_oldest = events[0].cursor if events else cursor
+                if effective_oldest is None:
+                    effective_oldest = requested_current_oldest
+                effective_newest = requested_current_newest or (cursor if cursor else None)
+                timeline_oldest_cursor = effective_oldest
+                timeline_newest_cursor = effective_newest or window.window_newest_cursor
+            elif direction == "newer":
+                if events:
+                    effective_newest = events[-1].cursor
+                elif window.window_newest_cursor:
+                    effective_newest = window.window_newest_cursor
+                else:
+                    effective_newest = requested_current_newest or cursor
+                effective_oldest = requested_current_oldest or window.window_oldest_cursor
+                timeline_oldest_cursor = effective_oldest
+                timeline_newest_cursor = effective_newest
+            else:
+                timeline_oldest_cursor = window.window_oldest_cursor
+                timeline_newest_cursor = window.window_newest_cursor
+
+            timeline_has_more_older = has_timeline_history_before(agent, timeline_oldest_cursor)
+            timeline_has_more_newer = has_timeline_history_after(agent, timeline_newest_cursor)
 
         window_url = reverse("agent_timeline_window", args=[agent.id])
 
         context = {
             "agent": agent,
+            "events": events,
             "timeline_window": window,
             "direction": direction,
             "timeline_limit": limit,
             "channel_labels": CHANNEL_LABELS,
             "requested_cursor": cursor,
-            "current_newest_cursor": current_newest_cursor,
+            "timeline_mode": response_mode,
             "timeline_window_url": window_url,
             "timeline_older_url": f"{window_url}?direction=older",
             "timeline_newer_url": f"{window_url}?direction=newer",
             "processing_active": is_agent_processing(agent.id),
             "agent_first_name": (agent.name or "").strip().split()[0] if (agent.name or "").strip() else "Agent",
+            "timeline_oldest_cursor": timeline_oldest_cursor,
+            "timeline_newest_cursor": timeline_newest_cursor,
+            "timeline_has_more_older": timeline_has_more_older,
+            "timeline_has_more_newer": timeline_has_more_newer,
+            "requested_current_newest": requested_current_newest,
+            "requested_current_oldest": requested_current_oldest,
+            "requires_resync": requires_resync,
+            "suppress_empty": response_mode == "delta",
         }
 
         logger.info(
-            "AgentTimelineWindowView: direction=%s cursor=%s processing_active=%s agent=%s user=%s",
+            "AgentTimelineWindowView: mode=%s direction=%s cursor=%s resync=%s agent=%s user=%s",
+            response_mode,
             direction,
             cursor,
-            context["processing_active"],
+            requires_resync,
             agent.id,
             self.request.user.id,
         )
 
-        return render(request, self.template_name, context)
+        response = render(request, template_name, context)
+        if requires_resync:
+            response["HX-Trigger"] = "timeline:resync"
+        return response
 
 
 class AgentWebSessionView(AgentAccessMixin, View):

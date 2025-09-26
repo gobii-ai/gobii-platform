@@ -140,9 +140,9 @@ class ConsoleViewsTest(RedisIsolationMixin, TestCase):
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        self.assertIn(new_cursor, content)
+        self.assertIn(f'data-newer="{new_cursor}"', content)
         self.assertNotIn(
-            "2024-08-31T23:00:00|message|old",
+            'data-newer="2024-08-31T23:00:00|message|old"',
             content,
-            "Timeline newer cursor should move forward to prevent duplicate fetches.",
+            "Timeline newer cursor should advance to the latest cursor value.",
         )

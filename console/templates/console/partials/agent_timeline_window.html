@@ -1,23 +1,28 @@
 {% load agent_extras %}
 
-{% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name %}
+{% with timeline_events=events|default:timeline_window.events %}
+  {% include "console/partials/_agent_timeline_items.html" with events=timeline_events agent_first_name=agent_first_name suppress_empty=suppress_empty %}
+{% endwith %}
 
 <div id="timeline-cursors" hx-swap-oob="true"
-     data-older="{{ timeline_window.window_oldest_cursor|default:'' }}"
-     data-newer="{{ current_newest_cursor|default:'' }}"
-     data-has-more-older="{{ timeline_window.has_more_older|yesno:'true,false' }}"
-     data-has-more-newer="{{ timeline_window.has_more_newer|yesno:'true,false' }}"
+     data-older="{{ timeline_oldest_cursor|default:'' }}"
+     data-newer="{{ timeline_newest_cursor|default:'' }}"
+     data-has-more-older="{{ timeline_has_more_older|yesno:'true,false' }}"
+     data-has-more-newer="{{ timeline_has_more_newer|yesno:'true,false' }}"
      data-processing-active="{{ processing_active|yesno:'true,false' }}"
-     data-direction="{{ direction }}"></div>
+     data-direction="{{ direction }}"
+     data-mode="{{ timeline_mode|default:'snapshot' }}"></div>
 
 <div id="timeline-load-older" hx-swap-oob="true" class="timeline-load-control border-b border-slate-100" data-side="older">
   <button type="button"
           data-role="load-older-button"
+          data-direction="older"
+          data-action="timeline-fetch"
+          data-url="{{ timeline_older_url }}"
+          data-target="#timeline-event-list"
+          data-swap="afterbegin"
           class="timeline-load-button"
-          hx-get="{{ timeline_older_url }}{% if timeline_window.window_oldest_cursor %}&cursor={{ timeline_window.window_oldest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ current_newest_cursor|default:''|urlencode }}"
-          hx-target="#timeline-event-list"
-          hx-swap="innerHTML"
-          {% if not timeline_window.has_more_older %}hidden{% endif %}>
+          {% if not timeline_has_more_older %}hidden{% endif %}>
     <span class="timeline-load-indicator" aria-hidden="true"></span>
     <span class="timeline-load-label">Load older</span>
   </button>
@@ -31,11 +36,13 @@
 <div id="timeline-load-newer" hx-swap-oob="true" class="timeline-load-control border-t border-slate-100" data-side="newer">
   <button type="button"
           data-role="load-newer-button"
+          data-direction="newer"
+          data-action="timeline-fetch"
+          data-url="{{ timeline_newer_url }}"
+          data-target="#timeline-event-list"
+          data-swap="beforeend"
           class="timeline-load-button"
-          hx-get="{{ timeline_newer_url }}{% if timeline_window.window_newest_cursor %}&cursor={{ timeline_window.window_newest_cursor|urlencode }}{% endif %}&limit={{ timeline_limit }}&current_newest={{ current_newest_cursor|default:''|urlencode }}"
-          hx-target="#timeline-event-list"
-          hx-swap="innerHTML"
-          {% if not timeline_window.has_more_newer %}hidden{% endif %}>
+          {% if not timeline_has_more_newer %}hidden{% endif %}>
     <span class="timeline-load-indicator" aria-hidden="true"></span>
     <span class="timeline-load-label">Load newer</span>
   </button>
