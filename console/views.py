@@ -78,6 +78,10 @@ from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import ORGANIZATIONS
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
+from constants.stripe import (
+    ORG_OVERAGE_STATE_META_KEY,
+    ORG_OVERAGE_STATE_DETACHED_PENDING,
+)
 from agent_namer import AgentNameGenerator
 from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import enable_mcp_tool
@@ -105,6 +109,135 @@ BILLING_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.ADMIN,
     OrganizationMembership.OrgRole.BILLING,
 }
+
+
+def _set_overage_detach_session(request, org_id: str, subscription_id: str, price_id: str) -> None:
+    """Record that the org's overage SKU was temporarily detached for seat updates."""
+    if not subscription_id or not price_id:
+        return
+
+    key = str(org_id)
+    detach_map = dict(request.session.get("org_overage_detach", {}))
+    detach_map[key] = {
+        "subscription_id": subscription_id,
+        "price_id": price_id,
+    }
+    request.session["org_overage_detach"] = detach_map
+    request.session.modified = True
+
+
+def _pop_overage_detach_session(request, org_id: str) -> dict | None:
+    """Remove and return any stored detach info for the org."""
+    key = str(org_id)
+    detach_map = dict(request.session.get("org_overage_detach", {}))
+    info = detach_map.pop(key, None)
+    if detach_map:
+        request.session["org_overage_detach"] = detach_map
+    else:
+        request.session.pop("org_overage_detach", None)
+    if info is not None:
+        request.session.modified = True
+    return info
+
+
+def _detach_org_overage_item(subscription: dict, overage_price_id: str | None, org_id: str, request) -> bool:
+    """Remove the org overage SKU from the subscription and mark the detach state."""
+    if not overage_price_id:
+        return False
+
+    items = (subscription.get("items") or {}).get("data", []) or []
+    overage_item = None
+    for item in items:
+        price = item.get("price") or {}
+        if price.get("id") == overage_price_id:
+            overage_item = item
+            break
+
+    if not overage_item:
+        return False
+
+    try:
+        stripe.SubscriptionItem.delete(overage_item.get("id"))
+    except Exception as exc:  # pragma: no cover - network failure path
+        logger.warning(
+            "Failed to detach org overage subscription item %s for org %s: %s",
+            overage_item.get("id"),
+            org_id,
+            exc,
+        )
+        return False
+
+    metadata = {**(subscription.get("metadata") or {})}
+    metadata[ORG_OVERAGE_STATE_META_KEY] = ORG_OVERAGE_STATE_DETACHED_PENDING
+    try:
+        stripe.Subscription.modify(subscription.get("id"), metadata=metadata)
+    except Exception as exc:  # pragma: no cover - network failure path
+        logger.warning(
+            "Failed to mark overage detach state on subscription %s for org %s: %s",
+            subscription.get("id"),
+            org_id,
+            exc,
+        )
+
+    _set_overage_detach_session(request, org_id, subscription.get("id"), overage_price_id)
+    return True
+
+
+def _reattach_org_overage_subscription(subscription_id: str | None, price_id: str | None) -> bool:
+    """Reattach the org overage SKU to the subscription if missing and clear the detach flag."""
+    if not subscription_id or not price_id:
+        return False
+
+    try:
+        subscription = stripe.Subscription.retrieve(
+            subscription_id,
+            expand=["items.data.price"],
+        )
+    except Exception as exc:  # pragma: no cover - network failure path
+        logger.warning(
+            "Failed to retrieve subscription %s while reattaching overage SKU: %s",
+            subscription_id,
+            exc,
+        )
+        return False
+
+    items = (subscription.get("items") or {}).get("data", []) or []
+    has_overage = any((item.get("price") or {}).get("id") == price_id for item in items)
+
+    if not has_overage:
+        try:
+            stripe.SubscriptionItem.create(subscription=subscription_id, price=price_id)
+            has_overage = True
+        except Exception as exc:  # pragma: no cover - network failure path
+            logger.warning(
+                "Failed to reattach overage SKU %s to subscription %s: %s",
+                price_id,
+                subscription_id,
+                exc,
+            )
+            has_overage = False
+
+    try:
+        stripe.Subscription.modify(subscription_id, metadata={ORG_OVERAGE_STATE_META_KEY: ""})
+    except Exception as exc:  # pragma: no cover - network failure path
+        logger.warning(
+            "Failed to clear overage detach flag on subscription %s: %s",
+            subscription_id,
+            exc,
+        )
+
+    return has_overage
+
+
+def _reattach_overage_from_session(request, org_id: str) -> bool:
+    """If the org had its overage SKU detached, reattach it and clear session state."""
+    info = _pop_overage_detach_session(request, org_id)
+    if not info:
+        return False
+
+    subscription_id = info.get("subscription_id")
+    price_id = info.get("price_id")
+    return _reattach_org_overage_subscription(subscription_id, price_id)
 
 class ConsoleHome(ConsoleViewMixin, TemplateView):
     """Dashboard homepage for the console."""
@@ -564,8 +697,49 @@ class BillingView(ConsoleViewMixin, TemplateView):
                 success_message = (
                     f"Seat checkout started successfully. In Stripe, update your licensed seat quantity to {requested}."
                 )
+
+            org_id_for_reattach = None
+            if target_info and target_info.get("org_id"):
+                org_id_for_reattach = target_info.get("org_id")
+
+            if org_id_for_reattach:
+                try:
+                    stripe.api_key = PaymentsHelper.get_stripe_key()
+                    if not _reattach_overage_from_session(request, org_id_for_reattach):
+                        logger.debug(
+                            "No pending overage SKU detach found for org %s on success redirect.",
+                            org_id_for_reattach,
+                        )
+                except Exception as exc:  # pragma: no cover - unexpected Stripe error
+                    logger.warning(
+                        "Failed to reattach overage SKU after success redirect for org %s: %s",
+                        org_id_for_reattach,
+                        exc,
+                    )
+
             messages.success(request, success_message)
+
         if request.GET.get("seats_cancelled"):
+            target_info = request.session.pop("org_seat_portal_target", None)
+            org_id_for_reattach = None
+            if target_info and target_info.get("org_id"):
+                org_id_for_reattach = target_info.get("org_id")
+
+            if org_id_for_reattach:
+                try:
+                    stripe.api_key = PaymentsHelper.get_stripe_key()
+                    if not _reattach_overage_from_session(request, org_id_for_reattach):
+                        logger.debug(
+                            "No pending overage SKU detach found for org %s on cancel redirect.",
+                            org_id_for_reattach,
+                        )
+                except Exception as exc:  # pragma: no cover - unexpected Stripe error
+                    logger.warning(
+                        "Failed to reattach overage SKU after cancellation for org %s: %s",
+                        org_id_for_reattach,
+                        exc,
+                    )
+
             messages.info(
                 request,
                 "Seat checkout was cancelled before completion.",
@@ -4123,6 +4297,14 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                 }
 
                 return_url = request.build_absolute_uri(reverse("billing")) + "?seats_success=1"
+                cancel_url = request.build_absolute_uri(reverse("billing")) + "?seats_cancelled=1"
+
+                overage_detach_performed = _detach_org_overage_item(
+                    subscription,
+                    stripe_settings.org_team_additional_task_price_id,
+                    str(org.id),
+                    request,
+                )
 
                 try:
                     session = stripe.billing_portal.Session.create(
@@ -4151,6 +4333,7 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                         org.id,
                         portal_exc,
                     )
+
                     request.session.pop("org_seat_portal_target", None)
 
                     try:
@@ -4169,6 +4352,14 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                             proration_behavior="create_prorations",
                         )
 
+                        if overage_detach_performed:
+                            reattached = _reattach_overage_from_session(request, str(org.id))
+                            if not reattached:
+                                logger.warning(
+                                    "Failed to reattach overage SKU after direct seat update for org %s",
+                                    org.id,
+                                )
+
                         messages.warning(
                             request,
                             "Stripe portal seat updates are disabled, so we applied the seat change immediately. Additional seats will activate once Stripe processes the change.",
@@ -4180,6 +4371,13 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                             org.id,
                             modify_exc,
                         )
+                        if overage_detach_performed:
+                            reattached = _reattach_overage_from_session(request, str(org.id))
+                            if not reattached:
+                                logger.warning(
+                                    "Failed to reattach overage SKU after modify error for org %s",
+                                    org.id,
+                                )
                         messages.error(
                             request,
                             "We weren't able to update the seat count. Please try again or contact support.",
@@ -4187,6 +4385,13 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
 
                     return redirect("billing")
                 except Exception as portal_exc:
+                    if overage_detach_performed:
+                        reattached = _reattach_overage_from_session(request, str(org.id))
+                        if not reattached:
+                            logger.warning(
+                                "Failed to reattach overage SKU after portal error for org %s",
+                                org.id,
+                            )
                     raise portal_exc
             except Exception as exc:
                 logger.exception(

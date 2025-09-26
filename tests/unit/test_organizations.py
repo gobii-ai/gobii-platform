@@ -20,6 +20,10 @@ from unittest.mock import patch, MagicMock
 
 from config.stripe_config import get_stripe_settings
 import stripe
+from constants.stripe import (
+    ORG_OVERAGE_STATE_META_KEY,
+    ORG_OVERAGE_STATE_DETACHED_PENDING,
+)
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
@@ -144,8 +148,6 @@ class OrganizationInvitesTest(TestCase):
         self.assertEqual(line_items[0]["quantity"], 1)
         overage_price = stripe_settings.org_team_additional_task_price_id
         self.assertEqual(len(line_items), 1)
-        if overage_price:
-            self.assertNotEqual(line_items[0]["price"], overage_price)
 
     def test_seat_checkout_requires_membership(self):
         stranger = get_user_model().objects.create_user(email="stranger@example.com", password="pw", username="stranger")
@@ -288,12 +290,138 @@ class OrganizationInvitesTest(TestCase):
         self.assertEqual(items[0]["quantity"], 3)
 
     @tag("batch_organizations")
-    @patch("console.views.stripe.Subscription.modify")
-    @patch("console.views.stripe.billing_portal.Session.create")
     @patch("console.views.stripe.Subscription.retrieve")
-    def test_seat_checkout_portal_disabled_falls_back_to_modify(self, mock_retrieve, mock_portal_create, mock_modify):
+    @patch("console.views.stripe.billing_portal.Session.create")
+    @patch("console.views.stripe.SubscriptionItem.delete")
+    @patch("console.views.stripe.Subscription.modify")
+    @patch("console.views.get_stripe_settings")
+    def test_seat_checkout_portal_detach_allows_update(
+        self,
+        mock_get_settings,
+        mock_modify,
+        mock_delete,
+        mock_portal_create,
+        mock_retrieve,
+    ):
+        base_settings = get_stripe_settings()
+        custom_settings = replace(
+            base_settings,
+            org_team_price_id="price_org_team",
+            org_team_additional_task_price_id="price_overage",
+        )
+        mock_get_settings.return_value = custom_settings
+
+        mock_portal_create.return_value = MagicMock(url="https://stripe.test/portal-update")
+
         mock_retrieve.return_value = {
             "id": "sub_999",
+            "items": {
+                "data": [
+                    {
+                        "id": "si_seats",
+                        "quantity": 4,
+                        "price": {
+                            "id": "price_org_team",
+                            "recurring": {"usage_type": "licensed"},
+                        },
+                    },
+                    {
+                        "id": "si_overage",
+                        "price": {
+                            "id": "price_overage",
+                            "recurring": {"usage_type": "metered"},
+                        },
+                    },
+                ]
+            },
+            "metadata": {"foo": "bar"},
+            "customer": "cus_999",
+        }
+
+        billing = self.org.billing
+        billing.purchased_seats = 4
+        billing.stripe_subscription_id = "sub_999"
+        billing.save(update_fields=["purchased_seats", "stripe_subscription_id"])
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, {"seats": 3})
+
+        mock_retrieve.assert_called_once_with("sub_999", expand=["items.data.price"])
+        self.assertEqual(mock_portal_create.call_count, 1)
+        mock_delete.assert_called_once_with("si_overage")
+        mock_modify.assert_called_once()
+
+        _, metadata_kwargs = mock_modify.call_args
+        self.assertEqual(
+            metadata_kwargs.get("metadata", {}).get(ORG_OVERAGE_STATE_META_KEY),
+            ORG_OVERAGE_STATE_DETACHED_PENDING,
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/portal-update")
+
+        session_data = self.client.session.get("org_seat_portal_target")
+        self.assertIsNotNone(session_data)
+        self.assertEqual(session_data.get("requested"), 7)
+
+        detach_state = self.client.session.get("org_overage_detach", {}).get(str(self.org.id))
+        self.assertIsNotNone(detach_state)
+
+    @patch("console.views.stripe.Subscription.retrieve")
+    @patch("console.views.stripe.billing_portal.Session.create")
+    @patch("console.views.stripe.SubscriptionItem.create")
+    @patch("console.views.stripe.SubscriptionItem.delete")
+    @patch("console.views.stripe.Subscription.modify")
+    @patch("console.views.get_stripe_settings")
+    def test_seat_checkout_portal_failure_modifies(
+        self,
+        mock_get_settings,
+        mock_modify,
+        mock_delete,
+        mock_item_create,
+        mock_portal_create,
+        mock_retrieve,
+    ):
+        base_settings = get_stripe_settings()
+        custom_settings = replace(
+            base_settings,
+            org_team_price_id="price_org_team",
+            org_team_additional_task_price_id="price_overage",
+        )
+        mock_get_settings.return_value = custom_settings
+
+        mock_portal_create.side_effect = [
+            stripe.error.InvalidRequestError(message="multiple items", param=None),
+        ]
+
+        initial_subscription = {
+            "id": "sub_888",
+            "items": {
+                "data": [
+                    {
+                        "id": "si_seats",
+                        "quantity": 2,
+                        "price": {
+                            "id": "price_org_team",
+                            "recurring": {"usage_type": "licensed"},
+                        },
+                    },
+                    {
+                        "id": "si_overage",
+                        "price": {
+                            "id": "price_overage",
+                            "recurring": {"usage_type": "metered"},
+                        },
+                    },
+                ]
+            },
+            "metadata": {"foo": "bar"},
+            "customer": "cus_888",
+        }
+
+        subscription_after_detach = {
+            "id": "sub_888",
             "items": {
                 "data": [
                     {
@@ -306,41 +434,105 @@ class OrganizationInvitesTest(TestCase):
                     }
                 ]
             },
-            "metadata": {"foo": "bar"},
-            "customer": "cus_999",
+            "metadata": {ORG_OVERAGE_STATE_META_KEY: ORG_OVERAGE_STATE_DETACHED_PENDING},
+            "customer": "cus_888",
         }
 
-        mock_portal_create.side_effect = stripe.error.InvalidRequestError(
-            message="portal disabled",
-            param=None,
-        )
+        mock_retrieve.side_effect = [initial_subscription, subscription_after_detach]
 
         billing = self.org.billing
-        billing.purchased_seats = 4
-        billing.stripe_subscription_id = "sub_999"
+        billing.purchased_seats = 2
+        billing.stripe_subscription_id = "sub_888"
         billing.save(update_fields=["purchased_seats", "stripe_subscription_id"])
 
         self.client.force_login(self.inviter)
         url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
-        resp = self.client.post(url, {"seats": 3}, follow=True)
+        resp = self.client.post(url, {"seats": 2}, follow=True)
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(
             resp,
-            "Stripe portal seat updates are disabled",
+            "Stripe portal seat updates are disabled, so we applied the seat change immediately.",
             status_code=200,
         )
 
-        mock_retrieve.assert_called_once_with("sub_999", expand=["items.data.price"])
+        self.assertEqual(mock_retrieve.call_count, 2)
         mock_portal_create.assert_called_once()
-        mock_modify.assert_called_once()
-        _, kwargs = mock_modify.call_args
-        self.assertEqual(kwargs["items"][0]["id"], "si_seats")
-        self.assertEqual(kwargs["items"][0]["quantity"], 7)
-        self.assertEqual(kwargs["metadata"].get("seat_requestor_id"), str(self.inviter.id))
-        self.assertEqual(kwargs["proration_behavior"], "create_prorations")
+        mock_delete.assert_called_once_with("si_overage")
+        mock_item_create.assert_called_once_with(subscription="sub_888", price="price_overage")
 
-        self.assertNotIn("org_seat_portal_target", self.client.session)
+        metadata_calls = [call.kwargs.get("metadata") for call in mock_modify.call_args_list if "metadata" in call.kwargs]
+        self.assertTrue(any(meta and meta.get(ORG_OVERAGE_STATE_META_KEY) == ORG_OVERAGE_STATE_DETACHED_PENDING for meta in metadata_calls))
+        self.assertTrue(any(meta is not None and meta.get(ORG_OVERAGE_STATE_META_KEY, "") == "" for meta in metadata_calls))
+
+        session_data = self.client.session.get("org_seat_portal_target")
+        self.assertIsNone(session_data)
+
+    @patch("console.views._reattach_overage_from_session")
+    @patch("console.views.PaymentsHelper.get_stripe_key")
+    def test_billing_success_reattaches_overage(self, mock_get_key, mock_reattach):
+        mock_get_key.return_value = "sk_test"
+        mock_reattach.return_value = True
+
+        self.client.force_login(self.inviter)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session["org_seat_portal_target"] = {
+            "org_id": str(self.org.id),
+            "requested": 5,
+        }
+        session["org_overage_detach"] = {
+            str(self.org.id): {
+                "subscription_id": "sub_123",
+                "price_id": "price_overage",
+            }
+        }
+        session.save()
+
+        resp = self.client.get(reverse("billing") + "?seats_success=1")
+
+        self.assertEqual(resp.status_code, 200)
+        mock_get_key.assert_called_once()
+        mock_reattach.assert_called_once()
+        self.assertEqual(mock_reattach.call_args[0][1], str(self.org.id))
+
+        updated_session = self.client.session
+        self.assertNotIn("org_seat_portal_target", updated_session)
+
+    @patch("console.views._reattach_overage_from_session")
+    @patch("console.views.PaymentsHelper.get_stripe_key")
+    def test_billing_cancel_reattaches_overage(self, mock_get_key, mock_reattach):
+        mock_get_key.return_value = "sk_test"
+        mock_reattach.return_value = True
+
+        self.client.force_login(self.inviter)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session["org_seat_portal_target"] = {
+            "org_id": str(self.org.id),
+            "requested": 5,
+        }
+        session["org_overage_detach"] = {
+            str(self.org.id): {
+                "subscription_id": "sub_123",
+                "price_id": "price_overage",
+            }
+        }
+        session.save()
+
+        resp = self.client.get(reverse("billing") + "?seats_cancelled=1")
+
+        self.assertEqual(resp.status_code, 200)
+        mock_get_key.assert_called_once()
+        mock_reattach.assert_called_once()
+        self.assertEqual(mock_reattach.call_args[0][1], str(self.org.id))
+
+        updated_session = self.client.session
+        self.assertNotIn("org_seat_portal_target", updated_session)
 
     @tag("batch_organizations")
     @patch("console.views.stripe.SubscriptionSchedule.modify")

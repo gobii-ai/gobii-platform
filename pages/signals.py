@@ -15,6 +15,11 @@ from djstripe.event_handlers import djstripe_receiver
 from observability import traced, trace
 
 from config.plans import get_plan_by_product_id
+from config.stripe_config import get_stripe_settings
+from constants.stripe import (
+    ORG_OVERAGE_STATE_META_KEY,
+    ORG_OVERAGE_STATE_DETACHED_PENDING,
+)
 from constants.plans import PlanNamesChoices
 from tasks.services import TaskCreditService
 
@@ -434,6 +439,111 @@ def handle_subscription_event(event, **kwargs):
                 prev_seats = 0
                 if organization_billing:
                     prev_seats = getattr(organization_billing, "purchased_seats", 0)
+
+                stripe_settings = get_stripe_settings()
+                overage_price_id = stripe_settings.org_team_additional_task_price_id
+                if overage_price_id:
+                    items_data = source_data.get("items", {}).get("data", []) or []
+                    has_overage_item = any(
+                        (item.get("price") or {}).get("id") == overage_price_id
+                        for item in items_data
+                    )
+
+                    metadata: dict[str, str] = {}
+                    source_metadata = source_data.get("metadata") if isinstance(source_data, Mapping) else None
+                    if isinstance(source_metadata, Mapping):
+                        metadata = dict(source_metadata)
+                    else:
+                        metadata = dict(getattr(sub, "metadata", {}) or {})
+
+                    overage_state = metadata.get(ORG_OVERAGE_STATE_META_KEY, "")
+                    seat_delta = seats - prev_seats
+
+                    should_reattach = not has_overage_item and (
+                        overage_state != ORG_OVERAGE_STATE_DETACHED_PENDING or seat_delta != 0
+                    )
+
+                    if should_reattach:
+                        subscription_id = getattr(sub, "id", "")
+                        already_present = False
+                        try:
+                            live_subscription = stripe.Subscription.retrieve(
+                                subscription_id,
+                                expand=["items.data.price"],
+                            )
+                            live_items = (live_subscription.get("items") or {}).get("data", []) if isinstance(live_subscription, Mapping) else []
+                            already_present = any(
+                                (item.get("price") or {}).get("id") == overage_price_id
+                                for item in live_items or []
+                            )
+                        except Exception as exc:  # pragma: no cover - unexpected Stripe error
+                            logger.warning(
+                                "Failed to refresh subscription %s before reattaching overage SKU: %s",
+                                subscription_id,
+                                exc,
+                            )
+
+                        if not already_present:
+                            try:
+                                stripe.SubscriptionItem.create(
+                                    subscription=subscription_id,
+                                    price=overage_price_id,
+                                )
+                                span.add_event(
+                                    "org_subscription_overage_item_added",
+                                    {
+                                        "subscription.id": subscription_id,
+                                        "price.id": overage_price_id,
+                                    },
+                                )
+                            except stripe.error.InvalidRequestError as exc:
+                                logger.warning(
+                                    "Overage price %s already present on subscription %s when reattaching: %s",
+                                    overage_price_id,
+                                    subscription_id,
+                                    exc,
+                                )
+                                already_present = True
+                            except Exception as exc:  # pragma: no cover - unexpected Stripe error
+                                logger.exception(
+                                    "Failed to attach org overage price %s to subscription %s: %s",
+                                    overage_price_id,
+                                    subscription_id,
+                                    exc,
+                                )
+                        else:
+                            span.add_event(
+                                "org_subscription_overage_item_exists",
+                                {
+                                    "subscription.id": subscription_id,
+                                    "price.id": overage_price_id,
+                                },
+                            )
+
+                        if (overage_state == ORG_OVERAGE_STATE_DETACHED_PENDING) and (already_present or not should_reattach):
+                            try:
+                                stripe.Subscription.modify(
+                                    subscription_id,
+                                    metadata={ORG_OVERAGE_STATE_META_KEY: ""},
+                                )
+                            except Exception as exc:  # pragma: no cover - unexpected Stripe error
+                                logger.warning(
+                                    "Failed to clear overage detach flag on subscription %s: %s",
+                                    subscription_id,
+                                    exc,
+                                )
+                    elif has_overage_item and overage_state == ORG_OVERAGE_STATE_DETACHED_PENDING:
+                        try:
+                            stripe.Subscription.modify(
+                                getattr(sub, "id", ""),
+                                metadata={ORG_OVERAGE_STATE_META_KEY: ""},
+                            )
+                        except Exception as exc:  # pragma: no cover - unexpected Stripe error
+                            logger.warning(
+                                "Failed to clear overage detach flag on subscription %s: %s",
+                                getattr(sub, "id", ""),
+                                exc,
+                            )
 
                 billing = mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
                 if billing:
