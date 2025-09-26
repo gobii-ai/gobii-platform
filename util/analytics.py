@@ -127,6 +127,33 @@ class AnalyticsEvent(StrEnum):
     SMS_SHORTENED_LINK_DELETED = 'SMS - Shortened Link Deleted'
     SMS_SHORTENED_LINK_CLICKED = 'SMS - Shortened Link Clicked'
 
+    # Organization Events
+    ORGANIZATION_CREATED = 'Organization Created'
+    ORGANIZATION_UPDATED = 'Organization Updated'
+    ORGANIZATION_DELETED = 'Organization Deleted'
+    ORGANIZATION_MEMBER_ADDED = 'Organization Member Added'
+    ORGANIZATION_MEMBER_REMOVED = 'Organization Member Removed'
+    ORGANIZATION_MEMBER_ROLE_UPDATED = 'Organization Member Role Updated'
+    ORGANIZATION_BILLING_VIEWED = 'Organization Billing Viewed'
+    ORGANIZATION_BILLING_UPDATED = 'Organization Billing Updated'
+    ORGANIZATION_PLAN_CHANGED = 'Organization Plan Changed'
+    ORGANIZATION_INVITE_SENT = 'Organization Invite Sent'
+    ORGANIZATION_INVITE_ACCEPTED = 'Organization Invite Accepted'
+    ORGANIZATION_INVITE_DECLINED = 'Organization Invite Declined'
+    ORGANIZATION_AGENT_CREATED = 'Organization Agent Created'
+    ORGANIZATION_AGENT_DELETED = 'Organization Agent Deleted'
+    ORGANIZATION_TASK_CREATED = 'Organization Task Created'
+    ORGANIZATION_TASK_DELETED = 'Organization Task Deleted'
+    ORGANIZATION_API_KEY_CREATED = 'Organization API Key Created'
+    ORGANIZATION_API_KEY_DELETED = 'Organization API Key Deleted'
+    ORGANIZATION_PERSISTENT_AGENT_CREATED = 'Organization Persistent Agent Created'
+    ORGANIZATION_PERSISTENT_AGENT_DELETED = 'Organization Persistent Agent Deleted'
+    ORGANIZATION_SEAT_ADDED = 'Organization Seat Added'
+    ORGANIZATION_SEAT_REMOVED = 'Organization Seat Removed'
+    ORGANIZATION_SEAT_ASSIGNED = 'Organization Seat Assigned'
+    ORGANIZATION_SEAT_UNASSIGNED = 'Organization Seat Unassigned'
+
+
 class AnalyticsCTAs(StrEnum):
     CTA_CREATE_AGENT_CLICKED = 'CTA - Create Agent Clicked'
     CTA_EXAMPLE_AGENT_CLICKED = 'CTA - Example Agent Clicked'
@@ -213,6 +240,46 @@ class Analytics:
                     properties=properties,
                     context=context
                 )
+
+    @staticmethod
+    def with_org_properties(
+        properties: dict | None = None,
+        *,
+        organization: object | None = None,
+        organization_id: str | None = None,
+        organization_name: str | None = None,
+        organization_flag: bool | None = None,
+    ) -> dict:
+        """Return a copy of ``properties`` annotated with organization metadata.
+
+        The helper accepts either an organization object (anything exposing ``id``/``name``),
+        explicit identifiers, or a boolean flag to indicate whether the event occurred in an
+        organization context.
+        """
+
+        props: dict[str, Any] = dict(properties or {})
+
+        org = organization
+        org_id_value = organization_id
+        if org_id_value is None and org is not None:
+            org_id_value = getattr(org, "id", None) or getattr(org, "pk", None)
+
+        org_name_value = organization_name
+        if org_name_value is None and org is not None:
+            org_name_value = getattr(org, "name", None)
+
+        if organization_flag is None:
+            organization_flag = bool(org_id_value) or bool(org)
+
+        props['organization'] = bool(organization_flag)
+
+        if org_id_value:
+            props['organization_id'] = str(org_id_value)
+
+        if org_name_value:
+            props['organization_name'] = org_name_value
+
+        return props
 
     @staticmethod
     @tracer.start_as_current_span("ANALYTICS Get Client IP")
