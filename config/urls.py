@@ -45,6 +45,8 @@ from console.views import (
     OrganizationLeaveOrgView,
     OrganizationMemberRoleUpdateOrgView,
     OrganizationSeatCheckoutView,
+    OrganizationSeatScheduleView,
+    OrganizationSeatScheduleCancelView,
     OrganizationSeatPortalView,
     update_billing_settings,
     get_billing_settings,
@@ -121,6 +123,8 @@ urlpatterns = [
     path("console/organizations/<uuid:org_id>/members/<int:user_id>/role/", OrganizationMemberRoleUpdateOrgView.as_view(), name="org_member_role_update_org"),
     path("console/organizations/<uuid:org_id>/leave/", OrganizationLeaveOrgView.as_view(), name="org_leave_org"),
     path("console/organizations/<uuid:org_id>/seats/checkout/", OrganizationSeatCheckoutView.as_view(), name="organization_seat_checkout"),
+    path("console/organizations/<uuid:org_id>/seats/schedule/", OrganizationSeatScheduleView.as_view(), name="organization_seat_schedule"),
+    path("console/organizations/<uuid:org_id>/seats/schedule/cancel/", OrganizationSeatScheduleCancelView.as_view(), name="organization_seat_schedule_cancel"),
     path("console/organizations/<uuid:org_id>/seats/portal/", OrganizationSeatPortalView.as_view(), name="organization_seat_portal"),
 
     # Task management views

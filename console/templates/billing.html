@@ -129,6 +129,47 @@
         {% if seat_purchase_form.seats.errors %}
           <p class="mt-2 text-sm text-red-700">{{ seat_purchase_form.seats.errors|join:", " }}</p>
         {% endif %}
+
+        {% if org_can_manage_billing and org_has_stripe_subscription and overview.seats.purchased > 0 %}
+          {% with pending=org_pending_seat_change %}
+          <div class="mt-6 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <h3 class="text-base font-semibold text-slate-900">Reduce seats next billing cycle</h3>
+            <p class="mt-1 text-sm text-slate-600">
+              Choose how many seats the organization should keep after the current billing period. The existing seats remain available until the next cycle starts.
+            </p>
+
+            <form method="post" action="{% url 'organization_seat_schedule' organization.id %}" class="mt-3 flex flex-col sm:flex-row sm:items-center sm:gap-3">
+              {% csrf_token %}
+              <div class="flex items-center gap-3">
+                {{ seat_reduction_form.future_seats.label_tag }}
+                {{ seat_reduction_form.future_seats }}
+              </div>
+              <button type="submit" class="mt-3 sm:mt-0 inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-slate-800 rounded-md hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-900">
+                Schedule reduction
+              </button>
+            </form>
+
+            {% if pending.quantity is not None %}
+              <div class="mt-4 rounded-md border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900/80">
+                <p>
+                  A seat update to <span class="font-semibold text-blue-900">{{ pending.quantity }}</span> seats is scheduled
+                  {% if pending.effective_at %}
+                    for {{ pending.effective_at|date:"F j, Y" }}.
+                  {% else %}
+                    for the next billing cycle.
+                  {% endif %}
+                </p>
+                <form method="post" action="{% url 'organization_seat_schedule_cancel' organization.id %}" class="mt-3">
+                  {% csrf_token %}
+                  <button type="submit" class="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-white border border-blue-100 rounded-md hover:bg-blue-50">
+                    Cancel scheduled change
+                  </button>
+                </form>
+              </div>
+            {% endif %}
+          </div>
+          {% endwith %}
+        {% endif %}
       </div>
 
       <div class="bg-white/90 backdrop-blur-sm border border-slate-200 shadow rounded-xl p-6"

@@ -1213,6 +1213,22 @@ class OrganizationBilling(models.Model):
         default=0,
         help_text="Number of seats purchased for this organization (must cover active members + pending invites beyond the founder).",
     )
+    pending_seat_quantity = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Seat quantity scheduled to take effect in a future billing period.",
+    )
+    pending_seat_effective_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the pending seat quantity is expected to take effect.",
+    )
+    pending_seat_schedule_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Stripe subscription schedule ID managing the pending seat change.",
+    )
     max_extra_tasks = models.IntegerField(
         default=0,
         help_text="Maximum number of additional tasks the org can buy beyond included credits. 0 means disabled; -1 is unlimited.",

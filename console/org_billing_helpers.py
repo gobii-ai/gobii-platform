@@ -67,12 +67,22 @@ def build_org_billing_overview(organization) -> dict[str, Any]:
     period_start, period_end = BillingService.get_current_billing_period_for_owner(organization)
 
     seat_info: OrgBillingSeatInfo | None = None
+    pending_seat_quantity: int | None = None
+    pending_seat_effective_at = None
     if billing is not None:
         seat_info = OrgBillingSeatInfo(
             purchased=getattr(billing, "purchased_seats", 0) or 0,
             reserved=billing.seats_reserved,
             available=billing.seats_available,
         )
+        pending_seat_quantity = getattr(billing, "pending_seat_quantity", None)
+        pending_seat_effective_at = getattr(billing, "pending_seat_effective_at", None)
+        if pending_seat_effective_at is not None:
+            try:
+                pending_seat_effective_at = timezone.localtime(pending_seat_effective_at)
+            except Exception:
+                # Fallback to naive value if localization fails (e.g. during migrations)
+                pass
 
     cancel_at = None
     cancel_at_period_end = False
@@ -98,6 +108,10 @@ def build_org_billing_overview(organization) -> dict[str, Any]:
             "purchased": seat_info.purchased if seat_info else 0,
             "reserved": seat_info.reserved if seat_info else 0,
             "available": seat_info.available if seat_info else 0,
+        },
+        "pending_seats": {
+            "quantity": pending_seat_quantity,
+            "effective_at": pending_seat_effective_at,
         },
         "period": OrgBillingPeriod(
             start=period_start.strftime("%B %d, %Y"),

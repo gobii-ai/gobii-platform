@@ -453,6 +453,19 @@ def handle_subscription_event(event, **kwargs):
                         billing.purchased_seats = seats
                         updates.append("purchased_seats")
 
+                    pending_schedule_id = getattr(billing, "pending_seat_schedule_id", "")
+                    if pending_schedule_id and seats != prev_seats:
+                        billing.pending_seat_quantity = None
+                        billing.pending_seat_effective_at = None
+                        billing.pending_seat_schedule_id = ""
+                        for field in (
+                            "pending_seat_quantity",
+                            "pending_seat_effective_at",
+                            "pending_seat_schedule_id",
+                        ):
+                            if field not in updates:
+                                updates.append(field)
+
                     if hasattr(billing, 'cancel_at'):
                         if billing.cancel_at != cancel_at_dt:
                             billing.cancel_at = cancel_at_dt

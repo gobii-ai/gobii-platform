@@ -68,6 +68,7 @@ from .forms import (
     OrganizationForm,
     OrganizationInviteForm,
     OrganizationSeatPurchaseForm,
+    OrganizationSeatReductionForm,
 )
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
@@ -591,6 +592,7 @@ class BillingView(ConsoleViewMixin, TemplateView):
                 billing = getattr(organization, "billing", None)
                 seat_purchase_required = bool(getattr(billing, "purchased_seats", 0) <= 0)
                 seat_purchase_form = OrganizationSeatPurchaseForm(org=organization)
+                seat_reduction_form = OrganizationSeatReductionForm(org=organization)
 
                 granted = Decimal(str(overview['credits']['granted'])) if overview['credits']['granted'] else Decimal('0')
                 used = Decimal(str(overview['credits']['used'])) if overview['credits']['used'] else Decimal('0')
@@ -606,8 +608,10 @@ class BillingView(ConsoleViewMixin, TemplateView):
                     'org_credit_usage_pct': usage_pct,
                     'org_can_open_stripe': can_manage_billing and bool(overview['billing_record']['stripe_customer_id']),
                     'seat_purchase_form': seat_purchase_form,
+                    'seat_reduction_form': seat_reduction_form,
                     'seat_purchase_required': seat_purchase_required,
                     'org_has_stripe_subscription': bool(getattr(billing, "stripe_subscription_id", None)),
+                    'org_pending_seat_change': overview.get('pending_seats', {}),
                 })
                 return render(request, self.template_name, context)
 
@@ -4189,6 +4193,288 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                 "We weren’t able to start the checkout flow. Please try again or contact support.",
             )
             return redirect("billing")
+
+
+class OrganizationSeatScheduleView(WaffleFlagMixin, LoginRequiredMixin, View):
+    """Schedule a reduction in organization seats effective next billing cycle."""
+
+    waffle_flag = ORGANIZATIONS
+
+    @tracer.start_as_current_span("CONSOLE Organization Seat Schedule")
+    @transaction.atomic
+    def post(self, request, org_id: str):
+        org = get_object_or_404(Organization.objects.select_related("billing"), id=org_id)
+
+        membership = OrganizationMembership.objects.filter(
+            org=org,
+            user=request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            role__in=(
+                OrganizationMembership.OrgRole.OWNER,
+                OrganizationMembership.OrgRole.ADMIN,
+                OrganizationMembership.OrgRole.BILLING,
+            ),
+        ).first()
+
+        if membership is None:
+            return HttpResponseForbidden()
+
+        form = OrganizationSeatReductionForm(request.POST, org=org)
+        if not form.is_valid():
+            for error in form.errors.get("future_seats", []):
+                messages.error(request, error)
+            return redirect("billing")
+
+        billing = getattr(org, "billing", None)
+        if not billing or not getattr(billing, "stripe_subscription_id", None):
+            messages.error(request, "This organization does not have an active Stripe subscription yet.")
+            return redirect("billing")
+
+        target_quantity = form.cleaned_data["future_seats"]
+
+        stripe_settings = get_stripe_settings()
+        seat_price_id = stripe_settings.org_team_price_id
+
+        if not seat_price_id:
+            messages.error(request, "Stripe seat price not configured. Please contact support.")
+            return redirect("billing")
+
+        try:
+            stripe.api_key = PaymentsHelper.get_stripe_key()
+            subscription = stripe.Subscription.retrieve(
+                billing.stripe_subscription_id,
+                expand=["items.data.price"],
+            )
+
+            licensed_item = None
+            subscription_items = subscription.get("items", {}).get("data", []) or []
+            for item in subscription_items:
+                price = item.get("price", {}) or {}
+                usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
+                price_id = price.get("id")
+                if usage_type == "licensed" or (price_id and price_id == seat_price_id):
+                    licensed_item = item
+                    break
+
+            if not licensed_item:
+                messages.error(
+                    request,
+                    "We couldn't find a seat item on the active subscription. Please contact support.",
+                )
+                return redirect("billing")
+
+            try:
+                current_quantity = int(licensed_item.get("quantity") or 0)
+            except (TypeError, ValueError):
+                current_quantity = 0
+
+            if current_quantity <= 0:
+                messages.error(request, "No seats are currently active to reduce.")
+                return redirect("billing")
+
+            if target_quantity >= current_quantity:
+                messages.error(
+                    request,
+                    "Enter a number smaller than your current seat total to schedule a reduction.",
+                )
+                return redirect("billing")
+
+            existing_schedule_id = subscription.get("schedule") or getattr(billing, "pending_seat_schedule_id", "")
+            if existing_schedule_id:
+                try:
+                    stripe.SubscriptionSchedule.release(existing_schedule_id)
+                except Exception as exc:  # pragma: no cover - unexpected Stripe error
+                    logger.exception(
+                        "Failed to release existing Stripe schedule %s for org %s: %s",
+                        existing_schedule_id,
+                        org.id,
+                        exc,
+                    )
+                    messages.error(
+                        request,
+                        "We weren't able to update the seat schedule. Please try again or contact support.",
+                    )
+                    return redirect("billing")
+
+                billing.pending_seat_quantity = None
+                billing.pending_seat_effective_at = None
+                billing.pending_seat_schedule_id = ""
+                billing.save(
+                    update_fields=[
+                        "pending_seat_quantity",
+                        "pending_seat_effective_at",
+                        "pending_seat_schedule_id",
+                    ]
+                )
+
+            current_phase_items: list[dict[str, object]] = []
+            next_phase_items: list[dict[str, object]] = []
+
+            for item in subscription_items:
+                price = item.get("price", {}) or {}
+                price_id = price.get("id")
+                if not price_id:
+                    continue
+
+                usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
+                is_seat_item = (
+                    item is licensed_item or usage_type == "licensed" or (price_id and price_id == seat_price_id)
+                )
+
+                try:
+                    quantity = int(item.get("quantity") or 0)
+                except (TypeError, ValueError):
+                    quantity = 0
+
+                current_payload: dict[str, object] = {"price": price_id}
+                next_payload: dict[str, object] = {"price": price_id}
+
+                if is_seat_item:
+                    current_payload["quantity"] = current_quantity
+                    next_payload["quantity"] = target_quantity
+                elif usage_type != "metered" and quantity > 0:
+                    current_payload["quantity"] = quantity
+                    next_payload["quantity"] = quantity
+
+                current_phase_items.append(current_payload)
+                next_phase_items.append(next_payload)
+
+            current_period_start_ts = subscription.get("current_period_start")
+            current_period_end_ts = subscription.get("current_period_end")
+
+            phases: list[dict[str, object]] = [
+                {
+                    "items": current_phase_items,
+                    "proration_behavior": "none",
+                },
+                {
+                    "items": next_phase_items,
+                    "proration_behavior": "none",
+                },
+            ]
+
+            if current_period_start_ts:
+                phases[0]["start_date"] = int(current_period_start_ts)
+            if current_period_end_ts:
+                periods_end_int = int(current_period_end_ts)
+                phases[0]["end_date"] = periods_end_int
+                phases[1]["start_date"] = periods_end_int
+
+            metadata = {
+                "org_id": str(org.id),
+                "seat_requestor_id": str(request.user.id),
+                "seat_target_quantity": str(target_quantity),
+            }
+
+            schedule = stripe.SubscriptionSchedule.create(
+                from_subscription=subscription.get("id"),
+            )
+
+            stripe.SubscriptionSchedule.modify(
+                getattr(schedule, "id", ""),
+                phases=phases,
+                end_behavior="release",
+                metadata=metadata,
+            )
+
+            period_end_ts = current_period_end_ts
+            effective_at = None
+            if period_end_ts:
+                try:
+                    effective_at = datetime.fromtimestamp(int(period_end_ts), tz=dt_timezone.utc)
+                except (TypeError, ValueError, OSError):
+                    effective_at = None
+
+            billing.pending_seat_quantity = target_quantity
+            billing.pending_seat_effective_at = effective_at
+            billing.pending_seat_schedule_id = getattr(schedule, "id", "") or ""
+            billing.save(
+                update_fields=[
+                    "pending_seat_quantity",
+                    "pending_seat_effective_at",
+                    "pending_seat_schedule_id",
+                ]
+            )
+
+            messages.success(
+                request,
+                "Seat reduction scheduled. The new total will apply at the start of the next billing period.",
+            )
+        except Exception as exc:  # pragma: no cover - unexpected Stripe error
+            logger.exception(
+                "Failed to create Stripe seat schedule for org %s (sub %s): %s",
+                org.id,
+                getattr(billing, "stripe_subscription_id", None),
+                exc,
+            )
+            messages.error(
+                request,
+                "We weren't able to schedule the seat reduction. Please try again or contact support.",
+            )
+
+        return redirect("billing")
+
+
+class OrganizationSeatScheduleCancelView(WaffleFlagMixin, LoginRequiredMixin, View):
+    """Cancel any pending seat reductions for an organization."""
+
+    waffle_flag = ORGANIZATIONS
+
+    @tracer.start_as_current_span("CONSOLE Organization Seat Schedule Cancel")
+    @transaction.atomic
+    def post(self, request, org_id: str):
+        org = get_object_or_404(Organization.objects.select_related("billing"), id=org_id)
+
+        membership = OrganizationMembership.objects.filter(
+            org=org,
+            user=request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            role__in=(
+                OrganizationMembership.OrgRole.OWNER,
+                OrganizationMembership.OrgRole.ADMIN,
+                OrganizationMembership.OrgRole.BILLING,
+            ),
+        ).first()
+
+        if membership is None:
+            return HttpResponseForbidden()
+
+        billing = getattr(org, "billing", None)
+        schedule_id = getattr(billing, "pending_seat_schedule_id", "") if billing else ""
+
+        if not billing or not schedule_id:
+            messages.info(request, "No scheduled seat changes to cancel.")
+            return redirect("billing")
+
+        try:
+            stripe.api_key = PaymentsHelper.get_stripe_key()
+            stripe.SubscriptionSchedule.release(schedule_id)
+        except Exception as exc:  # pragma: no cover - unexpected Stripe error
+            logger.exception(
+                "Failed to release Stripe schedule %s for org %s: %s",
+                schedule_id,
+                org.id,
+                exc,
+            )
+            messages.error(
+                request,
+                "We weren't able to cancel the scheduled seat change. Please try again or contact support.",
+            )
+            return redirect("billing")
+
+        billing.pending_seat_quantity = None
+        billing.pending_seat_effective_at = None
+        billing.pending_seat_schedule_id = ""
+        billing.save(
+            update_fields=[
+                "pending_seat_quantity",
+                "pending_seat_effective_at",
+                "pending_seat_schedule_id",
+            ]
+        )
+
+        messages.success(request, "Scheduled seat changes were cancelled.")
+        return redirect("billing")
 
 
 class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):

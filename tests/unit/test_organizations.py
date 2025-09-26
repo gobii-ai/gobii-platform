@@ -15,7 +15,7 @@ from api.models import (
     BrowserUseAgent,
 )
 from dataclasses import replace
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone as datetime_timezone
 from unittest.mock import patch, MagicMock
 
 from config.stripe_config import get_stripe_settings
@@ -260,6 +260,162 @@ class OrganizationInvitesTest(TestCase):
         _, kwargs = mock_modify.call_args
         self.assertEqual(kwargs["items"][0]["id"], "si_456")
         self.assertEqual(kwargs["items"][0]["quantity"], 3)
+
+    @tag("batch_organizations")
+    @patch("console.views.stripe.SubscriptionSchedule.modify")
+    @patch("console.views.stripe.SubscriptionSchedule.release")
+    @patch("console.views.stripe.SubscriptionSchedule.create")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_seat_reduction_schedules_next_cycle(self, mock_retrieve, mock_schedule_create, mock_schedule_release, mock_schedule_modify):
+        period_end = int((timezone.now() + timedelta(days=10)).timestamp())
+        current_period_start = int((timezone.now() - timedelta(days=20)).timestamp())
+        mock_retrieve.return_value = {
+            "id": "sub_789",
+            "current_period_end": period_end,
+            "current_period_start": current_period_start,
+            "items": {
+                "data": [
+                    {
+                        "id": "si_seat",
+                        "quantity": 5,
+                        "price": {"id": "price_org_team", "usage_type": "licensed"},
+                    },
+                    {
+                        "id": "si_tasks",
+                        "price": {"id": "price_overage", "usage_type": "metered"},
+                    },
+                ]
+            },
+            "metadata": {},
+            "schedule": None,
+        }
+        mock_schedule_create.return_value = MagicMock(id="ssch_new")
+
+        billing = self.org.billing
+        billing.purchased_seats = 5
+        billing.stripe_subscription_id = "sub_789"
+        billing.save(update_fields=["purchased_seats", "stripe_subscription_id"])
+
+        custom_settings = replace(get_stripe_settings(), org_team_price_id="price_org_team")
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_schedule", kwargs={"org_id": self.org.id})
+        with patch("console.views.get_stripe_settings", return_value=custom_settings):
+            resp = self.client.post(url, {"future_seats": 3}, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Seat reduction scheduled", status_code=200)
+
+        mock_schedule_release.assert_not_called()
+        mock_schedule_create.assert_called_once()
+        mock_schedule_modify.assert_called_once()
+
+        _, create_kwargs = mock_schedule_create.call_args
+        _, modify_kwargs = mock_schedule_modify.call_args
+        self.assertEqual(create_kwargs.get("from_subscription"), "sub_789")
+        self.assertEqual(modify_kwargs.get("end_behavior"), "release")
+        phases = modify_kwargs.get("phases")
+        self.assertIsNotNone(phases)
+        self.assertEqual(phases[0]["items"][0]["quantity"], 5)
+        self.assertEqual(phases[1]["items"][0]["quantity"], 3)
+        self.assertEqual(phases[0]["start_date"], current_period_start)
+        self.assertEqual(phases[0]["end_date"], period_end)
+        self.assertEqual(phases[1]["start_date"], period_end)
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.pending_seat_quantity, 3)
+        self.assertEqual(billing.pending_seat_schedule_id, "ssch_new")
+        expected_effective = datetime.fromtimestamp(period_end, tz=datetime_timezone.utc)
+        self.assertEqual(billing.pending_seat_effective_at, expected_effective)
+
+    @tag("batch_organizations")
+    @patch("console.views.stripe.SubscriptionSchedule.modify")
+    @patch("console.views.stripe.SubscriptionSchedule.release")
+    @patch("console.views.stripe.SubscriptionSchedule.create")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_seat_reduction_replaces_existing_schedule(self, mock_retrieve, mock_schedule_create, mock_schedule_release, mock_schedule_modify):
+        period_end = int((timezone.now() + timedelta(days=5)).timestamp())
+        current_period_start = int((timezone.now() - timedelta(days=10)).timestamp())
+        mock_retrieve.return_value = {
+            "id": "sub_sched",
+            "current_period_end": period_end,
+            "current_period_start": current_period_start,
+            "items": {
+                "data": [
+                    {
+                        "id": "si_seat",
+                        "quantity": 4,
+                        "price": {"id": "price_org_team", "usage_type": "licensed"},
+                    }
+                ]
+            },
+            "metadata": {},
+            "schedule": "ssch_old",
+        }
+        mock_schedule_create.return_value = MagicMock(id="ssch_new")
+
+        billing = self.org.billing
+        billing.purchased_seats = 4
+        billing.stripe_subscription_id = "sub_sched"
+        billing.pending_seat_quantity = 2
+        billing.pending_seat_effective_at = timezone.now()
+        billing.pending_seat_schedule_id = "ssch_old"
+        billing.save(
+            update_fields=[
+                "purchased_seats",
+                "stripe_subscription_id",
+                "pending_seat_quantity",
+                "pending_seat_effective_at",
+                "pending_seat_schedule_id",
+            ]
+        )
+
+        custom_settings = replace(get_stripe_settings(), org_team_price_id="price_org_team")
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_schedule", kwargs={"org_id": self.org.id})
+        with patch("console.views.get_stripe_settings", return_value=custom_settings):
+            resp = self.client.post(url, {"future_seats": 3}, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Seat reduction scheduled", status_code=200)
+
+        mock_schedule_release.assert_any_call("ssch_old")
+        mock_schedule_create.assert_called_once()
+        mock_schedule_modify.assert_called_once()
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.pending_seat_quantity, 3)
+        self.assertEqual(billing.pending_seat_schedule_id, "ssch_new")
+
+    @tag("batch_organizations")
+    @patch("console.views.stripe.SubscriptionSchedule.modify")
+    @patch("console.views.stripe.SubscriptionSchedule.release")
+    def test_cancel_pending_seat_reduction_releases_schedule(self, mock_schedule_release, mock_schedule_modify):
+        billing = self.org.billing
+        billing.pending_seat_quantity = 2
+        billing.pending_seat_effective_at = timezone.now()
+        billing.pending_seat_schedule_id = "ssch_cancel"
+        billing.save(update_fields=[
+            "pending_seat_quantity",
+            "pending_seat_effective_at",
+            "pending_seat_schedule_id",
+        ])
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_schedule_cancel", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Scheduled seat changes were cancelled", status_code=200)
+
+        mock_schedule_release.assert_called_once_with("ssch_cancel")
+        mock_schedule_modify.assert_not_called()
+
+        billing.refresh_from_db()
+        self.assertIsNone(billing.pending_seat_quantity)
+        self.assertIsNone(billing.pending_seat_effective_at)
+        self.assertEqual(billing.pending_seat_schedule_id, "")
 
     @patch("console.views.stripe.billing_portal.Session.create")
     def test_seat_portal_redirects(self, mock_portal):
