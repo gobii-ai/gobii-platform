@@ -118,9 +118,10 @@ class OrganizationInvitesTest(TestCase):
         self.assertIn("already has a pending invitation", " ".join(form.errors.get("email", [])))
         self.assertEqual(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).count(), 1)
 
+    @patch("config.stripe_config._load_from_database", return_value=None)
     @patch("console.views.stripe.checkout.Session.create")
     @patch("console.views.get_or_create_stripe_customer")
-    def test_seat_checkout_redirects_to_stripe(self, mock_customer, mock_session):
+    def test_seat_checkout_redirects_to_stripe(self, mock_customer, mock_session, _load_from_db):
         mock_customer.return_value = MagicMock(id="cus_test")
         mock_session.return_value = MagicMock(url="https://stripe.test/checkout")
 
@@ -130,6 +131,7 @@ class OrganizationInvitesTest(TestCase):
         billing.save(update_fields=["purchased_seats"])
 
         url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
+        stripe_settings = get_stripe_settings(force_reload=True)
         resp = self.client.post(url, {"seats": 1})
 
         self.assertEqual(resp.status_code, 302)
@@ -138,15 +140,12 @@ class OrganizationInvitesTest(TestCase):
         _, kwargs = mock_session.call_args
         line_items = kwargs.get("line_items")
         self.assertIsNotNone(line_items)
-        stripe_settings = get_stripe_settings()
         self.assertEqual(line_items[0]["price"], stripe_settings.org_team_price_id)
         self.assertEqual(line_items[0]["quantity"], 1)
         overage_price = stripe_settings.org_team_additional_task_price_id
+        self.assertEqual(len(line_items), 1)
         if overage_price:
-            self.assertGreaterEqual(len(line_items), 2)
-            self.assertEqual(line_items[1]["price"], overage_price)
-        else:
-            self.assertEqual(len(line_items), 1)
+            self.assertNotEqual(line_items[0]["price"], overage_price)
 
     def test_seat_checkout_requires_membership(self):
         stranger = get_user_model().objects.create_user(email="stranger@example.com", password="pw", username="stranger")
