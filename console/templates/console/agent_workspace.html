@@ -401,6 +401,10 @@
     letter-spacing: 0.015em;
   }
 
+  #timeline-load-newer {
+    margin-bottom: 3.5rem;
+  }
+
   .timeline-history-label {
     font-size: 0.75rem;
     color: #94a3b8;
@@ -851,6 +855,10 @@
 
   const root = document.getElementById('agent-workspace-root');
 
+  const timelineLog = (...args) => console.debug('[agent-workspace][timeline]', ...args);
+  const timelineWarn = (...args) => console.warn('[agent-workspace][timeline]', ...args);
+  const timelineError = (...args) => console.error('[agent-workspace][timeline]', ...args);
+
   if (!root) {
     console.warn('[agent-workspace] root node missing; aborting init.');
     return;
@@ -907,7 +915,7 @@
     const getLoadNewerContainer = () => document.getElementById('timeline-load-newer');
     const getLoadOlderContainer = () => document.getElementById('timeline-load-older');
 
-    const limit = parseInt(root.dataset.timelineLimit || '150', 10);
+    const limit = parseInt(root.dataset.timelineLimit || '10', 10);
     const newerUrl = root.dataset.timelineNewerUrl;
     const eventStreamUrl = root.dataset.eventStreamUrl;
     const processingStatusUrl = root.dataset.processingStatusUrl || null;
@@ -1863,31 +1871,89 @@
 
     function queueRealtimeUpdate() {
       const current = Number.isFinite(state.pendingRealtime) ? state.pendingRealtime : 0;
-      state.pendingRealtime = Math.min(current + 1, 99);
+      const next = Math.min(current + 1, 99);
+      timelineLog('queueRealtimeUpdate', {
+        previous: current,
+        next,
+        autoScroll: state.autoScroll,
+        fetchingNewer: state.fetchingNewer,
+        fetchingOlder: state.fetchingOlder,
+        resyncing: state.resyncing,
+      });
+      state.pendingRealtime = next;
       updateJumpButton();
     }
 
     function drainPendingRealtime() {
-      if (!state.pendingRealtime) return;
-      if (state.fetchingNewer) return;
-      if (state.resyncing) return;
-      if (shouldDeferRealtime()) return;
+      if (!state.pendingRealtime) {
+        timelineLog('drainPendingRealtime skipped: nothing pending');
+        return;
+      }
+      if (state.fetchingNewer) {
+        timelineLog('drainPendingRealtime deferred: fetchingNewer in progress', {
+          pendingRealtime: state.pendingRealtime,
+        });
+        return;
+      }
+      if (state.resyncing) {
+        timelineLog('drainPendingRealtime deferred: snapshot in progress', {
+          pendingRealtime: state.pendingRealtime,
+        });
+        return;
+      }
+      if (shouldDeferRealtime()) {
+        timelineLog('drainPendingRealtime deferred: shouldDeferRealtime returned true', {
+          pendingRealtime: state.pendingRealtime,
+          autoScroll: state.autoScroll,
+          hasMoreNewer: hasMoreNewerInDom(),
+        });
+        return;
+      }
+      timelineLog('drainPendingRealtime flushing queued realtime updates', {
+        pendingRealtime: state.pendingRealtime,
+      });
       state.pendingRealtime = 0;
       updateJumpButton();
       requestNewer('queued-realtime');
     }
 
     function maybeAutoFetchBacklog() {
-      if (!hasMoreNewerInDom()) return;
-      if (state.fetchingNewer) return;
-      if (state.fetchingOlder) return;
-      if (state.resyncing) return;
-      if (!state.autoScroll) return;
-      if (state.pendingRealtime > 0) return;
-      const trigger = state.lastNewerTrigger;
-      if (!trigger || !AUTO_NEWER_TRIGGERS.has(trigger)) {
+      if (!hasMoreNewerInDom()) {
+        timelineLog('maybeAutoFetchBacklog skipped: no backlog in DOM');
         return;
       }
+      if (state.fetchingNewer) {
+        timelineLog('maybeAutoFetchBacklog skipped: fetchingNewer already running');
+        return;
+      }
+      if (state.fetchingOlder) {
+        timelineLog('maybeAutoFetchBacklog skipped: fetchingOlder in progress');
+        return;
+      }
+      if (state.resyncing) {
+        timelineLog('maybeAutoFetchBacklog skipped: snapshot inflight');
+        return;
+      }
+      if (!state.autoScroll) {
+        timelineLog('maybeAutoFetchBacklog skipped: autoScroll disabled');
+        return;
+      }
+      if (state.pendingRealtime > 0) {
+        timelineLog('maybeAutoFetchBacklog skipped: pending realtime updates queued', {
+          pendingRealtime: state.pendingRealtime,
+        });
+        return;
+      }
+      const trigger = state.lastNewerTrigger;
+      if (!trigger || !AUTO_NEWER_TRIGGERS.has(trigger)) {
+        timelineLog('maybeAutoFetchBacklog skipped: trigger not eligible', {
+          trigger,
+        });
+        return;
+      }
+      timelineLog('maybeAutoFetchBacklog requesting newer items automatically', {
+        trigger,
+      });
       requestNewer('auto-newer-loop');
     }
 
@@ -1904,6 +1970,7 @@
       if (!state.knownCursors) {
         state.knownCursors = new Set();
       }
+      const beforeKnown = state.knownCursors.size;
 
       const items = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : [];
       const newcomers = [];
@@ -1932,17 +1999,41 @@
           });
         });
       }
+
+      timelineLog('syncKnownCursors complete', {
+        animate,
+        newCursors: newcomers.length,
+        totalKnown: state.knownCursors.size,
+        beforeKnown,
+      });
     }
 
     function trimTimeline(direction) {
-      if (!timeline) return;
+      if (!timeline) {
+        return { trimmedFromTop: 0, trimmedFromBottom: 0 };
+      }
       const nodes = eventContainer ? Array.from(eventContainer.querySelectorAll('.timeline-event[data-cursor]')) : [];
-      if (nodes.length <= limit) return;
+      if (nodes.length <= limit) {
+        timelineLog('trimTimeline skipped: within limit', {
+          direction,
+          count: nodes.length,
+          limit,
+        });
+        return { trimmedFromTop: 0, trimmedFromBottom: 0 };
+      }
 
       const excess = nodes.length - limit;
+      timelineLog('trimTimeline removing items', {
+        direction,
+        count: nodes.length,
+        limit,
+        excess,
+      });
       const removingFromTop = direction !== 'older';
       let restoreScroll = false;
       let previousBottomOffset = 0;
+      let trimmedFromTop = 0;
+      let trimmedFromBottom = 0;
 
       if (removingFromTop) {
         const autoScrollActive = state.autoScroll || isNearBottom();
@@ -1958,6 +2049,7 @@
           if (node) {
             forgetCursor(node);
             node.remove();
+            trimmedFromBottom += 1;
           }
         }
       } else {
@@ -1966,6 +2058,7 @@
           if (node) {
             forgetCursor(node);
             node.remove();
+            trimmedFromTop += 1;
           }
         }
       }
@@ -1981,12 +2074,22 @@
 
       ensureProcessingSlotPosition();
       refreshEmptyState();
+      const remaining = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]').length : 0;
+      timelineLog('trimTimeline complete', {
+        direction,
+        remaining,
+        restoreScroll,
+        trimmedFromTop,
+        trimmedFromBottom,
+      });
+      return { trimmedFromTop, trimmedFromBottom };
     }
 
     function dedupeTimeline() {
-      if (!timeline) return;
+      if (!timeline) return 0;
       const seen = new Set();
       const items = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : [];
+      let removed = 0;
       for (let i = items.length - 1; i >= 0; i -= 1) {
         const node = items[i];
         const cursor = node?.dataset?.cursor;
@@ -1994,23 +2097,86 @@
         if (seen.has(cursor)) {
           forgetCursor(node);
           node.remove();
+          removed += 1;
         } else {
           seen.add(cursor);
         }
       }
       ensureProcessingSlotPosition();
       refreshEmptyState();
+      if (removed > 0) {
+        timelineLog('dedupeTimeline removed duplicate nodes', {
+          removed,
+          remaining: eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]').length : 0,
+        });
+      } else {
+        timelineLog('dedupeTimeline found no duplicates', {
+          total: items.length,
+        });
+      }
+      return removed;
+    }
+
+    function syncCursorDataset(options = {}) {
+      const {
+        reason = 'unspecified',
+        trimmedOlder = 0,
+        trimmedNewer = 0,
+        dedupeRemoved = 0,
+      } = options;
+
+      const cursorNode = getCursorsEl();
+      if (!cursorNode) {
+        timelineLog('syncCursorDataset skipped: missing cursor node', { reason });
+        return;
+      }
+
+      const nodes = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : [];
+      const firstCursor = nodes[0]?.dataset?.cursor || '';
+      const lastCursor = nodes.length ? nodes[nodes.length - 1]?.dataset?.cursor || '' : '';
+
+      cursorNode.dataset.older = firstCursor;
+      cursorNode.dataset.newer = lastCursor;
+
+      if (trimmedOlder > 0) {
+        cursorNode.dataset.hasMoreOlder = 'true';
+      }
+      if (trimmedNewer > 0) {
+        cursorNode.dataset.hasMoreNewer = 'true';
+      }
+
+      timelineLog('syncCursorDataset', {
+        reason,
+        trimmedOlder,
+        trimmedNewer,
+        dedupeRemoved,
+        firstCursor,
+        lastCursor,
+        hasMoreOlder: cursorNode.dataset.hasMoreOlder,
+        hasMoreNewer: cursorNode.dataset.hasMoreNewer,
+        totalNodes: nodes.length,
+      });
+
+      syncLoadControls();
     }
 
     function completeNewerRequest() {
+      timelineLog('completeNewerRequest', {
+        queuedTrigger: state.queuedNewerTrigger,
+        pendingRealtime: state.pendingRealtime,
+      });
       state.fetchingNewer = false;
       state.inflightDirection = null;
       const queuedTrigger = state.queuedNewerTrigger;
       state.queuedNewerTrigger = null;
       if (queuedTrigger) {
+        timelineLog('completeNewerRequest flushing queued trigger', {
+          trigger: queuedTrigger,
+        });
         requestNewer(queuedTrigger);
         return;
       }
+      timelineLog('completeNewerRequest flushing queue');
       flushQueuedRequests();
     }
 
@@ -2023,6 +2189,15 @@
       const cursorNode = getCursorsEl();
       const oldest = cursorNode?.dataset?.older || '';
       const newest = cursorNode?.dataset?.newer || '';
+
+      timelineLog('buildTimelineRequest start', {
+        direction,
+        trigger,
+        mode: baseMode,
+        oldest,
+        newest,
+        limit,
+      });
 
       let baseUrl = null;
       if (direction === 'older') {
@@ -2049,7 +2224,7 @@
       }
 
       if (!baseUrl) {
-        console.warn('[agent-workspace] Missing base URL for timeline request', direction);
+        timelineWarn('buildTimelineRequest missing base URL', { direction });
         return null;
       }
 
@@ -2057,7 +2232,7 @@
       const url = `${baseUrl}${separator}${params.toString()}`;
       const swap = direction === 'older' ? 'afterbegin' : direction === 'newer' ? 'beforeend' : 'innerHTML';
 
-      return {
+      const config = {
         url,
         swap,
         target: '#timeline-event-list',
@@ -2066,10 +2241,29 @@
           'X-Timeline-Trigger': trigger,
         },
       };
+
+      timelineLog('buildTimelineRequest ready', {
+        direction,
+        trigger,
+        url,
+        swap,
+        params: Object.fromEntries(params.entries()),
+      });
+
+      return config;
     }
 
     function sendTimelineRequest(config) {
       if (!config) return;
+      timelineLog('sendTimelineRequest dispatch', {
+        url: config.url,
+        swap: config.swap,
+        headers: config.headers,
+        target: config.target,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+      });
       window.htmx.ajax('GET', config.url, {
         target: config.target,
         swap: config.swap,
@@ -2078,15 +2272,26 @@
     }
 
     function flushQueuedRequests() {
+      timelineLog('flushQueuedRequests invoked', {
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        pendingResync: state.pendingResync,
+        queuedOlder: state.queuedOlder,
+        queuedNewerTrigger: state.queuedNewerTrigger,
+      });
       if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        timelineLog('flushQueuedRequests abort: request in-flight');
         return;
       }
       if (state.pendingResync) {
+        timelineLog('flushQueuedRequests processing pending resync');
         state.pendingResync = false;
         requestTimelineSnapshot('queued-resync');
         return;
       }
       if (state.queuedOlder) {
+        timelineLog('flushQueuedRequests dispatching queued older request');
         state.queuedOlder = false;
         requestOlder('queued-older');
         return;
@@ -2096,22 +2301,51 @@
         const nearBottom = isNearBottom();
         state.queuedNewerTrigger = null;
         if (!nearBottom) {
+          timelineLog('flushQueuedRequests deferring queued newer: user not near bottom', {
+            trigger: queuedTrigger,
+          });
           queueRealtimeUpdate();
           return;
         }
+        timelineLog('flushQueuedRequests dispatching queued newer', {
+          trigger: queuedTrigger,
+        });
         requestNewer(queuedTrigger);
       }
     }
 
     function requestOlder(trigger = 'manual-older') {
-      if (!olderUrl || !timeline) return;
+      if (!olderUrl || !timeline) {
+        timelineWarn('requestOlder aborted: missing URL or timeline element', {
+          hasOlderUrl: Boolean(olderUrl),
+          hasTimeline: Boolean(timeline),
+          trigger,
+        });
+        return;
+      }
+      timelineLog('requestOlder invoked', {
+        trigger,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        queuedOlder: state.queuedOlder,
+      });
       state.justResynced = false;
       if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        timelineLog('requestOlder queued', {
+          trigger,
+          fetchingOlder: state.fetchingOlder,
+          fetchingNewer: state.fetchingNewer,
+          resyncing: state.resyncing,
+        });
         state.queuedOlder = true;
         return;
       }
       const request = buildTimelineRequest('older', { trigger });
-      if (!request) return;
+      if (!request) {
+        timelineWarn('requestOlder aborted: buildTimelineRequest returned null', { trigger });
+        return;
+      }
 
       state.action = 'older';
       state.fetchingOlder = true;
@@ -2119,18 +2353,47 @@
       state.previousScrollHeight = timeline?.scrollHeight || 0;
       state.scrollAnchor = captureScrollAnchor();
 
+      timelineLog('requestOlder sending', {
+        trigger,
+        url: request.url,
+        previousScrollHeight: state.previousScrollHeight,
+      });
+
       sendTimelineRequest(request);
     }
 
     function requestNewer(trigger = 'manual-newer') {
-      if (!newerUrl || !timeline) return;
+      if (!newerUrl || !timeline) {
+        timelineWarn('requestNewer aborted: missing URL or timeline element', {
+          hasNewerUrl: Boolean(newerUrl),
+          hasTimeline: Boolean(timeline),
+          trigger,
+        });
+        return;
+      }
+      timelineLog('requestNewer invoked', {
+        trigger,
+        fetchingNewer: state.fetchingNewer,
+        fetchingOlder: state.fetchingOlder,
+        resyncing: state.resyncing,
+        pendingRealtime: state.pendingRealtime,
+      });
       state.justResynced = false;
       if (state.fetchingNewer || state.fetchingOlder || state.resyncing) {
+        timelineLog('requestNewer queued', {
+          trigger,
+          fetchingNewer: state.fetchingNewer,
+          fetchingOlder: state.fetchingOlder,
+          resyncing: state.resyncing,
+        });
         state.queuedNewerTrigger = trigger;
         return;
       }
       const request = buildTimelineRequest('newer', { trigger });
-      if (!request) return;
+      if (!request) {
+        timelineWarn('requestNewer aborted: buildTimelineRequest returned null', { trigger });
+        return;
+      }
 
       state.action = 'newer';
       state.fetchingNewer = true;
@@ -2139,30 +2402,65 @@
       const nearBottom = isNearBottom();
       state.autoScroll = state.pendingComposerScroll ? true : nearBottom;
 
+      timelineLog('requestNewer sending', {
+        trigger,
+        url: request.url,
+        nearBottom,
+        autoScroll: state.autoScroll,
+      });
+
       sendTimelineRequest(request);
     }
 
     function requestTimelineSnapshot(trigger = 'snapshot') {
-      if (!timeline) return;
+      if (!timeline) {
+        timelineWarn('requestTimelineSnapshot aborted: missing timeline element', { trigger });
+        return;
+      }
+      timelineLog('requestTimelineSnapshot invoked', {
+        trigger,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        pendingResync: state.pendingResync,
+      });
       state.justResynced = false;
       if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        timelineLog('requestTimelineSnapshot queued', {
+          trigger,
+          fetchingOlder: state.fetchingOlder,
+          fetchingNewer: state.fetchingNewer,
+          resyncing: state.resyncing,
+        });
         state.pendingResync = true;
         return;
       }
 
       state.pendingResync = false;
       const request = buildTimelineRequest('snapshot', { trigger, mode: 'snapshot' });
-      if (!request) return;
+      if (!request) {
+        timelineWarn('requestTimelineSnapshot aborted: buildTimelineRequest returned null', { trigger });
+        return;
+      }
 
       state.action = 'snapshot';
       state.resyncing = true;
       state.inflightDirection = 'snapshot';
       state.previousScrollHeight = timeline?.scrollHeight || 0;
 
+      timelineLog('requestTimelineSnapshot sending', {
+        trigger,
+        url: request.url,
+        previousScrollHeight: state.previousScrollHeight,
+      });
+
       sendTimelineRequest(request);
     }
 
     function completeOlderRequest() {
+      timelineLog('completeOlderRequest', {
+        queuedOlder: state.queuedOlder,
+      });
       state.fetchingOlder = false;
       state.inflightDirection = null;
       state.scrollAnchor = null;
@@ -2170,6 +2468,9 @@
     }
 
     function completeSnapshotRequest() {
+      timelineLog('completeSnapshotRequest', {
+        pendingResync: state.pendingResync,
+      });
       state.resyncing = false;
       state.inflightDirection = null;
       state.justResynced = true;
@@ -2394,6 +2695,17 @@
 
       const triggerLabel = headerLookup('X-Timeline-Trigger');
 
+      timelineLog('htmx:beforeRequest', {
+        derivedDirection: direction,
+        sourceDirection: sourceEl?.dataset?.direction || null,
+        trigger: triggerLabel,
+        actionState: state.action,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        pendingResync: state.pendingResync,
+      });
+
       if (direction === 'older') {
         state.action = 'older';
         state.fetchingOlder = true;
@@ -2419,6 +2731,14 @@
         state.action = direction;
       }
 
+      timelineLog('htmx:beforeRequest state updated', {
+        action: state.action,
+        inflightDirection: state.inflightDirection,
+        trigger: triggerLabel,
+        previousScrollHeight: state.previousScrollHeight,
+        scrollAnchorCaptured: Boolean(state.scrollAnchor),
+      });
+
       syncLoadControls();
     });
 
@@ -2434,6 +2754,13 @@
       const bottomOffset = getTimelineBottomOffset();
       const maintainAnchor = state.autoScroll || bottomOffset <= BOTTOM_ANCHOR_THRESHOLD;
 
+      timelineLog('htmx:beforeSwap', {
+        action: state.action,
+        bottomOffset,
+        maintainAnchor,
+        autoScroll: state.autoScroll,
+      });
+
       if (maintainAnchor) {
         state.bottomAnchorOffset = Math.max(bottomOffset, 0);
         state.pageBottomOffset = Math.max(getPageBottomOffset(), 0);
@@ -2445,6 +2772,17 @@
 
     window.htmx.on('htmx:afterSwap', (event) => {
       if (event.detail?.target?.id !== 'timeline-event-list') return;
+
+      timelineLog('htmx:afterSwap start', {
+        action: state.action,
+        pendingRealtime: state.pendingRealtime,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        autoScroll: state.autoScroll,
+        bottomAnchorOffset: state.bottomAnchorOffset,
+        pageBottomOffset: state.pageBottomOffset,
+      });
 
       closeOpenToolChip();
       normaliseToolClusters();
@@ -2484,12 +2822,19 @@
         }
       }
 
-      dedupeTimeline();
+      const dedupeRemoved = dedupeTimeline() || 0;
+      let trimSummary = { trimmedFromTop: 0, trimmedFromBottom: 0 };
       if (state.action === 'older' || state.action === 'newer') {
-        trimTimeline(state.action);
+        trimSummary = trimTimeline(state.action) || trimSummary;
       } else if (state.action === 'snapshot') {
-        trimTimeline('snapshot');
+        trimSummary = trimTimeline('snapshot') || trimSummary;
       }
+      syncCursorDataset({
+        reason: 'htmx-afterSwap',
+        trimmedOlder: trimSummary.trimmedFromTop,
+        trimmedNewer: trimSummary.trimmedFromBottom,
+        dedupeRemoved,
+      });
       syncKnownCursors({ animate: state.action === 'newer' });
       updateComposerCursor();
 
@@ -2530,11 +2875,21 @@
       state.awaitingProcessingSync = false;
       syncProcessingFromDom();
       maybeAutoFetchBacklog();
-      syncLoadControls();
+
+      timelineLog('htmx:afterSwap complete', {
+        hasMoreNewer: hasMoreNewerInDom(),
+        autoScroll: state.autoScroll,
+        pendingRealtime: state.pendingRealtime,
+        awaitingProcessingSync: state.awaitingProcessingSync,
+      });
     });
 
     window.htmx.on('htmx:afterSettle', (event) => {
       if (event.detail?.target?.id === 'timeline-event-list') {
+        timelineLog('htmx:afterSettle', {
+          autoScroll: state.autoScroll,
+          pendingRealtime: state.pendingRealtime,
+        });
         ensureProcessingSlotPosition();
         updateTimelinePadding();
         updateJumpButton();
@@ -2546,20 +2901,35 @@
     });
 
     document.body.addEventListener('timeline:resync', () => {
+      timelineLog('timeline:resync received', {
+        justResynced: state.justResynced,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+      });
       state.pendingRealtime = 0;
       if (state.justResynced) {
         state.justResynced = false;
         return;
       }
       if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        timelineLog('timeline:resync queued pending snapshot due to inflight work');
         state.pendingResync = true;
         return;
       }
+      timelineLog('timeline:resync triggering snapshot request');
       requestTimelineSnapshot('trigger-resync');
     });
 
     window.htmx.on('htmx:responseError', (event) => {
       if (event.detail?.target?.id !== 'timeline-event-list') return;
+      timelineError('htmx:responseError', {
+        action: state.action,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        status: event.detail?.xhr?.status ?? null,
+      });
       const hadOlder = state.action === 'older' || state.fetchingOlder;
       const hadNewer = state.action === 'newer' || state.fetchingNewer;
       const hadSnapshot = state.action === 'snapshot' || state.resyncing;
@@ -2582,6 +2952,12 @@
 
     window.htmx.on('htmx:sendError', (event) => {
       if (event.detail?.target?.id !== 'timeline-event-list') return;
+      timelineError('htmx:sendError', {
+        action: state.action,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+      });
       const hadOlder = state.action === 'older' || state.fetchingOlder;
       const hadNewer = state.action === 'newer' || state.fetchingNewer;
       const hadSnapshot = state.action === 'snapshot' || state.resyncing;
@@ -2603,6 +2979,10 @@
     });
 
     const handleProcessingStartedEvent = (evt) => {
+      timelineLog('eventsource processing.started received', {
+        lastEventId: evt?.lastEventId || null,
+        currentProcessingEventId: state.processingEventId || null,
+      });
       if (evt?.lastEventId) {
         state.lastEventId = evt.lastEventId;
         state.processingEventId = evt.lastEventId;
@@ -2613,6 +2993,10 @@
     };
 
     const handleProcessingFinishedEvent = (evt) => {
+      timelineLog('eventsource processing.finished received', {
+        lastEventId: evt?.lastEventId || null,
+        processingEventId: state.processingEventId || null,
+      });
       if (evt?.lastEventId) {
         state.lastEventId = evt.lastEventId;
       }
@@ -2624,6 +3008,12 @@
         compareEventIds(finishId, state.processingEventId) < 0,
       );
       if (staleFinish) {
+        timelineLog('eventsource processing.finished stale event detected', {
+          finishId,
+          processingEventId: state.processingEventId,
+        });
+      }
+      if (staleFinish) {
         if (isNearBottom()) {
           requestNewer('processing-finished-stale');
         } else {
@@ -2632,6 +3022,9 @@
         return;
       }
       state.processingEventId = null;
+      timelineLog('eventsource processing.finished refreshing state', {
+        finishId,
+      });
       refreshProcessingState({ reason: 'processing-finished' })
         .finally(() => {
           if (isNearBottom()) {
@@ -2643,18 +3036,23 @@
     };
 
     function connectEventStream(lastId) {
+      timelineLog('connectEventStream invoked', {
+        lastId,
+        hasEventStreamUrl: Boolean(eventStreamUrl),
+      });
       if (!eventStreamUrl) {
-        console.warn('[agent-workspace] Missing eventStreamUrl dataset attribute; realtime updates disabled.');
+        timelineWarn('connectEventStream aborted: missing eventStreamUrl dataset attribute');
         return;
       }
 
       if (typeof window.EventSource === 'undefined') {
-        console.warn('[agent-workspace] EventSource API unavailable; realtime updates disabled.');
+        timelineWarn('connectEventStream aborted: EventSource API unavailable');
         return;
       }
 
       let cursor = lastId;
       if (cursor && !/^[0-9]+-[0-9]+$/.test(cursor)) {
+        timelineWarn('connectEventStream ignoring malformed cursor', { cursor });
         cursor = null;
       }
 
@@ -2662,17 +3060,33 @@
       const source = new EventSource(url);
 
       source.onopen = () => {
+        timelineLog('eventsource connection opened', {
+          url,
+          cursor,
+        });
       };
 
       const handleMessage = (evt) => {
+        const eventType = evt?.type || 'message';
+        timelineLog('eventsource message received', {
+          eventType,
+          lastEventId: evt?.lastEventId || null,
+        });
         if (evt && evt.lastEventId) {
           state.lastEventId = evt.lastEventId;
         }
         reconnectDelay = 3000;
         if (shouldDeferRealtime()) {
+          timelineLog('eventsource message deferred via queueRealtimeUpdate', {
+            eventType,
+            lastEventId: state.lastEventId,
+          });
           queueRealtimeUpdate();
           return;
         }
+        timelineLog('eventsource message requesting newer timeline', {
+          eventType,
+        });
         requestNewer('auto-newer');
       };
 
@@ -2682,6 +3096,10 @@
       source.addEventListener('processing.started', handleProcessingStartedEvent);
       source.addEventListener('processing.finished', handleProcessingFinishedEvent);
       source.onerror = (err) => {
+        timelineError('eventsource error', {
+          error: err?.message || err || null,
+          reconnectDelay,
+        });
         source.close();
         state.eventSource = null;
         reconnectDelay = Math.min(Math.round(reconnectDelay * 1.5), RECONNECT_MAX);
@@ -2698,6 +3116,11 @@
       };
 
       state.eventSource = source;
+      timelineLog('eventsource listener registered', {
+        url,
+        cursor,
+        reconnectDelay,
+      });
     }
 
     if (sessionUrl) {

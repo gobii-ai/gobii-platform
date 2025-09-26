@@ -186,7 +186,7 @@ def _get_base_step_qs(agent: PersistentAgent):
 def fetch_timeline_window(
     agent: PersistentAgent,
     *,
-    limit: int = 150,
+    limit: int = 10,
     direction: str = "initial",
     cursor: str | None = None,
 ) -> TimelineWindow:

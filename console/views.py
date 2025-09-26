@@ -5228,7 +5228,7 @@ class AgentAllowlistInviteRejectView(TemplateView):
         return redirect("agent_allowlist_invite_reject", token=token)
 
 
-TIMELINE_DEFAULT_LIMIT = 150
+TIMELINE_DEFAULT_LIMIT = 10
 
 
 class AgentWorkspaceView(AgentAccessMixin, TemplateView):
