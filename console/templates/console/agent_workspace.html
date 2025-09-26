@@ -2093,7 +2093,12 @@
       }
       if (state.queuedNewerTrigger) {
         const queuedTrigger = state.queuedNewerTrigger;
+        const nearBottom = isNearBottom();
         state.queuedNewerTrigger = null;
+        if (!nearBottom) {
+          queueRealtimeUpdate();
+          return;
+        }
         requestNewer(queuedTrigger);
       }
     }
@@ -2296,12 +2301,13 @@
       let resizeComposerTextarea = null;
 
       composer.addEventListener('htmx:beforeRequest', () => {
-        state.pendingComposerScroll = true;
+        state.pendingComposerScroll = isNearBottom();
         setComposerSending(true);
       });
       composer.addEventListener('htmx:afterRequest', (event) => {
         const succeeded = Boolean(event.detail && event.detail.xhr && event.detail.xhr.status < 400);
         if (succeeded) {
+          const nearBottom = isNearBottom();
           composer.reset();
           if (typeof resizeComposerTextarea === 'function') {
             resizeComposerTextarea({ reset: true });
@@ -2310,7 +2316,11 @@
             scheduleComposerLayoutUpdate();
           }
           showProcessingIndicator({ sticky: true });
-          requestNewer('composer-submit');
+          if (nearBottom) {
+            requestNewer('composer-submit');
+          } else {
+            state.pendingComposerScroll = false;
+          }
         } else {
           state.pendingComposerScroll = false;
         }
@@ -2614,13 +2624,21 @@
         compareEventIds(finishId, state.processingEventId) < 0,
       );
       if (staleFinish) {
-        requestNewer('processing-finished-stale');
+        if (isNearBottom()) {
+          requestNewer('processing-finished-stale');
+        } else {
+          queueRealtimeUpdate();
+        }
         return;
       }
       state.processingEventId = null;
       refreshProcessingState({ reason: 'processing-finished' })
         .finally(() => {
-          requestNewer('processing-finished');
+          if (isNearBottom()) {
+            requestNewer('processing-finished');
+          } else {
+            queueRealtimeUpdate();
+          }
         });
     };
 
