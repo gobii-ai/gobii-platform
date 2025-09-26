@@ -1406,12 +1406,23 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
 
                     return redirect('agent_welcome', pk=persistent_agent.id)
                     
+            except ValidationError as exc:
+                error_messages = []
+                if hasattr(exc, 'message_dict'):
+                    for field_errors in exc.message_dict.values():
+                        error_messages.extend(field_errors)
+                error_messages.extend(getattr(exc, 'messages', []))
+                if not error_messages:
+                    error_messages.append("We couldn't create that agent. Please check your organization settings and try again.")
+                for message_text in error_messages:
+                    form.add_error(None, message_text)
             except Exception as e:
+                logger.exception("Error creating persistent agent: %s", e)
                 messages.error(
                     request,
-                    f"Error creating persistent agent: {str(e)}"
+                    "We ran into a problem creating your agent. Please try again."
                 )
-        
+
         # If form is invalid or has errors, re-render with them
         context = self.get_context_data(form=form)
         context['form'] = form

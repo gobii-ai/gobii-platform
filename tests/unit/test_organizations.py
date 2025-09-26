@@ -505,12 +505,24 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
         )
 
         browser = BrowserUseAgent.objects.create(user=owner, name="Seatless Browser")
+
+        self.assertEqual(seatless_org.billing.purchased_seats, 0)
+
+        with self.assertRaises(ValidationError):
+            PersistentAgent.objects.create(
+                user=owner,
+                organization=seatless_org,
+                name="Seatless Agent",
+                charter="do things",
+                browser_use_agent=browser,
+            )
+
         agent = PersistentAgent(
             user=owner,
             organization=seatless_org,
-            name="Seatless Agent",
+            name="Seatless Agent 2",
             charter="do things",
-            browser_use_agent=browser,
+            browser_use_agent=BrowserUseAgent.objects.create(user=owner, name="Seatless Browser 2"),
         )
 
         with self.assertRaises(ValidationError):

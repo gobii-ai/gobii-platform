@@ -1,6 +1,7 @@
 from django.test import TestCase, Client, tag
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from unittest.mock import patch
 
 
 @tag("batch_console_agents")
@@ -20,7 +21,7 @@ class ConsoleViewsTest(TestCase):
     def test_delete_persistent_agent_also_deletes_browser_agent(self):
         """Test that deleting a persistent agent also deletes its browser agent."""
         from api.models import PersistentAgent, BrowserUseAgent
-        
+
         # Create a browser use agent
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -53,3 +54,46 @@ class ConsoleViewsTest(TestCase):
         # Verify both the persistent agent and browser agent are deleted
         self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent_id).exists())
         self.assertFalse(BrowserUseAgent.objects.filter(id=browser_agent_id).exists())
+
+    @patch("console.views.AgentService.has_agents_available", return_value=True)
+    @tag("batch_console_agents")
+    def test_org_agent_creation_blocked_without_seat(self, _mock_agents_available):
+        """Org-owned agent creation should surface a validation error when no seats exist."""
+        from api.models import Organization, OrganizationMembership, PersistentAgent
+
+        org = Organization.objects.create(
+            name="Seatless Inc",
+            slug="seatless-inc",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        session = self.client.session
+        session["agent_charter"] = "Help with tasks"
+        session["context_type"] = "organization"
+        session["context_id"] = str(org.id)
+        session["context_name"] = org.name
+        session.save()
+
+        response = self.client.post(
+            reverse("agent_create_contact"),
+            data={
+                "preferred_contact_method": "email",
+                "contact_endpoint_email": "owner@example.com",
+                "email_enabled": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.redirect_chain)
+        form = response.context.get("form")
+        self.assertIsNotNone(form)
+        non_field_errors = form.non_field_errors()
+        self.assertTrue(any("Purchase organization seats" in err for err in non_field_errors))
+        self.assertEqual(PersistentAgent.objects.filter(organization=org).count(), 0)

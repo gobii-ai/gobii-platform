@@ -97,6 +97,9 @@ class AgentAllowlistViewTests(TestCase):
     def test_org_admin_access_allowed_member_forbidden(self):
         # Make agent org-owned
         org = Organization.objects.create(name="Acme", slug="acme", created_by=self.owner)
+        billing = org.billing
+        billing.purchased_seats = 1
+        billing.save(update_fields=["purchased_seats"])
         self.agent.organization = org
         self.agent.save(update_fields=["organization"])
 

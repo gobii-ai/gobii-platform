@@ -85,6 +85,9 @@ class PersistentAgentStepCreditsTests(TestCase):
             plan="startup",
             created_by=self.user,
         )
+        billing = org.billing
+        billing.purchased_seats = 1
+        billing.save(update_fields=["purchased_seats"])
         # Create an org-owned agent
         # Create a separate browser agent for the org-owned persistent agent
         org_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="BA-Org")
