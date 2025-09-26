@@ -299,3 +299,39 @@ class SubscriptionSignalOrganizationTests(TestCase):
         billing.refresh_from_db()
         self.assertEqual(billing.purchased_seats, 1)
         mock_grant.assert_not_called()
+
+    @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
+    @patch("pages.signals.get_plan_by_product_id")
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_cycle_renews_with_replace_current(self, mock_sync, mock_plan, mock_grant):
+        billing = self.org.billing
+        billing.purchased_seats = 3
+        billing.billing_cycle_anchor = 17
+        billing.save(update_fields=["purchased_seats", "billing_cycle_anchor"])
+
+        sub, payload = self._mock_subscription(quantity=3, billing_reason="subscription_cycle", payload_invoice="in_cycle")
+        mock_sync.return_value = sub
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        event = _build_djstripe_event(payload)
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.stripe.Invoice.retrieve") as mock_invoice_retrieve, \
+            patch("pages.signals.Invoice.sync_from_stripe_data") as mock_invoice_sync:
+
+            handle_subscription_event(event)
+
+        mock_invoice_retrieve.assert_not_called()
+        mock_invoice_sync.assert_not_called()
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.purchased_seats, 3)
+        self.assertEqual(billing.billing_cycle_anchor, 1)
+
+        mock_plan.assert_called_once()
+        mock_grant.assert_called_once()
+        call_args, call_kwargs = mock_grant.call_args
+        self.assertEqual(call_args[0], self.org)
+        self.assertEqual(call_kwargs.get("seats"), 3)
+        self.assertEqual(call_kwargs.get("invoice_id"), payload["latest_invoice"])
+        self.assertTrue(call_kwargs.get("replace_current"))
+        self.assertIs(call_kwargs.get("subscription"), sub)
