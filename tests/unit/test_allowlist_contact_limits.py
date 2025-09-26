@@ -14,7 +14,10 @@ from api.models import (
     CommsAllowlistEntry,
     CommsChannel,
     AgentAllowlistInvite,
+    Organization,
+    OrganizationMembership,
 )
+from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG
 from util.subscription_helper import get_user_max_contacts_per_agent
 
@@ -188,7 +191,9 @@ class ContactLimitEnforcementTests(TestCase):
         
         with self.assertRaises(ValidationError):
             entry4.full_clean()
-    
+
+
+
     @patch('util.subscription_helper.get_user_plan')
     def test_editing_existing_entry_doesnt_count(self, mock_get_user_plan):
         """Test that updating an existing entry doesn't trigger the limit check."""
@@ -401,6 +406,67 @@ class ContactLimitEnforcementTests(TestCase):
         # Should show 0 pending since the invitation is accepted
         self.assertIn("Maximum 3 contacts", str(ctx.exception))
         self.assertIn("including 0 pending invitations", str(ctx.exception))
+
+
+@tag("batch_allowlist_rules")
+class OrganizationContactLimitTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username="org-owner",
+            email="owner@example.com",
+        )
+        self.org = Organization.objects.create(
+            name="OrgCo",
+            slug="orgco",
+            created_by=self.owner,
+        )
+        billing = self.org.billing
+        billing.subscription = PlanNames.ORG_TEAM
+        billing.purchased_seats = 2
+        billing.save(update_fields=["subscription", "purchased_seats"])
+
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+
+        self.browser_agent = BrowserUseAgent.objects.create(
+            user=self.owner,
+            name="Org Browser Agent",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.owner,
+            organization=self.org,
+            name="Org Agent",
+            charter="Org charter",
+            browser_use_agent=self.browser_agent,
+            whitelist_policy=PersistentAgent.WhitelistPolicy.MANUAL,
+        )
+
+    def test_helper_uses_org_plan_limit(self):
+        limit = get_user_max_contacts_per_agent(self.owner, organization=self.org)
+        self.assertEqual(limit, PLAN_CONFIG["org_team"]["max_contacts_per_agent"])
+
+    def test_allowlist_enforces_org_plan_limit(self):
+        limit = PLAN_CONFIG["org_team"]["max_contacts_per_agent"]
+        for i in range(limit):
+            CommsAllowlistEntry.objects.create(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address=f"org{i}@example.com",
+                is_active=True,
+            )
+
+        overflow_entry = CommsAllowlistEntry(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="overflow@example.com",
+            is_active=True,
+        )
+
+        with self.assertRaises(ValidationError):
+            overflow_entry.full_clean()
 
 
 @tag("batch_allowlist_rules")
