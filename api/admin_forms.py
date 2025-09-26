@@ -95,10 +95,13 @@ class AgentEmailAccountForm(ModelForm):
                         user_id=user_id,
                         event=AnalyticsEvent.EMAIL_ACCOUNT_CREATED if is_new else AnalyticsEvent.EMAIL_ACCOUNT_UPDATED,
                         source=AnalyticsSource.WEB,
-                        properties={
-                            'endpoint': obj.endpoint.address,
-                            'agent_id': str(getattr(obj.endpoint.owner_agent, 'id', '')),
-                        },
+                        properties=Analytics.with_org_properties(
+                            {
+                                'endpoint': obj.endpoint.address,
+                                'agent_id': str(getattr(obj.endpoint.owner_agent, 'id', '')),
+                            },
+                            organization=getattr(getattr(obj.endpoint, 'owner_agent', None), 'organization', None),
+                        ),
                     )
             except Exception:
                 pass

@@ -261,12 +261,15 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
                                         user_id=str(agent_obj.user.id),
                                         event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS,
                                         source=AnalyticsSource.EMAIL,
-                                        properties={
-                                            "agent_id": str(agent_obj.id),
-                                            "agent_name": agent_obj.name,
-                                            "channel": channel_val,
-                                            "sender": parsed.sender,
-                                        },
+                                        properties=Analytics.with_org_properties(
+                                            {
+                                                "agent_id": str(agent_obj.id),
+                                                "agent_name": agent_obj.name,
+                                                "channel": channel_val,
+                                                "sender": parsed.sender,
+                                            },
+                                            organization=getattr(agent_obj, "organization", None),
+                                        ),
                                     )
                                 except Exception:
                                     # Do not block on email failures
