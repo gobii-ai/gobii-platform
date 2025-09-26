@@ -1,6 +1,6 @@
 # gobii_platform/api/serializers.py
 from rest_framework import serializers
-from .models import BrowserUseAgent, BrowserUseAgentTask
+from .models import ApiKey, BrowserUseAgent, BrowserUseAgentTask
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
 
 # Serializer for Listing Agents (id, name, created_at)
@@ -128,8 +128,14 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not self.instance and request is not None:
             agent_obj = attrs.get('agent')
-            if agent_obj and agent_obj.user != request.user:
-                raise serializers.ValidationError({'agent': 'Specified agent does not belong to the authenticated user.'})
+            if agent_obj:
+                auth = getattr(request, 'auth', None)
+                if isinstance(auth, ApiKey) and getattr(auth, 'organization_id', None):
+                    persistent = getattr(agent_obj, 'persistent_agent', None)
+                    if not persistent or persistent.organization_id != auth.organization_id:
+                        raise serializers.ValidationError({'agent': 'Specified agent does not belong to the authenticated organization.'})
+                elif agent_obj.user != request.user:
+                    raise serializers.ValidationError({'agent': 'Specified agent does not belong to the authenticated user.'})
         return attrs
 
 class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):
