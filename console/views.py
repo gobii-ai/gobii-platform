@@ -653,7 +653,7 @@ class ApiKeyDetailView(LoginRequiredMixin, View):
         })
         transaction.on_commit(lambda: Analytics.track_event(
             user_id=request.user.id,
-            event=AnalyticsEvent.API_KEY_REVOKED,
+            event=AnalyticsEvent.ORGANIZATION_API_KEY_REVOKED if props.get('organization', None) else AnalyticsEvent.API_KEY_REVOKED,
             source=AnalyticsSource.WEB,
             properties=props.copy(),
         ))
