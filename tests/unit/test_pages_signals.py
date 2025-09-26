@@ -10,6 +10,10 @@ from api.models import UserBilling, Organization
 from constants.plans import PlanNamesChoices
 from pages.signals import handle_subscription_event
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
+from constants.stripe import (
+    ORG_OVERAGE_STATE_META_KEY,
+    ORG_OVERAGE_STATE_DETACHED_PENDING,
+)
 
 
 User = get_user_model()
@@ -146,6 +150,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
         billing.stripe_customer_id = "cus_org"
         billing.subscription = PlanNamesChoices.ORG_TEAM.value
         billing.save(update_fields=["stripe_customer_id", "subscription"])
+        patcher = patch("pages.signals.stripe.Subscription.retrieve")
+        self.addCleanup(patcher.stop)
+        self.mock_subscription_retrieve = patcher.start()
+        self.mock_subscription_retrieve.return_value = {
+            "items": {"data": []},
+            "metadata": {},
+        }
 
     def _mock_subscription(self, *, quantity, billing_reason, payload_invoice="in_org"):
         aware_start = timezone.make_aware(datetime(2025, 9, 1, 0, 0, 0), timezone=dt_timezone.utc)
@@ -169,10 +180,11 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         return sub, payload
 
+    @patch("pages.signals.stripe.SubscriptionItem.create")
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
-    def test_subscription_create_sets_seats_and_grants(self, mock_sync, mock_plan, mock_grant):
+    def test_subscription_create_sets_seats_and_grants(self, mock_sync, mock_plan, mock_grant, mock_item_create):
         sub, payload = self._mock_subscription(quantity=2, billing_reason=None)
         mock_sync.return_value = sub
         mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
@@ -202,10 +214,11 @@ class SubscriptionSignalOrganizationTests(TestCase):
         self.assertEqual(kwargs.get("seats"), 2)
         self.assertEqual(kwargs.get("invoice_id"), invoice_payload["id"])
 
+    @patch("pages.signals.stripe.SubscriptionItem.create")
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
-    def test_subscription_create_with_existing_seats_grants_delta(self, mock_sync, mock_plan, mock_grant):
+    def test_subscription_create_with_existing_seats_grants_delta(self, mock_sync, mock_plan, mock_grant, mock_item_create):
         billing = self.org.billing
         billing.purchased_seats = 3
         billing.save(update_fields=["purchased_seats"])
@@ -235,10 +248,11 @@ class SubscriptionSignalOrganizationTests(TestCase):
         self.assertEqual(kwargs.get("seats"), 2)
         self.assertEqual(kwargs.get("invoice_id"), "")
 
+    @patch("pages.signals.stripe.SubscriptionItem.create")
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
-    def test_subscription_update_grants_difference(self, mock_sync, mock_plan, mock_grant):
+    def test_subscription_update_grants_difference(self, mock_sync, mock_plan, mock_grant, mock_item_create):
         billing = self.org.billing
         billing.purchased_seats = 2
         billing.save(update_fields=["purchased_seats"])
@@ -270,10 +284,11 @@ class SubscriptionSignalOrganizationTests(TestCase):
         self.assertEqual(kwargs.get("seats"), 1)
         self.assertEqual(kwargs.get("invoice_id"), "")
 
+    @patch("pages.signals.stripe.SubscriptionItem.create")
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
-    def test_subscription_update_decrease_no_grant(self, mock_sync, mock_plan, mock_grant):
+    def test_subscription_update_decrease_no_grant(self, mock_sync, mock_plan, mock_grant, mock_item_create):
         billing = self.org.billing
         billing.purchased_seats = 3
         billing.save(update_fields=["purchased_seats"])
@@ -299,3 +314,156 @@ class SubscriptionSignalOrganizationTests(TestCase):
         billing.refresh_from_db()
         self.assertEqual(billing.purchased_seats, 1)
         mock_grant.assert_not_called()
+
+    @patch("pages.signals.stripe.SubscriptionItem.create")
+    @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
+    @patch("pages.signals.get_plan_by_product_id")
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_cycle_renews_with_replace_current(self, mock_sync, mock_plan, mock_grant, mock_item_create):
+        billing = self.org.billing
+        billing.purchased_seats = 3
+        billing.billing_cycle_anchor = 17
+        billing.save(update_fields=["purchased_seats", "billing_cycle_anchor"])
+
+        sub, payload = self._mock_subscription(quantity=3, billing_reason="subscription_cycle", payload_invoice="in_cycle")
+        mock_sync.return_value = sub
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        event = _build_djstripe_event(payload)
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.stripe.Invoice.retrieve") as mock_invoice_retrieve, \
+            patch("pages.signals.Invoice.sync_from_stripe_data") as mock_invoice_sync:
+
+            handle_subscription_event(event)
+
+        mock_invoice_retrieve.assert_not_called()
+        mock_invoice_sync.assert_not_called()
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.purchased_seats, 3)
+        self.assertEqual(billing.billing_cycle_anchor, 1)
+
+        mock_plan.assert_called_once()
+        mock_grant.assert_called_once()
+        call_args, call_kwargs = mock_grant.call_args
+        self.assertEqual(call_args[0], self.org)
+        self.assertEqual(call_kwargs.get("seats"), 3)
+        self.assertEqual(call_kwargs.get("invoice_id"), payload["latest_invoice"])
+        self.assertTrue(call_kwargs.get("replace_current"))
+        self.assertIs(call_kwargs.get("subscription"), sub)
+
+    @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
+    @patch("pages.signals.get_plan_by_product_id")
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_adds_overage_item_when_missing(self, mock_sync, mock_plan, mock_grant):
+        sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_update")
+        payload["items"]["data"][0]["price"]["id"] = "price_org_team"
+        mock_sync.return_value = sub
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+
+        event = _build_djstripe_event(payload)
+
+        custom_settings = SimpleNamespace(org_team_additional_task_price_id="price_overage")
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.get_stripe_settings", return_value=custom_settings), \
+            patch("pages.signals.stripe.Subscription.retrieve", return_value={"items": {"data": payload["items"]["data"]}}) as mock_sub_retrieve, \
+            patch("pages.signals.stripe.SubscriptionItem.create") as mock_item_create:
+
+            handle_subscription_event(event)
+
+        mock_sub_retrieve.assert_called_once_with(sub.id, expand=["items.data.price"])
+        mock_item_create.assert_called_once_with(subscription=sub.id, price="price_overage")
+        mock_grant.assert_called_once()
+
+    @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
+    @patch("pages.signals.get_plan_by_product_id")
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_skips_overage_item_when_present(self, mock_sync, mock_plan, mock_grant):
+        sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_update")
+        payload_items = payload["items"]["data"]
+        payload_items[0]["price"]["id"] = "price_org_team"
+        payload_items.append({
+            "plan": {"usage_type": "metered"},
+            "price": {"id": "price_overage"},
+            "quantity": None,
+        })
+
+        mock_sync.return_value = sub
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+
+        event = _build_djstripe_event(payload)
+
+        custom_settings = SimpleNamespace(org_team_additional_task_price_id="price_overage")
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.get_stripe_settings", return_value=custom_settings), \
+            patch("pages.signals.stripe.SubscriptionItem.create") as mock_item_create:
+
+            handle_subscription_event(event)
+
+        mock_item_create.assert_not_called()
+
+    @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
+    @patch("pages.signals.get_plan_by_product_id")
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_detach_pending_skips_overage_create(self, mock_sync, mock_plan, mock_grant):
+        sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_update")
+        payload["items"]["data"][0]["price"]["id"] = "price_org_team"
+        payload["metadata"] = {ORG_OVERAGE_STATE_META_KEY: ORG_OVERAGE_STATE_DETACHED_PENDING}
+
+        mock_sync.return_value = sub
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+
+        billing = self.org.billing
+        billing.purchased_seats = 2
+        billing.save(update_fields=["purchased_seats"])
+
+        event = _build_djstripe_event(payload)
+
+        custom_settings = SimpleNamespace(org_team_additional_task_price_id="price_overage")
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.get_stripe_settings", return_value=custom_settings), \
+            patch("pages.signals.stripe.SubscriptionItem.create") as mock_item_create, \
+            patch("pages.signals.stripe.Subscription.modify") as mock_modify:
+
+            handle_subscription_event(event)
+
+        mock_item_create.assert_not_called()
+        mock_modify.assert_not_called()
+
+    @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
+    @patch("pages.signals.get_plan_by_product_id")
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_detach_pending_clears_flag_when_item_present(self, mock_sync, mock_plan, mock_grant):
+        sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_update")
+        payload_items = payload["items"]["data"]
+        payload_items[0]["price"]["id"] = "price_org_team"
+        payload_items.append({
+            "plan": {"usage_type": "metered"},
+            "price": {"id": "price_overage"},
+            "quantity": None,
+        })
+        payload["metadata"] = {ORG_OVERAGE_STATE_META_KEY: ORG_OVERAGE_STATE_DETACHED_PENDING}
+
+        mock_sync.return_value = sub
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+
+        billing = self.org.billing
+        billing.purchased_seats = 2
+        billing.save(update_fields=["purchased_seats"])
+
+        event = _build_djstripe_event(payload)
+
+        custom_settings = SimpleNamespace(org_team_additional_task_price_id="price_overage")
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.get_stripe_settings", return_value=custom_settings), \
+            patch("pages.signals.stripe.SubscriptionItem.create") as mock_item_create, \
+            patch("pages.signals.stripe.Subscription.modify") as mock_modify:
+
+            handle_subscription_event(event)
+
+        mock_item_create.assert_not_called()
+        mock_modify.assert_called_once_with(sub.id, metadata={ORG_OVERAGE_STATE_META_KEY: ""})

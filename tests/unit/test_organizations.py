@@ -15,10 +15,15 @@ from api.models import (
     BrowserUseAgent,
 )
 from dataclasses import replace
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone as datetime_timezone
 from unittest.mock import patch, MagicMock
 
 from config.stripe_config import get_stripe_settings
+import stripe
+from constants.stripe import (
+    ORG_OVERAGE_STATE_META_KEY,
+    ORG_OVERAGE_STATE_DETACHED_PENDING,
+)
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
@@ -117,9 +122,10 @@ class OrganizationInvitesTest(TestCase):
         self.assertIn("already has a pending invitation", " ".join(form.errors.get("email", [])))
         self.assertEqual(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).count(), 1)
 
+    @patch("config.stripe_config._load_from_database", return_value=None)
     @patch("console.views.stripe.checkout.Session.create")
     @patch("console.views.get_or_create_stripe_customer")
-    def test_seat_checkout_redirects_to_stripe(self, mock_customer, mock_session):
+    def test_seat_checkout_redirects_to_stripe(self, mock_customer, mock_session, _load_from_db):
         mock_customer.return_value = MagicMock(id="cus_test")
         mock_session.return_value = MagicMock(url="https://stripe.test/checkout")
 
@@ -129,6 +135,7 @@ class OrganizationInvitesTest(TestCase):
         billing.save(update_fields=["purchased_seats"])
 
         url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
+        stripe_settings = get_stripe_settings(force_reload=True)
         resp = self.client.post(url, {"seats": 1})
 
         self.assertEqual(resp.status_code, 302)
@@ -137,13 +144,10 @@ class OrganizationInvitesTest(TestCase):
         _, kwargs = mock_session.call_args
         line_items = kwargs.get("line_items")
         self.assertIsNotNone(line_items)
-        stripe_settings = get_stripe_settings()
         self.assertEqual(line_items[0]["price"], stripe_settings.org_team_price_id)
         self.assertEqual(line_items[0]["quantity"], 1)
-        self.assertEqual(
-            line_items[1]["price"],
-            stripe_settings.org_team_additional_task_price_id,
-        )
+        overage_price = stripe_settings.org_team_additional_task_price_id
+        self.assertEqual(len(line_items), 1)
 
     def test_seat_checkout_requires_membership(self):
         stranger = get_user_model().objects.create_user(email="stranger@example.com", password="pw", username="stranger")
@@ -153,9 +157,9 @@ class OrganizationInvitesTest(TestCase):
         self.assertEqual(resp.status_code, 403)
 
     @tag("batch_organizations")
-    @patch("console.views.stripe.Subscription.modify")
+    @patch("console.views.stripe.billing_portal.Session.create")
     @patch("console.views.stripe.Subscription.retrieve")
-    def test_seat_checkout_adds_to_existing_subscription(self, mock_retrieve, mock_modify):
+    def test_seat_checkout_adds_to_existing_subscription(self, mock_retrieve, mock_portal_create):
         mock_retrieve.return_value = {
             "id": "sub_123",
             "items": {
@@ -171,6 +175,7 @@ class OrganizationInvitesTest(TestCase):
                 ]
             },
             "metadata": {"foo": "bar"},
+            "customer": "cus_123",
         }
 
         billing = self.org.billing
@@ -180,23 +185,37 @@ class OrganizationInvitesTest(TestCase):
 
         self.client.force_login(self.inviter)
         url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
-        resp = self.client.post(url, {"seats": 2}, follow=True)
+        mock_portal_create.return_value = MagicMock(url="https://stripe.test/portal-update")
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Seat update submitted", status_code=200)
+        resp = self.client.post(url, {"seats": 2})
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/portal-update")
 
         mock_retrieve.assert_called_once_with("sub_123", expand=["items.data.price"])
-        mock_modify.assert_called_once()
-        _, kwargs = mock_modify.call_args
-        self.assertEqual(kwargs["items"][0]["id"], "si_123")
-        self.assertEqual(kwargs["items"][0]["quantity"], 5)
-        self.assertEqual(kwargs["metadata"].get("seat_requestor_id"), str(self.inviter.id))
-        self.assertEqual(kwargs["proration_behavior"], "create_prorations")
+        mock_portal_create.assert_called_once()
+        _, kwargs = mock_portal_create.call_args
+        self.assertEqual(kwargs.get("customer"), "cus_123")
+        flow_data = kwargs.get("flow_data")
+        self.assertIsNotNone(flow_data)
+        self.assertEqual(flow_data.get("type"), "subscription_update_confirm")
+        sub_update = flow_data.get("subscription_update_confirm")
+        self.assertIsNotNone(sub_update)
+        self.assertEqual(sub_update.get("subscription"), "sub_123")
+        items = sub_update.get("items")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["id"], "si_123")
+        self.assertEqual(items[0]["quantity"], 5)
+
+        session_data = self.client.session.get("org_seat_portal_target")
+        self.assertIsNotNone(session_data)
+        self.assertEqual(session_data.get("requested"), 5)
 
     @tag("batch_organizations")
-    @patch("console.views.stripe.Subscription.modify")
+    @tag("batch_organizations")
+    @patch("console.views.stripe.billing_portal.Session.create")
     @patch("console.views.stripe.Subscription.retrieve")
-    def test_seat_checkout_handles_missing_licensed_item(self, mock_retrieve, mock_modify):
+    def test_seat_checkout_handles_missing_licensed_item(self, mock_retrieve, mock_portal_create):
         mock_retrieve.return_value = {
             "id": "sub_123",
             "items": {"data": [{"price": {"usage_type": "metered"}}]},
@@ -218,12 +237,13 @@ class OrganizationInvitesTest(TestCase):
             status_code=200,
         )
         mock_retrieve.assert_called_once()
-        mock_modify.assert_not_called()
+        mock_portal_create.assert_not_called()
 
     @tag("batch_organizations")
-    @patch("console.views.stripe.Subscription.modify")
+    @tag("batch_organizations")
+    @patch("console.views.stripe.billing_portal.Session.create")
     @patch("console.views.stripe.Subscription.retrieve")
-    def test_seat_checkout_matches_price_id_when_usage_type_missing(self, mock_retrieve, mock_modify):
+    def test_seat_checkout_matches_price_id_when_usage_type_missing(self, mock_retrieve, mock_portal_create):
         base_settings = get_stripe_settings()
         custom_settings = replace(base_settings, org_team_price_id="price_org_team")
 
@@ -239,6 +259,7 @@ class OrganizationInvitesTest(TestCase):
                 ]
             },
             "metadata": {},
+            "customer": "cus_456",
         }
 
         billing = self.org.billing
@@ -249,17 +270,425 @@ class OrganizationInvitesTest(TestCase):
         self.client.force_login(self.inviter)
         url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
 
-        with patch("console.views.get_stripe_settings", return_value=custom_settings):
-            resp = self.client.post(url, {"seats": 2}, follow=True)
+        mock_portal_create.return_value = MagicMock(url="https://stripe.test/portal-update")
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Seat update submitted", status_code=200)
+        with patch("console.views.get_stripe_settings", return_value=custom_settings):
+            resp = self.client.post(url, {"seats": 2})
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/portal-update")
 
         mock_retrieve.assert_called_once_with("sub_456", expand=["items.data.price"])
+        mock_portal_create.assert_called_once()
+        _, kwargs = mock_portal_create.call_args
+        flow_data = kwargs.get("flow_data")
+        self.assertEqual(flow_data.get("type"), "subscription_update_confirm")
+        sub_update = flow_data.get("subscription_update_confirm")
+        self.assertEqual(sub_update.get("subscription"), "sub_456")
+        items = sub_update.get("items")
+        self.assertEqual(items[0]["id"], "si_456")
+        self.assertEqual(items[0]["quantity"], 3)
+
+    @tag("batch_organizations")
+    @patch("console.views.stripe.Subscription.retrieve")
+    @patch("console.views.stripe.billing_portal.Session.create")
+    @patch("console.views.stripe.SubscriptionItem.delete")
+    @patch("console.views.stripe.Subscription.modify")
+    @patch("console.views.get_stripe_settings")
+    def test_seat_checkout_portal_detach_allows_update(
+        self,
+        mock_get_settings,
+        mock_modify,
+        mock_delete,
+        mock_portal_create,
+        mock_retrieve,
+    ):
+        base_settings = get_stripe_settings()
+        custom_settings = replace(
+            base_settings,
+            org_team_price_id="price_org_team",
+            org_team_additional_task_price_id="price_overage",
+        )
+        mock_get_settings.return_value = custom_settings
+
+        mock_portal_create.return_value = MagicMock(url="https://stripe.test/portal-update")
+
+        mock_retrieve.return_value = {
+            "id": "sub_999",
+            "items": {
+                "data": [
+                    {
+                        "id": "si_seats",
+                        "quantity": 4,
+                        "price": {
+                            "id": "price_org_team",
+                            "recurring": {"usage_type": "licensed"},
+                        },
+                    },
+                    {
+                        "id": "si_overage",
+                        "price": {
+                            "id": "price_overage",
+                            "recurring": {"usage_type": "metered"},
+                        },
+                    },
+                ]
+            },
+            "metadata": {"foo": "bar"},
+            "customer": "cus_999",
+        }
+
+        billing = self.org.billing
+        billing.purchased_seats = 4
+        billing.stripe_subscription_id = "sub_999"
+        billing.save(update_fields=["purchased_seats", "stripe_subscription_id"])
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, {"seats": 3})
+
+        mock_retrieve.assert_called_once_with("sub_999", expand=["items.data.price"])
+        self.assertEqual(mock_portal_create.call_count, 1)
+        mock_delete.assert_called_once_with("si_overage")
         mock_modify.assert_called_once()
-        _, kwargs = mock_modify.call_args
-        self.assertEqual(kwargs["items"][0]["id"], "si_456")
-        self.assertEqual(kwargs["items"][0]["quantity"], 3)
+
+        _, metadata_kwargs = mock_modify.call_args
+        self.assertEqual(
+            metadata_kwargs.get("metadata", {}).get(ORG_OVERAGE_STATE_META_KEY),
+            ORG_OVERAGE_STATE_DETACHED_PENDING,
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/portal-update")
+
+        session_data = self.client.session.get("org_seat_portal_target")
+        self.assertIsNotNone(session_data)
+        self.assertEqual(session_data.get("requested"), 7)
+
+        detach_state = self.client.session.get("org_overage_detach", {}).get(str(self.org.id))
+        self.assertIsNotNone(detach_state)
+
+    @patch("console.views.stripe.Subscription.retrieve")
+    @patch("console.views.stripe.billing_portal.Session.create")
+    @patch("console.views.stripe.SubscriptionItem.create")
+    @patch("console.views.stripe.SubscriptionItem.delete")
+    @patch("console.views.stripe.Subscription.modify")
+    @patch("console.views.get_stripe_settings")
+    def test_seat_checkout_portal_failure_modifies(
+        self,
+        mock_get_settings,
+        mock_modify,
+        mock_delete,
+        mock_item_create,
+        mock_portal_create,
+        mock_retrieve,
+    ):
+        base_settings = get_stripe_settings()
+        custom_settings = replace(
+            base_settings,
+            org_team_price_id="price_org_team",
+            org_team_additional_task_price_id="price_overage",
+        )
+        mock_get_settings.return_value = custom_settings
+
+        mock_portal_create.side_effect = [
+            stripe.error.InvalidRequestError(message="multiple items", param=None),
+        ]
+
+        initial_subscription = {
+            "id": "sub_888",
+            "items": {
+                "data": [
+                    {
+                        "id": "si_seats",
+                        "quantity": 2,
+                        "price": {
+                            "id": "price_org_team",
+                            "recurring": {"usage_type": "licensed"},
+                        },
+                    },
+                    {
+                        "id": "si_overage",
+                        "price": {
+                            "id": "price_overage",
+                            "recurring": {"usage_type": "metered"},
+                        },
+                    },
+                ]
+            },
+            "metadata": {"foo": "bar"},
+            "customer": "cus_888",
+        }
+
+        subscription_after_detach = {
+            "id": "sub_888",
+            "items": {
+                "data": [
+                    {
+                        "id": "si_seats",
+                        "quantity": 4,
+                        "price": {
+                            "id": "price_org_team",
+                            "recurring": {"usage_type": "licensed"},
+                        },
+                    }
+                ]
+            },
+            "metadata": {ORG_OVERAGE_STATE_META_KEY: ORG_OVERAGE_STATE_DETACHED_PENDING},
+            "customer": "cus_888",
+        }
+
+        mock_retrieve.side_effect = [initial_subscription, subscription_after_detach]
+
+        billing = self.org.billing
+        billing.purchased_seats = 2
+        billing.stripe_subscription_id = "sub_888"
+        billing.save(update_fields=["purchased_seats", "stripe_subscription_id"])
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, {"seats": 2}, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            "Stripe portal seat updates are disabled, so we applied the seat change immediately.",
+            status_code=200,
+        )
+
+        self.assertEqual(mock_retrieve.call_count, 2)
+        mock_portal_create.assert_called_once()
+        mock_delete.assert_called_once_with("si_overage")
+        mock_item_create.assert_called_once_with(subscription="sub_888", price="price_overage")
+
+        metadata_calls = [call.kwargs.get("metadata") for call in mock_modify.call_args_list if "metadata" in call.kwargs]
+        self.assertTrue(any(meta and meta.get(ORG_OVERAGE_STATE_META_KEY) == ORG_OVERAGE_STATE_DETACHED_PENDING for meta in metadata_calls))
+        self.assertTrue(any(meta is not None and meta.get(ORG_OVERAGE_STATE_META_KEY, "") == "" for meta in metadata_calls))
+
+        session_data = self.client.session.get("org_seat_portal_target")
+        self.assertIsNone(session_data)
+
+    @patch("console.views._reattach_overage_from_session")
+    @patch("console.views.PaymentsHelper.get_stripe_key")
+    def test_billing_success_reattaches_overage(self, mock_get_key, mock_reattach):
+        mock_get_key.return_value = "sk_test"
+        mock_reattach.return_value = True
+
+        self.client.force_login(self.inviter)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session["org_seat_portal_target"] = {
+            "org_id": str(self.org.id),
+            "requested": 5,
+        }
+        session["org_overage_detach"] = {
+            str(self.org.id): {
+                "subscription_id": "sub_123",
+                "price_id": "price_overage",
+            }
+        }
+        session.save()
+
+        resp = self.client.get(reverse("billing") + "?seats_success=1")
+
+        self.assertEqual(resp.status_code, 200)
+        mock_get_key.assert_called_once()
+        mock_reattach.assert_called_once()
+        self.assertEqual(mock_reattach.call_args[0][1], str(self.org.id))
+
+        updated_session = self.client.session
+        self.assertNotIn("org_seat_portal_target", updated_session)
+
+    @patch("console.views._reattach_overage_from_session")
+    @patch("console.views.PaymentsHelper.get_stripe_key")
+    def test_billing_cancel_reattaches_overage(self, mock_get_key, mock_reattach):
+        mock_get_key.return_value = "sk_test"
+        mock_reattach.return_value = True
+
+        self.client.force_login(self.inviter)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session["org_seat_portal_target"] = {
+            "org_id": str(self.org.id),
+            "requested": 5,
+        }
+        session["org_overage_detach"] = {
+            str(self.org.id): {
+                "subscription_id": "sub_123",
+                "price_id": "price_overage",
+            }
+        }
+        session.save()
+
+        resp = self.client.get(reverse("billing") + "?seats_cancelled=1")
+
+        self.assertEqual(resp.status_code, 200)
+        mock_get_key.assert_called_once()
+        mock_reattach.assert_called_once()
+        self.assertEqual(mock_reattach.call_args[0][1], str(self.org.id))
+
+        updated_session = self.client.session
+        self.assertNotIn("org_seat_portal_target", updated_session)
+
+    @tag("batch_organizations")
+    @patch("console.views.stripe.SubscriptionSchedule.modify")
+    @patch("console.views.stripe.SubscriptionSchedule.release")
+    @patch("console.views.stripe.SubscriptionSchedule.create")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_seat_reduction_schedules_next_cycle(self, mock_retrieve, mock_schedule_create, mock_schedule_release, mock_schedule_modify):
+        period_end = int((timezone.now() + timedelta(days=10)).timestamp())
+        current_period_start = int((timezone.now() - timedelta(days=20)).timestamp())
+        mock_retrieve.return_value = {
+            "id": "sub_789",
+            "current_period_end": period_end,
+            "current_period_start": current_period_start,
+            "items": {
+                "data": [
+                    {
+                        "id": "si_seat",
+                        "quantity": 5,
+                        "price": {"id": "price_org_team", "usage_type": "licensed"},
+                    },
+                    {
+                        "id": "si_tasks",
+                        "price": {"id": "price_overage", "usage_type": "metered"},
+                    },
+                ]
+            },
+            "metadata": {},
+            "schedule": None,
+        }
+        mock_schedule_create.return_value = MagicMock(id="ssch_new")
+
+        billing = self.org.billing
+        billing.purchased_seats = 5
+        billing.stripe_subscription_id = "sub_789"
+        billing.save(update_fields=["purchased_seats", "stripe_subscription_id"])
+
+        custom_settings = replace(get_stripe_settings(), org_team_price_id="price_org_team")
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_schedule", kwargs={"org_id": self.org.id})
+        with patch("console.views.get_stripe_settings", return_value=custom_settings):
+            resp = self.client.post(url, {"future_seats": 3}, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Seat reduction scheduled", status_code=200)
+
+        mock_schedule_release.assert_not_called()
+        mock_schedule_create.assert_called_once()
+        mock_schedule_modify.assert_called_once()
+
+        _, create_kwargs = mock_schedule_create.call_args
+        _, modify_kwargs = mock_schedule_modify.call_args
+        self.assertEqual(create_kwargs.get("from_subscription"), "sub_789")
+        self.assertEqual(modify_kwargs.get("end_behavior"), "release")
+        phases = modify_kwargs.get("phases")
+        self.assertIsNotNone(phases)
+        self.assertEqual(phases[0]["items"][0]["quantity"], 5)
+        self.assertEqual(phases[1]["items"][0]["quantity"], 3)
+        self.assertEqual(phases[0]["start_date"], current_period_start)
+        self.assertEqual(phases[0]["end_date"], period_end)
+        self.assertEqual(phases[1]["start_date"], period_end)
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.pending_seat_quantity, 3)
+        self.assertEqual(billing.pending_seat_schedule_id, "ssch_new")
+        expected_effective = datetime.fromtimestamp(period_end, tz=datetime_timezone.utc)
+        self.assertEqual(billing.pending_seat_effective_at, expected_effective)
+
+    @tag("batch_organizations")
+    @patch("console.views.stripe.SubscriptionSchedule.modify")
+    @patch("console.views.stripe.SubscriptionSchedule.release")
+    @patch("console.views.stripe.SubscriptionSchedule.create")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_seat_reduction_replaces_existing_schedule(self, mock_retrieve, mock_schedule_create, mock_schedule_release, mock_schedule_modify):
+        period_end = int((timezone.now() + timedelta(days=5)).timestamp())
+        current_period_start = int((timezone.now() - timedelta(days=10)).timestamp())
+        mock_retrieve.return_value = {
+            "id": "sub_sched",
+            "current_period_end": period_end,
+            "current_period_start": current_period_start,
+            "items": {
+                "data": [
+                    {
+                        "id": "si_seat",
+                        "quantity": 4,
+                        "price": {"id": "price_org_team", "usage_type": "licensed"},
+                    }
+                ]
+            },
+            "metadata": {},
+            "schedule": "ssch_old",
+        }
+        mock_schedule_create.return_value = MagicMock(id="ssch_new")
+
+        billing = self.org.billing
+        billing.purchased_seats = 4
+        billing.stripe_subscription_id = "sub_sched"
+        billing.pending_seat_quantity = 2
+        billing.pending_seat_effective_at = timezone.now()
+        billing.pending_seat_schedule_id = "ssch_old"
+        billing.save(
+            update_fields=[
+                "purchased_seats",
+                "stripe_subscription_id",
+                "pending_seat_quantity",
+                "pending_seat_effective_at",
+                "pending_seat_schedule_id",
+            ]
+        )
+
+        custom_settings = replace(get_stripe_settings(), org_team_price_id="price_org_team")
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_schedule", kwargs={"org_id": self.org.id})
+        with patch("console.views.get_stripe_settings", return_value=custom_settings):
+            resp = self.client.post(url, {"future_seats": 3}, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Seat reduction scheduled", status_code=200)
+
+        mock_schedule_release.assert_any_call("ssch_old")
+        mock_schedule_create.assert_called_once()
+        mock_schedule_modify.assert_called_once()
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.pending_seat_quantity, 3)
+        self.assertEqual(billing.pending_seat_schedule_id, "ssch_new")
+
+    @tag("batch_organizations")
+    @patch("console.views.stripe.SubscriptionSchedule.modify")
+    @patch("console.views.stripe.SubscriptionSchedule.release")
+    def test_cancel_pending_seat_reduction_releases_schedule(self, mock_schedule_release, mock_schedule_modify):
+        billing = self.org.billing
+        billing.pending_seat_quantity = 2
+        billing.pending_seat_effective_at = timezone.now()
+        billing.pending_seat_schedule_id = "ssch_cancel"
+        billing.save(update_fields=[
+            "pending_seat_quantity",
+            "pending_seat_effective_at",
+            "pending_seat_schedule_id",
+        ])
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_schedule_cancel", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Scheduled seat changes were cancelled", status_code=200)
+
+        mock_schedule_release.assert_called_once_with("ssch_cancel")
+        mock_schedule_modify.assert_not_called()
+
+        billing.refresh_from_db()
+        self.assertIsNone(billing.pending_seat_quantity)
+        self.assertIsNone(billing.pending_seat_effective_at)
+        self.assertEqual(billing.pending_seat_schedule_id, "")
 
     @patch("console.views.stripe.billing_portal.Session.create")
     def test_seat_portal_redirects(self, mock_portal):
