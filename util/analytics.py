@@ -146,13 +146,13 @@ class AnalyticsEvent(StrEnum):
     ORGANIZATION_TASK_DELETED = 'Organization Task Deleted'
     ORGANIZATION_API_KEY_CREATED = 'Organization API Key Created'
     ORGANIZATION_API_KEY_DELETED = 'Organization API Key Deleted'
+    ORGANIZATION_API_KEY_REVOKED = 'Organization API Key Revoked'
     ORGANIZATION_PERSISTENT_AGENT_CREATED = 'Organization Persistent Agent Created'
     ORGANIZATION_PERSISTENT_AGENT_DELETED = 'Organization Persistent Agent Deleted'
     ORGANIZATION_SEAT_ADDED = 'Organization Seat Added'
     ORGANIZATION_SEAT_REMOVED = 'Organization Seat Removed'
     ORGANIZATION_SEAT_ASSIGNED = 'Organization Seat Assigned'
     ORGANIZATION_SEAT_UNASSIGNED = 'Organization Seat Unassigned'
-
 
 class AnalyticsCTAs(StrEnum):
     CTA_CREATE_AGENT_CLICKED = 'CTA - Create Agent Clicked'
