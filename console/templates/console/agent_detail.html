@@ -264,7 +264,7 @@
                 <div class="flex justify-between items-center mb-2">
                   <h4 class="text-sm font-medium text-gray-700">Allowed Contacts</h4>
                   <span class="text-xs text-gray-500">
-                    <span id="contact-count">{{ active_allowlist_count }}</span> / {{ account.usage.max_contacts_per_agent }} contacts
+                    <span id="contact-count">{{ active_allowlist_count }}</span> / {{ max_contacts_per_agent|default:account.usage.max_contacts_per_agent }} contacts
                   </span>
                 </div>
                 <div id="allowlist-entries-container">

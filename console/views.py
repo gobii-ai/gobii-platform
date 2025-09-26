@@ -1663,6 +1663,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             status=AgentAllowlistInvite.InviteStatus.PENDING
         ).count()
         context['active_allowlist_count'] = active_count + pending_count
+        from util.subscription_helper import get_user_max_contacts_per_agent
+        context['max_contacts_per_agent'] = get_user_max_contacts_per_agent(
+            agent.user,
+            organization=agent.organization,
+        )
 
         # Add pending contact requests count
         from api.models import CommsAllowlistRequest
@@ -3149,7 +3154,10 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         
         # Get current allowlist usage for limit display
         from util.subscription_helper import get_user_max_contacts_per_agent
-        max_contacts = get_user_max_contacts_per_agent(agent.user)
+        max_contacts = get_user_max_contacts_per_agent(
+            agent.user,
+            organization=agent.organization,
+        )
         active_count = CommsAllowlistEntry.objects.filter(
             agent=agent, is_active=True
         ).count()

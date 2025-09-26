@@ -935,14 +935,33 @@ def has_unlimited_agents(user) -> bool:
         return plan["agent_limit"] == AGENTS_UNLIMITED
 
 
-def get_user_max_contacts_per_agent(user) -> int:
-    """
-    Returns the per‑agent contact cap for a user.
+def get_user_max_contacts_per_agent(user, organization=None) -> int:
+    """Return the per-agent contact cap for a user or organization-owned agent.
 
-    Priority:
-    1) If the user's UserQuota.max_agent_contacts is set (> 0), use it.
-    2) Otherwise, fall back to the plan's max_contacts_per_agent (with sane defaults).
+    Priority when ``organization`` is provided:
+    1) Use the organization's plan ``max_contacts_per_agent`` value.
+    2) Fall back to the free-plan default when unavailable.
+
+    Priority for individual users:
+    1) If the user's ``UserQuota.max_agent_contacts`` is set (>0), use it.
+    2) Otherwise, fall back to the user's plan ``max_contacts_per_agent`` (defaulting to free plan).
     """
+    default_limit = PLAN_CONFIG[PlanNames.FREE].get("max_contacts_per_agent", 3)
+
+    if organization is not None:
+        plan = get_organization_plan(organization)
+        if not plan:
+            logger.warning(
+                "get_user_max_contacts_per_agent org %s: No plan found, defaulting to free plan",
+                getattr(organization, 'id', 'n/a'),
+            )
+            return default_limit
+
+        try:
+            return int(plan.get("max_contacts_per_agent", default_limit))
+        except (ValueError, TypeError):
+            return default_limit
+
     # Check for per-user override on quota
     try:
         from api.models import UserQuota
@@ -950,7 +969,11 @@ def get_user_max_contacts_per_agent(user) -> int:
         if quota and quota.max_agent_contacts is not None and quota.max_agent_contacts > 0:
             return int(quota.max_agent_contacts)
     except Exception as e:
-        logger.error("get_user_max_contacts_per_agent: quota lookup failed for user %s: %s", getattr(user, 'id', 'n/a'), e)
+        logger.error(
+            "get_user_max_contacts_per_agent: quota lookup failed for user %s: %s",
+            getattr(user, 'id', 'n/a'),
+            e,
+        )
 
     # Fallback to plan default
     plan = get_user_plan(user)
@@ -959,6 +982,9 @@ def get_user_max_contacts_per_agent(user) -> int:
             "get_user_max_contacts_per_agent %s: No plan found, defaulting to free plan",
             getattr(user, 'id', 'n/a')
         )
-        return PLAN_CONFIG[PlanNames.FREE].get("max_contacts_per_agent", 3)
+        return default_limit
 
-    return plan.get("max_contacts_per_agent", 3)
+    try:
+        return int(plan.get("max_contacts_per_agent", default_limit))
+    except (ValueError, TypeError):
+        return default_limit

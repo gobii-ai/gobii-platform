@@ -1,15 +1,18 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
 
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
+from django.utils import timezone
 
 from api.models import Organization, TaskCredit
 from constants.plans import PlanNames
 from tasks.services import TaskCreditService
 from util.constants.task_constants import TASKS_UNLIMITED
+from constants.grant_types import GrantTypeChoices
 
 
 User = get_user_model()
@@ -313,6 +316,38 @@ class TaskCreditServiceGrantOrgSubscriptionCreditsTests(TestCase):
             TaskCredit.objects.filter(organization=self.org, stripe_invoice_id="inv-org-dup").count(),
             1,
         )
+
+    def test_grant_subscription_credits_for_organization_replaces_current_cycle(self):
+        grant_date = timezone.now() - timedelta(days=1)
+        expiration = timezone.now() + timedelta(days=29)
+        existing = TaskCredit.objects.create(
+            organization=self.org,
+            credits=Decimal("200.0"),
+            credits_used=Decimal("150.0"),
+            granted_date=grant_date,
+            expiration_date=expiration,
+            plan=PlanNames.ORG_TEAM,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+        )
+
+        returned = TaskCreditService.grant_subscription_credits_for_organization(
+            self.org,
+            seats=self.org.billing.purchased_seats,
+            invoice_id="inv-org-renew",
+            grant_date=timezone.now(),
+            expiration_date=timezone.now() + timedelta(days=30),
+            replace_current=True,
+        )
+
+        self.assertEqual(returned, 1000)
+        # Should update existing block instead of creating a new one
+        credits = TaskCredit.objects.filter(organization=self.org)
+        self.assertEqual(credits.count(), 1)
+        refreshed = TaskCredit.objects.get(pk=existing.pk)
+        self.assertEqual(refreshed.stripe_invoice_id, "inv-org-renew")
+        self.assertEqual(refreshed.credits, Decimal("1000"))
+        self.assertEqual(refreshed.credits_used, Decimal("0"))
 
 @tag("batch_task_credits")
 class TaskCreditServiceHandleThresholdTests(TestCase):
