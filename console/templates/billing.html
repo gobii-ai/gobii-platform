@@ -132,31 +132,30 @@
 
         {% if org_can_manage_billing and org_has_stripe_subscription and overview.seats.purchased > 0 %}
           {% with pending=org_pending_seat_change %}
-          <div class="mt-6 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <h3 class="text-base font-semibold text-slate-900">Reduce seats next billing cycle</h3>
-            <p class="mt-1 text-sm text-slate-600">
-              Choose how many seats the organization should keep after the current billing period. The existing seats remain available until the next cycle starts.
-            </p>
-
-            <form method="post" action="{% url 'organization_seat_schedule' organization.id %}" class="mt-3 flex flex-col sm:flex-row sm:items-center sm:gap-3">
-              {% csrf_token %}
-              <div class="flex items-center gap-3">
-                {{ seat_reduction_form.future_seats.label_tag }}
-                {{ seat_reduction_form.future_seats }}
+          <div class="mt-6 rounded-lg border border-slate-200 bg-white shadow-sm"
+               x-data="{ open: false }">
+            <button type="button"
+                    class="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
+                    @click="open = !open">
+              <div>
+                <h3 class="text-base font-semibold text-slate-900">Manage seat reductions</h3>
+                <p class="mt-0.5 text-sm text-slate-600">
+                  Schedule a lower seat count for the next billing cycle without affecting the current period.
+                </p>
               </div>
-              <button type="submit" class="mt-3 sm:mt-0 inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-slate-800 rounded-md hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-900">
-                Schedule reduction
-              </button>
-            </form>
+              <span class="text-slate-500 transition-transform duration-200" :class="open ? 'rotate-180' : ''">
+                ▲
+              </span>
+            </button>
 
             {% if pending.quantity is not None %}
-              <div class="mt-4 rounded-md border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900/80">
+              <div class="border-t border-slate-200 bg-blue-50/70 px-4 py-3 text-sm text-blue-900/80">
                 <p>
-                  A seat update to <span class="font-semibold text-blue-900">{{ pending.quantity }}</span> seats is scheduled
+                  Seat count will change to <span class="font-semibold text-blue-900">{{ pending.quantity }}</span>
                   {% if pending.effective_at %}
-                    for {{ pending.effective_at|date:"F j, Y" }}.
+                    on {{ pending.effective_at|date:"F j, Y" }}.
                   {% else %}
-                    for the next billing cycle.
+                    at the start of the next billing cycle.
                   {% endif %}
                 </p>
                 <form method="post" action="{% url 'organization_seat_schedule_cancel' organization.id %}" class="mt-3">
@@ -167,6 +166,19 @@
                 </form>
               </div>
             {% endif %}
+
+            <div x-show="open" x-cloak class="border-t border-slate-200 px-4 py-4">
+              <form method="post" action="{% url 'organization_seat_schedule' organization.id %}" class="flex flex-col sm:flex-row sm:items-center sm:gap-3">
+                {% csrf_token %}
+                <div class="flex items-center gap-3">
+                  {{ seat_reduction_form.future_seats.label_tag }}
+                  {{ seat_reduction_form.future_seats }}
+                </div>
+                <button type="submit" class="mt-3 sm:mt-0 inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-slate-800 rounded-md hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-900">
+                  Schedule reduction
+                </button>
+              </form>
+            </div>
           </div>
           {% endwith %}
         {% endif %}
