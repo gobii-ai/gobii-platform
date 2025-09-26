@@ -47,6 +47,7 @@ from observability import traced
 from pages.mixins import PhoneNumberMixin
 
 from .context_helpers import build_console_context
+from .org_billing_helpers import build_org_billing_overview
 from tasks.services import TaskCreditService
 from util import sms
 from util.payments_helper import PaymentsHelper
@@ -86,6 +87,7 @@ from api.agent.comms.message_service import _get_or_create_conversation, _ensure
 from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMembership
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
+from django.apps import apps
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -96,6 +98,12 @@ tracer = trace.get_tracer("gobii.utils")
 # verified phone number on their account. Toggle this to force showing the
 # phone screen even when a verified number exists.
 SKIP_VERIFIED_SMS_SCREEN = True
+
+BILLING_MANAGE_ROLES = {
+    OrganizationMembership.OrgRole.OWNER,
+    OrganizationMembership.OrgRole.ADMIN,
+    OrganizationMembership.OrgRole.BILLING,
+}
 
 class ConsoleHome(ConsoleViewMixin, TemplateView):
     """Dashboard homepage for the console."""
@@ -547,7 +555,63 @@ class BillingView(ConsoleViewMixin, TemplateView):
     def get(self, request, *args, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        # Get the user's subscription plan (defaults to 'free' if not set)
+        if request.GET.get("seats_success"):
+            messages.success(
+                request,
+                "Seat checkout started successfully. Features will unlock once payment completes.",
+            )
+        if request.GET.get("seats_cancelled"):
+            messages.info(
+                request,
+                "Seat checkout was cancelled before completion.",
+            )
+
+        current_context = context.get('current_context', {}) or {}
+        if current_context.get('type') == 'organization' and current_context.get('id'):
+            try:
+                organization = Organization.objects.select_related('billing').get(id=current_context['id'])
+            except Organization.DoesNotExist:
+                messages.error(request, 'Organization not found. Switching back to personal billing.')
+                request.session['context_type'] = 'personal'
+                request.session['context_id'] = str(request.user.id)
+                request.session['context_name'] = request.user.get_full_name() or request.user.email
+                return redirect('billing')
+            else:
+                overview = build_org_billing_overview(organization)
+                membership = context.get('current_membership')
+                can_manage_billing = bool(membership and membership.role in BILLING_MANAGE_ROLES)
+
+                configured_limit = overview['extra_tasks']['configured_limit'] or 0
+                auto_purchase_state = {
+                    'enabled': configured_limit not in (0,),
+                    'infinite': configured_limit == -1,
+                    'max_tasks': configured_limit if configured_limit not in (0, -1) else 1000,
+                }
+
+                billing = getattr(organization, "billing", None)
+                seat_purchase_required = bool(getattr(billing, "purchased_seats", 0) <= 0)
+                seat_purchase_form = OrganizationSeatPurchaseForm(org=organization)
+
+                granted = Decimal(str(overview['credits']['granted'])) if overview['credits']['granted'] else Decimal('0')
+                used = Decimal(str(overview['credits']['used'])) if overview['credits']['used'] else Decimal('0')
+                usage_pct = 0
+                if granted > 0:
+                    usage_pct = min(100, float((used / granted) * 100))
+
+                context.update({
+                    'organization': organization,
+                    'org_billing_overview': overview,
+                    'org_can_manage_billing': can_manage_billing,
+                    'org_auto_purchase_state': auto_purchase_state,
+                    'org_credit_usage_pct': usage_pct,
+                    'org_can_open_stripe': can_manage_billing and bool(overview['billing_record']['stripe_customer_id']),
+                    'seat_purchase_form': seat_purchase_form,
+                    'seat_purchase_required': seat_purchase_required,
+                    'org_has_stripe_subscription': bool(getattr(billing, "stripe_subscription_id", None)),
+                })
+                return render(request, self.template_name, context)
+
+        # Personal billing fallback
         context['subscription_plan'] = get_user_plan(self.request.user)
         sub = get_active_subscription(self.request.user)
         paid_subscriber = sub is not None
@@ -571,8 +635,7 @@ class BillingView(ConsoleViewMixin, TemplateView):
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
 
-        # Render the billing page template
-        return render(request, "billing.html", context)
+        return render(request, self.template_name, context)
 
     @tracer.start_as_current_span("CONSOLE Billing Post (not allowed)")
     def post(self, request, *args, **kwargs):
@@ -626,14 +689,53 @@ def update_billing_settings(request):
         auto_purchase = data.get('enabled', False)
         infinite = data.get('infinite', False)
         max_tasks = data.get('maxTasks', 5)
+        resolved = build_console_context(request)
 
-        # Get or create the user's billing record
-        user_billing, created = UserBilling.objects.get_or_create(
+        if resolved.current_context.type == 'organization' and resolved.current_membership:
+            membership = resolved.current_membership
+            if membership.role not in BILLING_MANAGE_ROLES:
+                return JsonResponse({'success': False, 'error': 'Not permitted'}, status=403)
+
+            OrgBilling = apps.get_model('api', 'OrganizationBilling')
+            defaults = {'max_extra_tasks': 0, 'billing_cycle_anchor': timezone.now().day}
+            org_billing, _ = OrgBilling.objects.get_or_create(
+                organization=membership.org,
+                defaults=defaults,
+            )
+
+            if not auto_purchase:
+                org_billing.max_extra_tasks = 0
+            elif infinite:
+                org_billing.max_extra_tasks = -1
+            else:
+                org_billing.max_extra_tasks = max(1, int(max_tasks))
+
+            org_billing.save(update_fields=['max_extra_tasks', 'updated_at'])
+
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.BILLING_UPDATED,
+                source=AnalyticsSource.WEB,
+                properties={
+                    'max_extra_tasks': org_billing.max_extra_tasks,
+                    'auto_purchase': auto_purchase,
+                    'infinite': infinite,
+                    'owner_type': 'organization',
+                    'organization_id': str(membership.org.id),
+                }
+            ))
+
+            return JsonResponse({
+                'success': True,
+                'max_extra_tasks': org_billing.max_extra_tasks,
+                'owner_type': 'organization',
+            })
+
+        user_billing, _ = UserBilling.objects.get_or_create(
             user=request.user,
             defaults={'max_extra_tasks': 0}
         )
 
-        # Update based on the settings
         if not auto_purchase:
             user_billing.max_extra_tasks = 0
         elif infinite:
@@ -641,22 +743,24 @@ def update_billing_settings(request):
         else:
             user_billing.max_extra_tasks = max(1, int(max_tasks))
 
-        user_billing.save()
+        user_billing.save(update_fields=['max_extra_tasks'])
 
-        transaction.on_commit(lambda : Analytics.track_event(
+        transaction.on_commit(lambda: Analytics.track_event(
             user_id=request.user.id,
             event=AnalyticsEvent.BILLING_UPDATED,
             source=AnalyticsSource.WEB,
             properties={
                 'max_extra_tasks': user_billing.max_extra_tasks,
                 'auto_purchase': auto_purchase,
-                'infinite': infinite
+                'infinite': infinite,
+                'owner_type': 'user',
             }
         ))
 
         return JsonResponse({
             'success': True,
-            'max_extra_tasks': user_billing.max_extra_tasks
+            'max_extra_tasks': user_billing.max_extra_tasks,
+            'owner_type': 'user',
         })
     except Exception as e:
         return JsonResponse({
@@ -668,15 +772,38 @@ def update_billing_settings(request):
 @tracer.start_as_current_span("BILLING Get Billing Settings")
 def get_billing_settings(request):
     try:
-        user_billing, created = UserBilling.objects.get_or_create(
+        resolved = build_console_context(request)
+
+        if resolved.current_context.type == 'organization' and resolved.current_membership:
+            membership = resolved.current_membership
+            if membership.role not in BILLING_MANAGE_ROLES and membership is not None:
+                # Allow read-only access even without manage role, but disable editing client side
+                permitted = False
+            else:
+                permitted = True
+
+            OrgBilling = apps.get_model('api', 'OrganizationBilling')
+            defaults = {'max_extra_tasks': 0, 'billing_cycle_anchor': timezone.now().day}
+            org_billing, _ = OrgBilling.objects.get_or_create(
+                organization=membership.org,
+                defaults=defaults,
+            )
+
+            return JsonResponse({
+                'max_extra_tasks': org_billing.max_extra_tasks,
+                'owner_type': 'organization',
+                'can_modify': permitted,
+            })
+
+        user_billing, _ = UserBilling.objects.get_or_create(
             user=request.user,
             defaults={'max_extra_tasks': 0}
         )
 
-        # Not submitting analytics here as this is a part of a small AJAX request on larger page
-
         return JsonResponse({
-            'max_extra_tasks': user_billing.max_extra_tasks
+            'max_extra_tasks': user_billing.max_extra_tasks,
+            'owner_type': 'user',
+            'can_modify': True,
         })
     except Exception as e:
         return JsonResponse({
@@ -2752,6 +2879,7 @@ def grant_credits(request):
         logger.error(f"Failed to grant credits to user {user_id}: {str(e)}")
         return JsonResponse({'success': False, 'error': f"Failed to grant credits: {str(e)}"}, status=500)
 
+
 class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
     """View for displaying requested secrets that need values."""
     template_name = "console/agent_secrets_request.html"
@@ -3617,17 +3745,6 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        if self.request.GET.get("seats_success"):
-            messages.success(
-                self.request,
-                "Seat checkout started successfully. Features will unlock once payment completes.",
-            )
-        if self.request.GET.get("seats_cancelled"):
-            messages.info(
-                self.request,
-                "Seat checkout was cancelled before completion.",
-            )
-
         members = OrganizationMembership.objects.filter(
             org=self.org, status=OrganizationMembership.OrgStatus.ACTIVE
         ).select_related("user")
@@ -3666,8 +3783,6 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         else:
             allowed_role_choices = []
 
-        seat_purchase_required = bool(billing and billing.purchased_seats <= 0)
-
         context.update(
             {
                 "org": self.org,
@@ -3680,8 +3795,6 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 "is_org_owner": bool(my_membership and my_membership.role == OrganizationMembership.OrgRole.OWNER),
                 "is_org_admin": bool(my_membership and my_membership.role == OrganizationMembership.OrgRole.ADMIN),
                 "org_billing": billing,
-                "seat_purchase_required": seat_purchase_required,
-                "seat_purchase_form": OrganizationSeatPurchaseForm(org=self.org),
             }
         )
         return context
@@ -3952,36 +4065,95 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
         if not form.is_valid():
             for error in form.errors.get("seats", []):
                 messages.error(request, error)
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
         billing = getattr(org, "billing", None)
-        if billing and billing.purchased_seats > 0 and getattr(billing, "stripe_subscription_id", None):
-            messages.info(
-                request,
-                "This organization already has an active subscription. Use the Stripe management button to adjust seats.",
-            )
-            return redirect("organization_detail", org_id=org.id)
-
         seat_count = form.cleaned_data["seats"]
         if seat_count <= 0:
             messages.error(request, "Please select at least one seat to purchase.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
         stripe_settings = get_stripe_settings()
-        price_id = stripe_settings.org_team_price_id
+        seat_price_id = stripe_settings.org_team_price_id
+
+        if billing and getattr(billing, "stripe_subscription_id", None):
+            # Organization already has an active subscription; treat the input as
+            # additional seats to add to the existing licensed item quantity.
+            try:
+                stripe.api_key = PaymentsHelper.get_stripe_key()
+                subscription = stripe.Subscription.retrieve(
+                    billing.stripe_subscription_id,
+                    expand=["items.data.price"],
+                )
+
+                licensed_item = None
+                for item in subscription.get("items", {}).get("data", []) or []:
+                    price = item.get("price", {}) or {}
+                    price_usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
+                    price_id = price.get("id")
+                    if price_usage_type == "licensed" or (seat_price_id and price_id == seat_price_id):
+                        licensed_item = item
+                        break
+
+                if not licensed_item:
+                    messages.error(
+                        request,
+                        "We couldn't find a seat item on the active subscription. Please contact support.",
+                    )
+                    return redirect("billing")
+
+                current_quantity = int(licensed_item.get("quantity") or 0)
+                if current_quantity < 0:
+                    current_quantity = 0
+                new_quantity = current_quantity + seat_count
+
+                stripe.Subscription.modify(
+                    subscription.get("id"),
+                    items=[
+                        {
+                            "id": licensed_item.get("id"),
+                            "quantity": new_quantity,
+                        }
+                    ],
+                    metadata={
+                        **(subscription.get("metadata") or {}),
+                        "seat_requestor_id": str(request.user.id),
+                    },
+                    proration_behavior="create_prorations",
+                )
+
+                messages.success(
+                    request,
+                    "Seat update submitted. Additional seats will activate once Stripe processes the change.",
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Failed to update Stripe subscription %s for org %s: %s",
+                    getattr(billing, "stripe_subscription_id", None),
+                    org.id,
+                    exc,
+                )
+                messages.error(
+                    request,
+                    "We weren't able to update the seat count. Please try again or contact support.",
+                )
+
+            return redirect("billing")
+
+        price_id = seat_price_id
         if not price_id:
             messages.error(request, "Stripe price not configured. Please contact support.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
         try:
             stripe.api_key = PaymentsHelper.get_stripe_key()
             customer = get_or_create_stripe_customer(org)
 
             success_url = request.build_absolute_uri(
-                reverse("organization_detail", kwargs={"org_id": org.id})
+                reverse("billing")
             ) + "?seats_success=1"
             cancel_url = request.build_absolute_uri(
-                reverse("organization_detail", kwargs={"org_id": org.id})
+                reverse("billing")
             ) + "?seats_cancelled=1"
 
             line_items = [
@@ -4016,7 +4188,7 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                 request,
                 "We weren’t able to start the checkout flow. Please try again or contact support.",
             )
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
 
 class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
@@ -4046,14 +4218,12 @@ class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
         billing = getattr(org, "billing", None)
         if not billing or not billing.stripe_customer_id:
             messages.error(request, "This organization does not have an active Stripe subscription yet.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
         try:
             stripe.api_key = PaymentsHelper.get_stripe_key()
 
-            return_url = request.build_absolute_uri(
-                reverse("organization_detail", kwargs={"org_id": org.id})
-            )
+            return_url = request.build_absolute_uri(reverse("billing"))
 
             session = stripe.billing_portal.Session.create(
                 customer=billing.stripe_customer_id,
@@ -4068,7 +4238,7 @@ class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
                 request,
                 "We weren’t able to open the Stripe billing portal. Please try again or contact support.",
             )
-            return redirect("organization_detail", org_id=org.id)
+            return redirect("billing")
 
 
 class _OrgPermissionMixin:

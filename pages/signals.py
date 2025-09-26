@@ -10,7 +10,7 @@ from django.utils.dateparse import parse_datetime
 from allauth.account.signals import user_signed_up, user_logged_in, user_logged_out
 from django.dispatch import receiver
 
-from djstripe.models import Subscription, Customer
+from djstripe.models import Subscription, Customer, Invoice
 from djstripe.event_handlers import djstripe_receiver
 from observability import traced, trace
 
@@ -340,6 +340,29 @@ def handle_subscription_event(event, **kwargs):
             cancel_at_period_end_flag = _coerce_bool(getattr(sub, "cancel_at_period_end", None))
             span.set_attribute('subscription.cancel_at_period_end_fallback', str(cancel_at_period_end_flag))
 
+        invoice_id = _get_stripe_data_value(source_data, "latest_invoice") or getattr(sub, "latest_invoice", None)
+        span.set_attribute('subscription.invoice_id', str(invoice_id))
+
+        billing_reason = _get_stripe_data_value(source_data, "billing_reason")
+        if billing_reason is None:
+            billing_reason = getattr(sub, "billing_reason", None)
+
+        if invoice_id and not billing_reason:
+            try:
+                invoice_data = stripe.Invoice.retrieve(invoice_id)
+                invoice = Invoice.sync_from_stripe_data(invoice_data)
+                billing_reason = getattr(invoice, "billing_reason", None)
+                if billing_reason is None:
+                    billing_reason = _get_stripe_data_value(getattr(invoice, "stripe_data", {}) or {}, "billing_reason")
+            except Exception as exc:
+                span.add_event('invoice.fetch_failed', {'invoice.id': invoice_id})
+                logger.warning(
+                    "Webhook: failed to fetch invoice %s for subscription %s: %s",
+                    invoice_id,
+                    getattr(sub, 'id', ''),
+                    exc,
+                )
+
         # Locate the licensed (base plan) item among subscription items
         licensed_item = None
         try:
@@ -445,20 +468,31 @@ def handle_subscription_event(event, **kwargs):
 
                 if seats > 0:
                     seats_to_grant = 0
-                    if source_data.get("billing_reason") in {"subscription_create", "subscription_cycle"}:
-                        seats_to_grant = seats
-                    elif source_data.get("billing_reason") == "subscription_update" and seats > prev_seats:
+                    if billing_reason in {"subscription_create", "subscription_cycle"}:
+                        if billing_reason == "subscription_create" and prev_seats > 0:
+                            seats_to_grant = max(seats - prev_seats, 0)
+                        else:
+                            seats_to_grant = seats
+                    elif billing_reason == "subscription_update" and seats > prev_seats:
                         seats_to_grant = seats - prev_seats
 
                     if seats_to_grant > 0:
+                        grant_invoice_id = ""
+                        if invoice_id and (
+                            billing_reason == "subscription_cycle"
+                            or (billing_reason == "subscription_create" and prev_seats == 0)
+                        ):
+                            grant_invoice_id = invoice_id
+
                         # For cycle starts we want to reset the active monthly block
                         # instead of stacking an extra TaskCredit record.
                         replace_current = source_data.get("billing_reason") in {"subscription_create", "subscription_cycle"}
+                        
                         TaskCreditService.grant_subscription_credits_for_organization(
                             owner,
                             seats=seats_to_grant,
                             plan=plan,
-                            invoice_id=invoice_id or "",
+                            invoice_id=grant_invoice_id,
                             subscription=sub,
                             replace_current=replace_current,
                         )

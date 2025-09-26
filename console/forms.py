@@ -863,6 +863,13 @@ class OrganizationInviteForm(forms.Form):
     def __init__(self, *args, org=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.org = org
+        billing = getattr(org, "billing", None)
+        if billing and getattr(billing, "purchased_seats", 0) > 0 and getattr(billing, "stripe_subscription_id", None):
+            field = self.fields["seats"]
+            field.label = "Additional seats"
+            field.help_text = (
+                f"Currently {billing.purchased_seats} seats are active. Enter how many more to add."
+            )
 
     def clean_email(self):
         email = self.cleaned_data.get('email')

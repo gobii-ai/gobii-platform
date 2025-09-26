@@ -152,6 +152,49 @@ class TaskCreditService:
 
         return available
 
+    # -------------------- Owner-aware aggregation helpers --------------------
+    @staticmethod
+    @tracer.start_as_current_span("TaskCreditService Get Owner Task Credits Granted")
+    def get_owner_task_credits_granted(owner, task_credits: list | None = None) -> Decimal:
+        """Return total credits granted for either a User or Organization owner."""
+        if TaskCreditService._is_organization_owner(owner):
+            TaskCredit = apps.get_model("api", "TaskCredit")
+            if task_credits is None:
+                task_credits = TaskCreditService.get_current_task_credit_for_owner(owner)
+            total_granted = task_credits.aggregate(total_granted=Sum("credits"))['total_granted'] or 0
+            return Decimal(total_granted)
+        return Decimal(TaskCreditService.get_user_task_credits_granted(owner, task_credits))
+
+    @staticmethod
+    @tracer.start_as_current_span("TaskCreditService Get Owner Task Credits Used")
+    def get_owner_task_credits_used(owner, task_credits: list | None = None) -> Decimal:
+        """Return total credits consumed for either a User or Organization owner."""
+        if TaskCreditService._is_organization_owner(owner):
+            TaskCredit = apps.get_model("api", "TaskCredit")
+            if task_credits is None:
+                task_credits = TaskCreditService.get_current_task_credit_for_owner(owner)
+            total_used = task_credits.aggregate(total_used=Sum("credits_used"))['total_used'] or 0
+            return Decimal(total_used)
+        return Decimal(TaskCreditService.get_user_task_credits_used(owner, task_credits))
+
+    @staticmethod
+    @tracer.start_as_current_span("TaskCreditService Calculate Available Tasks For Owner")
+    def calculate_available_tasks_for_owner(owner, task_credits: list | None = None) -> Decimal:
+        """Return remaining credits for a User or Organization owner."""
+        if TaskCreditService._is_community_unlimited():
+            return Decimal(TASKS_UNLIMITED)
+
+        entitled = TaskCreditService.get_tasks_entitled_for_owner(owner)
+
+        if entitled == TASKS_UNLIMITED:
+            return Decimal(TASKS_UNLIMITED)
+
+        used = TaskCreditService.get_owner_task_credits_used(owner, task_credits)
+        remaining = Decimal(entitled) - Decimal(used)
+        if remaining < 0:
+            return Decimal(0)
+        return remaining
+
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Grant Subscription Credits")
     def grant_subscription_credits(user, credit_override=None, plan=None, invoice_id="", grant_date=None, expiration_date=None) -> int:
