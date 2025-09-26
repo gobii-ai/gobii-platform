@@ -168,6 +168,8 @@ jobs:
             tag: batch_stripe_config
           - batch: org_billing
             tag: batch_org_billing
+          - batch: api_org_keys
+            tag: batch_api_org_keys
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
