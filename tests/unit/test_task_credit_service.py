@@ -5,14 +5,14 @@ from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import MagicMock, patch
 
-from django.conf import settings
 from django.utils import timezone
 
-from api.models import Organization, TaskCredit
+from api.models import Organization, TaskCredit, TaskCreditConfig
 from constants.plans import PlanNames
 from tasks.services import TaskCreditService
 from util.constants.task_constants import TASKS_UNLIMITED
 from constants.grant_types import GrantTypeChoices
+from util.tool_costs import get_default_task_credit_cost, clear_tool_credit_cost_cache
 
 
 User = get_user_model()
@@ -143,6 +143,13 @@ class TaskCreditServiceConsumeCreditTests(TestCase):
 
 @tag("batch_task_credits")
 class TaskCreditServiceCheckAndConsumeCreditForOwnerTests(TestCase):
+    def setUp(self):
+        clear_tool_credit_cost_cache()
+        TaskCreditConfig.objects.update_or_create(
+            singleton_id=1,
+            defaults={"default_task_cost": Decimal("0.40")},
+        )
+
     def test_org_consumes_additional_task_when_allowed(self):
         owner = User.objects.create(username="org_owner3")
         org = Organization.objects.create(name="Org3", slug="org3", created_by=owner)
@@ -160,8 +167,9 @@ class TaskCreditServiceCheckAndConsumeCreditForOwnerTests(TestCase):
         credit.refresh_from_db()
         self.assertTrue(credit.additional_task)
         self.assertEqual(credit.organization, org)
-        self.assertEqual(float(credit.credits), float(settings.CREDITS_PER_TASK))
-        self.assertEqual(float(credit.credits_used), float(settings.CREDITS_PER_TASK))
+        default_cost = float(get_default_task_credit_cost())
+        self.assertEqual(float(credit.credits), default_cost)
+        self.assertEqual(float(credit.credits_used), default_cost)
 
     def test_org_consumption_fails_without_overage(self):
         owner = User.objects.create(username="org_owner4")
