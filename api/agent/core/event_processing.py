@@ -40,7 +40,7 @@ from .budget import (
 )
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from tasks.services import TaskCreditService
-from util.tool_costs import get_tool_credit_cost
+from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
 from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps
 from .llm_config import get_llm_config, get_llm_config_with_failover, REFERENCE_TOKENIZER_MODEL
@@ -364,7 +364,7 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
             tool_name, e, exc_info=True
         )
         # Fallback to default single-task cost when lookup fails
-        cost = Decimal(getattr(settings, "CREDITS_PER_TASK", 1))
+        cost = get_default_task_credit_cost()
 
     try:
         available = TaskCreditService.get_user_task_credits_available(owner_user)
@@ -388,7 +388,7 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         try:
             span.set_attribute(
                 "credit_check.tool_cost",
-                float(cost) if cost is not None else float(settings.CREDITS_PER_TASK),
+                float(cost) if cost is not None else float(get_default_task_credit_cost()),
             )
         except Exception as e:
             logger.debug("Failed to set span attribute 'credit_check.tool_cost': %s", e)
