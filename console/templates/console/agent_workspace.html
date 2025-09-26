@@ -950,6 +950,7 @@
       inflightDirection: null,
       pendingResync: false,
       justResynced: false,
+      processingSuppressed: false,
     };
     window.__agentWorkspaceState = state;
 
@@ -1680,7 +1681,7 @@
       }
       if (desired) {
         if (!state.processingActive || !node) {
-          showProcessingIndicator();
+          showProcessingIndicator({ reason: 'syncProcessingFromDom' });
         }
       } else if (
         !state.processingSticky &&
@@ -1690,6 +1691,7 @@
       ) {
         hideProcessingIndicator();
       }
+      updateProcessingIndicatorForVisibility('syncProcessingFromDom');
     }
 
     function getProcessingNode() {
@@ -1710,6 +1712,28 @@
 
     function showProcessingIndicator(options = {}) {
       if (!processingSlot) return;
+      const force = Boolean(options.force);
+      const latestVisible = latestSegmentVisible();
+      if (!force && !latestVisible) {
+        timelineLog('showProcessingIndicator suppressed: latest segment not in DOM', {
+          reason: options?.reason || 'unspecified',
+        });
+        const existing = getProcessingNode();
+        if (existing) {
+          existing.remove();
+        }
+        state.processingActive = true;
+        if (options && options.sticky) {
+          state.processingSticky = true;
+        }
+        state.processingSuppressed = true;
+        setProcessingDataset(true);
+        state.awaitingProcessingSync = false;
+        refreshEmptyState();
+        return;
+      }
+
+      state.processingSuppressed = false;
       ensureProcessingSlotPosition();
       let indicator = getProcessingNode();
       if (!indicator) {
@@ -1718,6 +1742,7 @@
         processingSlot.appendChild(indicator);
       } else {
         indicator.classList.remove('processing-indicator--fade');
+        indicator.style.removeProperty('display');
       }
       state.processingActive = true;
       if (options && options.sticky) {
@@ -1737,6 +1762,7 @@
         state.processingActive = false;
         state.processingSticky = false;
         state.processingEventId = null;
+        state.processingSuppressed = false;
         setProcessingDataset(false);
         state.awaitingProcessingSync = false;
         refreshEmptyState();
@@ -1749,6 +1775,7 @@
         state.processingActive = false;
         state.processingSticky = false;
         state.processingEventId = null;
+        state.processingSuppressed = false;
         setProcessingDataset(false);
         state.awaitingProcessingSync = false;
         refreshEmptyState();
@@ -2158,6 +2185,56 @@
       });
 
       syncLoadControls();
+      updateProcessingIndicatorForVisibility(reason);
+    }
+
+    function latestSegmentVisible() {
+      const cursorNode = getCursorsEl();
+      if (!cursorNode) {
+        return true;
+      }
+      return cursorNode.dataset?.hasMoreNewer !== 'true';
+    }
+
+    function updateProcessingIndicatorForVisibility(reason = 'unspecified') {
+      const indicator = getProcessingNode();
+      const latestVisible = latestSegmentVisible();
+
+      if (!latestVisible) {
+        if (indicator) {
+          indicator.remove();
+        }
+        state.processingSuppressed = state.processingActive;
+        timelineLog('processing indicator hidden (latest segment not in DOM)', {
+          reason,
+          processingActive: state.processingActive,
+        });
+        return;
+      }
+
+      if (!state.processingActive) {
+        state.processingSuppressed = false;
+        if (indicator) {
+          indicator.remove();
+        }
+        return;
+      }
+
+      if (indicator) {
+        indicator.style.removeProperty('display');
+        state.processingSuppressed = false;
+        timelineLog('processing indicator visible (latest segment present)', {
+          reason,
+        });
+        return;
+      }
+
+      if (state.processingSuppressed || state.processingActive) {
+        timelineLog('processing indicator re-created (latest segment present)', {
+          reason,
+        });
+        showProcessingIndicator({ force: true, reason: `visibility-${reason}` });
+      }
     }
 
     function completeNewerRequest() {
@@ -2616,7 +2693,7 @@
           } else {
             scheduleComposerLayoutUpdate();
           }
-          showProcessingIndicator({ sticky: true });
+          showProcessingIndicator({ sticky: true, reason: 'composer-submit' });
           if (nearBottom) {
             requestNewer('composer-submit');
           } else {
@@ -2988,7 +3065,7 @@
         state.processingEventId = evt.lastEventId;
       }
       reconnectDelay = 3000;
-      showProcessingIndicator({ sticky: true });
+      showProcessingIndicator({ sticky: true, reason: 'eventsource-processing-started' });
       refreshProcessingState({ reason: 'processing-started' });
     };
 
@@ -3108,7 +3185,7 @@
         if (indicatorVisible || processingFlagged) {
           state.processingSticky = true;
           if (!indicatorVisible && processingFlagged) {
-            showProcessingIndicator({ sticky: true });
+            showProcessingIndicator({ sticky: true, reason: 'eventsource-error-recovery' });
           }
           refreshProcessingState({ reason: 'eventsource-error' });
         }
@@ -3153,6 +3230,7 @@
 
     ensureProcessingSlotPosition();
     syncProcessingFromDom();
+    updateProcessingIndicatorForVisibility('initial');
     syncKnownCursors({ animate: false });
     normaliseToolClusters();
     connectEventStream(null);
