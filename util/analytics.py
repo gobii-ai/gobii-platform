@@ -144,6 +144,7 @@ class AnalyticsEvent(StrEnum):
     ORGANIZATION_AGENT_DELETED = 'Organization Agent Deleted'
     ORGANIZATION_TASK_CREATED = 'Organization Task Created'
     ORGANIZATION_TASK_DELETED = 'Organization Task Deleted'
+    ORGANIZATION_TASKS_VIEWED = 'Organization Tasks Viewed'
     ORGANIZATION_API_KEY_CREATED = 'Organization API Key Created'
     ORGANIZATION_API_KEY_DELETED = 'Organization API Key Deleted'
     ORGANIZATION_API_KEY_REVOKED = 'Organization API Key Revoked'
@@ -549,7 +550,6 @@ class Analytics:
         }
 
 PAGE_META = {
-
     "/pricing/":                        ("Marketing",  "Pricing"),
     "/accounts/login/":                 ("Auth",       "Login"),
     "/accounts/logout/":                ("Auth",       "Logout"),
