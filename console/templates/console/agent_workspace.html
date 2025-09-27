@@ -24,7 +24,7 @@
 
       <div id="timeline-shell" class="relative flex-1">
         <div id="timeline-events" class="flex h-full flex-col gap-3 overflow-y-auto">
-          <div id="timeline-load-older" class="timeline-load-control border-b border-slate-100" data-side="older">
+          <div id="timeline-load-older" class="timeline-load-control border-b border-slate-100" data-side="older" data-state="{{ timeline_has_more_older|yesno:'has-more,exhausted' }}">
             <button type="button"
                     data-role="load-older-button"
                     data-direction="older"
@@ -46,8 +46,8 @@
           <div id="timeline-event-list" class="flex flex-col gap-3">
             {% include "console/partials/_agent_timeline_items.html" with events=timeline_window.events agent_first_name=agent_first_name suppress_empty=suppress_empty %}
           </div>
-          <div id="processing-indicator-slot" class="mt-2 px-1"></div>
-          <div id="timeline-load-newer" class="timeline-load-control border-t border-slate-100" data-side="newer">
+          <div id="processing-indicator-slot" class="processing-slot" data-visible="false"></div>
+          <div id="timeline-load-newer" class="timeline-load-control border-t border-slate-100" data-side="newer" data-state="{{ timeline_has_more_newer|yesno:'has-more,exhausted' }}" {% if not timeline_has_more_newer %}hidden{% endif %}>
             <button type="button"
                     data-role="load-newer-button"
                     data-direction="newer"
@@ -126,6 +126,7 @@
   }
 
   #timeline-events {
+    --timeline-row-gap: 0.75rem;
     padding: 1rem 0.75rem var(--timeline-bottom-padding, 9rem);
   }
 
@@ -143,9 +144,17 @@
   }
 
   #processing-indicator-slot {
-    display: flex;
+    display: none;
     justify-content: flex-start;
     pointer-events: none;
+    margin-top: 0;
+    padding: 0;
+  }
+
+  #processing-indicator-slot[data-visible="true"] {
+    display: flex;
+    margin-top: var(--timeline-row-gap, 0.75rem);
+    padding: 0 0.25rem;
   }
 
   #agent-processing-indicator {
@@ -402,7 +411,14 @@
   }
 
   #timeline-load-newer {
-    margin-bottom: 3.5rem;
+    margin-bottom: var(--timeline-row-gap, 0.75rem);
+  }
+
+  #timeline-load-newer[hidden] {
+    display: none !important;
+    margin: 0;
+    padding: 0;
+    border: 0;
   }
 
   .timeline-history-label {
@@ -1369,6 +1385,7 @@
         : 24;
 
       const basePadding = composerHeight + composerBottomOffset + rowGap;
+      timeline.style.setProperty('--timeline-row-gap', `${Math.round(rowGap)}px`);
       let padding;
       if (shouldAlignEnd) {
         padding = basePadding;
@@ -1727,6 +1744,7 @@
           state.processingSticky = true;
         }
         state.processingSuppressed = true;
+        processingSlot.dataset.visible = 'false';
         setProcessingDataset(true);
         state.awaitingProcessingSync = false;
         refreshEmptyState();
@@ -1744,6 +1762,7 @@
         indicator.classList.remove('processing-indicator--fade');
         indicator.style.removeProperty('display');
       }
+      processingSlot.dataset.visible = 'true';
       state.processingActive = true;
       if (options && options.sticky) {
         state.processingSticky = true;
@@ -1763,6 +1782,9 @@
         state.processingSticky = false;
         state.processingEventId = null;
         state.processingSuppressed = false;
+        if (processingSlot) {
+          processingSlot.dataset.visible = 'false';
+        }
         setProcessingDataset(false);
         state.awaitingProcessingSync = false;
         refreshEmptyState();
@@ -1772,6 +1794,9 @@
       indicator.classList.add('processing-indicator--fade');
       window.setTimeout(() => {
         indicator.remove();
+        if (processingSlot) {
+          processingSlot.dataset.visible = 'false';
+        }
         state.processingActive = false;
         state.processingSticky = false;
         state.processingEventId = null;
