@@ -92,17 +92,21 @@ def sms_webhook(request):
         parsed_message = TwilioSmsAdapter.parse_request(request)
         ingest_inbound_message(CommsChannel.SMS, parsed_message)
 
-        Analytics.track_event(
-            user_id=agent.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_SMS_RECEIVED,
-            source=AnalyticsSource.SMS,
-            properties={
+        props = Analytics.with_org_properties(
+            {
                 'agent_id': str(agent.id),
                 'agent_name': agent.name,
                 'from_number': from_number,
                 'to_number': to_number,
                 'message_body': body,
-            }
+            },
+            organization=getattr(agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=agent.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SMS_RECEIVED,
+            source=AnalyticsSource.SMS,
+            properties=props.copy(),
         )
 
         # Return a 200 OK response to Twilio
@@ -162,15 +166,19 @@ def sms_status_webhook(request):
             attempt.delivered_at = now
             message.latest_status = DeliveryStatus.DELIVERED
             message.latest_delivered_at = now
-            Analytics.track_event(
-                user_id=message.owner_agent.user.id,
-                event=AnalyticsEvent.PERSISTENT_AGENT_SMS_DELIVERED,
-                source=AnalyticsSource.AGENT,
-                properties={
+            delivered_props = Analytics.with_org_properties(
+                {
                     "agent_id": str(message.owner_agent_id),
                     "message_id": str(message.id),
                     "sms_id": message_sid,
                 },
+                organization=getattr(message.owner_agent, "organization", None),
+            )
+            Analytics.track_event(
+                user_id=message.owner_agent.user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_SMS_DELIVERED,
+                source=AnalyticsSource.AGENT,
+                properties=delivered_props.copy(),
             )
         elif status in ["failed", "undelivered"]:
             attempt.status = DeliveryStatus.FAILED
@@ -179,16 +187,20 @@ def sms_status_webhook(request):
             message.latest_status = DeliveryStatus.FAILED
             message.latest_error_code = str(error_code)
             message.latest_error_message = error_message
-            Analytics.track_event(
-                user_id=message.owner_agent.user.id,
-                event=AnalyticsEvent.PERSISTENT_AGENT_SMS_FAILED,
-                source=AnalyticsSource.AGENT,
-                properties={
+            failed_props = Analytics.with_org_properties(
+                {
                     "agent_id": str(message.owner_agent_id),
                     "message_id": str(message.id),
                     "sms_id": message_sid,
                     "error_code": str(error_code),
                 },
+                organization=getattr(message.owner_agent, "organization", None),
+            )
+            Analytics.track_event(
+                user_id=message.owner_agent.user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_SMS_FAILED,
+                source=AnalyticsSource.AGENT,
+                properties=failed_props.copy(),
             )
         else:
             # Unknown or intermediate status
@@ -337,11 +349,8 @@ def email_webhook(request):
                 
                 processed_agents.append(agent)
                 
-                Analytics.track_event(
-                    user_id=agent.user.id,
-                    event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_RECEIVED,
-                    source=AnalyticsSource.AGENT,
-                    properties={
+                email_props = Analytics.with_org_properties(
+                    {
                         'agent_id': str(agent.id),
                         'agent_name': agent.name,
                         'from_email': from_email_raw,
@@ -349,7 +358,14 @@ def email_webhook(request):
                         'endpoint_address': endpoint.address,
                         'recipient_type': 'to' if endpoint.address in to_emails else
                                          'cc' if endpoint.address in cc_emails else 'bcc'
-                    }
+                    },
+                    organization=getattr(agent, "organization", None),
+                )
+                Analytics.track_event(
+                    user_id=agent.user.id,
+                    event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_RECEIVED,
+                    source=AnalyticsSource.AGENT,
+                    properties=email_props.copy(),
                 )
                 
                 logger.info(f"Successfully processed email for agent '{agent.name}' (endpoint: {endpoint.address})")
