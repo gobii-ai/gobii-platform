@@ -1,0 +1,63 @@
+{% load agent_extras %}
+
+{% with timeline_events=events|default:timeline_window.events %}
+  {% include "console/partials/_agent_timeline_items.html" with events=timeline_events agent_first_name=agent_first_name suppress_empty=suppress_empty %}
+{% endwith %}
+
+<div id="timeline-cursors" hx-swap-oob="true"
+     data-older="{{ timeline_oldest_cursor|default:'' }}"
+     data-newer="{{ timeline_newest_cursor|default:'' }}"
+     data-has-more-older="{{ timeline_has_more_older|yesno:'true,false' }}"
+     data-has-more-newer="{{ timeline_has_more_newer|yesno:'true,false' }}"
+     data-processing-active="{{ processing_active|yesno:'true,false' }}"
+     data-direction="{{ direction }}"
+     data-mode="{{ timeline_mode|default:'snapshot' }}"></div>
+
+<div id="timeline-load-older" hx-swap-oob="true" class="timeline-load-control border-b border-slate-100" data-side="older">
+  <button type="button"
+          data-role="load-older-button"
+          data-direction="older"
+          data-action="timeline-fetch"
+          data-url="{{ timeline_older_url }}"
+          data-target="#timeline-event-list"
+          data-swap="afterbegin"
+          class="timeline-load-button"
+          {% if not timeline_has_more_older %}hidden{% endif %}>
+    <span class="timeline-load-indicator" aria-hidden="true"></span>
+    <span class="timeline-load-label">Load older</span>
+  </button>
+  <span data-role="history-start"
+        class="timeline-history-label"
+        {% if timeline_window.has_more_older %}hidden{% endif %}>
+    Beginning of history
+  </span>
+</div>
+
+<div id="timeline-load-newer" hx-swap-oob="true" class="timeline-load-control border-t border-slate-100" data-side="newer">
+  <button type="button"
+          data-role="load-newer-button"
+          data-direction="newer"
+          data-action="timeline-fetch"
+          data-url="{{ timeline_newer_url }}"
+          data-target="#timeline-event-list"
+          data-swap="beforeend"
+          class="timeline-load-button"
+          {% if not timeline_has_more_newer %}hidden{% endif %}>
+    <span class="timeline-load-indicator" aria-hidden="true"></span>
+    <span class="timeline-load-label">Load newer</span>
+  </button>
+</div>
+
+<button id="jump-to-latest" hx-swap-oob="true"
+        class="jump-to-latest hidden"
+        type="button"
+        aria-label="Jump to latest"
+        aria-hidden="true"
+        style="display:none;opacity:0">
+  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
+  </svg>
+  <span class="sr-only">Jump to latest</span>
+</button>
+
+<div id="processing-state" hx-swap-oob="true" class="hidden" style="display:none" data-processing-active="{{ processing_active|yesno:'true,false' }}"></div>

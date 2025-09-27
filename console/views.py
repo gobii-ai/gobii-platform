@@ -88,11 +88,29 @@ from api.agent.tools.mcp_manager import enable_mcp_tool
 from api.agent.tasks import process_agent_events_task
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
-from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
+from api.agent.comms.message_service import (
+    _get_or_create_conversation,
+    _ensure_participant,
+    ingest_web_message,
+)
+from api.agent.events import is_agent_processing
 from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMembership
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
+from console.timeline import (
+    compare_cursors,
+    fetch_timeline_window,
+    get_timeline_extents,
+    has_timeline_history_after,
+    has_timeline_history_before,
+)
+from api.services.web_sessions import (
+    WEB_SESSION_TTL_SECONDS,
+    heartbeat_web_session,
+    end_web_session,
+    start_web_session,
+)
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -239,6 +257,54 @@ def _reattach_overage_from_session(request, org_id: str) -> bool:
     price_id = info.get("price_id")
     return _reattach_org_overage_subscription(subscription_id, price_id)
 
+
+def _agent_queryset_for_request(request):
+    qs = PersistentAgent.objects.all()
+    context_type = request.session.get('context_type', 'personal')
+
+    if context_type == 'organization':
+        org_id = request.session.get('context_id')
+        if not OrganizationMembership.objects.filter(
+            user=request.user,
+            org_id=org_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).exists():
+            return qs.none()
+        return qs.filter(organization_id=org_id)
+
+    return qs.filter(user=request.user, organization__isnull=True)
+
+
+class AgentAccessMixin(ConsoleViewMixin):
+    """Mixin that scopes agent queries to the active console context."""
+
+    _agent_cache: PersistentAgent | None = None
+
+    def get_agent_queryset(self):
+        return _agent_queryset_for_request(self.request)
+
+    def get_agent(self) -> PersistentAgent:
+        if self._agent_cache is None:
+            self._agent_cache = get_object_or_404(
+                self.get_agent_queryset(),
+                pk=self.kwargs.get('pk') or self.kwargs.get('agent_id'),
+            )
+        return self._agent_cache
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['agent'] = self.get_agent()
+        return context
+
+
+CHANNEL_LABELS = {
+    CommsChannel.EMAIL: "Email",
+    CommsChannel.SMS: "SMS",
+    CommsChannel.SLACK: "Slack",
+    CommsChannel.DISCORD: "Discord",
+    CommsChannel.WEB: "Web",
+    CommsChannel.OTHER: "Other",
+}
 class ConsoleHome(ConsoleViewMixin, TemplateView):
     """Dashboard homepage for the console."""
     template_name = "index.html"
@@ -5158,5 +5224,293 @@ class AgentAllowlistInviteRejectView(TemplateView):
             messages.error(request, "Invalid invitation token.")
         except Exception as e:
             messages.error(request, f"Error rejecting invitation: {e}")
-            
+           
         return redirect("agent_allowlist_invite_reject", token=token)
+
+
+TIMELINE_DEFAULT_LIMIT = 10
+
+
+class AgentWorkspaceView(AgentAccessMixin, TemplateView):
+    template_name = "console/agent_workspace.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = self.get_agent()
+        timeline_window = fetch_timeline_window(agent, limit=TIMELINE_DEFAULT_LIMIT)
+        timeline_oldest_cursor = timeline_window.window_oldest_cursor
+        timeline_newest_cursor = timeline_window.window_newest_cursor
+        timeline_has_more_older = timeline_window.has_more_older
+        timeline_has_more_newer = timeline_window.has_more_newer
+
+        if timeline_oldest_cursor is None or timeline_newest_cursor is None:
+            fallback_oldest, fallback_newest = get_timeline_extents(agent)
+            if timeline_oldest_cursor is None:
+                timeline_oldest_cursor = fallback_oldest
+            if timeline_newest_cursor is None:
+                timeline_newest_cursor = fallback_newest
+
+        timeline_has_more_older = (
+            timeline_has_more_older
+            or has_timeline_history_before(agent, timeline_oldest_cursor)
+        )
+        timeline_has_more_newer = (
+            timeline_has_more_newer
+            or has_timeline_history_after(agent, timeline_newest_cursor)
+        )
+
+        window_url = reverse("agent_timeline_window", args=[agent.id])
+        event_stream_url = reverse("api:agent-events-stream", args=[agent.id])
+        processing_active = is_agent_processing(agent.id)
+        raw_name = (agent.name or "").strip()
+        agent_first_name = raw_name.split()[0] if raw_name else "Agent"
+        logger.info(
+            "AgentWorkspaceView: processing_active=%s agent=%s user=%s",
+            processing_active,
+            agent.id,
+            self.request.user.id,
+        )
+        context.update(
+            {
+                "timeline_window": timeline_window,
+                "timeline_limit": TIMELINE_DEFAULT_LIMIT,
+                "timeline_oldest_cursor": timeline_oldest_cursor,
+                "timeline_newest_cursor": timeline_newest_cursor,
+                "timeline_has_more_older": timeline_has_more_older,
+                "timeline_has_more_newer": timeline_has_more_newer,
+                "timeline_mode": "snapshot",
+                "suppress_empty": False,
+                "channel_labels": CHANNEL_LABELS,
+                "timeline_window_url": window_url,
+                "timeline_older_url": f"{window_url}?direction=older",
+                "timeline_newer_url": f"{window_url}?direction=newer",
+                "event_stream_url": event_stream_url,
+                "processing_active": processing_active,
+                "processing_status_url": reverse("agent_processing_status", args=[agent.id]),
+                "agent_first_name": agent_first_name,
+                "web_session_url": reverse("agent_web_session", args=[agent.id]),
+                "web_session_ttl": WEB_SESSION_TTL_SECONDS,
+            }
+        )
+        return context
+
+
+class AgentTimelineWindowView(AgentAccessMixin, TemplateView):
+    template_name = "console/partials/agent_timeline_window.html"
+    delta_template_name = "console/partials/agent_timeline_delta.html"
+
+    def get(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        direction = request.GET.get("direction", "initial")
+        if direction not in {"initial", "older", "newer"}:
+            direction = "initial"
+
+        cursor = request.GET.get("cursor") or None
+        requested_current_newest = request.GET.get("current_newest") or None
+        requested_current_oldest = request.GET.get("current_oldest") or None
+        requested_mode = request.GET.get("mode") or None
+
+        limit_param = request.GET.get("limit")
+        try:
+            limit = int(limit_param) if limit_param else TIMELINE_DEFAULT_LIMIT
+        except (TypeError, ValueError):
+            limit = TIMELINE_DEFAULT_LIMIT
+
+        default_mode = "delta" if direction in {"older", "newer"} else "snapshot"
+        mode = requested_mode or default_mode
+        if mode not in {"delta", "snapshot"}:
+            mode = default_mode
+
+        requires_resync = False
+        if direction == "older" and mode == "delta" and cursor is None:
+            requires_resync = True
+        if direction == "newer" and mode == "delta":
+            if cursor is None or requested_current_newest is None:
+                requires_resync = True
+            elif compare_cursors(cursor, requested_current_newest) != 0:
+                requires_resync = True
+
+        if mode == "snapshot" or requires_resync or direction == "initial":
+            window = fetch_timeline_window(
+                agent,
+                limit=limit,
+                direction="initial",
+                cursor=None,
+            )
+            timeline_oldest_cursor = window.window_oldest_cursor
+            timeline_newest_cursor = window.window_newest_cursor
+            timeline_has_more_older = window.has_more_older
+            timeline_has_more_newer = window.has_more_newer
+            template_name = self.template_name
+            response_mode = "snapshot"
+            events = window.events
+        else:
+            window = fetch_timeline_window(
+                agent,
+                limit=limit,
+                direction=direction,
+                cursor=cursor,
+            )
+            events = window.events
+            template_name = self.delta_template_name
+            response_mode = "delta"
+
+            # Establish effective bounds after applying the delta.
+            if direction == "older":
+                effective_oldest = events[0].cursor if events else cursor
+                if effective_oldest is None:
+                    effective_oldest = requested_current_oldest
+                effective_newest = requested_current_newest or (cursor if cursor else None)
+                timeline_oldest_cursor = effective_oldest
+                timeline_newest_cursor = effective_newest or window.window_newest_cursor
+            elif direction == "newer":
+                if events:
+                    effective_newest = events[-1].cursor
+                elif window.window_newest_cursor:
+                    effective_newest = window.window_newest_cursor
+                else:
+                    effective_newest = requested_current_newest or cursor
+                effective_oldest = requested_current_oldest or window.window_oldest_cursor
+                timeline_oldest_cursor = effective_oldest
+                timeline_newest_cursor = effective_newest
+            else:
+                timeline_oldest_cursor = window.window_oldest_cursor
+                timeline_newest_cursor = window.window_newest_cursor
+
+            timeline_has_more_older = has_timeline_history_before(agent, timeline_oldest_cursor)
+            timeline_has_more_newer = has_timeline_history_after(agent, timeline_newest_cursor)
+
+        window_url = reverse("agent_timeline_window", args=[agent.id])
+
+        context = {
+            "agent": agent,
+            "events": events,
+            "timeline_window": window,
+            "direction": direction,
+            "timeline_limit": limit,
+            "channel_labels": CHANNEL_LABELS,
+            "requested_cursor": cursor,
+            "timeline_mode": response_mode,
+            "timeline_window_url": window_url,
+            "timeline_older_url": f"{window_url}?direction=older",
+            "timeline_newer_url": f"{window_url}?direction=newer",
+            "processing_active": is_agent_processing(agent.id),
+            "agent_first_name": (agent.name or "").strip().split()[0] if (agent.name or "").strip() else "Agent",
+            "timeline_oldest_cursor": timeline_oldest_cursor,
+            "timeline_newest_cursor": timeline_newest_cursor,
+            "timeline_has_more_older": timeline_has_more_older,
+            "timeline_has_more_newer": timeline_has_more_newer,
+            "requested_current_newest": requested_current_newest,
+            "requested_current_oldest": requested_current_oldest,
+            "requires_resync": requires_resync,
+            "suppress_empty": response_mode == "delta",
+        }
+
+        logger.info(
+            "AgentTimelineWindowView: mode=%s direction=%s cursor=%s resync=%s agent=%s user=%s",
+            response_mode,
+            direction,
+            cursor,
+            requires_resync,
+            agent.id,
+            self.request.user.id,
+        )
+
+        response = render(request, template_name, context)
+        if requires_resync:
+            response["HX-Trigger"] = "timeline:resync"
+        return response
+
+
+class AgentWebSessionView(AgentAccessMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        try:
+            payload = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON payload."}, status=400)
+
+        action = payload.get("action")
+        if action not in {"start", "heartbeat", "end"}:
+            return JsonResponse({"error": "Unknown action."}, status=400)
+
+        session_id = payload.get("session_id")
+        source = payload.get("source")
+
+        try:
+            if action == "start":
+                result = start_web_session(agent, request.user, source=source or "ui")
+                status = 201
+            elif action == "heartbeat":
+                if not session_id:
+                    return JsonResponse({"error": "session_id is required for heartbeat."}, status=400)
+                result = heartbeat_web_session(
+                    session_key=session_id,
+                    agent=agent,
+                    user=request.user,
+                    source=source or "heartbeat",
+                )
+                status = 200
+            else:  # action == "end"
+                if not session_id:
+                    return JsonResponse({"error": "session_id is required to end a session."}, status=400)
+                result = end_web_session(
+                    session_key=session_id,
+                    agent=agent,
+                    user=request.user,
+                    source=source or "end",
+                )
+                status = 200
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+
+        return JsonResponse(_serialize_session_response(result), status=status)
+
+
+def _serialize_session_response(result):
+    session = result.session
+    payload = {
+        "session_id": str(session.session_key),
+        "started_at": session.started_at.isoformat(),
+        "last_seen_at": session.last_seen_at.isoformat(),
+        "ttl_seconds": result.ttl_seconds,
+        "expires_at": result.expires_at.isoformat(),
+    }
+    if session.ended_at:
+        payload["ended_at"] = session.ended_at.isoformat()
+    return payload
+
+
+class AgentWebMessageView(AgentAccessMixin, View):
+    def post(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        body = (request.POST.get("body") or "").strip()
+        subject = (request.POST.get("subject") or "").strip() or None
+
+        if not body:
+            if request.headers.get("HX-Request"):
+                return JsonResponse({"error": "Message cannot be empty."}, status=400)
+            messages.error(request, "Message cannot be empty.")
+            return redirect("agent_workspace", pk=agent.pk)
+
+        ingest_web_message(agent, request.user, body=body, subject=subject)
+
+        if request.headers.get("HX-Request"):
+            response = HttpResponse(status=204)
+            response["HX-Trigger"] = "agent-message-sent"
+            return response
+
+        messages.success(request, "Message sent to agent.")
+        return redirect("agent_workspace", pk=agent.pk)
+
+
+class AgentProcessingStatusView(AgentAccessMixin, View):
+    def get(self, request, *args, **kwargs):
+        agent = self.get_agent()
+        processing_active = is_agent_processing(agent.id)
+        return JsonResponse({
+            "processing_active": processing_active,
+            "queried_at": timezone.now().isoformat(),
+        })

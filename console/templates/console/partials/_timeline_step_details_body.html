@@ -1,0 +1,38 @@
+{% load agent_extras %}
+{% load humanize %}
+
+{% with wrapper=wrapper_class|default:'space-y-3 rounded-2xl border border-white/40 bg-white/90 p-3 text-[11px] text-slate-600 shadow-inner' %}
+<div class="{{ wrapper }}">
+  <div class="flex flex-wrap gap-4">
+    {% if step.llm_model %}
+      <span><span class="font-semibold text-slate-700">Model:</span> {{ step.llm_model }}</span>
+    {% endif %}
+    {% if step.total_tokens %}
+      <span><span class="font-semibold text-slate-700">Tokens:</span> {{ step.total_tokens|intcomma }}</span>
+    {% endif %}
+  </div>
+
+  {% if show_sql and step.tool_call and step.tool_call.tool_params.operations %}
+    <div class="space-y-2">
+      <p class="font-semibold text-slate-700">SQL statements</p>
+      {% for statement in step.tool_call.tool_params.operations %}
+        <div class="overflow-auto rounded-xl bg-slate-900/95 p-3 shadow-inner">
+          <pre class="text-[11px] text-emerald-100"><code class="language-sql">{{ statement }}</code></pre>
+        </div>
+      {% endfor %}
+    </div>
+  {% elif step.tool_call and step.tool_call.tool_params %}
+    <div>
+      <p class="font-semibold text-slate-700">Parameters</p>
+      <pre class="max-h-48 overflow-auto rounded-xl bg-slate-900/95 p-3 text-[11px] text-slate-100 shadow-inner">{{ step.tool_call.tool_params|pretty_json }}</pre>
+    </div>
+  {% endif %}
+
+  {% if step.tool_call and step.tool_call.result %}
+    <div>
+      <p class="font-semibold text-slate-700">Result</p>
+      <div class="max-h-48 overflow-auto rounded-xl bg-slate-50 p-3 text-[11px] text-slate-700 shadow-inner whitespace-pre-wrap">{{ step.tool_call.result }}</div>
+    </div>
+  {% endif %}
+</div>
+{% endwith %}

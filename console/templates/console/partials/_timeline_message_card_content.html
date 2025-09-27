@@ -1,0 +1,79 @@
+{% load agent_extras %}
+{% load humanize %}
+{% load tz %}
+
+{% with first_name=agent_first_name|default:'Agent' %}
+{% with channel_lower=channel|lower %}
+{% with is_agent=message.is_outbound %}
+{% if is_agent %}
+  {% with alignment_class='is-agent' bubble_theme='chat-bubble--agent' author_theme='chat-author--agent' meta_theme='chat-meta' details_theme='is-agent' %}
+<article class="timeline-event chat-event {{ alignment_class }}" data-cursor="{{ event.cursor }}">
+  <div class="chat-bubble {{ bubble_theme }}">
+    <div class="chat-author {{ author_theme }}">
+      {{ first_name }}
+      {% if channel_lower != 'web' %}
+        <span class="ml-2 inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
+          {{ channel|channel_label }}
+        </span>
+      {% endif %}
+    </div>
+    <div class="chat-content prose prose-sm max-w-none text-slate-800 leading-relaxed">
+      {{ message.body|agent_message_html }}
+    </div>
+    {% with attachments=message.attachments.all %}
+      {% if attachments %}
+        <div class="chat-attachments">
+          {% for attachment in attachments %}
+            <a href="{{ attachment.file.url }}" target="_blank" rel="noopener">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
+              </svg>
+              <span class="truncate max-w-[160px]" title="{{ attachment.filename }}">{{ attachment.filename }}</span>
+              <span class="text-slate-500">{{ attachment.file_size|filesizeformat }}</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+  </div>
+  <div class="chat-meta {{ meta_theme }}">{{ event.timestamp|naturaltime }}</div>
+</article>
+  {% endwith %}
+{% else %}
+  {% with alignment_class='is-user' bubble_theme='chat-bubble--user' author_theme='chat-author--user' meta_theme='chat-meta is-user' details_theme='is-user' %}
+<article class="timeline-event chat-event {{ alignment_class }}" data-cursor="{{ event.cursor }}">
+  <div class="chat-bubble {{ bubble_theme }}">
+    <div class="chat-author {{ author_theme }}">
+      You
+      {% if channel_lower != 'web' %}
+        <span class="ml-2 inline-flex items-center rounded-full border border-white/40 bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/80">
+          {{ channel|channel_label }}
+        </span>
+      {% endif %}
+    </div>
+    <div class="chat-content prose prose-sm max-w-none text-white leading-relaxed">
+      {{ message.body|agent_message_html }}
+    </div>
+    {% with attachments=message.attachments.all %}
+      {% if attachments %}
+        <div class="chat-attachments">
+          {% for attachment in attachments %}
+            <a href="{{ attachment.file.url }}" target="_blank" rel="noopener">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
+              </svg>
+              <span class="truncate max-w-[160px]" title="{{ attachment.filename }}">{{ attachment.filename }}</span>
+              <span>{{ attachment.file_size|filesizeformat }}</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+  </div>
+  <div class="chat-meta {{ meta_theme }}">{{ event.timestamp|naturaltime }}</div>
+</article>
+  {% endwith %}
+{% endif %}
+{% endwith %}
+{% endwith %}
+{% endwith %}

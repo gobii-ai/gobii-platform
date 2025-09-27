@@ -14,14 +14,16 @@ from django.contrib.auth import get_user_model
 from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask
 from api.agent.core.budget import AgentBudgetManager, BudgetContext, set_current_context as set_budget_context
 from api.agent.tools.spawn_web_task import execute_spawn_web_task
+from tests.utils.redis_test_mixin import RedisIsolationMixin
 
 
 @tag("batch_spawn_depth")
-class SpawnDepthTrackingTests(TransactionTestCase):
+class SpawnDepthTrackingTests(RedisIsolationMixin, TransactionTestCase):
     """Test that parallel spawn_web_task calls correctly track depth."""
     
     def setUp(self):
         """Set up test data."""
+        super().setUp()
         User = get_user_model()
         self.user = User.objects.create_user(
             username='test@example.com',

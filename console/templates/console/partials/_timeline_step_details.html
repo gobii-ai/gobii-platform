@@ -1,0 +1,26 @@
+{% load agent_extras %}
+{% load humanize %}
+
+{% comment %}
+Renders the collapsible "technical details" view for timeline steps.
+Parameters expected in context:
+  step      – the PersistentAgentStep instance
+  summary   – optional summary label for the disclosure element
+  show_sql  – truthy value enables pretty rendering of SQL operations (sqlite_batch)
+{% endcomment %}
+
+{% with summary_label=summary|default:'See technical details' %}
+  {% if inline %}
+    {% include "console/partials/_timeline_step_details_body.html" with step=step show_sql=show_sql wrapper_class=wrapper_class|default:'space-y-3 text-[12px] text-slate-600' %}
+  {% else %}
+    <details class="group mt-4">
+      <summary class="flex cursor-pointer items-center gap-2 rounded-lg bg-white/70 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-white">
+        <span>{{ summary_label }}</span>
+        <svg class="h-3 w-3 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </summary>
+      {% include "console/partials/_timeline_step_details_body.html" with step=step show_sql=show_sql wrapper_class='space-y-3 rounded-2xl border border-white/40 bg-white/90 p-3 text-[11px] text-slate-600 shadow-inner' %}
+    </details>
+  {% endif %}
+{% endwith %}

@@ -2,6 +2,8 @@ from django.test import TestCase, TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from unittest.mock import patch, MagicMock
+
+from tests.utils.redis_test_mixin import RedisIsolationMixin
 from api.models import PersistentAgent, BrowserUseAgent, UserQuota, TaskCredit, PersistentAgentStep, \
     PersistentAgentSystemStep
 from constants.grant_types import GrantTypeChoices
@@ -18,7 +20,7 @@ def create_browser_agent_without_proxy(user, name):
 
 
 @tag("batch_api_persistent_agents")
-class PersistentAgentModelTests(TestCase):
+class PersistentAgentModelTests(RedisIsolationMixin, TestCase):
     """Test suite for the PersistentAgent model."""
 
     @classmethod
@@ -166,11 +168,12 @@ class PersistentAgentModelTests(TestCase):
 
 @patch('django.db.close_old_connections')  # Mock at class level to ensure it's always mocked  
 @tag("batch_api_persistent_agents")
-class PersistentAgentCreditConsumptionTests(TransactionTestCase):
+class PersistentAgentCreditConsumptionTests(RedisIsolationMixin, TransactionTestCase):
     """Test suite for persistent agent credit consumption."""
 
     def setUp(self):
         """Set up objects for each test method."""
+        super().setUp()
         User = get_user_model()
         self.user = User.objects.create_user(username='credituser@example.com', email='credituser@example.com', password='password')
         # UserQuota is created by a signal, but we can get it and increase the limit for tests.
@@ -321,10 +324,11 @@ class PersistentAgentCreditConsumptionTests(TransactionTestCase):
 
 
 @tag("batch_api_persistent_agents")
-class ScheduleUpdaterTests(TestCase):
+class ScheduleUpdaterTests(RedisIsolationMixin, TestCase):
     """Test suite for the schedule updater tool."""
 
     def setUp(self):
+        super().setUp()
         self.user = get_user_model().objects.create_user(
             username="testuser", email="test@example.com", password="testpass"
         )

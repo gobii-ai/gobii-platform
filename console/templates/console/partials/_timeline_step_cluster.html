@@ -1,0 +1,136 @@
+{% load agent_extras %}
+{% load humanize %}
+{% load tz %}
+
+{% if cluster.entries %}
+{% with entry_count=cluster.entry_count|default:cluster.entries|length collapse_threshold=cluster.collapse_threshold|default:5 %}
+<article class="timeline-event tool-cluster{% if cluster.collapsible %} tool-cluster--collapsible tool-cluster--collapsed{% endif %}"
+         data-cursor="{{ cluster.cursor }}"
+         data-entry-count="{{ entry_count }}"
+         {% if cluster.earliest_timestamp %}data-earliest="{{ cluster.earliest_timestamp|date:'c' }}"{% endif %}
+         data-collapsible="{{ cluster.collapsible|yesno:'true,false' }}"
+         data-collapse-threshold="{{ collapse_threshold }}"
+         data-cluster-kind="tool">
+  <div class="tool-cluster-shell">
+    <div class="tool-cluster-summary">
+      <button type="button"
+              class="tool-cluster-batch-toggle"
+              data-role="cluster-toggle"
+              aria-expanded="{% if cluster.collapsible %}false{% else %}true{% endif %}">
+        <span class="tool-cluster-batch-icon">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h10v10H7z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 5h10v10H5z" opacity="0.55" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 9h10v10H9z" opacity="0.4" />
+          </svg>
+        </span>
+        <span class="tool-cluster-batch-label">
+          <span data-role="cluster-count">{{ entry_count }}</span> tools called
+        </span>
+      </button>
+    </div>
+    <ul class="tool-chip-list" role="list">
+      {% for entry in cluster.entries %}
+        {% with tool=entry.tool meta=entry.meta params=tool.tool_params %}
+          {% with base_cursor=entry.event.cursor|default:cluster.cursor %}
+            {% with cursor_fragment=base_cursor|default_if_none:''|stringformat:"s" %}
+              {% with counter_fragment=forloop.counter0|stringformat:"s" %}
+                {% with raw_panel_key=cursor_fragment|add:'-'|add:counter_fragment %}
+                  {% with panel_id="tool-panel-"|add:raw_panel_key|slugify %}
+                    <li class="tool-chip" data-detail-id="{{ panel_id }}">
+                      <button type="button"
+                              class="tool-chip-trigger"
+                              aria-expanded="false"
+                              aria-controls="{{ panel_id }}">
+                        <span class="tool-chip-icon {{ meta.icon_bg }} {{ meta.icon_color }}">
+                          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            {% for path in meta.paths %}
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ path }}" />
+                            {% endfor %}
+                          </svg>
+                        </span>
+                        <span class="tool-chip-body">
+                          <span class="tool-chip-label">{{ meta.label }}</span>
+                          {% with query=params|attr:'query' url=params|attr:'url' operations=params|attr:'operations' summary=params|attr:'summary' %}
+                            {% if tool.tool_name == 'search_tools' and query %}
+                              <span class="tool-chip-caption">“{{ query|truncatechars:60 }}”</span>
+                            {% elif tool.tool_name == 'web_search' and query %}
+                              <span class="tool-chip-caption">“{{ query|truncatechars:60 }}”</span>
+                            {% elif tool.tool_name == 'search' and query %}
+                              <span class="tool-chip-caption">“{{ query|truncatechars:60 }}”</span>
+                            {% elif tool.tool_name == 'api_call' and url %}
+                              <span class="tool-chip-caption">{{ url|truncatechars:60 }}</span>
+                            {% elif tool.tool_name == 'http_request' and url %}
+                              <span class="tool-chip-caption">{{ url|truncatechars:60 }}</span>
+                            {% elif tool.tool_name == 'sqlite_batch' and operations %}
+                              <span class="tool-chip-caption">{{ operations|length }} statement{{ operations|length|pluralize }}</span>
+                            {% elif summary %}
+                              <span class="tool-chip-caption">{{ summary|truncatechars:60 }}</span>
+                            {% endif %}
+                          {% endwith %}
+                        </span>
+                      </button>
+                      <div class="tool-chip-detail" id="{{ panel_id }}" hidden>
+                        <div class="tool-chip-detail-header">
+                          <span class="tool-chip-detail-icon {{ meta.icon_bg }} {{ meta.icon_color }}">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              {% for path in meta.paths %}
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ path }}" />
+                              {% endfor %}
+                            </svg>
+                          </span>
+                          <div class="tool-chip-detail-text">
+                            <span class="tool-chip-detail-label">{{ meta.label }}</span>
+                            {% if entry.event.timestamp %}
+                              <time datetime="{{ entry.event.timestamp|date:'c' }}" class="tool-chip-detail-meta">{{ entry.event.timestamp|naturaltime }}</time>
+                            {% endif %}
+                          </div>
+                          <button type="button" class="tool-chip-close" aria-label="Close tool call details">
+                            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" class="h-4 w-4">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l8 8M6 14l8-8" />
+                            </svg>
+                          </button>
+                        </div>
+                        <div class="tool-chip-panel">
+                          {% if tool.tool_name == 'update_charter' %}
+                            {% with charter=params|attr:'new_charter' %}
+                              {% if not charter %}
+                                {% with charter=params|attr:'charter' %}
+                                  {% if charter %}
+                                    {% include "console/partials/_timeline_assignment_details.html" with charter_text=charter %}
+                                  {% else %}
+                                    <p class="tool-chip-panel-body text-slate-600">Assignment updated.</p>
+                                  {% endif %}
+                                {% endwith %}
+                              {% else %}
+                                {% include "console/partials/_timeline_assignment_details.html" with charter_text=charter %}
+                              {% endif %}
+                            {% endwith %}
+                          {% else %}
+                            {% include "console/partials/_timeline_step_details.html" with step=entry.step show_sql=entry.show_sql inline=True wrapper_class='space-y-3 text-xs text-slate-600' %}
+                          {% endif %}
+                        </div>
+                      </div>
+                    </li>
+                  {% endwith %}
+                {% endwith %}
+              {% endwith %}
+            {% endwith %}
+          {% endwith %}
+        {% endwith %}
+      {% endfor %}
+    </ul>
+    <div class="tool-cluster-detail-host" hidden aria-live="polite"></div>
+    {% if cluster.latest_timestamp %}
+      <div class="tool-cluster-timestamp chat-meta" data-role="cluster-timestamp">
+        {% if cluster.collapsible and cluster.earliest_timestamp %}
+          {{ cluster.earliest_timestamp|naturaltime }}
+        {% else %}
+          {{ cluster.latest_timestamp|naturaltime }}
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+</article>
+{% endwith %}
+{% endif %}
