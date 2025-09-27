@@ -317,30 +317,15 @@
   }
 
   .jump-to-latest[data-pending="true"]::after {
-    content: attr(data-pending-count);
+    content: '';
     position: absolute;
     top: -0.35rem;
     right: -0.3rem;
-    min-width: 1.1rem;
-    height: 1.1rem;
-    padding: 0 0.25rem;
+    width: 0.6rem;
+    height: 0.6rem;
     border-radius: 9999px;
     background: #ef4444;
-    color: #fff;
-    font-size: 0.65rem;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     box-shadow: 0 4px 8px rgba(239, 68, 68, 0.35);
-  }
-
-  .jump-to-latest[data-pending="true"][data-pending-count=""]::after {
-    content: '';
-    width: 0.6rem;
-    min-width: 0.6rem;
-    height: 0.6rem;
-    padding: 0;
   }
 
   .jump-to-latest[data-backlog="true"] {
@@ -1891,16 +1876,13 @@
       const hasRealtime = pendingCount > 0;
       button.dataset.pending = hasRealtime ? 'true' : 'false';
       button.dataset.backlog = !hasRealtime && backlog ? 'true' : 'false';
+      delete button.dataset.pendingCount;
 
       if (hasRealtime) {
-        const clamped = Math.min(pendingCount, 99);
-        button.dataset.pendingCount = String(clamped);
-        const label = `${jumpButtonDefaultLabel} (${clamped} new ${clamped === 1 ? 'update' : 'updates'})`;
-        button.setAttribute('aria-label', label);
+        button.setAttribute('aria-label', `${jumpButtonDefaultLabel} (new updates)`);
         return;
       }
 
-      button.dataset.pendingCount = '';
       if (backlog) {
         button.setAttribute('aria-label', `${jumpButtonDefaultLabel} (newer items available)`);
       } else {
@@ -1912,13 +1894,6 @@
       const cursorNode = getCursorsEl();
       if (!cursorNode) return false;
       return cursorNode.dataset?.hasMoreNewer === 'true';
-    }
-
-    function shouldDeferRealtime() {
-      if (!timeline) return false;
-      if (state.fetchingOlder || state.resyncing) return true;
-      if (hasMoreNewerInDom()) return true;
-      return !state.autoScroll;
     }
 
     function queueRealtimeUpdate() {
@@ -1953,11 +1928,14 @@
         });
         return;
       }
-      if (shouldDeferRealtime()) {
-        timelineLog('drainPendingRealtime deferred: shouldDeferRealtime returned true', {
+      const hasBacklog = hasMoreNewerInDom();
+      if (state.fetchingOlder || state.resyncing || hasBacklog || !state.autoScroll) {
+        timelineLog('drainPendingRealtime deferred', {
           pendingRealtime: state.pendingRealtime,
           autoScroll: state.autoScroll,
-          hasMoreNewer: hasMoreNewerInDom(),
+          hasBacklog,
+          fetchingOlder: state.fetchingOlder,
+          resyncing: state.resyncing,
         });
         return;
       }
@@ -2710,7 +2688,6 @@
       composer.addEventListener('htmx:afterRequest', (event) => {
         const succeeded = Boolean(event.detail && event.detail.xhr && event.detail.xhr.status < 400);
         if (succeeded) {
-          const nearBottom = isNearBottom();
           composer.reset();
           if (typeof resizeComposerTextarea === 'function') {
             resizeComposerTextarea({ reset: true });
@@ -2719,7 +2696,7 @@
             scheduleComposerLayoutUpdate();
           }
           showProcessingIndicator({ sticky: true, reason: 'composer-submit' });
-          if (nearBottom) {
+          if (isNearBottom() && !hasMoreNewerInDom()) {
             requestNewer('composer-submit');
           } else {
             state.pendingComposerScroll = false;
@@ -3129,7 +3106,7 @@
       });
       refreshProcessingState({ reason: 'processing-finished' })
         .finally(() => {
-          if (isNearBottom()) {
+          if (!hasMoreNewerInDom() && isNearBottom()) {
             requestNewer('processing-finished');
           } else {
             queueRealtimeUpdate();
@@ -3178,18 +3155,21 @@
           state.lastEventId = evt.lastEventId;
         }
         reconnectDelay = 3000;
-        if (shouldDeferRealtime()) {
-          timelineLog('eventsource message deferred via queueRealtimeUpdate', {
+        const hasBacklog = hasMoreNewerInDom();
+        const canAutoFetch = !hasBacklog && state.autoScroll && !state.fetchingNewer && !state.fetchingOlder && !state.resyncing;
+        if (canAutoFetch) {
+          timelineLog('eventsource message requesting newer timeline', {
             eventType,
-            lastEventId: state.lastEventId,
           });
-          queueRealtimeUpdate();
+          requestNewer('auto-newer');
           return;
         }
-        timelineLog('eventsource message requesting newer timeline', {
+        timelineLog('eventsource message deferred via queueRealtimeUpdate', {
           eventType,
+          lastEventId: state.lastEventId,
+          hasBacklog,
         });
-        requestNewer('auto-newer');
+        queueRealtimeUpdate();
       };
 
       source.addEventListener('message', handleMessage);
