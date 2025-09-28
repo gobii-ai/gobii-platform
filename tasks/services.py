@@ -1113,9 +1113,7 @@ class TaskCreditService:
                     pct_decimal = Decimal(100)
                 else:
                     tolerance = get_most_expensive_tool_cost()
-                    minimum_fraction = Decimal("0.001")
-                    if tolerance < minimum_fraction:
-                        tolerance = minimum_fraction
+                    tolerance = max(tolerance, Decimal("0.001"))
 
                     remaining = entitled_decimal - used_decimal
                     if remaining <= tolerance:
