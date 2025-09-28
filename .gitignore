@@ -1,5 +1,10 @@
 *.egg-info/
 .venv/
+.tmp/
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+static/frontend/
 .env
 
 # Python bytecode and caches

@@ -82,3 +82,6 @@ _auth_mgmt.create_permissions = _quiet_create_permissions
 # -----------------------------------------------------------------------------
 
 STORAGES["staticfiles"]["BACKEND"] = "django.contrib.staticfiles.storage.StaticFilesStorage"
+
+# Avoid relying on a running Vite dev server during test runs.
+VITE_USE_DEV_SERVER = False

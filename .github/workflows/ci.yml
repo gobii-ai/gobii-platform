@@ -37,6 +37,7 @@ jobs:
     name: tests (${{ matrix.batch }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    needs: tag-guard
     strategy:
       fail-fast: false
       matrix:

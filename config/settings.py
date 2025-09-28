@@ -171,6 +171,7 @@ TEMPLATES = [
                 "form_extras": "templatetags.form_extras",
                 "analytics_tags": "templatetags.analytics_tags",
                 "social_extras": "templatetags.social_extras",
+                "vite_tags": "templatetags.vite_tags",
             },
         },
     },
@@ -215,6 +216,13 @@ DATABASES = {
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = env('STATIC_ROOT', default=BASE_DIR / 'staticfiles')
+
+
+# ────────── Frontend (Vite) ──────────
+VITE_DEV_SERVER_URL = env('VITE_DEV_SERVER_URL', default='http://127.0.0.1:5173')
+VITE_USE_DEV_SERVER = env.bool('VITE_USE_DEV_SERVER', default=DEBUG)
+VITE_ASSET_ENTRY = env('VITE_ASSET_ENTRY', default='src/main.tsx')
+VITE_MANIFEST_PATH = Path(env('VITE_MANIFEST_PATH', default=str(BASE_DIR / 'static' / 'frontend' / 'manifest.json')))
 MEDIA_URL = "/media/"
 MEDIA_ROOT = env('MEDIA_ROOT', default=BASE_DIR / 'mediafiles')
 

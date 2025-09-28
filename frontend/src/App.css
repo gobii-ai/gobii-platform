@@ -1,0 +1,192 @@
+:root {
+  color-scheme: light;
+}
+
+#gobii-frontend-root {
+  width: 100%;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: min(960px, 100%);
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 3rem;
+  background: transparent;
+  color: #1f2933;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.app-badge {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background: linear-gradient(135deg, #4338ca, #6366f1);
+  color: white;
+}
+
+.app-title {
+  margin: 0;
+  font-size: clamp(1.75rem, 1.5rem + 1vw, 2.25rem);
+  font-weight: 700;
+}
+
+.app-subtitle {
+  margin: 0.25rem 0 0;
+  color: #4b5563;
+  max-width: 52ch;
+}
+
+.app-context {
+  margin: 0.35rem 0 0;
+  color: #1f2937;
+  font-weight: 500;
+}
+
+.app-main {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.card {
+  background: white;
+  border-radius: 1rem;
+  border: 1px solid rgba(99, 102, 241, 0.1);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.card--secondary {
+  border-color: rgba(71, 85, 105, 0.12);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+}
+
+.card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.card__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.card__cta {
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  padding: 0.5rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  color: white;
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+}
+
+.card__cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(99, 102, 241, 0.35);
+}
+
+.card__cta:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.status {
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  border: 1px solid transparent;
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.status--success {
+  border-color: rgba(34, 197, 94, 0.2);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.status--loading {
+  border-color: rgba(99, 102, 241, 0.2);
+}
+
+.status--error {
+  border-color: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.05);
+  color: #b91c1c;
+}
+
+.status__headline {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.status__details {
+  margin: 0;
+  color: #334155;
+  font-size: 0.95rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.status__details > div {
+  margin: 0;
+}
+
+.status__details dt {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.06em;
+}
+
+.status__details dd {
+  font-size: 0.95rem;
+  color: #1f2937;
+}
+
+.roadmap {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #1f2937;
+}
+
+.roadmap li {
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 2rem 1rem;
+  }
+
+  .card {
+    padding: 1.25rem;
+  }
+}

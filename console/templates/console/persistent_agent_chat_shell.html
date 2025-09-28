@@ -1,0 +1,16 @@
+{% extends "console_page.html" %}
+{% load vite_tags %}
+
+{% block console_content %}
+<div id="gobii-frontend-root"
+     class="min-h-[50vh]"
+     data-app="agent-chat"
+     data-agent-id="{{ agent.id }}"
+     data-agent-name="{{ agent.name|default:'' }}">
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% vite_asset 'src/main.tsx' %}
+{% endblock %}

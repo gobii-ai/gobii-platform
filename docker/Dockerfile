@@ -63,6 +63,9 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir --editable .
 
+RUN npm ci --prefix frontend
+RUN npm run build --prefix frontend
+
 ENV USE_EPHEMERAL_XVFB=true
 
 RUN DJANGO_SECRET_KEY=dummy-build-key \

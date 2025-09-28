@@ -15,6 +15,7 @@ from console.views import (
     ApiKeyCreateModalView,
     BillingView,
     PersistentAgentsView,
+    PersistentAgentChatShellView,
     AgentCreateContactView,
     AgentDetailView,
     AgentEnableSmsView,
@@ -89,6 +90,7 @@ urlpatterns = [
     path("console/profile/", ProfileView.as_view(), name="profile"),
 
     path("console/agents/", PersistentAgentsView.as_view(), name="agents"),
+    path("console/agents/<uuid:pk>/chat/", PersistentAgentChatShellView.as_view(), name="agent_chat_shell"),
     path("console/agents/create/contact/", AgentCreateContactView.as_view(), name="agent_create_contact"),
     path("console/agents/<uuid:pk>/", AgentDetailView.as_view(), name="agent_detail"),
     path("console/agents/<uuid:pk>/welcome/", AgentWelcomeView.as_view(), name="agent_welcome"),
