@@ -1,0 +1,2417 @@
+(function () {
+  if (window.__agentWorkspaceInitialized) {
+    console.debug('[agent-workspace] script already initialized; skipping');
+    return;
+  }
+  window.__agentWorkspaceInitialized = true;
+
+  const root = document.getElementById('agent-workspace-root');
+
+  const timelineLog = (...args) => console.debug('[agent-workspace][timeline]', ...args);
+  const timelineWarn = (...args) => console.warn('[agent-workspace][timeline]', ...args);
+  const timelineError = (...args) => console.error('[agent-workspace][timeline]', ...args);
+
+  if (!root) {
+    console.warn('[agent-workspace] root node missing; aborting init.');
+    return;
+  }
+
+  let attempts = 0;
+  const MAX_ATTEMPTS = 20;
+  let initialized = false;
+
+  function ready() {
+    if (typeof window.htmx === 'undefined') {
+      attempts += 1;
+      if (attempts === 1) {
+        console.warn('[agent-workspace] htmx not yet available; retrying init.');
+      }
+      if (attempts > MAX_ATTEMPTS) {
+        console.error('[agent-workspace] htmx failed to load after retries; realtime disabled.');
+        return false;
+      }
+      window.setTimeout(ready, 150);
+      return false;
+    }
+
+    init();
+    return true;
+  }
+
+  function init() {
+    if (initialized) {
+      return;
+    }
+    initialized = true;
+
+    const timeline = document.getElementById('timeline-events');
+    const timelineList = document.getElementById('timeline-event-list');
+    const processingSlot = document.getElementById('processing-indicator-slot');
+    const composer = document.getElementById('agent-web-compose');
+    const composerCursor = document.getElementById('composer-latest-cursor');
+    const composerSurface = document.querySelector('.composer-surface');
+    const eventContainer = timelineList || timeline;
+    let jumpButtonDefaultLabel = null;
+    const getJumpButton = () => {
+      const button = document.getElementById('jump-to-latest');
+      if (button && jumpButtonDefaultLabel === null) {
+        jumpButtonDefaultLabel = button.getAttribute('aria-label') || 'Jump to latest';
+        if (!button.dataset.defaultLabel) {
+          button.dataset.defaultLabel = jumpButtonDefaultLabel;
+        }
+      }
+      return button;
+    };
+    const agentFirstName = root.dataset.agentFirstName || 'Your agent';
+    const getCursorsEl = () => document.getElementById('timeline-cursors');
+    const getLoadNewerContainer = () => document.getElementById('timeline-load-newer');
+    const getLoadOlderContainer = () => document.getElementById('timeline-load-older');
+
+    const limit = parseInt(root.dataset.timelineLimit || '10', 10);
+    const newerUrl = root.dataset.timelineNewerUrl;
+    const eventStreamUrl = root.dataset.eventStreamUrl;
+    const processingStatusUrl = root.dataset.processingStatusUrl || null;
+
+    const initialProcessingActive = root.dataset.processingActive === 'true';
+
+    const composerShell = document.querySelector('.composer-shell');
+
+    const state = {
+      action: 'idle',
+      previousScrollHeight: 0,
+      lastEventId: null,
+      pendingComposerScroll: false,
+      autoScroll: true,
+      eventSource: null,
+      fetchingNewer: false,
+      fetchingOlder: false,
+      resyncing: false,
+      queuedNewerTrigger: null,
+      queuedOlder: false,
+      processingActive: initialProcessingActive,
+      bottomAnchorOffset: null,
+      pageBottomOffset: null,
+      knownCursors: new Set(),
+      processingSticky: initialProcessingActive,
+      lastNewerTrigger: null,
+      processingEventId: null,
+      awaitingProcessingSync: false,
+      processingRefreshPromise: null,
+      pendingRealtime: 0,
+      scrollAnchor: null,
+      inflightDirection: null,
+      pendingResync: false,
+      justResynced: false,
+      processingSuppressed: false,
+    };
+    window.__agentWorkspaceState = state;
+
+    const sessionUrl = root.dataset.webSessionUrl || null;
+    const sessionTtl = parseInt(root.dataset.webSessionTtl || '60', 10);
+    const heartbeatIntervalMs = Math.max(10000, Math.min(25000, Math.max(5000, (sessionTtl - 10) * 1000)));
+
+    const initialCursorNode = getCursorsEl();
+    if (initialCursorNode && !initialCursorNode.dataset.direction) {
+      initialCursorNode.dataset.direction = 'initial';
+    }
+    const sessionState = {
+      id: null,
+      inflight: false,
+      heartbeatTimer: null,
+      retryTimer: null,
+    };
+
+    function getCsrfToken() {
+      const match = document.cookie.match(/csrftoken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+
+    function clearHeartbeat() {
+      if (sessionState.heartbeatTimer) {
+        window.clearInterval(sessionState.heartbeatTimer);
+        sessionState.heartbeatTimer = null;
+      }
+    }
+
+    function clearSessionRestart() {
+      if (sessionState.retryTimer) {
+        window.clearTimeout(sessionState.retryTimer);
+        sessionState.retryTimer = null;
+      }
+    }
+
+    function markSessionInactive() {
+      clearHeartbeat();
+      sessionState.id = null;
+    }
+
+    function scheduleSessionRestart(delay = 8000) {
+      if (sessionState.retryTimer) {
+        return;
+      }
+      sessionState.retryTimer = window.setTimeout(() => {
+        sessionState.retryTimer = null;
+        startWebSession();
+      }, delay);
+    }
+
+    function postSession(action, extra = {}, fetchOptions = {}) {
+      if (!sessionUrl) {
+        return Promise.resolve(null);
+      }
+
+      const body = { action, ...extra };
+      if (sessionState.id && action !== 'start' && !body.session_id) {
+        body.session_id = sessionState.id;
+      }
+      if (!body.source) {
+        body.source = action;
+      }
+
+      const init = {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+        ...fetchOptions,
+      };
+      const defaultHeaders = {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRFToken': getCsrfToken(),
+        Accept: 'application/json',
+      };
+      init.headers = {
+        ...defaultHeaders,
+        ...(fetchOptions.headers || {}),
+      };
+
+      return fetch(sessionUrl, init).then((response) => {
+        if (!response.ok) {
+          return response
+            .json()
+            .catch(() => ({}))
+            .then((payload) => {
+              const errorMessage = payload?.error || `web session ${action} failed (${response.status})`;
+              throw new Error(errorMessage);
+            });
+        }
+        return response.json();
+      });
+    }
+
+    function scheduleHeartbeat() {
+      clearHeartbeat();
+      if (!sessionState.id) {
+        return;
+      }
+      sessionState.heartbeatTimer = window.setInterval(() => {
+        sendHeartbeat({ silent: true });
+      }, heartbeatIntervalMs);
+    }
+
+    function startWebSession() {
+      if (!sessionUrl || sessionState.inflight) {
+        return;
+      }
+
+      sessionState.inflight = true;
+      clearSessionRestart();
+
+      postSession('start', { source: 'ui' })
+        .then((data) => {
+          sessionState.id = data?.session_id || null;
+          if (sessionState.id) {
+            scheduleHeartbeat();
+          } else {
+            markSessionInactive();
+          }
+        })
+        .catch((error) => {
+          console.warn('[agent-workspace] Failed to create web session', error);
+          markSessionInactive();
+          scheduleSessionRestart();
+        })
+        .finally(() => {
+          sessionState.inflight = false;
+        });
+    }
+
+    function sendHeartbeat(options = {}) {
+      if (!sessionState.id) {
+        return Promise.resolve(null);
+      }
+
+      return postSession('heartbeat', { session_id: sessionState.id, source: options?.source || 'heartbeat' })
+        .then((data) => {
+          if (data?.session_id) {
+            sessionState.id = data.session_id;
+          }
+          return data;
+        })
+        .catch((error) => {
+          if (!options?.silent) {
+            console.warn('[agent-workspace] Web session heartbeat failed', error);
+          }
+          markSessionInactive();
+          scheduleSessionRestart();
+          return null;
+        });
+    }
+
+    function endWebSession(reason = 'end') {
+      if (!sessionUrl || !sessionState.id) {
+        return;
+      }
+
+      const sessionId = sessionState.id;
+      markSessionInactive();
+      clearSessionRestart();
+
+      postSession(
+        'end',
+        { session_id: sessionId, source: reason },
+        { keepalive: true }
+      ).catch(() => {
+        /* swallow */
+      });
+    }
+
+    const JUMP_BUTTON_SIZE = 52; // matches 3.25rem
+    const JUMP_BUTTON_GAP = 18;
+    const BASE_SCROLL_THRESHOLD = 140;
+    const ALIGN_THRESHOLD = 160;
+    const BOTTOM_ANCHOR_THRESHOLD = 48;
+    const AUTO_NEWER_TRIGGERS = new Set(['auto-newer', 'processing-finished', 'auto-newer-loop', 'jump-to-latest', 'queued-realtime']);
+    const TOOL_CLUSTER_SELECTOR = '.tool-cluster[data-cluster-kind="tool"]';
+
+    let openToolChip = null;
+
+    function closeOpenToolChip(options = {}) {
+      if (!openToolChip) return;
+      const cluster = openToolChip.closest('.tool-cluster-shell');
+      const host = cluster?.querySelector('.tool-cluster-detail-host');
+      const trigger = openToolChip.querySelector('.tool-chip-trigger');
+      const detailId = openToolChip.dataset.detailId || trigger?.getAttribute('aria-controls');
+      let detail = null;
+      if (detailId) {
+        detail = cluster?.querySelector(`#${detailId}`) || document.getElementById(detailId);
+      }
+
+      if (trigger) {
+        trigger.setAttribute('aria-expanded', 'false');
+      }
+
+      if (detail) {
+        detail.hidden = true;
+        if (host && detail.parentElement === host) {
+          host.removeChild(detail);
+        }
+        openToolChip.appendChild(detail);
+      }
+
+      if (host && host.childElementCount === 0) {
+        host.innerHTML = '';
+        host.hidden = true;
+      }
+
+      openToolChip.classList.remove('is-open');
+      delete openToolChip.dataset.detailId;
+
+      if (options.restoreFocus && trigger) {
+        trigger.focus();
+      }
+
+      openToolChip = null;
+    }
+
+    function openToolChipDetail(chip) {
+      if (!chip) return;
+
+      if (chip === openToolChip) {
+        closeOpenToolChip({ restoreFocus: true });
+        return;
+      }
+
+      const cluster = chip.closest('.tool-cluster-shell');
+      const host = cluster?.querySelector('.tool-cluster-detail-host');
+      const trigger = chip.querySelector('.tool-chip-trigger');
+      const detailId = trigger?.getAttribute('aria-controls');
+
+      if (!cluster || !host || !trigger || !detailId) {
+        closeOpenToolChip();
+        return;
+      }
+
+      let detail = cluster.querySelector(`#${detailId}`) || document.getElementById(detailId);
+      if (!detail) {
+        closeOpenToolChip();
+        return;
+      }
+
+      closeOpenToolChip();
+
+      chip.classList.add('is-open');
+      chip.dataset.detailId = detailId;
+      trigger.setAttribute('aria-expanded', 'true');
+
+      detail.hidden = false;
+      host.hidden = false;
+      host.innerHTML = '';
+      host.appendChild(detail);
+
+      openToolChip = chip;
+
+      window.requestAnimationFrame(() => {
+        const closeBtn = detail.querySelector('.tool-chip-close');
+        if (closeBtn && typeof closeBtn.focus === 'function') {
+          closeBtn.focus();
+        }
+        if (typeof detail.scrollIntoView === 'function') {
+          detail.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      });
+    }
+
+    function getClusterThreshold(cluster) {
+      if (!cluster) return 5;
+      const raw = parseInt(cluster.dataset.collapseThreshold || '5', 10);
+      return Number.isFinite(raw) && raw > 0 ? raw : 5;
+    }
+
+    function getClusterCount(cluster) {
+      if (!cluster) return 0;
+      const raw = parseInt(cluster.dataset.entryCount || '0', 10);
+      if (Number.isFinite(raw) && raw >= 0) {
+        return raw;
+      }
+      const chips = cluster.querySelectorAll('.tool-chip');
+      const count = chips.length;
+      cluster.dataset.entryCount = String(count);
+      return count;
+    }
+
+    function updateClusterCountLabel(cluster) {
+      if (!cluster) return;
+      const count = getClusterCount(cluster);
+      const countNode = cluster.querySelector('[data-role="cluster-count"]');
+      if (countNode) {
+        countNode.textContent = String(count);
+      }
+    }
+
+    function setToolClusterCollapsed(cluster, collapsed) {
+      if (!cluster) return;
+      const toggle = cluster.querySelector('[data-role="cluster-toggle"]');
+      if (collapsed) {
+        cluster.classList.add('tool-cluster--collapsed');
+        if (openToolChip && cluster.contains(openToolChip)) {
+          closeOpenToolChip();
+        }
+        if (toggle) {
+          toggle.setAttribute('aria-expanded', 'false');
+        }
+      } else {
+        cluster.classList.remove('tool-cluster--collapsed');
+        if (toggle) {
+          toggle.setAttribute('aria-expanded', 'true');
+        }
+      }
+    }
+
+    function evaluateToolCluster(cluster) {
+      if (!cluster) return;
+      const count = getClusterCount(cluster);
+      const threshold = getClusterThreshold(cluster);
+      const shouldCollapse = count >= threshold;
+      updateClusterCountLabel(cluster);
+
+      if (shouldCollapse) {
+        cluster.dataset.collapsible = 'true';
+        cluster.classList.add('tool-cluster--collapsible');
+        setToolClusterCollapsed(cluster, true);
+      } else {
+        cluster.dataset.collapsible = 'false';
+        cluster.classList.remove('tool-cluster--collapsible');
+        setToolClusterCollapsed(cluster, false);
+      }
+    }
+
+    function mergeToolClusters(previous, current) {
+      if (!previous || !current) return false;
+      if (previous.dataset.clusterKind !== 'tool' || current.dataset.clusterKind !== 'tool') {
+        return false;
+      }
+
+      const prevList = previous.querySelector('.tool-chip-list');
+      const currentList = current.querySelector('.tool-chip-list');
+      if (!prevList || !currentList) {
+        return false;
+      }
+
+      const chipsToMove = Array.from(currentList.children);
+      if (!chipsToMove.length) {
+        forgetCursor(current);
+        current.remove();
+        evaluateToolCluster(previous);
+        return true;
+      }
+
+      closeOpenToolChip();
+
+      const previousCount = getClusterCount(previous);
+      const currentCount = parseInt(current.dataset.entryCount || String(chipsToMove.length), 10) || chipsToMove.length;
+
+      const currentEarliest = current.dataset.earliest;
+      const previousEarliest = previous.dataset.earliest;
+      if (currentEarliest && (!previousEarliest || currentEarliest < previousEarliest)) {
+        previous.dataset.earliest = currentEarliest;
+      }
+
+      chipsToMove.forEach((item) => {
+        prevList.appendChild(item);
+      });
+
+      forgetCursor(current);
+      current.remove();
+
+      const newCount = previousCount + currentCount;
+      previous.dataset.entryCount = String(newCount);
+      evaluateToolCluster(previous);
+      return true;
+    }
+
+    function normaliseToolClusters() {
+      if (!timeline) return;
+
+      let pair = eventContainer?.querySelector?.('.tool-cluster[data-cluster-kind="tool"] + .tool-cluster[data-cluster-kind="tool"]');
+      while (pair) {
+        const previous = pair.previousElementSibling;
+        const merged = mergeToolClusters(previous, pair);
+        if (!merged) {
+          break;
+        }
+        pair = eventContainer?.querySelector?.('.tool-cluster[data-cluster-kind="tool"] + .tool-cluster[data-cluster-kind="tool"]');
+      }
+
+      const clusters = eventContainer ? eventContainer.querySelectorAll(TOOL_CLUSTER_SELECTOR) : [];
+      clusters.forEach((cluster) => {
+        if (!cluster.dataset.entryCount) {
+          const count = cluster.querySelectorAll('.tool-chip').length;
+          cluster.dataset.entryCount = String(count);
+        }
+        evaluateToolCluster(cluster);
+      });
+    }
+
+    function getTimelineBottomOffset() {
+      if (!timeline) return 0;
+      return timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight;
+    }
+
+    function updateTimelinePadding() {
+      if (!timeline) return;
+      const composerHeight = composerSurface?.offsetHeight || 0;
+      const slack = Math.max(timeline.scrollHeight - timeline.clientHeight, 0);
+      const fewEvents = (eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : []).length <= 6;
+      const shouldAlignEnd = slack <= ALIGN_THRESHOLD && fewEvents;
+      const timelineStyles = window.getComputedStyle(timeline);
+      const rowGap = parseFloat(timelineStyles.rowGap || timelineStyles.gap || '0') || 12;
+      const composerBottomOffset = composerShell
+        ? parseFloat(window.getComputedStyle(composerShell).bottom || '24') || 24
+        : 24;
+
+      const basePadding = composerHeight + composerBottomOffset + rowGap;
+      timeline.style.setProperty('--timeline-row-gap', `${Math.round(rowGap)}px`);
+      let padding;
+      if (shouldAlignEnd) {
+        padding = basePadding;
+      } else {
+        const relaxedGap = Math.max(rowGap, 24);
+        const compactPadding = composerHeight + composerBottomOffset + relaxedGap;
+        padding = Math.max(compactPadding, basePadding);
+      }
+      timeline.style.setProperty('--timeline-bottom-padding', `${Math.round(padding)}px`);
+
+      timeline.classList.toggle('timeline-align-end', shouldAlignEnd);
+    }
+
+    function positionJumpButton() {
+      const button = getJumpButton();
+      if (!button || !composerSurface) return;
+      const rect = composerSurface.getBoundingClientRect();
+      const buttonHeight = button.offsetHeight || JUMP_BUTTON_SIZE;
+      const desiredTop = rect.top - (buttonHeight + JUMP_BUTTON_GAP);
+      const boundedTop = Math.max(desiredTop, 16);
+      button.style.top = `${Math.round(boundedTop)}px`;
+      button.style.bottom = 'auto';
+    }
+
+    function toggleJumpButtonVisibility(visible) {
+      const button = getJumpButton();
+      if (!button) return;
+      if (visible) {
+        button.classList.remove('hidden');
+        button.setAttribute('aria-hidden', 'false');
+        button.style.opacity = '1';
+        button.style.display = 'flex';
+        window.requestAnimationFrame(positionJumpButton);
+      } else {
+        button.style.opacity = '0';
+        button.classList.add('hidden');
+        button.setAttribute('aria-hidden', 'true');
+        button.style.display = 'none';
+      }
+    }
+
+    function isTimelineScrollable() {
+      if (!timeline) return false;
+      return timeline.scrollHeight - timeline.clientHeight > 1;
+    }
+
+    function getScrollThreshold() {
+      const composerHeight = composerSurface?.offsetHeight || 0;
+      const threshold = Math.max(BASE_SCROLL_THRESHOLD, Math.min(composerHeight + 160, 600));
+      return threshold;
+    }
+
+    function getPageBottomOffset() {
+      const doc = document.documentElement || document.body;
+      const body = document.body || { scrollHeight: 0, offsetHeight: 0 };
+      const totalHeight = Math.max(
+        doc?.scrollHeight || 0,
+        doc?.offsetHeight || 0,
+        body.scrollHeight || 0,
+        body.offsetHeight || 0
+      );
+      const viewportHeight = window.innerHeight || doc?.clientHeight || 0;
+      const scrollY = window.scrollY ?? doc?.scrollTop ?? 0;
+      const offset = totalHeight - (scrollY + viewportHeight);
+      return offset;
+    }
+
+    // Smoothly maintain the page's distance from the bottom when new content arrives.
+    function scrollPageToBottomOffset(offset, behavior) {
+      const doc = document.documentElement || document.body;
+      const body = document.body || { scrollHeight: 0, offsetHeight: 0 };
+      const totalHeight = Math.max(
+        doc?.scrollHeight || 0,
+        doc?.offsetHeight || 0,
+        body.scrollHeight || 0,
+        body.offsetHeight || 0
+      );
+      const viewportHeight = window.innerHeight || doc?.clientHeight || 0;
+      const target = Math.max(totalHeight - viewportHeight - Math.max(offset || 0, 0), 0);
+      const config = { top: target, behavior };
+      try {
+        window.scrollTo(config);
+      } catch (err) {
+        window.scrollTo(0, target);
+      }
+    }
+
+    function escapeCssSelector(value) {
+      if (!value) return '';
+      if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+        return CSS.escape(value);
+      }
+      return value.replace(/([\.\#\[\]\s,:>+~'"\\])/g, '\\$1');
+    }
+
+    function captureScrollAnchor() {
+      if (!timeline) return null;
+      const timelineRect = timeline.getBoundingClientRect?.();
+      if (!timelineRect) return null;
+      const events = eventContainer ? Array.from(eventContainer.querySelectorAll('.timeline-event[data-cursor]')) : [];
+      if (!events.length) return null;
+      const anchor = events.find((node) => {
+        const rect = node.getBoundingClientRect?.();
+        if (!rect) return false;
+        return rect.bottom > timelineRect.top + 1;
+      }) || events[0];
+      if (!anchor) return null;
+      const anchorRect = anchor.getBoundingClientRect?.();
+      if (!anchorRect) return null;
+      return {
+        cursor: anchor.dataset?.cursor || null,
+        offset: anchorRect.top - timelineRect.top,
+      };
+    }
+
+    function restoreScrollAnchor(anchor) {
+      if (!timeline || !anchor || !anchor.cursor) return false;
+      const selector = `.timeline-event[data-cursor="${escapeCssSelector(anchor.cursor)}"]`;
+      const node = eventContainer?.querySelector?.(selector);
+      if (!node) return false;
+      const timelineRect = timeline.getBoundingClientRect?.();
+      const nodeRect = node.getBoundingClientRect?.();
+      if (!timelineRect || !nodeRect) return false;
+      const currentOffset = nodeRect.top - timelineRect.top;
+      const delta = currentOffset - anchor.offset;
+      if (Math.abs(delta) < 1) {
+        return true;
+      }
+      timeline.scrollTop += delta;
+      return true;
+    }
+
+    function isNearBottom() {
+      if (!timeline) {
+        return true;
+      }
+
+      const threshold = getScrollThreshold();
+
+      if (isTimelineScrollable()) {
+        const bottomOffset = getTimelineBottomOffset();
+        const nearTimeline = bottomOffset <= threshold;
+        return nearTimeline;
+      }
+
+      const pageOffset = Math.max(getPageBottomOffset(), 0);
+      const nearPage = pageOffset <= threshold;
+      return nearPage;
+    }
+
+    let reconnectDelay = 3000;
+    const RECONNECT_MAX = 30000;
+
+    function ensureProcessingSlotPosition() {
+      if (!timeline) return;
+      const loadNewerContainer = getLoadNewerContainer();
+
+      if (processingSlot) {
+        const slotParent = processingSlot.parentNode;
+        const loadParent = loadNewerContainer?.parentNode || null;
+
+        if (loadNewerContainer && loadParent === timeline) {
+          if (slotParent !== timeline) {
+            timeline.insertBefore(processingSlot, loadNewerContainer);
+          } else if (processingSlot.nextElementSibling !== loadNewerContainer) {
+            timeline.insertBefore(processingSlot, loadNewerContainer);
+          }
+        } else if (slotParent !== timeline) {
+          timeline.appendChild(processingSlot);
+        } else if (timeline.lastElementChild !== processingSlot) {
+          timeline.appendChild(processingSlot);
+        }
+      }
+
+      if (loadNewerContainer && loadNewerContainer.parentNode === timeline) {
+        if (timeline.lastElementChild !== loadNewerContainer) {
+          timeline.appendChild(loadNewerContainer);
+        }
+      }
+    }
+
+    function scrollToBottom(arg) {
+      if (!timeline) return;
+
+      const hasOptions = typeof arg === 'object' && arg !== null;
+      const force = hasOptions ? Boolean(arg.force) : Boolean(arg);
+      const nearBefore = isNearBottom();
+      if (!force && !nearBefore) return;
+
+      const prefersReducedMotion = Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      const defaultTimelineBehavior = prefersReducedMotion ? 'auto' : 'smooth';
+      const timelineBehavior = hasOptions && arg.behavior ? arg.behavior : defaultTimelineBehavior;
+      const defaultPageBehavior = prefersReducedMotion ? 'auto' : (nearBefore ? 'auto' : 'smooth');
+      const pageBehavior = hasOptions && arg.pageBehavior ? arg.pageBehavior : defaultPageBehavior;
+      const alignPage = hasOptions ? arg.alignPage !== false : true;
+      const desiredPageOffset = hasOptions && typeof arg.pageOffset === 'number' ? arg.pageOffset : null;
+
+      const targetTop = Math.max(timeline.scrollHeight - timeline.clientHeight, 0);
+      if (typeof timeline.scrollTo === 'function') {
+        timeline.scrollTo({ top: targetTop, behavior: timelineBehavior });
+      } else {
+        timeline.scrollTop = targetTop;
+      }
+
+      state.autoScroll = true;
+
+      if (!alignPage) {
+        drainPendingRealtime();
+        return;
+      }
+
+      const currentOffset = getPageBottomOffset();
+      const targetOffset = desiredPageOffset !== null ? desiredPageOffset : 0;
+      if (Math.abs(targetOffset - currentOffset) > 1) {
+        scrollPageToBottomOffset(targetOffset, pageBehavior);
+      }
+
+      drainPendingRealtime();
+    }
+
+    const PROCESSING_NODE_ID = 'agent-processing-indicator';
+
+    function compareEventIds(a, b) {
+      if (!a || !b || a === b) return 0;
+      const [aTime, aSeq] = String(a).split('-').map((part) => parseInt(part, 10) || 0);
+      const [bTime, bSeq] = String(b).split('-').map((part) => parseInt(part, 10) || 0);
+      if (aTime !== bTime) {
+        return aTime > bTime ? 1 : -1;
+      }
+      if (aSeq !== bSeq) {
+        return aSeq > bSeq ? 1 : -1;
+      }
+      return 0;
+    }
+
+    function setProcessingDataset(active) {
+      const value = active ? 'true' : 'false';
+      root.dataset.processingActive = value;
+      const cursorNode = getCursorsEl();
+      if (cursorNode) {
+        cursorNode.dataset.processingActive = value;
+      }
+    }
+
+    function refreshProcessingState(options = {}) {
+      if (!processingStatusUrl) {
+        return Promise.resolve(null);
+      }
+      if (state.processingRefreshPromise) {
+        return state.processingRefreshPromise;
+      }
+      const reason = options?.reason || 'sync';
+      state.awaitingProcessingSync = true;
+      const fetchPromise = fetch(processingStatusUrl, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`processing status request failed (${response.status})`);
+          }
+          return response.json();
+        })
+        .then((payload) => {
+          const active = Boolean(payload?.processing_active);
+          setProcessingDataset(active);
+          state.processingActive = active;
+          if (active) {
+            state.processingSticky = true;
+          } else {
+            state.processingSticky = false;
+            state.processingEventId = null;
+          }
+          return active;
+        })
+        .catch((error) => {
+          console.warn('[agent-workspace] Failed to refresh processing state', reason, error);
+          return null;
+        })
+        .finally(() => {
+          state.processingRefreshPromise = null;
+          state.awaitingProcessingSync = false;
+          syncProcessingFromDom();
+        });
+
+      state.processingRefreshPromise = fetchPromise;
+      return fetchPromise;
+    }
+
+    function getProcessingFlag() {
+      const cursorNode = getCursorsEl();
+      if (cursorNode && typeof cursorNode.dataset.processingActive !== 'undefined') {
+        const flag = cursorNode.dataset.processingActive === 'true';
+        return flag;
+      }
+      const fallback = root.dataset.processingActive === 'true';
+      return fallback;
+    }
+
+    function syncProcessingFromDom() {
+      ensureProcessingSlotPosition();
+      const desired = getProcessingFlag();
+      const node = getProcessingNode();
+      if (!desired && state.processingSticky && !state.awaitingProcessingSync && !state.processingEventId) {
+        state.processingSticky = false;
+      }
+      if (desired) {
+        if (!state.processingActive || !node) {
+          showProcessingIndicator({ reason: 'syncProcessingFromDom' });
+        }
+      } else if (
+        !state.processingSticky &&
+        !state.awaitingProcessingSync &&
+        !state.processingEventId &&
+        (state.processingActive || node)
+      ) {
+        hideProcessingIndicator();
+      }
+      updateProcessingIndicatorForVisibility('syncProcessingFromDom');
+    }
+
+    function getProcessingNode() {
+      if (!processingSlot) return null;
+      return processingSlot.querySelector(`#${PROCESSING_NODE_ID}`);
+    }
+
+    function buildProcessingNode() {
+      const pill = document.createElement('div');
+      pill.id = PROCESSING_NODE_ID;
+      pill.className = 'processing-indicator';
+      pill.innerHTML = `
+        <span class="processing-pip" aria-hidden="true"></span>
+        <span class="processing-label"><strong>${agentFirstName}</strong> is working</span>
+      `;
+      return pill;
+    }
+
+    function showProcessingIndicator(options = {}) {
+      if (!processingSlot) return;
+      const force = Boolean(options.force);
+      const latestVisible = latestSegmentVisible();
+      if (!force && !latestVisible) {
+        timelineLog('showProcessingIndicator suppressed: latest segment not in DOM', {
+          reason: options?.reason || 'unspecified',
+        });
+        const existing = getProcessingNode();
+        if (existing) {
+          existing.remove();
+        }
+        state.processingActive = true;
+        if (options && options.sticky) {
+          state.processingSticky = true;
+        }
+        state.processingSuppressed = true;
+        processingSlot.dataset.visible = 'false';
+        setProcessingDataset(true);
+        state.awaitingProcessingSync = false;
+        refreshEmptyState();
+        return;
+      }
+
+      state.processingSuppressed = false;
+      ensureProcessingSlotPosition();
+      let indicator = getProcessingNode();
+      if (!indicator) {
+        processingSlot.innerHTML = '';
+        indicator = buildProcessingNode();
+        processingSlot.appendChild(indicator);
+      } else {
+        indicator.classList.remove('processing-indicator--fade');
+        indicator.style.removeProperty('display');
+      }
+      processingSlot.dataset.visible = 'true';
+      state.processingActive = true;
+      if (options && options.sticky) {
+        state.processingSticky = true;
+      }
+      setProcessingDataset(true);
+      state.awaitingProcessingSync = false;
+      refreshEmptyState();
+      if (isNearBottom()) {
+        scrollToBottom({ force: true });
+      }
+    }
+
+    function hideProcessingIndicator() {
+      const indicator = getProcessingNode();
+      if (!indicator) {
+        state.processingActive = false;
+        state.processingSticky = false;
+        state.processingEventId = null;
+        state.processingSuppressed = false;
+        if (processingSlot) {
+          processingSlot.dataset.visible = 'false';
+        }
+        setProcessingDataset(false);
+        state.awaitingProcessingSync = false;
+        refreshEmptyState();
+        ensureEmptyState();
+        return;
+      }
+      indicator.classList.add('processing-indicator--fade');
+      window.setTimeout(() => {
+        indicator.remove();
+        if (processingSlot) {
+          processingSlot.dataset.visible = 'false';
+        }
+        state.processingActive = false;
+        state.processingSticky = false;
+        state.processingEventId = null;
+        state.processingSuppressed = false;
+        setProcessingDataset(false);
+        state.awaitingProcessingSync = false;
+        refreshEmptyState();
+        ensureEmptyState();
+      }, 220);
+    }
+
+    function refreshEmptyState() {
+      if (!timeline) return;
+      const emptyState = eventContainer?.querySelector?.('.timeline-empty');
+      if (!emptyState) return;
+      const hasRealEvents = eventContainer?.querySelector?.('.timeline-event[data-cursor]');
+      if (hasRealEvents || state.processingActive) {
+        emptyState.remove();
+      }
+    }
+
+    function ensureEmptyState() {
+      if (!timeline) return;
+      const hasRealEvents = eventContainer?.querySelector?.('.timeline-event[data-cursor]');
+      if (hasRealEvents || state.processingActive) {
+        return;
+      }
+      if (!eventContainer?.querySelector?.('.timeline-empty')) {
+        const emptyState = document.createElement('div');
+        emptyState.className = 'timeline-empty text-center text-sm text-slate-400';
+        emptyState.textContent = 'No activity yet.';
+        if (eventContainer) {
+          eventContainer.appendChild(emptyState);
+        }
+      }
+    }
+
+    function updateComposerCursor() {
+      const cursorNode = getCursorsEl();
+      if (composerCursor && cursorNode) {
+        composerCursor.value = cursorNode.dataset.newer || '';
+      }
+    }
+
+    function syncLoadControls() {
+      const cursorNode = getCursorsEl();
+      const loadOlder = getLoadOlderContainer();
+      if (loadOlder) {
+        const hasOlder = cursorNode?.dataset?.hasMoreOlder === 'true';
+        const button = loadOlder.querySelector('[data-role="load-older-button"]');
+        const label = loadOlder.querySelector('[data-role="history-start"]');
+        if (button) {
+          button.hidden = !hasOlder;
+        }
+        if (label) {
+          label.hidden = Boolean(hasOlder);
+        }
+        loadOlder.dataset.state = hasOlder ? 'has-more' : 'exhausted';
+      }
+
+      const loadNewer = getLoadNewerContainer();
+      if (loadNewer) {
+        const hasNewer = cursorNode?.dataset?.hasMoreNewer === 'true';
+        const button = loadNewer.querySelector('[data-role="load-newer-button"]');
+        if (button) {
+          button.hidden = !hasNewer;
+        }
+        loadNewer.hidden = !hasNewer;
+        loadNewer.dataset.state = hasNewer ? 'has-more' : 'exhausted';
+      }
+    }
+
+    function updateJumpButton() {
+      const button = getJumpButton();
+      if (!button) return;
+      positionJumpButton();
+      const nearBottom = isNearBottom();
+      const backlog = hasMoreNewerInDom() || (state.pendingRealtime > 0);
+      const show = backlog || !nearBottom;
+      toggleJumpButtonVisibility(show);
+      updateJumpButtonPending();
+    }
+
+    function updateJumpButtonPending() {
+      const button = getJumpButton();
+      if (!button) return;
+      if (!jumpButtonDefaultLabel) {
+        jumpButtonDefaultLabel = button.dataset.defaultLabel || button.getAttribute('aria-label') || 'Jump to latest';
+      }
+      const pendingCount = state.pendingRealtime || 0;
+      const backlog = hasMoreNewerInDom();
+      const hasRealtime = pendingCount > 0;
+      button.dataset.pending = hasRealtime ? 'true' : 'false';
+      button.dataset.backlog = !hasRealtime && backlog ? 'true' : 'false';
+      delete button.dataset.pendingCount;
+
+      if (hasRealtime) {
+        button.setAttribute('aria-label', `${jumpButtonDefaultLabel} (new updates)`);
+        return;
+      }
+
+      if (backlog) {
+        button.setAttribute('aria-label', `${jumpButtonDefaultLabel} (newer items available)`);
+      } else {
+        button.setAttribute('aria-label', jumpButtonDefaultLabel);
+      }
+    }
+
+    function hasMoreNewerInDom() {
+      const cursorNode = getCursorsEl();
+      if (!cursorNode) return false;
+      return cursorNode.dataset?.hasMoreNewer === 'true';
+    }
+
+    function queueRealtimeUpdate() {
+      const current = Number.isFinite(state.pendingRealtime) ? state.pendingRealtime : 0;
+      const next = Math.min(current + 1, 99);
+      timelineLog('queueRealtimeUpdate', {
+        previous: current,
+        next,
+        autoScroll: state.autoScroll,
+        fetchingNewer: state.fetchingNewer,
+        fetchingOlder: state.fetchingOlder,
+        resyncing: state.resyncing,
+      });
+      state.pendingRealtime = next;
+      updateJumpButton();
+    }
+
+    function drainPendingRealtime() {
+      if (!state.pendingRealtime) {
+        timelineLog('drainPendingRealtime skipped: nothing pending');
+        return;
+      }
+      if (state.fetchingNewer) {
+        timelineLog('drainPendingRealtime deferred: fetchingNewer in progress', {
+          pendingRealtime: state.pendingRealtime,
+        });
+        return;
+      }
+      if (state.resyncing) {
+        timelineLog('drainPendingRealtime deferred: snapshot in progress', {
+          pendingRealtime: state.pendingRealtime,
+        });
+        return;
+      }
+      const hasBacklog = hasMoreNewerInDom();
+      if (state.fetchingOlder || state.resyncing || hasBacklog || !state.autoScroll) {
+        timelineLog('drainPendingRealtime deferred', {
+          pendingRealtime: state.pendingRealtime,
+          autoScroll: state.autoScroll,
+          hasBacklog,
+          fetchingOlder: state.fetchingOlder,
+          resyncing: state.resyncing,
+        });
+        return;
+      }
+      timelineLog('drainPendingRealtime flushing queued realtime updates', {
+        pendingRealtime: state.pendingRealtime,
+      });
+      state.pendingRealtime = 0;
+      updateJumpButton();
+      requestNewer('queued-realtime');
+    }
+
+    function maybeAutoFetchBacklog() {
+      if (!hasMoreNewerInDom()) {
+        timelineLog('maybeAutoFetchBacklog skipped: no backlog in DOM');
+        return;
+      }
+      if (state.fetchingNewer) {
+        timelineLog('maybeAutoFetchBacklog skipped: fetchingNewer already running');
+        return;
+      }
+      if (state.fetchingOlder) {
+        timelineLog('maybeAutoFetchBacklog skipped: fetchingOlder in progress');
+        return;
+      }
+      if (state.resyncing) {
+        timelineLog('maybeAutoFetchBacklog skipped: snapshot inflight');
+        return;
+      }
+      if (!state.autoScroll) {
+        timelineLog('maybeAutoFetchBacklog skipped: autoScroll disabled');
+        return;
+      }
+      if (state.pendingRealtime > 0) {
+        timelineLog('maybeAutoFetchBacklog skipped: pending realtime updates queued', {
+          pendingRealtime: state.pendingRealtime,
+        });
+        return;
+      }
+      const trigger = state.lastNewerTrigger;
+      if (!trigger || !AUTO_NEWER_TRIGGERS.has(trigger)) {
+        timelineLog('maybeAutoFetchBacklog skipped: trigger not eligible', {
+          trigger,
+        });
+        return;
+      }
+      timelineLog('maybeAutoFetchBacklog requesting newer items automatically', {
+        trigger,
+      });
+      requestNewer('auto-newer-loop');
+    }
+
+    function forgetCursor(node) {
+      if (!node || !state.knownCursors) return;
+      const cursor = node.dataset?.cursor;
+      if (!cursor) return;
+      state.knownCursors.delete(cursor);
+    }
+
+    function syncKnownCursors(options = {}) {
+      if (!timeline) return;
+      const animate = Boolean(options.animate);
+      if (!state.knownCursors) {
+        state.knownCursors = new Set();
+      }
+      const beforeKnown = state.knownCursors.size;
+
+      const items = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : [];
+      const newcomers = [];
+
+      items.forEach((node) => {
+        const cursor = node.dataset?.cursor;
+        if (!cursor) return;
+        if (!state.knownCursors.has(cursor)) {
+          state.knownCursors.add(cursor);
+          if (animate) {
+            newcomers.push(node);
+          }
+        }
+      });
+
+      if (animate && newcomers.length) {
+        window.requestAnimationFrame(() => {
+          newcomers.forEach((node) => {
+            node.classList.add('timeline-event--incoming');
+            const cleanup = () => {
+              node.classList.remove('timeline-event--incoming');
+              node.removeEventListener('animationend', cleanup);
+            };
+            node.addEventListener('animationend', cleanup, { once: true });
+            window.setTimeout(cleanup, 900);
+          });
+        });
+      }
+
+      timelineLog('syncKnownCursors complete', {
+        animate,
+        newCursors: newcomers.length,
+        totalKnown: state.knownCursors.size,
+        beforeKnown,
+      });
+    }
+
+    function trimTimeline(direction) {
+      if (!timeline) {
+        return { trimmedFromTop: 0, trimmedFromBottom: 0 };
+      }
+      const nodes = eventContainer ? Array.from(eventContainer.querySelectorAll('.timeline-event[data-cursor]')) : [];
+      if (nodes.length <= limit) {
+        timelineLog('trimTimeline skipped: within limit', {
+          direction,
+          count: nodes.length,
+          limit,
+        });
+        return { trimmedFromTop: 0, trimmedFromBottom: 0 };
+      }
+
+      const excess = nodes.length - limit;
+      timelineLog('trimTimeline removing items', {
+        direction,
+        count: nodes.length,
+        limit,
+        excess,
+      });
+      const removingFromTop = direction !== 'older';
+      let restoreScroll = false;
+      let previousBottomOffset = 0;
+      let trimmedFromTop = 0;
+      let trimmedFromBottom = 0;
+
+      if (removingFromTop) {
+        const autoScrollActive = state.autoScroll || isNearBottom();
+        if (autoScrollActive) {
+          restoreScroll = true;
+          previousBottomOffset = timeline.scrollHeight - timeline.scrollTop;
+        }
+      }
+
+      if (direction === 'older') {
+        for (let i = 0; i < excess; i += 1) {
+          const node = nodes[nodes.length - 1 - i];
+          if (node) {
+            forgetCursor(node);
+            node.remove();
+            trimmedFromBottom += 1;
+          }
+        }
+      } else {
+        for (let i = 0; i < excess; i += 1) {
+          const node = nodes[i];
+          if (node) {
+            forgetCursor(node);
+            node.remove();
+            trimmedFromTop += 1;
+          }
+        }
+      }
+
+      if (restoreScroll) {
+        const target = Math.max(timeline.scrollHeight - previousBottomOffset, 0);
+        if (typeof timeline.scrollTo === 'function') {
+          timeline.scrollTo({ top: target, behavior: 'auto' });
+        } else {
+          timeline.scrollTop = target;
+        }
+      }
+
+      ensureProcessingSlotPosition();
+      refreshEmptyState();
+      const remaining = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]').length : 0;
+      timelineLog('trimTimeline complete', {
+        direction,
+        remaining,
+        restoreScroll,
+        trimmedFromTop,
+        trimmedFromBottom,
+      });
+      return { trimmedFromTop, trimmedFromBottom };
+    }
+
+    function dedupeTimeline() {
+      if (!timeline) return 0;
+      const seen = new Set();
+      const items = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : [];
+      let removed = 0;
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        const node = items[i];
+        const cursor = node?.dataset?.cursor;
+        if (!cursor) continue;
+        if (seen.has(cursor)) {
+          forgetCursor(node);
+          node.remove();
+          removed += 1;
+        } else {
+          seen.add(cursor);
+        }
+      }
+      ensureProcessingSlotPosition();
+      refreshEmptyState();
+      if (removed > 0) {
+        timelineLog('dedupeTimeline removed duplicate nodes', {
+          removed,
+          remaining: eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]').length : 0,
+        });
+      } else {
+        timelineLog('dedupeTimeline found no duplicates', {
+          total: items.length,
+        });
+      }
+      return removed;
+    }
+
+    function syncCursorDataset(options = {}) {
+      const {
+        reason = 'unspecified',
+        trimmedOlder = 0,
+        trimmedNewer = 0,
+        dedupeRemoved = 0,
+      } = options;
+
+      const cursorNode = getCursorsEl();
+      if (!cursorNode) {
+        timelineLog('syncCursorDataset skipped: missing cursor node', { reason });
+        return;
+      }
+
+      const nodes = eventContainer ? eventContainer.querySelectorAll('.timeline-event[data-cursor]') : [];
+      const firstCursor = nodes[0]?.dataset?.cursor || '';
+      const lastCursor = nodes.length ? nodes[nodes.length - 1]?.dataset?.cursor || '' : '';
+
+      cursorNode.dataset.older = firstCursor;
+      cursorNode.dataset.newer = lastCursor;
+
+      if (trimmedOlder > 0) {
+        cursorNode.dataset.hasMoreOlder = 'true';
+      }
+      if (trimmedNewer > 0) {
+        cursorNode.dataset.hasMoreNewer = 'true';
+      }
+
+      timelineLog('syncCursorDataset', {
+        reason,
+        trimmedOlder,
+        trimmedNewer,
+        dedupeRemoved,
+        firstCursor,
+        lastCursor,
+        hasMoreOlder: cursorNode.dataset.hasMoreOlder,
+        hasMoreNewer: cursorNode.dataset.hasMoreNewer,
+        totalNodes: nodes.length,
+      });
+
+      syncLoadControls();
+      updateProcessingIndicatorForVisibility(reason);
+    }
+
+    function latestSegmentVisible() {
+      const cursorNode = getCursorsEl();
+      if (!cursorNode) {
+        return true;
+      }
+      return cursorNode.dataset?.hasMoreNewer !== 'true';
+    }
+
+    function updateProcessingIndicatorForVisibility(reason = 'unspecified') {
+      const indicator = getProcessingNode();
+      const latestVisible = latestSegmentVisible();
+
+      if (!latestVisible) {
+        if (indicator) {
+          indicator.remove();
+        }
+        state.processingSuppressed = state.processingActive;
+        timelineLog('processing indicator hidden (latest segment not in DOM)', {
+          reason,
+          processingActive: state.processingActive,
+        });
+        return;
+      }
+
+      if (!state.processingActive) {
+        state.processingSuppressed = false;
+        if (indicator) {
+          indicator.remove();
+        }
+        return;
+      }
+
+      if (indicator) {
+        indicator.style.removeProperty('display');
+        state.processingSuppressed = false;
+        timelineLog('processing indicator visible (latest segment present)', {
+          reason,
+        });
+        return;
+      }
+
+      if (state.processingSuppressed || state.processingActive) {
+        timelineLog('processing indicator re-created (latest segment present)', {
+          reason,
+        });
+        showProcessingIndicator({ force: true, reason: `visibility-${reason}` });
+      }
+    }
+
+    function completeNewerRequest() {
+      timelineLog('completeNewerRequest', {
+        queuedTrigger: state.queuedNewerTrigger,
+        pendingRealtime: state.pendingRealtime,
+      });
+      state.fetchingNewer = false;
+      state.inflightDirection = null;
+      const queuedTrigger = state.queuedNewerTrigger;
+      state.queuedNewerTrigger = null;
+      if (queuedTrigger) {
+        timelineLog('completeNewerRequest flushing queued trigger', {
+          trigger: queuedTrigger,
+        });
+        requestNewer(queuedTrigger);
+        return;
+      }
+      timelineLog('completeNewerRequest flushing queue');
+      flushQueuedRequests();
+    }
+
+    const olderUrl = root.dataset.timelineOlderUrl || null;
+    const windowUrl = root.dataset.timelineWindowUrl || null;
+
+    function buildTimelineRequest(direction, { trigger = direction, mode } = {}) {
+      const baseMode = mode || (direction === 'snapshot' ? 'snapshot' : 'delta');
+      const params = new URLSearchParams({ limit: String(limit), mode: baseMode });
+      const cursorNode = getCursorsEl();
+      const oldest = cursorNode?.dataset?.older || '';
+      const newest = cursorNode?.dataset?.newer || '';
+
+      timelineLog('buildTimelineRequest start', {
+        direction,
+        trigger,
+        mode: baseMode,
+        oldest,
+        newest,
+        limit,
+      });
+
+      let baseUrl = null;
+      if (direction === 'older') {
+        baseUrl = olderUrl;
+        if (oldest) {
+          params.set('cursor', oldest);
+          params.set('current_oldest', oldest);
+        }
+        if (newest) {
+          params.set('current_newest', newest);
+        }
+      } else if (direction === 'newer') {
+        baseUrl = newerUrl;
+        if (newest) {
+          params.set('cursor', newest);
+          params.set('current_newest', newest);
+        }
+        if (oldest) {
+          params.set('current_oldest', oldest);
+        }
+      } else {
+        baseUrl = windowUrl || newerUrl || olderUrl;
+        params.set('direction', 'initial');
+      }
+
+      if (!baseUrl) {
+        timelineWarn('buildTimelineRequest missing base URL', { direction });
+        return null;
+      }
+
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      const url = `${baseUrl}${separator}${params.toString()}`;
+      const swap = direction === 'older' ? 'afterbegin' : direction === 'newer' ? 'beforeend' : 'innerHTML';
+
+      const config = {
+        url,
+        swap,
+        target: '#timeline-event-list',
+        headers: {
+          'X-Timeline-Action': direction,
+          'X-Timeline-Trigger': trigger,
+        },
+      };
+
+      timelineLog('buildTimelineRequest ready', {
+        direction,
+        trigger,
+        url,
+        swap,
+        params: Object.fromEntries(params.entries()),
+      });
+
+      return config;
+    }
+
+    function sendTimelineRequest(config) {
+      if (!config) return;
+      timelineLog('sendTimelineRequest dispatch', {
+        url: config.url,
+        swap: config.swap,
+        headers: config.headers,
+        target: config.target,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+      });
+      window.htmx.ajax('GET', config.url, {
+        target: config.target,
+        swap: config.swap,
+        headers: config.headers,
+      });
+    }
+
+    function flushQueuedRequests() {
+      timelineLog('flushQueuedRequests invoked', {
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        pendingResync: state.pendingResync,
+        queuedOlder: state.queuedOlder,
+        queuedNewerTrigger: state.queuedNewerTrigger,
+      });
+      if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        timelineLog('flushQueuedRequests abort: request in-flight');
+        return;
+      }
+      if (state.pendingResync) {
+        timelineLog('flushQueuedRequests processing pending resync');
+        state.pendingResync = false;
+        requestTimelineSnapshot('queued-resync');
+        return;
+      }
+      if (state.queuedOlder) {
+        timelineLog('flushQueuedRequests dispatching queued older request');
+        state.queuedOlder = false;
+        requestOlder('queued-older');
+        return;
+      }
+      if (state.queuedNewerTrigger) {
+        const queuedTrigger = state.queuedNewerTrigger;
+        const nearBottom = isNearBottom();
+        state.queuedNewerTrigger = null;
+        if (!nearBottom) {
+          timelineLog('flushQueuedRequests deferring queued newer: user not near bottom', {
+            trigger: queuedTrigger,
+          });
+          queueRealtimeUpdate();
+          return;
+        }
+        timelineLog('flushQueuedRequests dispatching queued newer', {
+          trigger: queuedTrigger,
+        });
+        requestNewer(queuedTrigger);
+      }
+    }
+
+    function requestOlder(trigger = 'manual-older') {
+      if (!olderUrl || !timeline) {
+        timelineWarn('requestOlder aborted: missing URL or timeline element', {
+          hasOlderUrl: Boolean(olderUrl),
+          hasTimeline: Boolean(timeline),
+          trigger,
+        });
+        return;
+      }
+      timelineLog('requestOlder invoked', {
+        trigger,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        queuedOlder: state.queuedOlder,
+      });
+      state.justResynced = false;
+      if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        timelineLog('requestOlder queued', {
+          trigger,
+          fetchingOlder: state.fetchingOlder,
+          fetchingNewer: state.fetchingNewer,
+          resyncing: state.resyncing,
+        });
+        state.queuedOlder = true;
+        return;
+      }
+      const request = buildTimelineRequest('older', { trigger });
+      if (!request) {
+        timelineWarn('requestOlder aborted: buildTimelineRequest returned null', { trigger });
+        return;
+      }
+
+      state.action = 'older';
+      state.fetchingOlder = true;
+      state.inflightDirection = 'older';
+      state.previousScrollHeight = timeline?.scrollHeight || 0;
+      state.scrollAnchor = captureScrollAnchor();
+
+      timelineLog('requestOlder sending', {
+        trigger,
+        url: request.url,
+        previousScrollHeight: state.previousScrollHeight,
+      });
+
+      sendTimelineRequest(request);
+    }
+
+    function requestNewer(trigger = 'manual-newer') {
+      if (!newerUrl || !timeline) {
+        timelineWarn('requestNewer aborted: missing URL or timeline element', {
+          hasNewerUrl: Boolean(newerUrl),
+          hasTimeline: Boolean(timeline),
+          trigger,
+        });
+        return;
+      }
+      timelineLog('requestNewer invoked', {
+        trigger,
+        fetchingNewer: state.fetchingNewer,
+        fetchingOlder: state.fetchingOlder,
+        resyncing: state.resyncing,
+        pendingRealtime: state.pendingRealtime,
+      });
+      state.justResynced = false;
+      if (state.fetchingNewer || state.fetchingOlder || state.resyncing) {
+        timelineLog('requestNewer queued', {
+          trigger,
+          fetchingNewer: state.fetchingNewer,
+          fetchingOlder: state.fetchingOlder,
+          resyncing: state.resyncing,
+        });
+        state.queuedNewerTrigger = trigger;
+        return;
+      }
+      const request = buildTimelineRequest('newer', { trigger });
+      if (!request) {
+        timelineWarn('requestNewer aborted: buildTimelineRequest returned null', { trigger });
+        return;
+      }
+
+      state.action = 'newer';
+      state.fetchingNewer = true;
+      state.inflightDirection = 'newer';
+      state.lastNewerTrigger = trigger;
+      const nearBottom = isNearBottom();
+      state.autoScroll = state.pendingComposerScroll ? true : nearBottom;
+
+      timelineLog('requestNewer sending', {
+        trigger,
+        url: request.url,
+        nearBottom,
+        autoScroll: state.autoScroll,
+      });
+
+      sendTimelineRequest(request);
+    }
+
+    function requestTimelineSnapshot(trigger = 'snapshot') {
+      if (!timeline) {
+        timelineWarn('requestTimelineSnapshot aborted: missing timeline element', { trigger });
+        return;
+      }
+      timelineLog('requestTimelineSnapshot invoked', {
+        trigger,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        pendingResync: state.pendingResync,
+      });
+      state.justResynced = false;
+      if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        timelineLog('requestTimelineSnapshot queued', {
+          trigger,
+          fetchingOlder: state.fetchingOlder,
+          fetchingNewer: state.fetchingNewer,
+          resyncing: state.resyncing,
+        });
+        state.pendingResync = true;
+        return;
+      }
+
+      state.pendingResync = false;
+      const request = buildTimelineRequest('snapshot', { trigger, mode: 'snapshot' });
+      if (!request) {
+        timelineWarn('requestTimelineSnapshot aborted: buildTimelineRequest returned null', { trigger });
+        return;
+      }
+
+      state.action = 'snapshot';
+      state.resyncing = true;
+      state.inflightDirection = 'snapshot';
+      state.previousScrollHeight = timeline?.scrollHeight || 0;
+
+      timelineLog('requestTimelineSnapshot sending', {
+        trigger,
+        url: request.url,
+        previousScrollHeight: state.previousScrollHeight,
+      });
+
+      sendTimelineRequest(request);
+    }
+
+    function completeOlderRequest() {
+      timelineLog('completeOlderRequest', {
+        queuedOlder: state.queuedOlder,
+      });
+      state.fetchingOlder = false;
+      state.inflightDirection = null;
+      state.scrollAnchor = null;
+      flushQueuedRequests();
+    }
+
+    function completeSnapshotRequest() {
+      timelineLog('completeSnapshotRequest', {
+        pendingResync: state.pendingResync,
+      });
+      state.resyncing = false;
+      state.inflightDirection = null;
+      state.justResynced = true;
+      state.pendingResync = false;
+      flushQueuedRequests();
+    }
+
+    if (timeline) {
+      timeline.addEventListener('scroll', () => {
+        const nearBottom = isNearBottom();
+        state.autoScroll = nearBottom;
+        updateJumpButton();
+        drainPendingRealtime();
+      });
+    }
+
+    const handleWindowScroll = () => {
+      const nearBottom = isNearBottom();
+      state.autoScroll = nearBottom;
+      updateJumpButton();
+      drainPendingRealtime();
+    };
+
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+
+    const handleResize = () => {
+      updateTimelinePadding();
+      positionJumpButton();
+      updateJumpButton();
+    };
+
+    const handleOrientationChange = () => {
+      updateTimelinePadding();
+      positionJumpButton();
+      updateJumpButton();
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleOrientationChange);
+
+    document.addEventListener('click', (event) => {
+      const fetchButton = event.target.closest('[data-action="timeline-fetch"]');
+      if (!fetchButton) return;
+      event.preventDefault();
+      const direction = fetchButton.dataset.direction;
+      if (direction === 'older') {
+        requestOlder('manual-older');
+      } else if (direction === 'newer') {
+        requestNewer('manual-newer');
+      }
+    });
+
+    document.addEventListener('click', (event) => {
+      const toggle = event.target.closest('[data-role="cluster-toggle"]');
+      if (!toggle) return;
+      const cluster = toggle.closest('.tool-cluster');
+      if (!cluster || cluster.dataset.collapsible !== 'true') return;
+      const isCollapsed = cluster.classList.contains('tool-cluster--collapsed');
+      setToolClusterCollapsed(cluster, !isCollapsed);
+    });
+
+    document.addEventListener('click', (event) => {
+      const btn = event.target.closest('#jump-to-latest');
+      if (!btn) return;
+      state.autoScroll = true;
+      toggleJumpButtonVisibility(false);
+      if (hasMoreNewerInDom()) {
+        state.pendingRealtime = 0;
+        updateJumpButtonPending();
+        requestNewer('jump-to-latest');
+      } else {
+        drainPendingRealtime();
+      }
+      scrollToBottom({ force: true });
+    });
+
+    document.addEventListener('click', (event) => {
+      const trigger = event.target.closest('.tool-chip-trigger');
+      if (trigger) {
+        event.preventDefault();
+        const chip = trigger.closest('.tool-chip');
+        openToolChipDetail(chip);
+        return;
+      }
+
+      const closeBtn = event.target.closest('.tool-chip-close');
+      if (closeBtn) {
+        event.preventDefault();
+        closeOpenToolChip({ restoreFocus: true });
+        return;
+      }
+
+      if (
+        openToolChip &&
+        !event.target.closest('.tool-chip') &&
+        !event.target.closest('.tool-cluster-detail-host')
+      ) {
+        closeOpenToolChip();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && openToolChip) {
+        closeOpenToolChip({ restoreFocus: true });
+      }
+    });
+
+    if (composer) {
+      const composerSendButton = composer.querySelector('.composer-send-button');
+      const setComposerSending = (sending) => {
+        if (!composerSendButton) {
+          return;
+        }
+        composerSendButton.disabled = Boolean(sending);
+        composerSendButton.setAttribute('aria-busy', sending ? 'true' : 'false');
+        if (!sending) {
+          composerSendButton.removeAttribute('data-state');
+          return;
+        }
+        composerSendButton.dataset.state = 'sending';
+      };
+
+      const scheduleComposerLayoutUpdate = () => window.requestAnimationFrame(() => {
+        updateTimelinePadding();
+        positionJumpButton();
+        updateJumpButton();
+      });
+
+      let resizeComposerTextarea = null;
+
+      composer.addEventListener('htmx:beforeRequest', () => {
+        state.pendingComposerScroll = isNearBottom();
+        setComposerSending(true);
+      });
+      composer.addEventListener('htmx:afterRequest', (event) => {
+        const succeeded = Boolean(event.detail && event.detail.xhr && event.detail.xhr.status < 400);
+        if (succeeded) {
+          composer.reset();
+          if (typeof resizeComposerTextarea === 'function') {
+            resizeComposerTextarea({ reset: true });
+            scheduleComposerLayoutUpdate();
+          } else {
+            scheduleComposerLayoutUpdate();
+          }
+          showProcessingIndicator({ sticky: true, reason: 'composer-submit' });
+          if (isNearBottom() && !hasMoreNewerInDom()) {
+            requestNewer('composer-submit');
+          } else {
+            state.pendingComposerScroll = false;
+          }
+        } else {
+          state.pendingComposerScroll = false;
+        }
+        setComposerSending(false);
+      });
+
+      window.htmx.on('htmx:responseError', (event) => {
+        if (event.detail?.target?.id !== 'agent-web-compose') return;
+        state.pendingComposerScroll = false;
+        setComposerSending(false);
+      });
+
+      window.htmx.on('htmx:sendError', (event) => {
+        if (event.detail?.target?.id !== 'agent-web-compose') return;
+        state.pendingComposerScroll = false;
+        setComposerSending(false);
+      });
+
+      const composerTextarea = composer.querySelector('textarea');
+      if (composerTextarea) {
+        const MAX_COMPOSER_HEIGHT = 320;
+
+        resizeComposerTextarea = ({ reset = false } = {}) => {
+          if (reset) {
+            composerTextarea.style.height = '';
+          }
+          composerTextarea.style.height = 'auto';
+          const newHeight = Math.min(composerTextarea.scrollHeight, MAX_COMPOSER_HEIGHT);
+          composerTextarea.style.height = `${newHeight}px`;
+          composerTextarea.style.overflowY = composerTextarea.scrollHeight > MAX_COMPOSER_HEIGHT ? 'auto' : 'hidden';
+        };
+
+        const refreshComposerLayout = () => {
+          resizeComposerTextarea();
+          scheduleComposerLayoutUpdate();
+        };
+
+        refreshComposerLayout();
+
+        composerTextarea.addEventListener('input', refreshComposerLayout);
+        composerTextarea.addEventListener('focus', refreshComposerLayout);
+        composerTextarea.addEventListener('blur', scheduleComposerLayoutUpdate);
+        composerTextarea.addEventListener('keydown', (event) => {
+          const isPlainEnter = event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
+          if (!isPlainEnter || event.isComposing) {
+            return;
+          }
+          event.preventDefault();
+          composer.requestSubmit();
+        });
+      }
+    }
+
+    window.htmx.on('htmx:beforeRequest', (event) => {
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
+      closeOpenToolChip();
+
+      const sourceEl = event.detail.elt;
+      const headers = event.detail.requestConfig?.headers || {};
+      const params = event.detail.requestConfig?.parameters || {};
+
+      const headerLookup = (name) => {
+        const lower = name.toLowerCase();
+        return headers[name] ?? headers[lower] ?? headers[lower.replace(/-/g, '_')];
+      };
+
+      let direction = sourceEl?.dataset?.direction || headerLookup('X-Timeline-Action') || params.direction || state.action || 'idle';
+      if (direction === 'initial') {
+        direction = 'snapshot';
+      }
+
+      const triggerLabel = headerLookup('X-Timeline-Trigger');
+
+      timelineLog('htmx:beforeRequest', {
+        derivedDirection: direction,
+        sourceDirection: sourceEl?.dataset?.direction || null,
+        trigger: triggerLabel,
+        actionState: state.action,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        pendingResync: state.pendingResync,
+      });
+
+      if (direction === 'older') {
+        state.action = 'older';
+        state.fetchingOlder = true;
+        state.inflightDirection = 'older';
+        state.previousScrollHeight = timeline?.scrollHeight || 0;
+        state.scrollAnchor = captureScrollAnchor();
+        state.lastNewerTrigger = null;
+      } else if (direction === 'newer') {
+        state.action = 'newer';
+        state.fetchingNewer = true;
+        state.inflightDirection = 'newer';
+        if (triggerLabel) {
+          state.lastNewerTrigger = triggerLabel;
+        } else if (!state.lastNewerTrigger) {
+          state.lastNewerTrigger = 'manual-newer';
+        }
+      } else if (direction === 'snapshot') {
+        state.action = 'snapshot';
+        state.resyncing = true;
+        state.inflightDirection = 'snapshot';
+        state.previousScrollHeight = timeline?.scrollHeight || 0;
+      } else {
+        state.action = direction;
+      }
+
+      timelineLog('htmx:beforeRequest state updated', {
+        action: state.action,
+        inflightDirection: state.inflightDirection,
+        trigger: triggerLabel,
+        previousScrollHeight: state.previousScrollHeight,
+        scrollAnchorCaptured: Boolean(state.scrollAnchor),
+      });
+
+      syncLoadControls();
+    });
+
+    // Preserve the user's bottom offset while new timeline fragments stream in.
+    window.htmx.on('htmx:beforeSwap', (event) => {
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
+      if (!timeline || state.action !== 'newer') {
+        state.bottomAnchorOffset = null;
+        state.pageBottomOffset = null;
+        return;
+      }
+
+      const bottomOffset = getTimelineBottomOffset();
+      const maintainAnchor = state.autoScroll || bottomOffset <= BOTTOM_ANCHOR_THRESHOLD;
+
+      timelineLog('htmx:beforeSwap', {
+        action: state.action,
+        bottomOffset,
+        maintainAnchor,
+        autoScroll: state.autoScroll,
+      });
+
+      if (maintainAnchor) {
+        state.bottomAnchorOffset = Math.max(bottomOffset, 0);
+        state.pageBottomOffset = Math.max(getPageBottomOffset(), 0);
+      } else {
+        state.bottomAnchorOffset = null;
+        state.pageBottomOffset = null;
+      }
+    });
+
+    window.htmx.on('htmx:afterSwap', (event) => {
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
+
+      timelineLog('htmx:afterSwap start', {
+        action: state.action,
+        pendingRealtime: state.pendingRealtime,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        autoScroll: state.autoScroll,
+        bottomAnchorOffset: state.bottomAnchorOffset,
+        pageBottomOffset: state.pageBottomOffset,
+      });
+
+      closeOpenToolChip();
+      normaliseToolClusters();
+
+      const anchorOffset = typeof state.bottomAnchorOffset === 'number' ? state.bottomAnchorOffset : null;
+      const pageOffset = typeof state.pageBottomOffset === 'number' ? state.pageBottomOffset : null;
+      state.bottomAnchorOffset = null;
+      state.pageBottomOffset = null;
+
+      ensureProcessingSlotPosition();
+      updateTimelinePadding();
+      syncLoadControls();
+
+      if (state.action === 'newer' && anchorOffset !== null) {
+        const target = Math.max(timeline.scrollHeight - timeline.clientHeight - anchorOffset, 0);
+        if (typeof timeline.scrollTo === 'function') {
+          timeline.scrollTo({ top: target, behavior: 'auto' });
+        } else {
+          timeline.scrollTop = target;
+        }
+      }
+
+      if (state.action === 'newer' && pageOffset !== null) {
+        scrollPageToBottomOffset(pageOffset, 'auto');
+      }
+
+      if (state.action === 'older' && timeline) {
+        const restored = restoreScrollAnchor(state.scrollAnchor);
+        if (!restored) {
+          const delta = timeline.scrollHeight - state.previousScrollHeight;
+          const target = Math.max(delta, 0);
+          if (typeof timeline.scrollTo === 'function') {
+            timeline.scrollTo({ top: target, behavior: 'auto' });
+          } else {
+            timeline.scrollTop = target;
+          }
+        }
+      }
+
+      const dedupeRemoved = dedupeTimeline() || 0;
+      let trimSummary = { trimmedFromTop: 0, trimmedFromBottom: 0 };
+      if (state.action === 'older' || state.action === 'newer') {
+        trimSummary = trimTimeline(state.action) || trimSummary;
+      } else if (state.action === 'snapshot') {
+        trimSummary = trimTimeline('snapshot') || trimSummary;
+      }
+      syncCursorDataset({
+        reason: 'htmx-afterSwap',
+        trimmedOlder: trimSummary.trimmedFromTop,
+        trimmedNewer: trimSummary.trimmedFromBottom,
+        dedupeRemoved,
+      });
+      syncKnownCursors({ animate: state.action === 'newer' });
+      updateComposerCursor();
+
+      if (typeof Prism !== 'undefined') {
+        Prism.highlightAllUnder(timeline);
+      }
+
+      if (state.autoScroll) {
+        scrollToBottom({ force: true });
+      }
+
+      if (state.action === 'older' || state.fetchingOlder) {
+        completeOlderRequest();
+      }
+
+      if (state.action === 'newer' || state.fetchingNewer) {
+        completeNewerRequest();
+      }
+
+      if (state.action === 'snapshot' || state.resyncing) {
+        completeSnapshotRequest();
+      }
+
+      if (state.action === 'newer' && !hasMoreNewerInDom()) {
+        state.pendingRealtime = 0;
+      } else if (state.action === 'snapshot') {
+        state.pendingRealtime = 0;
+        state.lastNewerTrigger = null;
+      }
+      updateJumpButtonPending();
+
+      state.action = 'idle';
+      state.previousScrollHeight = 0;
+      state.pendingComposerScroll = false;
+      state.autoScroll = isNearBottom();
+      updateJumpButton();
+      refreshEmptyState();
+      state.awaitingProcessingSync = false;
+      syncProcessingFromDom();
+      maybeAutoFetchBacklog();
+
+      timelineLog('htmx:afterSwap complete', {
+        hasMoreNewer: hasMoreNewerInDom(),
+        autoScroll: state.autoScroll,
+        pendingRealtime: state.pendingRealtime,
+        awaitingProcessingSync: state.awaitingProcessingSync,
+      });
+    });
+
+    window.htmx.on('htmx:afterSettle', (event) => {
+      if (event.detail?.target?.id === 'timeline-event-list') {
+        timelineLog('htmx:afterSettle', {
+          autoScroll: state.autoScroll,
+          pendingRealtime: state.pendingRealtime,
+        });
+        ensureProcessingSlotPosition();
+        updateTimelinePadding();
+        updateJumpButton();
+        refreshEmptyState();
+        state.awaitingProcessingSync = false;
+        syncProcessingFromDom();
+        syncLoadControls();
+      }
+    });
+
+    document.body.addEventListener('timeline:resync', () => {
+      timelineLog('timeline:resync received', {
+        justResynced: state.justResynced,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+      });
+      state.pendingRealtime = 0;
+      if (state.justResynced) {
+        state.justResynced = false;
+        return;
+      }
+      if (state.fetchingOlder || state.fetchingNewer || state.resyncing) {
+        timelineLog('timeline:resync queued pending snapshot due to inflight work');
+        state.pendingResync = true;
+        return;
+      }
+      timelineLog('timeline:resync triggering snapshot request');
+      requestTimelineSnapshot('trigger-resync');
+    });
+
+    window.htmx.on('htmx:responseError', (event) => {
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
+      timelineError('htmx:responseError', {
+        action: state.action,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+        status: event.detail?.xhr?.status ?? null,
+      });
+      const hadOlder = state.action === 'older' || state.fetchingOlder;
+      const hadNewer = state.action === 'newer' || state.fetchingNewer;
+      const hadSnapshot = state.action === 'snapshot' || state.resyncing;
+      if (hadOlder) {
+        completeOlderRequest();
+      }
+      if (hadNewer) {
+        completeNewerRequest();
+      }
+      if (hadSnapshot) {
+        completeSnapshotRequest();
+      }
+      state.action = 'idle';
+      state.previousScrollHeight = 0;
+      state.scrollAnchor = null;
+      state.pendingComposerScroll = false;
+      updateJumpButton();
+      syncLoadControls();
+    });
+
+    window.htmx.on('htmx:sendError', (event) => {
+      if (event.detail?.target?.id !== 'timeline-event-list') return;
+      timelineError('htmx:sendError', {
+        action: state.action,
+        fetchingOlder: state.fetchingOlder,
+        fetchingNewer: state.fetchingNewer,
+        resyncing: state.resyncing,
+      });
+      const hadOlder = state.action === 'older' || state.fetchingOlder;
+      const hadNewer = state.action === 'newer' || state.fetchingNewer;
+      const hadSnapshot = state.action === 'snapshot' || state.resyncing;
+      if (hadOlder) {
+        completeOlderRequest();
+      }
+      if (hadNewer) {
+        completeNewerRequest();
+      }
+      if (hadSnapshot) {
+        completeSnapshotRequest();
+      }
+      state.action = 'idle';
+      state.previousScrollHeight = 0;
+      state.scrollAnchor = null;
+      state.pendingComposerScroll = false;
+      updateJumpButton();
+      syncLoadControls();
+    });
+
+    const handleProcessingStartedEvent = (evt) => {
+      timelineLog('eventsource processing.started received', {
+        lastEventId: evt?.lastEventId || null,
+        currentProcessingEventId: state.processingEventId || null,
+      });
+      if (evt?.lastEventId) {
+        state.lastEventId = evt.lastEventId;
+        state.processingEventId = evt.lastEventId;
+      }
+      reconnectDelay = 3000;
+      showProcessingIndicator({ sticky: true, reason: 'eventsource-processing-started' });
+      refreshProcessingState({ reason: 'processing-started' });
+    };
+
+    const handleProcessingFinishedEvent = (evt) => {
+      timelineLog('eventsource processing.finished received', {
+        lastEventId: evt?.lastEventId || null,
+        processingEventId: state.processingEventId || null,
+      });
+      if (evt?.lastEventId) {
+        state.lastEventId = evt.lastEventId;
+      }
+      reconnectDelay = 3000;
+      const finishId = evt?.lastEventId || null;
+      const staleFinish = Boolean(
+        finishId &&
+        state.processingEventId &&
+        compareEventIds(finishId, state.processingEventId) < 0,
+      );
+      if (staleFinish) {
+        timelineLog('eventsource processing.finished stale event detected', {
+          finishId,
+          processingEventId: state.processingEventId,
+        });
+      }
+      if (staleFinish) {
+        if (isNearBottom()) {
+          requestNewer('processing-finished-stale');
+        } else {
+          queueRealtimeUpdate();
+        }
+        return;
+      }
+      state.processingEventId = null;
+      timelineLog('eventsource processing.finished refreshing state', {
+        finishId,
+      });
+      refreshProcessingState({ reason: 'processing-finished' })
+        .finally(() => {
+          if (!hasMoreNewerInDom() && isNearBottom()) {
+            requestNewer('processing-finished');
+          } else {
+            queueRealtimeUpdate();
+          }
+        });
+    };
+
+    function connectEventStream(lastId) {
+      timelineLog('connectEventStream invoked', {
+        lastId,
+        hasEventStreamUrl: Boolean(eventStreamUrl),
+      });
+      if (!eventStreamUrl) {
+        timelineWarn('connectEventStream aborted: missing eventStreamUrl dataset attribute');
+        return;
+      }
+
+      if (typeof window.EventSource === 'undefined') {
+        timelineWarn('connectEventStream aborted: EventSource API unavailable');
+        return;
+      }
+
+      let cursor = lastId;
+      if (cursor && !/^[0-9]+-[0-9]+$/.test(cursor)) {
+        timelineWarn('connectEventStream ignoring malformed cursor', { cursor });
+        cursor = null;
+      }
+
+      const url = cursor ? `${eventStreamUrl}?cursor=${encodeURIComponent(cursor)}` : eventStreamUrl;
+      const source = new EventSource(url);
+
+      source.onopen = () => {
+        timelineLog('eventsource connection opened', {
+          url,
+          cursor,
+        });
+      };
+
+      const handleMessage = (evt) => {
+        const eventType = evt?.type || 'message';
+        timelineLog('eventsource message received', {
+          eventType,
+          lastEventId: evt?.lastEventId || null,
+        });
+        if (evt && evt.lastEventId) {
+          state.lastEventId = evt.lastEventId;
+        }
+        reconnectDelay = 3000;
+        const hasBacklog = hasMoreNewerInDom();
+        const canAutoFetch = !hasBacklog && state.autoScroll && !state.fetchingNewer && !state.fetchingOlder && !state.resyncing;
+        if (canAutoFetch) {
+          timelineLog('eventsource message requesting newer timeline', {
+            eventType,
+          });
+          requestNewer('auto-newer');
+          return;
+        }
+        timelineLog('eventsource message deferred via queueRealtimeUpdate', {
+          eventType,
+          lastEventId: state.lastEventId,
+          hasBacklog,
+        });
+        queueRealtimeUpdate();
+      };
+
+      source.addEventListener('message', handleMessage);
+      source.addEventListener('step.created', handleMessage);
+      source.addEventListener('message.created', handleMessage);
+      source.addEventListener('processing.started', handleProcessingStartedEvent);
+      source.addEventListener('processing.finished', handleProcessingFinishedEvent);
+      source.onerror = (err) => {
+        timelineError('eventsource error', {
+          error: err?.message || err || null,
+          reconnectDelay,
+        });
+        source.close();
+        state.eventSource = null;
+        reconnectDelay = Math.min(Math.round(reconnectDelay * 1.5), RECONNECT_MAX);
+        const indicatorVisible = Boolean(getProcessingNode());
+        const processingFlagged = getProcessingFlag();
+        if (indicatorVisible || processingFlagged) {
+          state.processingSticky = true;
+          if (!indicatorVisible && processingFlagged) {
+            showProcessingIndicator({ sticky: true, reason: 'eventsource-error-recovery' });
+          }
+          refreshProcessingState({ reason: 'eventsource-error' });
+        }
+        window.setTimeout(() => connectEventStream(state.lastEventId), reconnectDelay);
+      };
+
+      state.eventSource = source;
+      timelineLog('eventsource listener registered', {
+        url,
+        cursor,
+        reconnectDelay,
+      });
+    }
+
+    if (sessionUrl) {
+      startWebSession();
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          if (sessionState.id) {
+            sendHeartbeat({ silent: true, source: 'visibility' });
+          } else {
+            startWebSession();
+          }
+        }
+      });
+
+      window.addEventListener('focus', () => {
+        if (sessionState.id) {
+          sendHeartbeat({ silent: true, source: 'focus' });
+        } else {
+          startWebSession();
+        }
+      });
+
+      window.addEventListener('pagehide', (event) => {
+        if (!event.persisted) {
+          endWebSession('pagehide');
+        }
+      });
+    }
+
+    ensureProcessingSlotPosition();
+    syncProcessingFromDom();
+    updateProcessingIndicatorForVisibility('initial');
+    syncKnownCursors({ animate: false });
+    normaliseToolClusters();
+    connectEventStream(null);
+    updateTimelinePadding();
+    positionJumpButton();
+    scrollToBottom({ force: true, behavior: 'auto', pageBehavior: 'auto' });
+    updateJumpButton();
+    syncLoadControls();
+    refreshEmptyState();
+
+    if (typeof Prism !== 'undefined') {
+      Prism.highlightAllUnder(timeline);
+    }
+
+    window.addEventListener('beforeunload', () => {
+      endWebSession('beforeunload');
+      window.removeEventListener('scroll', handleWindowScroll);
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleOrientationChange);
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+    });
+  }
+
+  ready();
+})();
