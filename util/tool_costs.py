@@ -34,3 +34,21 @@ def get_tool_credit_cost(tool_name: str | None) -> Decimal:
             return default_cost
 
     return default_cost
+
+
+def get_most_expensive_tool_cost() -> Decimal:
+    """Return the largest configured tool credit cost, including the default."""
+    default_cost: Decimal = getattr(settings, "CREDITS_PER_TASK")
+    raw_mapping: dict[str, Any] = getattr(settings, "TOOL_CREDIT_COSTS", {}) or {}
+
+    max_cost = default_cost
+    for value in raw_mapping.values():
+        try:
+            candidate = value if isinstance(value, Decimal) else Decimal(str(value))
+        except Exception:
+            continue
+
+        if candidate > max_cost:
+            max_cost = candidate
+
+    return max_cost

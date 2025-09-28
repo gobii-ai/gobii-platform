@@ -375,3 +375,25 @@ class TaskCreditServiceHandleThresholdTests(TestCase):
              patch.object(TaskCreditService, "get_user_total_tasks_used", return_value=95):
             TaskCreditService.handle_task_threshold(user)
         mock_publish.assert_called_once()
+
+    @patch("tasks.services.apps.get_model")
+    @patch("tasks.services.Analytics.publish_threshold_event")
+    def test_handle_task_threshold_treats_small_remainder_as_full_usage(self, mock_publish, mock_get_model):
+        user = User.objects.create(username="user11")
+        Usage = MagicMock()
+        mock_get_model.return_value = Usage
+
+        Usage.objects.get_or_create.side_effect = [
+            (MagicMock(), False),  # 75% already recorded this month
+            (MagicMock(), False),  # 90% already recorded this month
+            (MagicMock(), True),   # 100% should fire when remainder within tolerance
+        ]
+
+        with patch.object(TaskCreditService, "get_tasks_entitled", return_value=Decimal("100")), \
+             patch.object(TaskCreditService, "get_user_total_tasks_used", return_value=Decimal("99.96")):
+            TaskCreditService.handle_task_threshold(user)
+
+        mock_publish.assert_called_once()
+        _, threshold, pct, *_ = mock_publish.call_args[0]
+        self.assertEqual(threshold, 100)
+        self.assertEqual(pct, 100)
