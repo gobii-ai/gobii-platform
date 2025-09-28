@@ -18,6 +18,7 @@ from .models import (
     AgentEmailAccount, ToolFriendlyName,
     StripeConfig,
     MeteringBatch,
+    UsageThresholdSent,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -834,6 +835,23 @@ class PaidPlanIntentAdmin(admin.ModelAdmin):
     search_fields = ("user__email", "user__username")
     ordering = ("-requested_at",)
     readonly_fields = ("requested_at", "id")
+
+
+@admin.register(UsageThresholdSent)
+class UsageThresholdSentAdmin(admin.ModelAdmin):
+    list_display = ("user", "period_ym", "threshold", "plan_limit", "sent_at")
+    list_filter = ("threshold",)
+    search_fields = ("user__email", "user__id", "period_ym")
+    date_hierarchy = "sent_at"
+    readonly_fields = ("user", "period_ym", "threshold", "plan_limit", "sent_at")
+    ordering = ("-sent_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
 
 # --- TASK CREDITS INSIDE USER (CustomUserAdmin) ---
 class TaskCreditInlineForUser(admin.TabularInline):

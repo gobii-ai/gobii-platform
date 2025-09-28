@@ -14,6 +14,7 @@ from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames, PlanNamesChoices
 from observability import traced, trace
 from util.analytics import Analytics
+from util.tool_costs import get_most_expensive_tool_cost
 from util.constants.task_constants import TASKS_UNLIMITED
 from django.db import transaction
 from django.conf import settings
@@ -1103,9 +1104,22 @@ class TaskCreditService:
             if entitled == TASKS_UNLIMITED or entitled == 0:
                 pct = 0.0
             else:
-                pct = (used / entitled) * 100
-                if pct > 100:
-                    pct = 100.0
+                entitled_decimal = Decimal(entitled)
+                used_decimal = Decimal(used)
+
+                pct_decimal = (used_decimal / entitled_decimal) * Decimal(100)
+
+                if pct_decimal > Decimal(100):
+                    pct_decimal = Decimal(100)
+                else:
+                    tolerance = get_most_expensive_tool_cost()
+                    tolerance = max(tolerance, Decimal("0.001"))
+
+                    remaining = entitled_decimal - used_decimal
+                    if remaining <= tolerance:
+                        pct_decimal = Decimal(100)
+
+                pct = float(pct_decimal)
 
             UsageThresholdSent = apps.get_model("api", "UsageThresholdSent")
 
