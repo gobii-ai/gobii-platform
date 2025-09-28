@@ -1,16 +1,19 @@
-{% extends "console_page.html" %}
+{% extends "console/react_shell_base.html" %}
 {% load vite_tags %}
 
-{% block console_content %}
-<div id="gobii-frontend-root"
-     class="min-h-[50vh]"
-     data-app="agent-chat"
-     data-agent-id="{{ agent.id }}"
-     data-agent-name="{{ agent.name|default:'' }}">
+{% block page_title %}Persistent Agent Chat Shell · Gobii{% endblock %}
+
+{% block react_shell_content %}
+<div class="py-12 px-6">
+  <div id="gobii-frontend-root"
+       class="mx-auto max-w-5xl"
+       data-app="agent-chat"
+       data-agent-id="{{ agent.id }}"
+       data-agent-name="{{ agent.name|default:'' }}">
+  </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-  {{ block.super }}
   {% vite_asset 'src/main.tsx' %}
 {% endblock %}

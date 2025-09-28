@@ -78,6 +78,15 @@
             </svg>
             Dashboard
           </a>
+          <a href="{% url 'console_diagnostics' %}"
+             class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'console_diagnostics' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
+            <svg class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'console_diagnostics' %}text-blue-600{% else %}text-gray-500{% endif %}"
+                 xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-9-9" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 00-9-9v9l3 3" />
+            </svg>
+            Diagnostics
+          </a>
           <a href="{% url 'agents' %}"
             class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'agents' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
             <svg class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'agents' %}text-blue-600{% else %}text-gray-500{% endif %}"
