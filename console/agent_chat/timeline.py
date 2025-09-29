@@ -94,10 +94,12 @@ def _relative_timestamp(dt: datetime | None) -> str | None:
     if dt > now:
         return "moments ago"
     try:
-        return naturaltime(dt)
+        # `naturaltime` may return a lazy translation object; convert to plain str for serialization.
+        humanized = naturaltime(dt)
     except Exception:
         # Fallback to timesince when humanize isn't available
         return f"{timesince(dt, now)} ago"
+    return str(humanized)
 
 
 def _microsecond_epoch(dt: datetime) -> int:

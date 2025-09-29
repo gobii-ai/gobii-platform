@@ -122,6 +122,8 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(event["kind"], "message")
         self.assertEqual(event["message"]["bodyText"], body)
         self.assertEqual(event["message"]["channel"], CommsChannel.WEB)
+        relative_ts = event["message"].get("relativeTimestamp")
+        self.assertIsInstance(relative_ts, str)
 
         stored = (
             PersistentAgentMessage.objects.filter(owner_agent=self.agent, body=body)
