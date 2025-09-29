@@ -95,9 +95,11 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "whitenoise.runserver_nostatic",  # Should be before staticfiles if DEBUG is True and runserver
+    "daphne",
     "django.contrib.staticfiles",
 
     # 3rd-party
+    "channels",
     "rest_framework",
     "drf_spectacular",
     "django.contrib.sites",
@@ -180,6 +182,7 @@ TEMPLATES = [
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 # ────────── Database ──────────
 DATABASES = {
@@ -431,6 +434,14 @@ SPECTACULAR_SETTINGS = {
 
 # ────────── Redis ──────────
 REDIS_URL = env("REDIS_URL")
+
+# Channels uses Redis for cross-process messaging (WebSockets, background broadcasts).
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [REDIS_URL]},
+    }
+}
 
 # ────────── Celery ──────────
 CELERY_BROKER_URL = REDIS_URL

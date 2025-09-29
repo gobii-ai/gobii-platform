@@ -138,6 +138,8 @@ jobs:
             tag: batch_spawn_depth
           - batch: xvfb
             tag: batch_xvfb
+          - batch: websocket
+            tag: batch_websocket
           - batch: allowlist_direction
             tag: batch_allowlist_direction
           - batch: console_context

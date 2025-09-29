@@ -57,8 +57,8 @@ docker compose -f infra/local/docker-compose.yml up -d
 # 2) activate venv
 source console/.venv/bin/activate
 
-# 3) run the web server with hot reload
-python manage.py runserver 0.0.0.0:8000
+# 3) run the ASGI web server with hot reload
+uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000
 
 # 4) (new shell) run the Vite dev server for React pages
 npm run dev --prefix frontend
