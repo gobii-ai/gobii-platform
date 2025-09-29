@@ -62,22 +62,7 @@ function mergeEvents(existing: TimelineEvent[], incoming: TimelineEvent[]): Time
   return sortEvents(Array.from(map.values()))
 }
 
-function applySnapshot(
-  current: TimelineEvent[],
-  snapshot: TimelineResponse,
-  mode: 'replace' | 'prepend' | 'append',
-): { events: TimelineEvent[]; oldestCursor: string | null; newestCursor: string | null } {
-  const incoming = sortEvents(snapshot.events)
-  let merged: TimelineEvent[]
-  if (mode === 'replace') {
-    merged = incoming
-  } else {
-    merged = mergeEvents(current, incoming)
-  }
-  const oldestCursor = merged.length ? merged[0].cursor : null
-  const newestCursor = merged.length ? merged[merged.length - 1].cursor : null
-  return { events: merged, oldestCursor, newestCursor }
-}
+const TIMELINE_WINDOW_SIZE = 10
 
 export type AgentChatState = {
   agentId: string | null
@@ -86,6 +71,7 @@ export type AgentChatState = {
   newestCursor: string | null
   hasMoreOlder: boolean
   hasMoreNewer: boolean
+  hasUnseenActivity: boolean
   processingActive: boolean
   loading: boolean
   loadingOlder: boolean
@@ -96,6 +82,7 @@ export type AgentChatState = {
   refreshProcessing: () => Promise<void>
   loadOlder: () => Promise<void>
   loadNewer: () => Promise<void>
+  jumpToLatest: () => Promise<void>
   sendMessage: (body: string) => Promise<void>
   receiveRealtimeEvent: (event: TimelineEvent) => void
   updateProcessing: (active: boolean) => void
@@ -109,6 +96,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   newestCursor: null,
   hasMoreOlder: false,
   hasMoreNewer: false,
+  hasUnseenActivity: false,
   processingActive: false,
   loading: false,
   loadingOlder: false,
@@ -117,10 +105,12 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   autoScrollPinned: true,
 
   async initialize(agentId) {
-    set({ loading: true, agentId, error: null })
+    set({ loading: true, agentId, error: null, autoScrollPinned: true })
     try {
-      const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial' })
-      const { events, oldestCursor, newestCursor } = applySnapshot([], snapshot, 'replace')
+      const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
+      const events = sortEvents(snapshot.events)
+      const oldestCursor = events.length ? events[0].cursor : null
+      const newestCursor = events.length ? events[events.length - 1].cursor : null
       set({
         events,
         oldestCursor,
@@ -129,6 +119,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         hasMoreNewer: snapshot.has_more_newer,
         processingActive: snapshot.processing_active,
         loading: false,
+        autoScrollPinned: true,
       })
     } catch (error) {
       set({
@@ -161,13 +152,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const snapshot = await fetchAgentTimeline(state.agentId, {
         direction: 'older',
         cursor: state.oldestCursor ?? undefined,
+        limit: TIMELINE_WINDOW_SIZE,
       })
-      const { events, oldestCursor, newestCursor } = applySnapshot(state.events, snapshot, 'prepend')
+      const events = sortEvents(snapshot.events)
+      const oldestCursor = events.length ? events[0].cursor : null
+      const newestCursor = events.length ? events[events.length - 1].cursor : null
       set({
         events,
         oldestCursor,
         newestCursor,
         hasMoreOlder: snapshot.has_more_older,
+        hasMoreNewer: snapshot.has_more_newer,
         loadingOlder: false,
       })
     } catch (error) {
@@ -188,12 +183,16 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const snapshot = await fetchAgentTimeline(state.agentId, {
         direction: 'newer',
         cursor: state.newestCursor ?? undefined,
+        limit: TIMELINE_WINDOW_SIZE,
       })
-      const { events, oldestCursor, newestCursor } = applySnapshot(state.events, snapshot, 'append')
+      const events = sortEvents(snapshot.events)
+      const oldestCursor = events.length ? events[0].cursor : null
+      const newestCursor = events.length ? events[events.length - 1].cursor : null
       set({
         events,
         oldestCursor,
         newestCursor,
+        hasMoreOlder: snapshot.has_more_older,
         hasMoreNewer: snapshot.has_more_newer,
         processingActive: snapshot.processing_active,
         loadingNewer: false,
@@ -202,6 +201,35 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       set({
         loadingNewer: false,
         error: error instanceof Error ? error.message : 'Failed to load newer events',
+      })
+    }
+  },
+
+  async jumpToLatest() {
+    const state = get()
+    if (!state.agentId) {
+      return
+    }
+    set({ loading: true })
+    try {
+      const snapshot = await fetchAgentTimeline(state.agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
+      const events = sortEvents(snapshot.events)
+      const oldestCursor = events.length ? events[0].cursor : null
+      const newestCursor = events.length ? events[events.length - 1].cursor : null
+      set({
+        events,
+        oldestCursor,
+        newestCursor,
+        hasMoreOlder: snapshot.has_more_older,
+        hasMoreNewer: snapshot.has_more_newer,
+        processingActive: snapshot.processing_active,
+        hasUnseenActivity: false,
+        loading: false,
+      })
+    } catch (error) {
+      set({
+        loading: false,
+        error: error instanceof Error ? error.message : 'Failed to jump to latest',
       })
     }
   },
@@ -228,6 +256,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   receiveRealtimeEvent(event) {
     const state = get()
+    if (!state.autoScrollPinned) {
+      set({ hasUnseenActivity: true })
+      return
+    }
     let events: TimelineEvent[]
     if (event.kind === 'steps') {
       const last = state.events[state.events.length - 1]

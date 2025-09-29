@@ -21,10 +21,12 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const initialize = useAgentChatStore((state) => state.initialize)
   const loadOlder = useAgentChatStore((state) => state.loadOlder)
   const loadNewer = useAgentChatStore((state) => state.loadNewer)
+  const jumpToLatest = useAgentChatStore((state) => state.jumpToLatest)
   const sendMessage = useAgentChatStore((state) => state.sendMessage)
   const events = useAgentChatStore((state) => state.events)
   const hasMoreOlder = useAgentChatStore((state) => state.hasMoreOlder)
   const hasMoreNewer = useAgentChatStore((state) => state.hasMoreNewer)
+  const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const processingActive = useAgentChatStore((state) => state.processingActive)
   const loading = useAgentChatStore((state) => state.loading)
   const loadingOlder = useAgentChatStore((state) => state.loadingOlder)
@@ -55,26 +57,21 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
       setAutoScrollPinned(distanceFromBottom < 64)
     }
 
-    node.addEventListener('scroll', handleScroll)
-    handleScroll()
+    node.addEventListener('scroll', handleScroll, { passive: true })
     return () => node.removeEventListener('scroll', handleScroll)
   }, [setAutoScrollPinned])
 
   const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])
 
-  const handleJumpToLatest = () => {
+  const handleJumpToLatest = async () => {
+    await jumpToLatest()
     const node = timelineRef.current
     if (!node) return
-    node.scrollTop = node.scrollHeight
-    setAutoScrollPinned(true)
+    requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight
+      setAutoScrollPinned(true)
+    })
   }
-
-  useEffect(() => {
-    if (!autoScrollPinned || !hasMoreNewer || loadingNewer) {
-      return
-    }
-    loadNewer()
-  }, [autoScrollPinned, hasMoreNewer, loadNewer, loadingNewer])
 
   const handleSend = async (body: string) => {
     await sendMessage(body)
@@ -110,6 +107,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
         onSendMessage={handleSend}
         onJumpToLatest={handleJumpToLatest}
         autoScrollPinned={autoScrollPinned}
+        hasUnseenActivity={hasUnseenActivity}
         timelineRef={timelineRef}
         loadingOlder={loadingOlder}
         loadingNewer={loadingNewer}

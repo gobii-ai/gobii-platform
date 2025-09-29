@@ -14,6 +14,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onSendMessage?: (body: string) => void | Promise<void>
   autoScrollPinned?: boolean
+  hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>
   loadingOlder?: boolean
   loadingNewer?: boolean
@@ -33,6 +34,7 @@ export function AgentChatLayout({
   onJumpToLatest,
   onSendMessage,
   autoScrollPinned = true,
+  hasUnseenActivity = false,
   timelineRef,
   loadingOlder = false,
   loadingNewer = false,
@@ -107,6 +109,7 @@ export function AgentChatLayout({
         aria-label="Jump to latest"
         aria-hidden={autoScrollPinned ? 'true' : 'false'}
         onClick={onJumpToLatest}
+        data-has-activity={hasUnseenActivity ? 'true' : 'false'}
       >
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />

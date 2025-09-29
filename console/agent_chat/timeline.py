@@ -501,7 +501,7 @@ def fetch_timeline_window(
     newest_cursor = truncated[-1].cursor if truncated else None
 
     has_more_older = _has_more_before(agent, oldest_cursor)
-    has_more_newer = _has_more_after(agent, newest_cursor)
+    has_more_newer = False if direction == "initial" else _has_more_after(agent, newest_cursor)
 
     return TimelineWindow(
         events=timeline_events,
