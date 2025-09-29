@@ -9,6 +9,15 @@
     <div class="text-sm font-medium text-gray-900">{{ key.name }}</div>
     <div class="text-xs text-gray-500">Prefix: {{ key.prefix }}</div>
   </td>
+  {% if api_key_context.type == 'organization' %}
+    <td class="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+      {% if key.created_by %}
+        {{ key.created_by.get_full_name|default:key.created_by.email|default:key.created_by.username }}
+      {% else %}
+        <span class="text-gray-400">—</span>
+      {% endif %}
+    </td>
+  {% endif %}
   <td class="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-gray-500">
     {{ key.created_at|date:"M d, Y" }}
   </td>
@@ -31,23 +40,31 @@
     {% endif %}
   </td>
   <td class="px-2 md:px-6 py-4 whitespace-nowrap text-center w-16 md:w-24">
-    {% if key.is_active %}
-      <button
-        class="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
-        @click="$dispatch('open-modal', { id: 'revoke-confirm-modal', url: '{% url 'api_key_detail' pk=key.id %}' })"
-      >
-        Revoke
-      </button>
+    {% if can_manage_api_keys %}
+      {% if key.is_active %}
+        <button
+          class="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
+          @click="$dispatch('open-modal', { id: 'revoke-confirm-modal', url: '{% url 'api_key_detail' pk=key.id %}' })"
+        >
+          Revoke
+        </button>
+      {% else %}
+        <span class="text-gray-400">Revoked</span>
+      {% endif %}
     {% else %}
-      <span class="text-gray-400">Revoked</span>
+      <span class="text-gray-400">—</span>
     {% endif %}
   </td>
   <td class="px-2 md:px-6 py-4 whitespace-nowrap text-center w-16 md:w-24">
-    <button
-      class="text-red-600 hover:text-red-900 focus:outline-none focus:underline"
-      @click="$dispatch('open-modal', { id: 'delete-confirm-modal', url: '{% url 'api_key_detail' pk=key.id %}' })"
-    >
-      Delete
-    </button>
+    {% if can_manage_api_keys %}
+      <button
+        class="text-red-600 hover:text-red-900 focus:outline-none focus:underline"
+        @click="$dispatch('open-modal', { id: 'delete-confirm-modal', url: '{% url 'api_key_detail' pk=key.id %}' })"
+      >
+        Delete
+      </button>
+    {% else %}
+      <span class="text-gray-400">—</span>
+    {% endif %}
   </td>
 </tr>

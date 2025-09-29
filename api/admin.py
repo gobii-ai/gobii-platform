@@ -65,9 +65,24 @@ class PatchedCardAdmin(StripeModelAdmin):
 
 @admin.register(ApiKey)
 class ApiKeyAdmin(admin.ModelAdmin):
-    list_display = ("prefix", "user", "name", "created_at", "revoked_at", "last_used_at")
-    search_fields = ("user__email", "prefix", "name")
+    list_display = (
+        "prefix",
+        "owner_display",
+        "name",
+        "created_by",
+        "created_at",
+        "revoked_at",
+        "last_used_at",
+    )
+    search_fields = ("user__email", "organization__name", "prefix", "name")
+    list_filter = ("organization",)
     readonly_fields = ("prefix", "hashed_key", "created_at", "last_used_at")
+
+    @admin.display(description="Owner")
+    def owner_display(self, obj):
+        if obj.organization_id:
+            return obj.organization
+        return obj.user
 
 @admin.register(UserQuota)
 class UserQuotaAdmin(admin.ModelAdmin):

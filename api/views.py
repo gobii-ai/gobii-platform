@@ -7,16 +7,17 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.http import HttpResponseRedirect, Http404
 from django.views import View
+from django.db import models
 
 from observability import traced, dict_to_attributes
 from util.constants.task_constants import TASKS_UNLIMITED
 from .agent.tools.sms_sender import ensure_scheme
 from .models import (
+    ApiKey,
     BrowserUseAgent,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     LinkShortener,
-    PersistentAgent,
 )
 from .serializers import (
     BrowserUseAgentSerializer,
@@ -41,35 +42,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
 
-def _derive_task_organization(task: BrowserUseAgentTask):
-    """Return the organization associated with a task if one can be inferred."""
-    org = None
-    try:
-        credit = getattr(task, "task_credit", None)
-        if credit is not None and getattr(credit, "organization_id", None):
-            org = credit.organization
-    except Exception:  # pragma: no cover - defensive fetch guard
-        org = None
 
-    if org is not None:
-        return org
-
-    agent = getattr(task, "agent", None)
-    if agent is None:
-        return None
-
-    try:
-        persistent = getattr(agent, "persistent_agent", None)
-        if persistent is None and isinstance(agent, BrowserUseAgent):
-            persistent = PersistentAgent.objects.filter(browser_use_agent=agent).select_related("organization").first()
-        if persistent is not None and getattr(persistent, "organization_id", None):
-            return persistent.organization
-    except PersistentAgent.DoesNotExist:  # pragma: no cover - safe fallback
-        return None
-    except Exception:  # pragma: no cover - defensive fallback
-        return None
-
-    return None
 
 # Standard Pagination (can be customized or moved to settings)
 class StandardResultsSetPagination(PageNumberPagination):
@@ -94,9 +67,35 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
 
+    def _request_organization(self):
+        auth = getattr(self.request, 'auth', None)
+        if isinstance(auth, ApiKey) and getattr(auth, 'organization_id', None):
+            return auth.organization
+        return None
+
     def get_queryset(self):
-        """Return BrowserUseAgent instances owned by the user"""
-        Analytics.track_event(user_id=self.request.user.id, event=AnalyticsEvent.AGENTS_LISTED, source=AnalyticsSource.API)
+        """Return BrowserUseAgent instances owned by the user or organization."""
+        org = self._request_organization()
+        properties = {}
+
+        if org is not None:
+            properties['owner_type'] = 'organization'
+            properties['organization_id'] = str(org.id)
+
+            Analytics.track_event(
+                user_id=self.request.user.id,
+                event=AnalyticsEvent.AGENTS_LISTED,
+                source=AnalyticsSource.API,
+                properties=properties,
+            )
+
+            return self.queryset.filter(persistent_agent__organization=org)
+
+        Analytics.track_event(
+            user_id=self.request.user.id,
+            event=AnalyticsEvent.AGENTS_LISTED,
+            source=AnalyticsSource.API,
+        )
         return self.queryset.filter(user=self.request.user)
 
     def get_serializer_class(self):
@@ -107,6 +106,9 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Associate the agent with the current user"""
+        if self._request_organization() is not None:
+            raise DRFValidationError(detail="Organization API keys cannot create browser agents.")
+
         try:
             serializer.save(user=self.request.user)
             Analytics.track_event(user_id=self.request.user.id, event=AnalyticsEvent.AGENT_CREATED, source=AnalyticsSource.API)
@@ -163,6 +165,23 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
     pagination_class = StandardResultsSetPagination
     lookup_field = 'id'
 
+    def _request_organization(self):
+        auth = getattr(self.request, 'auth', None)
+        if isinstance(auth, ApiKey) and getattr(auth, 'organization_id', None):
+            return auth.organization
+        return None
+
+    def _validate_agent_access(self, agent):
+        org = self._request_organization()
+        if org is not None:
+            persistent = getattr(agent, 'persistent_agent', None)
+            if not persistent or persistent.organization_id != org.id:
+                raise Http404
+            return
+
+        if agent.user != self.request.user:
+            raise Http404
+
     def get_serializer_class(self, action=None):
         current_action = action or self.action
         if current_action in ['list', 'list_all']:
@@ -187,11 +206,25 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                 span.set_attribute('user.id', '0')
 
 
-            qs = BrowserUseAgentTask.objects.alive().select_related('agent')
-            qs = qs.filter(user=self.request.user)
+            qs = BrowserUseAgentTask.objects.alive().select_related('agent', 'agent__persistent_agent')
+
+            org = self._request_organization()
+            if org is not None:
+                span.set_attribute('tasks.owner_type', 'organization')
+                span.set_attribute('tasks.organization_id', str(org.id))
+                qs = qs.filter(
+                    models.Q(organization=org) |
+                    models.Q(agent__persistent_agent__organization=org)
+                ).distinct()
+            else:
+                qs = qs.filter(user=self.request.user, organization__isnull=True)
 
         agentId = self.kwargs.get('agentId')
         properties = {}
+        org = self._request_organization()
+        if org is not None:
+            properties['owner_type'] = 'organization'
+            properties['organization_id'] = str(org.id)
 
         if agentId:
             properties['agent_id'] = str(agentId)
@@ -199,7 +232,8 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         if agentId:
             # Validate that the referenced agent belongs to the user; 404 otherwise
             with traced("DB-GET Agent", agent_id=str(agentId), user_id=self.request.user.id) as span:
-                get_object_or_404(BrowserUseAgent, id=agentId, user=self.request.user)
+                agent = get_object_or_404(BrowserUseAgent, id=agentId)
+                self._validate_agent_access(agent)
                 qs = qs.filter(agent_id=agentId)
             Analytics.track_event(user_id=self.request.user.id, event=AnalyticsEvent.TASKS_LISTED, source=AnalyticsSource.API, properties=properties)
 
@@ -209,13 +243,29 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
     @action(detail=False, methods=['get'])
     def list_all(self, request):
         with traced("GET tasks", user_id=self.request.user.id) as span:
-            queryset = BrowserUseAgentTask.objects.alive().filter(user=request.user).select_related('agent')
+            org = self._request_organization()
+            queryset = BrowserUseAgentTask.objects.alive().select_related('agent', 'agent__persistent_agent')
+
+            if org is not None:
+                span.set_attribute('tasks.owner_type', 'organization')
+                span.set_attribute('tasks.organization_id', str(org.id))
+                queryset = queryset.filter(
+                    models.Q(organization=org) |
+                    models.Q(agent__persistent_agent__organization=org)
+                ).distinct()
+            else:
+                queryset = queryset.filter(user=request.user, organization__isnull=True)
+
             page = self.paginate_queryset(queryset)
             if page is not None:
                 serializer = self.get_serializer(page, many=True)
                 return self.get_paginated_response(serializer.data)
             serializer = self.get_serializer(queryset, many=True)
-            Analytics.track_event(user_id=request.user.id, event=AnalyticsEvent.TASKS_LISTED, source=AnalyticsSource.API)
+            properties = {}
+            if org is not None:
+                properties['owner_type'] = 'organization'
+                properties['organization_id'] = str(org.id)
+            Analytics.track_event(user_id=request.user.id, event=AnalyticsEvent.TASKS_LISTED, source=AnalyticsSource.API, properties=properties or None)
         return Response(serializer.data)
 
     def perform_create(self, serializer):
@@ -229,10 +279,15 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
 
             if agentId:
                 # Agent-scoped route – trust the path parameter
-                agent = get_object_or_404(BrowserUseAgent, id=agentId, user=self.request.user)
+                agent = get_object_or_404(BrowserUseAgent, id=agentId)
+                self._validate_agent_access(agent)
             else:
                 # User-level route – optional JSON field
                 agent = serializer.validated_data.get('agent')
+                if agent is not None:
+                    self._validate_agent_access(agent)
+
+            org = self._request_organization()
 
             wait_time = serializer.validated_data.pop('wait', None)
 
@@ -240,7 +295,13 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
             secrets = serializer.validated_data.pop('secrets', None)
 
             try:
-                task = serializer.save(agent=agent, user=self.request.user)
+                save_kwargs = {'agent': agent, 'user': self.request.user}
+                if org is not None:
+                    save_kwargs['organization'] = org
+                elif agent and hasattr(agent, 'persistent_agent') and getattr(agent.persistent_agent, 'organization', None):
+                    save_kwargs['organization'] = agent.persistent_agent.organization
+
+                task = serializer.save(**save_kwargs)
 
                 ctx = baggage.set_baggage("task.id", str(task.id), context.get_current())
                 context.attach(ctx)
@@ -382,7 +443,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                 span.set_attributes(attr_for_span)
 
                 # Track task creation
-                org = _derive_task_organization(task)
+                org = getattr(task, "organization", None)
                 properties = Analytics.with_org_properties(properties, organization=org)
                 Analytics.track_event(
                     user_id=task.user_id,
@@ -446,7 +507,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
             instance.deleted_at = timezone.now()
             instance.save(update_fields=['is_deleted', 'deleted_at'])
             span.add_event('TASK Deleted', {'task.id': str(instance.id), 'agent.id': str(instance.agent.id) if instance.agent else None})
-            org = _derive_task_organization(instance)
+            org = getattr(instance, "organization", None)
             props = Analytics.with_org_properties(
                 {
                     'agent_id': str(instance.agent.id) if instance.agent else None,
@@ -484,7 +545,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
 
             span.set_attributes(dict_to_attributes(task, 'task'))
 
-            view_props = Analytics.with_org_properties({}, organization=_derive_task_organization(task))
+            view_props = Analytics.with_org_properties({}, organization=getattr(task, "organization", None))
             Analytics.track_event(
                 user_id=task.user_id,
                 event=AnalyticsEvent.TASK_RESULT_VIEWED,
@@ -545,7 +606,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                         'task_id': str(task.id),
                         'agent_id': str(agentId),
                     },
-                    organization=_derive_task_organization(task),
+                    organization=getattr(task, "organization", None),
                 )
                 Analytics.track_event(
                     user_id=task.user_id,

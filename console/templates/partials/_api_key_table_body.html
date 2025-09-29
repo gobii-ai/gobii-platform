@@ -1,8 +1,8 @@
 {% for key in api_keys %}
-  {% include "partials/_api_key_row.html" %}
+  {% include "partials/_api_key_row.html" with key=key api_key_context=api_key_context can_manage_api_keys=can_manage_api_keys %}
 {% empty %}
   <tr>
-    <td colspan="6" class="px-6 py-4 text-center text-gray-500">
+    <td colspan="{% if api_key_context.type == 'organization' %}7{% else %}6{% endif %}" class="px-6 py-4 text-center text-gray-500">
       You don't have any API keys yet.
     </td>
   </tr>

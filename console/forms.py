@@ -30,18 +30,37 @@ class ApiKeyForm(forms.ModelForm):
             })
         }
 
-    # let the view inject the current user
-    def __init__(self, *args, user=None, **kwargs):
+    def __init__(self, *args, user=None, organization=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.user = user
+        self.organization = organization
+
+        if user is not None:
+            self.instance.user = user
+            self.instance.organization = None
+        elif organization is not None:
+            self.instance.organization = organization
+            self.instance.user = None
+
+    def clean(self):
+        cleaned = super().clean()
+        if self.user and self.organization:
+            raise forms.ValidationError("API keys must belong to exactly one owner.")
+        if not self.user and not self.organization:
+            raise forms.ValidationError("Unable to determine API key owner. Refresh and try again.")
+        return cleaned
 
     def clean_name(self):
-        name = self.cleaned_data["name"].strip()
-        # case-insensitive match to avoid "Key" vs "key"
-        if ApiKey.objects.filter(user=self.user, name__iexact=name).exists():
-            raise forms.ValidationError(
-                "You already have an API key with that name."
-            )
+        name = (self.cleaned_data.get("name") or "").strip()
+
+        filters = {}
+        if self.user:
+            filters["user"] = self.user
+        if self.organization:
+            filters["organization"] = self.organization
+
+        if ApiKey.objects.filter(**filters, name__iexact=name).exists():
+            raise forms.ValidationError("An API key with that name already exists.")
         return name
 
 

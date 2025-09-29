@@ -22,6 +22,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.text import slugify
 from datetime import timedelta, datetime, timezone as dt_timezone
+from functools import cached_property
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
@@ -109,6 +110,50 @@ BILLING_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.ADMIN,
     OrganizationMembership.OrgRole.BILLING,
 }
+
+API_KEY_MANAGE_ROLES = {
+    OrganizationMembership.OrgRole.OWNER,
+    OrganizationMembership.OrgRole.ADMIN,
+}
+
+API_KEY_VIEW_ROLES = API_KEY_MANAGE_ROLES | {
+    OrganizationMembership.OrgRole.BILLING,
+}
+
+
+class ApiKeyOwnerMixin:
+    """Utilities for resolving API key ownership based on console context."""
+
+    @cached_property
+    def api_key_context(self):
+        resolved = build_console_context(self.request)
+        if resolved.current_context.type == "organization":
+            membership = resolved.current_membership
+            if membership is None:
+                raise PermissionDenied("Organization context is no longer available.")
+
+            can_view = membership.role in API_KEY_VIEW_ROLES
+            if not can_view:
+                raise PermissionDenied("You do not have access to organization API keys.")
+
+            return {
+                "type": "organization",
+                "organization": membership.org,
+                "membership": membership,
+                "can_manage": membership.role in API_KEY_MANAGE_ROLES,
+            }
+
+        return {
+            "type": "user",
+            "user": self.request.user,
+            "can_manage": True,
+        }
+
+    def _ensure_can_manage_api_keys(self):
+        ctx = self.api_key_context
+        if not ctx.get("can_manage"):
+            raise PermissionDenied("You do not have permission to manage API keys for this organization.")
+        return ctx
 
 
 def _resolve_org_from_request(request):
@@ -286,25 +331,29 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        # Get the oldest non-revoked API key that has a raw key value
-        default_key = ApiKey.objects.filter(
-            user=self.request.user,
-            revoked_at__isnull=True,
-            raw_key__isnull=False
-        ).exclude(
-            raw_key=""
-        ).order_by('created_at').first()
+        current_ctx = context.get('current_context', {}) or {}
 
-        if default_key and default_key.raw_key:
-            context['default_api_key'] = default_key.raw_key
-            context['has_api_key'] = True
+        if current_ctx.get('type') != 'organization':
+            # Get the oldest non-revoked API key that has a raw key value
+            default_key = ApiKey.objects.filter(
+                user=self.request.user,
+                revoked_at__isnull=True,
+                raw_key__isnull=False
+            ).exclude(
+                raw_key=""
+            ).order_by('created_at').first()
+
+            if default_key and default_key.raw_key:
+                context['default_api_key'] = default_key.raw_key
+                context['has_api_key'] = True
+            else:
+                context['has_api_key'] = False
         else:
             context['has_api_key'] = False
 
         # Add agent statistics (personal vs organization)
         from api.models import BrowserUseAgent, BrowserUseAgentTask
 
-        current_ctx = context.get('current_context', {})
         ctx_type = current_ctx.get('type', 'personal')
 
         if ctx_type == 'organization' and current_ctx.get('id'):
@@ -490,7 +539,7 @@ class ExampleConsolePage(LoginRequiredMixin, TemplateView):
     """Example console page."""
     template_name = "example_console_page.html"
 
-class ApiKeyListView(ConsoleViewMixin, FormMixin, ListView):
+class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
     """List all API keys for the current user and handle creation."""
     model = ApiKey
     template_name = "api_keys.html"
@@ -500,19 +549,37 @@ class ApiKeyListView(ConsoleViewMixin, FormMixin, ListView):
 
     @tracer.start_as_current_span("CONSOLE API Key List - get_queryset")
     def get_queryset(self):
-        return ApiKey.objects.filter(user=self.request.user).order_by('-created_at')
+        ctx = self.api_key_context
+        if ctx["type"] == "organization":
+            return (
+                ApiKey.objects.select_related("created_by")
+                .filter(organization=ctx["organization"])
+                .order_by('-created_at')
+            )
+
+        return (
+            ApiKey.objects.select_related("created_by")
+            .filter(user=self.request.user)
+            .order_by('-created_at')
+        )
 
     @tracer.start_as_current_span("CONSOLE API Key List - get_context_data")
     def get_context_data(self, **kwargs):
         """Add form to context."""
         context = super().get_context_data(**kwargs)
         context['form'] = self.get_form() # Add form instance from FormMixin
+        context['api_key_context'] = self.api_key_context
+        context['can_manage_api_keys'] = self.api_key_context.get("can_manage", False)
         return context
 
     @tracer.start_as_current_span("CONSOLE API Key List - get_form_kwargs")
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
-        kwargs["user"] = self.request.user
+        ctx = self.api_key_context
+        if ctx["type"] == "organization":
+            kwargs["organization"] = ctx["organization"]
+        else:
+            kwargs["user"] = self.request.user
         return kwargs
 
     @tracer.start_as_current_span("CONSOLE API Key List - Create API Key")
@@ -522,7 +589,16 @@ class ApiKeyListView(ConsoleViewMixin, FormMixin, ListView):
         if not request.user.is_authenticated:
             return HttpResponseForbidden()
 
+        self._ensure_can_manage_api_keys()
+
         form = self.get_form()
+        ctx = self.api_key_context
+        if ctx["type"] == "organization":
+            form.organization = ctx["organization"]
+            form.user = None
+        else:
+            form.user = self.request.user
+            form.organization = None
         if form.is_valid():
             try:
                 return self.form_valid(form)
@@ -569,10 +645,23 @@ class ApiKeyListView(ConsoleViewMixin, FormMixin, ListView):
     def form_valid(self, form):
         """Process a valid form to create an API key."""
         name = form.cleaned_data['name']
-        # create_for_user bypasses model validation by using objects.create
-        # The validation will now happen in the model's save method
-        # which could raise ValidationError (e.g., if key limit is reached)
-        raw_key, api_key = ApiKey.create_for_user(self.request.user, name=name)
+        ctx = self.api_key_context
+
+        if ctx["type"] == "organization":
+            raw_key, api_key = ApiKey.create_for_org(
+                ctx["organization"],
+                created_by=self.request.user,
+                name=name,
+            )
+        else:
+            # create_for_user bypasses model validation by using objects.create
+            # The validation will now happen in the model's save method
+            # which could raise ValidationError (e.g., if key limit is reached)
+            raw_key, api_key = ApiKey.create_for_user(
+                self.request.user,
+                name=name,
+                created_by=self.request.user,
+            )
 
         base_props = {
             'key_id': str(api_key.id),
@@ -614,17 +703,27 @@ class ApiKeyListView(ConsoleViewMixin, FormMixin, ListView):
             return redirect(self.get_success_url())
 
 
-class ApiKeyDetailView(LoginRequiredMixin, View):
+class ApiKeyDetailView(ApiKeyOwnerMixin, LoginRequiredMixin, View):
     """Handle Revoke (PATCH) and Delete (DELETE) for a specific API key."""
     http_method_names = ['get', 'patch', 'delete', 'options'] # Added GET for HTMX refresh
 
     @tracer.start_as_current_span("API Key Get Object")
     def get_object(self):
         """Helper to get the API key or raise 404."""
+        ctx = self.api_key_context
+        base_qs = ApiKey.objects.select_related("created_by")
+
+        if ctx["type"] == "organization":
+            return get_object_or_404(
+                base_qs,
+                id=self.kwargs['pk'],
+                organization=ctx["organization"],
+            )
+
         return get_object_or_404(
-            ApiKey,
+            base_qs,
             id=self.kwargs['pk'],
-            user=self.request.user # Ensure user owns the key
+            user=self.request.user,
         )
 
     @tracer.start_as_current_span("API Key Detail View - GET")
@@ -639,11 +738,20 @@ class ApiKeyDetailView(LoginRequiredMixin, View):
 
         # Not tracking here as it's a small segment of larger page
 
-        return render(request, "partials/_api_key_row.html", {"key": api_key})
+        return render(
+            request,
+            "partials/_api_key_row.html",
+            {
+                "key": api_key,
+                "api_key_context": self.api_key_context,
+                "can_manage_api_keys": self.api_key_context.get("can_manage", False),
+            },
+        )
 
     @transaction.atomic
     def patch(self, request, *args, **kwargs):
         """Handle PATCH requests to revoke an API key."""
+        self._ensure_can_manage_api_keys()
         api_key = self.get_object()
         api_key.revoke()
 
@@ -676,6 +784,7 @@ class ApiKeyDetailView(LoginRequiredMixin, View):
     @transaction.atomic
     def delete(self, request, *args, **kwargs):
         """Handle DELETE requests to permanently delete an API key."""
+        self._ensure_can_manage_api_keys()
         api_key = self.get_object()
         key_name = api_key.name # Store name before deleting
         key_id = api_key.id     # Store ID before deleting
@@ -716,26 +825,53 @@ class ApiKeyDetailView(LoginRequiredMixin, View):
         # Log or handle the error as needed
         return HttpResponseNotAllowed(self._allowed_methods())
 
-class ApiKeyTableView(LoginRequiredMixin, ListView):
+class ApiKeyTableView(ApiKeyOwnerMixin, LoginRequiredMixin, ListView):
     model = ApiKey
     template_name = "partials/_api_key_table_body.html"  # New partial for just the table body
     context_object_name = "api_keys"
 
     @tracer.start_as_current_span("API Key Table View - GET")
     def get_queryset(self):
-        # Return keys ordered by creation date, newest first
-        return ApiKey.objects.filter(user=self.request.user).order_by('-created_at')
+        ctx = self.api_key_context
+        if ctx["type"] == "organization":
+            return (
+                ApiKey.objects.select_related("created_by")
+                .filter(organization=ctx["organization"])
+                .order_by('-created_at')
+            )
 
-class ApiKeyBlankFormView(LoginRequiredMixin, View):
+        return (
+            ApiKey.objects.select_related("created_by")
+            .filter(user=self.request.user)
+            .order_by('-created_at')
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['api_key_context'] = self.api_key_context
+        context['can_manage_api_keys'] = self.api_key_context.get("can_manage", False)
+        return context
+
+class ApiKeyBlankFormView(ApiKeyOwnerMixin, LoginRequiredMixin, View):
     @tracer.start_as_current_span("API Key Blank Form View - GET")
     def get(self, request, *args, **kwargs):
-        form = ApiKeyForm(user=request.user)
+        ctx = self.api_key_context
+        if ctx["type"] == "organization":
+            self._ensure_can_manage_api_keys()
+            form = ApiKeyForm(organization=ctx["organization"])
+        else:
+            form = ApiKeyForm(user=request.user)
         return render(request, "partials/_api_key_form.html", {"form": form})
 
-class ApiKeyCreateModalView(LoginRequiredMixin, View):
+class ApiKeyCreateModalView(ApiKeyOwnerMixin, LoginRequiredMixin, View):
     @tracer.start_as_current_span("API Key Create Modal View - GET")
     def get(self, request, *args, **kwargs):
-        form = ApiKeyForm(user=request.user)
+        ctx = self.api_key_context
+        self._ensure_can_manage_api_keys()
+        if ctx["type"] == "organization":
+            form = ApiKeyForm(organization=ctx["organization"])
+        else:
+            form = ApiKeyForm(user=request.user)
         return render(request, "partials/_api_key_modal.html", {"form": form})
 
 class BillingView(ConsoleViewMixin, TemplateView):
@@ -1109,22 +1245,23 @@ def tasks_view(request):
                 status=OrganizationMembership.OrgStatus.ACTIVE,
             ).exists():
                 return HttpResponseForbidden("You do not have access to this organization.")
-            # For organization context, show tasks from agents owned by the organization
-            # Get BrowserUseAgents that are linked to PersistentAgents in this organization
-            persistent_agent_ids = PersistentAgent.objects.filter(
-                organization_id=context_id
-            ).values_list('browser_use_agent_id', flat=True)
-            tasks_queryset = BrowserUseAgentTask.objects.filter(
-                agent_id__in=persistent_agent_ids,
-                is_deleted=False
-            ).order_by('-created_at')
+
+            tasks_queryset = (
+                BrowserUseAgentTask.objects.filter(
+                    models.Q(organization_id=context_id) |
+                    models.Q(agent__persistent_agent__organization_id=context_id),
+                    is_deleted=False,
+                )
+                .distinct()
+                .order_by('-created_at')
+            )
         else:
             # For personal context, show user's personal tasks only
-            # Exclude tasks for org-owned agents; include agent-less tasks
             tasks_queryset = (
                 BrowserUseAgentTask.objects.filter(
                     user=request.user,
-                    is_deleted=False
+                    is_deleted=False,
+                    organization__isnull=True,
                 )
                 .exclude(agent__persistent_agent__organization__isnull=False)
                 .order_by('-created_at')

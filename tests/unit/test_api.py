@@ -9,12 +9,16 @@ from unittest.mock import patch, MagicMock
 import sys
 import types
 from api.models import (
-    BrowserUseAgent,
     ApiKey,
+    BrowserUseAgent,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
+    Organization,
+    OrganizationMembership,
+    PersistentAgent,
+    TaskCredit,
     UserQuota,
-    TaskCredit, )
+)
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from util.subscription_helper import report_task_usage_to_stripe, report_task_usage
@@ -23,8 +27,39 @@ from django.utils import timezone
 from datetime import timedelta
 from django.core.exceptions import ValidationError
 
+from console.forms import ApiKeyForm
+
 
 User = get_user_model()
+
+
+@tag('batch_console_api_keys')
+class ApiKeyFormTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='form-user@example.com',
+            email='form-user@example.com',
+            password='password123'
+        )
+        self.org = Organization.objects.create(
+            name='Form Org',
+            slug='form-org',
+            created_by=self.user,
+        )
+
+    def test_form_validates_for_personal_owner(self):
+        form = ApiKeyForm(data={'name': 'Personal Key'}, user=self.user)
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_form_validates_for_org_owner(self):
+        form = ApiKeyForm(data={'name': 'Org Key'}, organization=self.org)
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_form_rejects_missing_owner(self):
+        form = ApiKeyForm(data={'name': 'Invalid Key'})
+        self.assertFalse(form.is_valid())
+        self.assertIn('Unable to determine API key owner', ''.join(form.non_field_errors()))
+
 
 @tag("batch_api_agents")
 class BrowserUseAgentViewSetTests(APITestCase):
@@ -202,26 +237,148 @@ class BrowserUseAgentTaskSerializerTests(APITestCase):
         # Valid wait parameter
         serializer = BrowserUseAgentTaskSerializer(data={'prompt': 'Test task', 'wait': 600})
         self.assertTrue(serializer.is_valid())
-        
+
         # Wait parameter too small
         serializer = BrowserUseAgentTaskSerializer(data={'prompt': 'Test task', 'wait': -1})
         self.assertFalse(serializer.is_valid())
         self.assertIn('wait', serializer.errors)
-        
+
         # Wait parameter too large
         serializer = BrowserUseAgentTaskSerializer(data={'prompt': 'Test task', 'wait': 1351})
         self.assertFalse(serializer.is_valid())
         self.assertIn('wait', serializer.errors)
-        
+
         # Wait parameter is not required
         serializer = BrowserUseAgentTaskSerializer(data={'prompt': 'Test task'})
         self.assertTrue(serializer.is_valid())
-        
+
         # Wait parameter is properly removed when saving
         serializer = BrowserUseAgentTaskSerializer(data={'prompt': 'Test task', 'wait': 30})
         self.assertTrue(serializer.is_valid())
         self.assertIn('wait', serializer.validated_data)
-        
+
+
+@tag('batch_api_org_keys')
+class OrganizationApiKeyTests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username='org-owner@example.com',
+            email='org-owner@example.com',
+            password='password123'
+        )
+        UserQuota.objects.get_or_create(user=self.owner, defaults={'agent_limit': 5})
+
+        self.client.login(username='org-owner@example.com', password='password123')
+
+        self.org = Organization.objects.create(
+            name='Org API Keys',
+            slug='org-api-keys',
+            created_by=self.owner,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        billing = self.org.billing
+        billing.purchased_seats = 5
+        billing.save(update_fields=['purchased_seats'])
+
+        self.personal_browser = BrowserUseAgent.objects.create(user=self.owner, name='Personal Agent')
+        self.org_browser = BrowserUseAgent.objects.create(user=self.owner, name='Org Agent Browser')
+        self.org_agent = PersistentAgent.objects.create(
+            user=self.owner,
+            organization=self.org,
+            name='Org Persistent Agent',
+            charter='Handle organizational tasks',
+            browser_use_agent=self.org_browser,
+        )
+
+        now = timezone.now()
+        TaskCredit.objects.create(
+            organization=self.org,
+            credits=10,
+            credits_used=0,
+            granted_date=now,
+            expiration_date=now + timezone.timedelta(days=30),
+        )
+
+        self.org_task = BrowserUseAgentTask.objects.create(
+            agent=self.org_browser,
+            user=self.owner,
+            prompt={'detail': 'org task'},
+        )
+        self.org_task.refresh_from_db()
+        self.assertEqual(self.org_task.organization, self.org)
+        self.personal_task = BrowserUseAgentTask.objects.create(
+            agent=self.personal_browser,
+            user=self.owner,
+            prompt={'detail': 'personal task'},
+        )
+        self.personal_task.refresh_from_db()
+        self.assertIsNone(self.personal_task.organization)
+
+        self.raw_org_key, self.org_api_key = ApiKey.create_for_org(
+            self.org,
+            created_by=self.owner,
+            name='org-key'
+        )
+
+    def test_org_key_lists_only_org_agents(self):
+        self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
+        url = reverse('api:browseruseagent-list')
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = {agent['name'] for agent in response.data['results']}
+        self.assertIn(self.org_browser.name, names)
+        self.assertNotIn(self.personal_browser.name, names)
+
+    def test_org_key_limits_agent_listing_to_org_owned_agent(self):
+        self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
+        url = reverse('api:agent-tasks-list', kwargs={'agentId': self.personal_browser.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_org_key_lists_only_org_tasks(self):
+        self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
+        url = reverse('api:user-tasks-list')
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task_ids = {task['id'] for task in response.data['results']}
+        self.assertIn(str(self.org_task.id), task_ids)
+        self.assertNotIn(str(self.personal_task.id), task_ids)
+
+    def test_org_key_agentless_task_creation_sets_organization(self):
+        self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
+        url = reverse('api:user-tasks-list')
+        response = self.client.post(url, {'prompt': 'agentless'}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        new_task_id = response.data['id']
+        self.assertEqual(response.data.get('agent'), None)
+        self.assertEqual(response.data.get('organization_id'), str(self.org.id))
+        task = BrowserUseAgentTask.objects.get(id=new_task_id)
+        self.assertIsNone(task.agent)
+        self.assertEqual(task.organization, self.org)
+        self.assertEqual(task.user, self.owner)
+
+    def test_org_key_cannot_create_browser_agents(self):
+        self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
+        url = reverse('api:browseruseagent-list')
+        response = self.client.post(url, {'name': 'New Agent'}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        message = response.data
+        if isinstance(message, dict):
+            message = message.get('detail') or message.get('non_field_errors', [])
+        if isinstance(message, list):
+            self.assertIn('Organization API keys cannot create browser agents.', message)
+        else:
+            self.assertIn('Organization API keys cannot create browser agents.', str(message))
+
 @tag("batch_api_tasks")
 class BrowserUseAgentTaskViewSetTests(APITestCase):
     def setUp(self):

@@ -88,10 +88,29 @@ class SmsProvider(models.TextChoices):
 
 class ApiKey(models.Model):
     MAX_API_KEYS_PER_USER = 50
+    MAX_API_KEYS_PER_ORG = 50
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="api_keys"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="api_keys",
+        null=True,
+        blank=True,
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        related_name="api_keys",
+        null=True,
+        blank=True,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="created_api_keys",
+        null=True,
+        blank=True,
     )
     name = models.CharField(max_length=64, default="default")
     prefix = models.CharField(max_length=8, editable=False)
@@ -103,7 +122,23 @@ class ApiKey(models.Model):
 
     class Meta:
         constraints = [
-            UniqueConstraint(fields=['user', 'name'], name='unique_api_key_user_name')
+            UniqueConstraint(
+                fields=['user', 'name'],
+                name='unique_api_key_user_name',
+                condition=models.Q(organization__isnull=True, user__isnull=False),
+            ),
+            UniqueConstraint(
+                fields=['organization', 'name'],
+                name='unique_api_key_org_name',
+                condition=models.Q(organization__isnull=False),
+            ),
+            models.CheckConstraint(
+                check=(
+                    (models.Q(user__isnull=False, organization__isnull=True))
+                    | (models.Q(user__isnull=True, organization__isnull=False))
+                ),
+                name="api_key_exactly_one_owner",
+            ),
         ]
 
     @staticmethod
@@ -112,11 +147,29 @@ class ApiKey(models.Model):
         return raw, _hash(raw)
 
     @classmethod
-    def create_for_user(cls, user, name="default"):
+    def create_for_user(cls, user, name="default", *, created_by=None):
         raw, hashed = cls.generate()
         prefix = raw[:8]
         instance = cls.objects.create(
             user=user,
+            name=name,
+            prefix=prefix,
+            hashed_key=hashed,
+            raw_key=raw,
+            created_by=created_by or user,
+        )
+        return raw, instance
+
+    @classmethod
+    def create_for_org(cls, organization, *, created_by, name="default"):
+        if created_by is None:
+            raise ValueError("created_by is required for organization API keys")
+
+        raw, hashed = cls.generate()
+        prefix = raw[:8]
+        instance = cls.objects.create(
+            organization=organization,
+            created_by=created_by,
             name=name,
             prefix=prefix,
             hashed_key=hashed,
@@ -126,21 +179,53 @@ class ApiKey(models.Model):
 
     def clean(self):
         super().clean()
+        owner_user = getattr(self, 'user', None)
+        owner_org = getattr(self, 'organization', None)
+        owner_user_id = getattr(self, 'user_id', None) or (owner_user.id if owner_user else None)
+        owner_org_id = getattr(self, 'organization_id', None) or (owner_org.id if owner_org else None)
+
         if self._state.adding:
-            user_id = getattr(self, 'user_id', None)
-            if user_id:
-                current_key_count = ApiKey.objects.filter(user_id=user_id).count()
+
+            if bool(owner_user_id) == bool(owner_org_id):
+                raise ValidationError("API keys must belong to exactly one owner (user or organization).")
+
+            if owner_user_id:
+                current_key_count = ApiKey.objects.filter(user_id=owner_user_id).count()
                 if current_key_count >= self.MAX_API_KEYS_PER_USER:
-                    User = get_user_model()
-                    try:
-                        user_email = User.objects.get(id=user_id).email
-                    except User.DoesNotExist:
-                        user_email = "Unknown"
                     raise ValidationError(
                         f"You have reached the maximum limit of {self.MAX_API_KEYS_PER_USER} API keys."
                     )
 
+            if owner_org_id:
+                current_key_count = ApiKey.objects.filter(organization_id=owner_org_id).count()
+                if current_key_count >= self.MAX_API_KEYS_PER_ORG:
+                    raise ValidationError(
+                        f"This organization has reached the maximum limit of {self.MAX_API_KEYS_PER_ORG} API keys."
+                    )
+
+        if owner_user_id:
+            existing = ApiKey.objects.filter(
+                user_id=owner_user_id,
+                name__iexact=self.name,
+            )
+            if self.pk:
+                existing = existing.exclude(pk=self.pk)
+            if existing.exists():
+                raise ValidationError("You already have an API key with that name.")
+
+        if owner_org_id:
+            existing = ApiKey.objects.filter(
+                organization_id=owner_org_id,
+                name__iexact=self.name,
+            )
+            if self.pk:
+                existing = existing.exclude(pk=self.pk)
+            if existing.exists():
+                raise ValidationError("This organization already has an API key with that name.")
+
     def save(self, *args, **kwargs):
+        if self.user_id and self.created_by_id is None:
+            self.created_by_id = self.user_id
         self.full_clean()
         return super().save(*args, **kwargs)
 
@@ -508,6 +593,14 @@ class BrowserUseAgentTask(models.Model):
     )
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agent_tasks", null=True, blank=True)
+    organization = models.ForeignKey(
+        'Organization',
+        on_delete=models.CASCADE,
+        related_name='browser_use_tasks',
+        null=True,
+        blank=True,
+        help_text="Owning organization, when applicable."
+    )
     # Credit used for this task
     task_credit = models.ForeignKey(
         "TaskCredit",
@@ -606,6 +699,7 @@ class BrowserUseAgentTask(models.Model):
         indexes = [
             models.Index(fields=['status', 'created_at'], name='task_status_created_idx'),
             models.Index(fields=['created_at'], name='task_created_idx'),
+            models.Index(fields=['organization', 'created_at'], name='task_org_created_idx'),
         ]
 
     def __str__(self):
@@ -626,32 +720,43 @@ class BrowserUseAgentTask(models.Model):
                 if not self.user.is_active:
                     raise ValidationError({'subscription': 'Inactive user. Cannot create tasks.'})
 
-                # Determine owner: organization if this task is for an org-owned PersistentAgent; otherwise the user
-                owner_org = None
-                try:
-                    if self.agent and hasattr(self.agent, 'persistent_agent') and self.agent.persistent_agent:
-                        owner_org = self.agent.persistent_agent.organization
-                except Exception:
-                    owner_org = None
+        owner_org = self.organization
+        agent_org = None
+        if self.agent:
+            try:
+                pa = self.agent.persistent_agent
+            except Exception:
+                pa = None
+            else:
+                if pa and getattr(pa, 'organization', None):
+                    agent_org = pa.organization
 
-                # We need a helper layer on top of this stuff to unify the logic; known duplication here
-                if owner_org:
-                    task_credits = TaskCredit.objects.filter(
-                        organization=owner_org, expiration_date__gte=timezone.now(), voided=False
-                    )
-                else:
-                    task_credits = TaskCredit.objects.filter(
-                        user=self.user, expiration_date__gte=timezone.now(), voided=False
-                    )
-                available_tasks = sum(tc.remaining for tc in task_credits)
+        if owner_org is None and agent_org is not None:
+            owner_org = agent_org
+            self.organization = agent_org
+        elif owner_org is not None and agent_org is not None and owner_org != agent_org:
+            raise ValidationError({'organization': 'Organization mismatch between task and agent ownership.'})
 
-                subscription = get_active_subscription(self.user) if not owner_org else None
+        if self.organization_id is None and owner_org is not None:
+            self.organization = owner_org
 
-                # If no active subscription and no remaining credits, block task creation
-                if available_tasks <= 0 and subscription is None:
-                    raise ValidationError(
-                        {"quota": f"Task quota exceeded. Used: {available_tasks}"}
-                    )
+        if self._state.adding:
+            if owner_org:
+                task_credits = TaskCredit.objects.filter(
+                    organization=owner_org, expiration_date__gte=timezone.now(), voided=False
+                )
+            else:
+                task_credits = TaskCredit.objects.filter(
+                    user=self.user, expiration_date__gte=timezone.now(), voided=False
+                )
+
+            available_tasks = sum(tc.remaining for tc in task_credits)
+            subscription = get_active_subscription(self.user) if owner_org is None else None
+
+            if available_tasks <= 0 and subscription is None:
+                raise ValidationError(
+                    {"quota": f"Task quota exceeded. Used: {available_tasks}"}
+                )
 
     def save(self, *args, **kwargs):
         if self._state.adding:
@@ -660,14 +765,20 @@ class BrowserUseAgentTask(models.Model):
         if self._state.adding and self.user_id:
             with transaction.atomic():
                 # Determine owner (organization or user) and consume accordingly
-                owner = self.user
-                if self.agent:
+                owner = None
+                if self.organization_id:
+                    owner = self.organization
+                if owner is None and self.agent:
                     try:
                         pa = self.agent.persistent_agent
                     except Exception:
                         pa = None
-                    if pa and getattr(pa, 'organization', None):
-                        owner = pa.organization
+                    else:
+                        if pa and getattr(pa, 'organization', None):
+                            owner = pa.organization
+
+                if owner is None:
+                    owner = self.user
 
                 # Use consolidated credit checking and consumption logic (owner-aware)
                 # Determine amount to consume; persist it on the task for auditability
@@ -684,9 +795,7 @@ class BrowserUseAgentTask(models.Model):
                 if self.credits_cost is None:
                     self.credits_cost = default_cost
 
-                super().save(*args, **kwargs)
-        else:
-            super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
 
 
 class BrowserUseAgentTaskStep(models.Model):
@@ -751,7 +860,7 @@ def initialize_new_user_resources(sender, instance, created, **kwargs):
 
             # Automatically create a default API key for new users
             with traced("CREATE User API Key"):
-                ApiKey.create_for_user(user=instance, name="default")
+                ApiKey.create_for_user(user=instance, name="default", created_by=instance)
 
             # Create an initial billing record for the user
             with traced("CREATE User Billing Record", user_id=instance.id):
