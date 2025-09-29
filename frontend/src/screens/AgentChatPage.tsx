@@ -43,22 +43,21 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
 
   useLayoutEffect(() => {
     if (!autoScrollPinned) return
-    const node = timelineRef.current
-    if (!node) return
-    node.scrollTop = node.scrollHeight
+    window.scrollTo(0, document.documentElement.scrollHeight)
   }, [events, autoScrollPinned])
 
   useEffect(() => {
-    const node = timelineRef.current
-    if (!node) return
-
     const handleScroll = () => {
-      const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight
-      setAutoScrollPinned(distanceFromBottom < 64)
+      const scrollHeight = document.documentElement.scrollHeight
+      const scrollTop = window.scrollY
+      const clientHeight = window.innerHeight
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const shouldPin = distanceFromBottom < 64
+      setAutoScrollPinned(shouldPin)
     }
 
-    node.addEventListener('scroll', handleScroll, { passive: true })
-    return () => node.removeEventListener('scroll', handleScroll)
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
   }, [setAutoScrollPinned])
 
   const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])

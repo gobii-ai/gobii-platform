@@ -39,6 +39,7 @@ export function AgentChatLayout({
   loadingOlder = false,
   loadingNewer = false,
 }: AgentChatLayoutProps) {
+
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-6 sm:px-6 lg:px-10">
@@ -47,7 +48,7 @@ export function AgentChatLayout({
           className="relative flex flex-1 flex-col gap-4"
         >
           <div id="timeline-shell" className="relative flex-1">
-            <div ref={timelineRef} id="timeline-events" className="flex h-full flex-col gap-3 overflow-y-auto">
+            <div ref={timelineRef} id="timeline-events" className="flex flex-col gap-3">
               <div
                 id="timeline-load-older"
                 className="timeline-load-control border-b border-slate-100"

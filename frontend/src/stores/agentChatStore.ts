@@ -106,11 +106,13 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   async initialize(agentId) {
     set({ loading: true, agentId, error: null, autoScrollPinned: true })
+
     try {
       const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
       const events = sortEvents(snapshot.events)
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
+
       set({
         events,
         oldestCursor,
@@ -122,6 +124,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         autoScrollPinned: true,
       })
     } catch (error) {
+      console.error('Failed to initialize agent chat:', error)
       set({
         loading: false,
         error: error instanceof Error ? error.message : 'Failed to load timeline',
