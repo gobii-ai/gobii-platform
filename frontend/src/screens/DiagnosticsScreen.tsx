@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 
 import { PingStatusCard, type PingDetail } from '../components/PingStatusCard'
 import { usePingProbe } from '../hooks/usePingProbe'
+import { formatTimeOfDay } from '../utils/datetime'
 
 export function DiagnosticsScreen() {
   const { status, snapshot, errorMessage, runPing } = usePingProbe()
@@ -22,19 +23,60 @@ export function DiagnosticsScreen() {
     return [{ label: 'Authenticated user', value: userLabel }]
   }, [snapshot, userLabel])
 
+  const statusLabel = useMemo(() => {
+    switch (status) {
+      case 'success':
+        return 'Connected'
+      case 'error':
+        return 'Error'
+      case 'loading':
+        return 'Checking'
+      default:
+        return 'Idle'
+    }
+  }, [status])
+
+  const lastChecked = useMemo(() => {
+    if (!snapshot) {
+      return 'Not checked yet'
+    }
+
+    return formatTimeOfDay(snapshot.timestamp)
+  }, [snapshot])
+
   return (
     <div className="app-shell" data-state={status}>
-      <header className="app-header">
-        <div className="app-badge">Gobii</div>
-        <div>
-          <h1 className="app-title">Console Diagnostics</h1>
-          <p className="app-subtitle">
-            Quick verification that the React bundle can mount and reach Django APIs.
-          </p>
-        </div>
-      </header>
-
       <main className="app-main">
+        <section className="card card--header" data-section="diagnostics-overview">
+          <div className="card__body card__body--header">
+            <div className="app-header">
+              <div>
+                <h1 className="app-title">Diagnostics</h1>
+                <p className="app-subtitle">
+                  System status and connectivity checks for the React console shell.
+                </p>
+              </div>
+            </div>
+
+            <dl className="app-meta">
+              <div className="app-meta__item">
+                <dt>Status</dt>
+                <dd className={`app-status-indicator app-status-indicator--${status}`}>
+                  {statusLabel}
+                </dd>
+              </div>
+              <div className="app-meta__item">
+                <dt>Last checked</dt>
+                <dd>{lastChecked}</dd>
+              </div>
+              <div className="app-meta__item">
+                <dt>Authenticated user</dt>
+                <dd>{userLabel}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
         <PingStatusCard
           title="Ping API Status"
           status={status}
@@ -47,19 +89,6 @@ export function DiagnosticsScreen() {
             loadingDetails: 'Use this to confirm console React wiring and API connectivity.',
           }}
         />
-
-        <section className="card card--secondary">
-          <header className="card__header">
-            <h2 className="card__title">Integration Checklist</h2>
-          </header>
-          <div className="card__body">
-            <ul className="roadmap">
-              <li>React builds load through Vite and mount into the console shell.</li>
-              <li>Session-authenticated API calls succeed via `fetchPing`.</li>
-              <li>Add additional diagnostics cards here as more surface areas migrate.</li>
-            </ul>
-          </div>
-        </section>
       </main>
     </div>
   )

@@ -9,10 +9,10 @@
 .app-shell {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
-  width: min(960px, 100%);
-  margin: 0 auto;
-  padding: 2.5rem 1.5rem 3rem;
+  gap: 1.5rem;
+  width: 100%;
+  margin: 0;
+  padding: 0 1.25rem 3rem 0.75rem;
   background: transparent;
   color: #1f2933;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -21,6 +21,7 @@
 .app-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 1rem;
 }
 
@@ -57,6 +58,8 @@
 .app-main {
   display: grid;
   gap: 1.5rem;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .card {
@@ -70,9 +73,94 @@
   gap: 1.5rem;
 }
 
+.card--header {
+  position: relative;
+  overflow: hidden;
+  border-color: transparent;
+  box-shadow: 0 16px 32px rgba(79, 70, 229, 0.14);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(59, 130, 246, 0.08));
+}
+
+.card--header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.18), transparent 55%);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.card__body--header {
+  position: relative;
+  z-index: 1;
+  gap: 1.75rem;
+}
+
 .card--secondary {
   border-color: rgba(71, 85, 105, 0.12);
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+}
+
+.app-meta {
+  margin: 0;
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.app-meta__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.app-meta dt {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(30, 64, 175, 0.85);
+  margin: 0;
+}
+
+.app-meta dd {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.app-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+}
+
+.app-status-indicator--success {
+  background: rgba(34, 197, 94, 0.16);
+  color: #047857;
+}
+
+.app-status-indicator--loading {
+  background: rgba(79, 70, 229, 0.18);
+  color: #4338ca;
+}
+
+.app-status-indicator--error {
+  background: rgba(239, 68, 68, 0.16);
+  color: #b91c1c;
+}
+
+.app-status-indicator--idle {
+  background: rgba(148, 163, 184, 0.18);
+  color: #334155;
 }
 
 .card__header {
@@ -183,10 +271,14 @@
 
 @media (max-width: 640px) {
   .app-shell {
-    padding: 2rem 1rem;
+    padding: 0 clamp(0.75rem, 6vw, 1.5rem) 2.25rem clamp(0.75rem, 5vw, 1.25rem);
   }
 
   .card {
     padding: 1.25rem;
   }
+}
+.card[data-section='ping-status'] {
+  border-color: transparent;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
 }
