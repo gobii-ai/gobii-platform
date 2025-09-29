@@ -681,9 +681,26 @@ def process_agent_events(
         # Clear local budget context
         set_budget_context(None)
 
+        # Broadcast final processing state to websocket clients after all processing is complete
+        try:
+            from console.agent_chat.signals import _broadcast_processing
+            from api.models import PersistentAgent
+            agent_obj = PersistentAgent.objects.get(id=persistent_agent_id)
+            _broadcast_processing(agent_obj)
+        except Exception as e:
+            logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
+
 
 def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) -> None:
     """Core event processing logic, called while holding the distributed lock."""
+    # Broadcast processing state at start of processing (when lock is acquired)
+    try:
+        from console.agent_chat.signals import _broadcast_processing
+        agent_obj = PersistentAgent.objects.get(id=persistent_agent_id)
+        _broadcast_processing(agent_obj)
+    except Exception as e:
+        logger.debug("Failed to broadcast processing state at start for agent %s: %s", persistent_agent_id, e)
+
     # Exit early in proprietary mode if the agent's owner has no credits
     try:
         agent = PersistentAgent.objects.get(id=persistent_agent_id)

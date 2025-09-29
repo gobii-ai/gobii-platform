@@ -216,12 +216,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       return
     }
     try {
-      set({ processingActive: true })
       const event = await sendAgentMessage(state.agentId, trimmed)
       get().receiveRealtimeEvent(event)
     } catch (error) {
       set({
-        processingActive: false,
         error: error instanceof Error ? error.message : 'Failed to send message',
       })
       throw error

@@ -435,6 +435,18 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
 
 
 def _compute_processing(agent: PersistentAgent) -> bool:
+    # Check if the agent event processing lock is held
+    # Note: Redlock prefixes keys with "redlock:" internally
+    from config.redis_client import get_redis_client
+    lock_key = f"redlock:agent-event-processing:{agent.id}"
+    try:
+        redis_client = get_redis_client()
+        if redis_client.exists(lock_key):
+            return True
+    except Exception:
+        pass  # Fall through to browser task check
+
+    # Also check for active browser tasks
     if not getattr(agent, "browser_use_agent_id", None):
         return False
     task_qs: BrowserUseAgentTaskQuerySet = BrowserUseAgentTask.objects
