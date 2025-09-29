@@ -11,6 +11,7 @@ from util.subscription_helper import get_user_plan, get_user_api_rate_limit, get
     get_user_task_credit_limit, has_unlimited_agents, allow_user_extra_tasks, get_user_extra_task_limit, \
     get_user_max_contacts_per_agent
 from util.tool_costs import get_most_expensive_tool_cost
+from util.constants.task_constants import TASKS_UNLIMITED
 
 
 def _enum_to_dict(enum_cls):
@@ -47,6 +48,10 @@ def account_info(request):
     tasks_available = TaskCreditService.get_user_task_credits_available(request.user, task_credits=task_credits)
     max_task_cost = get_most_expensive_tool_cost()
 
+    # Determine if the user effectively has unlimited tasks (e.g., unlimited additional tasks)
+    tasks_entitled = TaskCreditService.get_tasks_entitled(request.user)
+    tasks_unlimited = tasks_entitled == TASKS_UNLIMITED
+
     acct_info = {
         'account': {
             'plan': plan,
@@ -57,9 +62,14 @@ def account_info(request):
                 'agents_unlimited': agents_unlimited,
                 'agents_in_use': AgentService.get_agents_in_use(request.user),
                 'agents_available': AGENTS_UNLIMITED if agents_unlimited is True else AgentService.get_agents_available(request.user),
-                'tasks_entitled': TaskCreditService.get_tasks_entitled(request.user),
+                'tasks_entitled': tasks_entitled,
                 'tasks_available': tasks_available,
-                'tasks_used_pct': 100 if tasks_available < max_task_cost else TaskCreditService.get_user_task_credits_used_pct(request.user, task_credits=task_credits),
+                # If unlimited, usage is effectively 0%; else treat "can't afford a single tool" as 100%
+                'tasks_used_pct': (
+                    0 if tasks_unlimited else (
+                        100 if (tasks_available != TASKS_UNLIMITED and tasks_available < max_task_cost) else TaskCreditService.get_user_task_credits_used_pct(request.user, task_credits=task_credits)
+                    )
+                ),
                 'tasks_addl_enabled': allow_user_extra_tasks(request.user),
                 'tasks_addl_limit': get_user_extra_task_limit(request.user),
                 'task_credits_monthly': get_user_task_credit_limit(request.user),
