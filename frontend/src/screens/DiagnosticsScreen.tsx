@@ -2,10 +2,17 @@ import { useMemo } from 'react'
 
 import { PingStatusCard, type PingDetail } from '../components/PingStatusCard'
 import { usePingProbe } from '../hooks/usePingProbe'
+import { useWebSocketProbe } from '../hooks/useWebSocketProbe'
 import { formatTimeOfDay } from '../utils/datetime'
 
 export function DiagnosticsScreen() {
   const { status, snapshot, errorMessage, runPing } = usePingProbe()
+  const {
+    status: wsStatus,
+    snapshot: wsSnapshot,
+    errorMessage: wsErrorMessage,
+    runProbe: runWebSocketProbe,
+  } = useWebSocketProbe()
 
   const userLabel = useMemo(() => {
     if (!snapshot?.payload.user) {
@@ -43,6 +50,17 @@ export function DiagnosticsScreen() {
 
     return formatTimeOfDay(snapshot.timestamp)
   }, [snapshot])
+
+  const websocketDetails = useMemo<PingDetail[]>(() => {
+    if (!wsSnapshot) {
+      return []
+    }
+
+    return [
+      { label: 'Round-trip latency', value: `${wsSnapshot.roundtripMs} ms` },
+      { label: 'Echo payload', value: wsSnapshot.echoPayload },
+    ]
+  }, [wsSnapshot])
 
   return (
     <div className="app-shell" data-state={status}>
@@ -87,6 +105,21 @@ export function DiagnosticsScreen() {
           copy={{
             successHeadline: 'React bundle is live (success)',
             loadingDetails: 'Use this to confirm console React wiring and API connectivity.',
+          }}
+        />
+
+        <PingStatusCard
+          title="WebSocket Echo Status"
+          status={wsStatus}
+          snapshot={wsSnapshot}
+          errorMessage={wsErrorMessage}
+          onRunPing={runWebSocketProbe}
+          details={websocketDetails}
+          copy={{
+            successHeadline: 'WebSocket echo succeeded',
+            loadingHeadline: 'Opening WebSocket...',
+            loadingDetails: 'We connect to /ws/echo and expect an authenticated echo response.',
+            errorHeadline: 'WebSocket check failed',
           }}
         />
       </main>
