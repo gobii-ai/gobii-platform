@@ -63,6 +63,7 @@ from ..tools.mcp_tools import (
     execute_search_tools, execute_mcp_tool
 )
 from ..tools.mcp_manager import get_mcp_manager
+from ..tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
 from ...models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -348,6 +349,9 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
     Returns True if execution may proceed; False if insufficient or consumption fails.
     In failure cases, this function records a step + system step and logging.
     """
+    if tool_name == "send_chat_message":
+        return True
+
     if not settings.GOBII_PROPRIETARY_MODE or not getattr(agent, "user_id", None):
         return True
 
@@ -1092,6 +1096,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         result = execute_send_email(agent, tool_params)
                     elif tool_name == "send_sms":
                         result = execute_send_sms(agent, tool_params)
+                    elif tool_name == "send_chat_message":
+                        result = execute_send_chat_message(agent, tool_params)
                     elif tool_name == "update_schedule":
                         result = execute_update_schedule(agent, tool_params)
                     elif tool_name == "update_charter":
@@ -2161,6 +2167,7 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         },
         get_send_email_tool(),
         get_send_sms_tool(),
+        get_send_chat_tool(),
         get_search_web_tool(),
         get_spawn_web_task_tool(),
         get_update_schedule_tool(),

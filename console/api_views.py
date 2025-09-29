@@ -4,14 +4,20 @@ import json
 from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
+from django.http import HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
-from api.models import CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint
+from api.models import (
+    CommsChannel,
+    PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    build_web_agent_address,
+    build_web_user_address,
+)
 
 from console.agent_chat.access import resolve_agent
 from console.agent_chat.timeline import (
@@ -25,19 +31,30 @@ from console.agent_chat.timeline import (
 
 def _ensure_console_endpoints(agent: PersistentAgent, user) -> tuple[str, str]:
     """Ensure dedicated console endpoints exist and return (sender, recipient) addresses."""
-    channel = CommsChannel.OTHER
-    sender_address = f"console-user:{user.id}"
-    recipient_address = f"console-agent:{agent.id}"
+    channel = CommsChannel.WEB
+    sender_address = build_web_user_address(user.id, agent.id)
+    recipient_address = build_web_agent_address(agent.id)
 
-    # Ensure recipient endpoint is owned by agent for lookup
     agent_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
         channel=channel,
         address=recipient_address,
-        defaults={"owner_agent": agent, "is_primary": False},
+        defaults={
+            "owner_agent": agent,
+            "is_primary": bool(
+                agent.preferred_contact_endpoint
+                and agent.preferred_contact_endpoint.channel == CommsChannel.WEB
+            ),
+        },
     )
+    updates = []
     if agent_endpoint.owner_agent_id != agent.id:
         agent_endpoint.owner_agent = agent
-        agent_endpoint.save(update_fields=["owner_agent"])
+        updates.append("owner_agent")
+    if not agent_endpoint.address:
+        agent_endpoint.address = recipient_address
+        updates.append("address")
+    if updates:
+        agent_endpoint.save(update_fields=updates)
 
     PersistentAgentCommsEndpoint.objects.get_or_create(
         channel=channel,
@@ -100,16 +117,19 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
 
         sender_address, recipient_address = _ensure_console_endpoints(agent, request.user)
 
+        if not agent.is_sender_whitelisted(CommsChannel.WEB, sender_address):
+            return HttpResponseForbidden("You are not allowed to message this agent.")
+
         parsed = ParsedMessage(
             sender=sender_address,
             recipient=recipient_address,
             subject=None,
             body=message_text,
             attachments=[],
-            raw_payload={"source": "console"},
-            msg_channel=CommsChannel.OTHER,
+            raw_payload={"source": "console", "user_id": request.user.id},
+            msg_channel=CommsChannel.WEB,
         )
-        info = ingest_inbound_message(CommsChannel.OTHER, parsed)
+        info = ingest_inbound_message(CommsChannel.WEB, parsed)
         event = serialize_message_event(info.message)
         return JsonResponse({"event": event}, status=201)
 

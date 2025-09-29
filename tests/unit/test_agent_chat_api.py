@@ -8,13 +8,17 @@ from django.test import Client, TestCase, override_settings, tag
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
+    DeliveryStatus,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    build_web_agent_address,
+    build_web_user_address,
 )
+from api.agent.tools.web_chat_sender import execute_send_chat_message
 
 CHANNEL_LAYER_SETTINGS = {
     "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
@@ -39,22 +43,25 @@ class AgentChatAPITests(TestCase):
             browser_use_agent=cls.browser_agent,
         )
 
+        cls.user_address = build_web_user_address(cls.user.id, cls.agent.id)
+        cls.agent_address = build_web_agent_address(cls.agent.id)
+
         cls.agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=cls.agent,
-            channel=CommsChannel.EMAIL,
-            address="agent@example.com",
+            channel=CommsChannel.WEB,
+            address=cls.agent_address,
             is_primary=True,
         )
         cls.user_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=None,
-            channel=CommsChannel.EMAIL,
-            address="user@example.com",
+            channel=CommsChannel.WEB,
+            address=cls.user_address,
             is_primary=False,
         )
         cls.conversation = PersistentAgentConversation.objects.create(
             owner_agent=cls.agent,
-            channel=CommsChannel.EMAIL,
-            address="user@example.com",
+            channel=CommsChannel.WEB,
+            address=cls.user_address,
         )
 
         PersistentAgentMessage.objects.create(
@@ -114,7 +121,7 @@ class AgentChatAPITests(TestCase):
         event = payload["event"]
         self.assertEqual(event["kind"], "message")
         self.assertEqual(event["message"]["bodyText"], body)
-        self.assertEqual(event["message"]["channel"], CommsChannel.OTHER)
+        self.assertEqual(event["message"]["channel"], CommsChannel.WEB)
 
         stored = (
             PersistentAgentMessage.objects.filter(owner_agent=self.agent, body=body)
@@ -122,6 +129,25 @@ class AgentChatAPITests(TestCase):
             .first()
         )
         self.assertIsNotNone(stored)
-        self.assertEqual(stored.from_endpoint.address, f"console-user:{self.user.id}")
-        self.assertEqual(stored.conversation.address, f"console-user:{self.user.id}")
+        self.assertEqual(stored.from_endpoint.address, self.user_address)
+        self.assertEqual(stored.conversation.address, self.user_address)
         mock_delay.assert_called_once()
+
+    @tag("batch_agent_chat")
+    def test_send_chat_tool_creates_outbound_message(self):
+        params = {"body": "Tool says hi", "to_address": self.user_address}
+        result = execute_send_chat_message(self.agent, params)
+        self.assertEqual(result["status"], "ok")
+
+        message = PersistentAgentMessage.objects.get(owner_agent=self.agent, is_outbound=True, body="Tool says hi")
+        self.assertEqual(message.from_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(message.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(message.latest_status, DeliveryStatus.DELIVERED)
+
+    @tag("batch_agent_chat")
+    def test_send_chat_tool_rejects_unlisted_address(self):
+        stranger_address = build_web_user_address(self.user.id + 999, self.agent.id)
+        params = {"body": "Nope", "to_address": stranger_address}
+        result = execute_send_chat_message(self.agent, params)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("authorized", result["message"].lower())
