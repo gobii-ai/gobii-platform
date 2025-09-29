@@ -3558,6 +3558,8 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                         messages.warning(request, "No contacts were selected")
                         
             except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
                 logger.error(f"Failed to process contact requests for agent {agent.id}: {str(e)}")
                 messages.error(request, "Failed to process requests. Please try again.")
         
