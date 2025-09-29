@@ -43,13 +43,6 @@ export function AgentChatLayout({
         <div
           id="agent-workspace-root"
           className="relative flex flex-1 flex-col gap-4"
-          data-timeline-limit={events.length}
-          data-timeline-older-url=""
-          data-timeline-newer-url=""
-          data-event-stream-url=""
-          data-processing-status-url=""
-          data-processing-active={processingActive ? 'true' : 'false'}
-          data-agent-first-name={agentFirstName}
         >
           <div id="timeline-shell" className="relative flex-1">
             <div ref={timelineRef} id="timeline-events" className="flex h-full flex-col gap-3 overflow-y-auto">
@@ -61,8 +54,6 @@ export function AgentChatLayout({
               >
                 <button
                   type="button"
-                  data-role="load-older-button"
-                  data-direction="older"
                   className="timeline-load-button"
                   hidden={!hasMoreOlder && !loadingOlder}
                   onClick={onLoadOlder}
@@ -71,7 +62,7 @@ export function AgentChatLayout({
                   <span className="timeline-load-indicator" data-loading={loadingOlder ? 'true' : 'false'} aria-hidden="true" />
                   <span className="timeline-load-label">{loadingOlder ? 'Loading…' : 'Load older'}</span>
                 </button>
-                <span data-role="history-start" className="timeline-history-label" hidden={hasMoreOlder}>
+                <span className="timeline-history-label" hidden={hasMoreOlder}>
                   Beginning of history
                 </span>
               </div>
@@ -93,8 +84,6 @@ export function AgentChatLayout({
               >
                 <button
                   type="button"
-                  data-role="load-newer-button"
-                  data-direction="newer"
                   className="timeline-load-button"
                   hidden={!hasMoreNewer && !loadingNewer}
                   onClick={onLoadNewer}
@@ -106,18 +95,6 @@ export function AgentChatLayout({
               </div>
             </div>
           </div>
-
-          <div
-            id="timeline-cursors"
-            className="hidden"
-            data-older={oldestCursor || ''}
-            data-newer={newestCursor || ''}
-            data-has-more-older={hasMoreOlder ? 'true' : 'false'}
-            data-has-more-newer={hasMoreNewer ? 'true' : 'false'}
-            data-processing-active={processingActive ? 'true' : 'false'}
-            data-direction="initial"
-            data-mode="snapshot"
-          />
 
           <AgentComposer agentName={agentName} onSubmit={onSendMessage} />
         </div>
@@ -136,8 +113,6 @@ export function AgentChatLayout({
         </svg>
         <span className="sr-only">Jump to latest</span>
       </button>
-
-      <div id="processing-state" className="hidden" style={{ display: 'none' }} data-processing-active={processingActive ? 'true' : 'false'} />
     </main>
   )
 }

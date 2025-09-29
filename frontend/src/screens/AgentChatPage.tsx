@@ -22,7 +22,6 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const loadOlder = useAgentChatStore((state) => state.loadOlder)
   const loadNewer = useAgentChatStore((state) => state.loadNewer)
   const sendMessage = useAgentChatStore((state) => state.sendMessage)
-  const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
   const events = useAgentChatStore((state) => state.events)
   const hasMoreOlder = useAgentChatStore((state) => state.hasMoreOlder)
   const hasMoreNewer = useAgentChatStore((state) => state.hasMoreNewer)
@@ -38,8 +37,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
 
   useEffect(() => {
     initialize(agentId)
-    refreshProcessing()
-  }, [agentId, initialize, refreshProcessing])
+  }, [agentId, initialize])
 
   useLayoutEffect(() => {
     if (!autoScrollPinned) return
