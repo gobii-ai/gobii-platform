@@ -383,7 +383,7 @@ def _default_summarise(previous: str, steps: Sequence[StepData], safety_identifi
         recent_lines.append("• " + s.to_summary_str())
 
     joined = "\n".join(recent_lines)
-    joined = joined + "\n" + ("Safety ID: " + safety_identifier if safety_identifier else "")
+    joined = joined + "\n" + ("Safety ID: " + str(safety_identifier) if safety_identifier else "")
     return previous + ("\n" if previous else "") + joined 
 
 
