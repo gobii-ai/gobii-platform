@@ -1,0 +1,21 @@
+{% load static %}
+{% load vite_tags %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block page_title %}Gobii Console{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
+  <link rel="preload" as="image" href="{% static 'images/noBgBlue.png' %}" />
+  <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+  <link rel="stylesheet" href="{% static 'css/pygments.css' %}">
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="min-h-screen bg-slate-100">
+  <main class="min-h-screen">
+    {% block react_shell_content %}{% endblock %}
+  </main>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

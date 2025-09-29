@@ -10,6 +10,7 @@ Django and Celery run directly inside your `console/.venv` for fast reloads.
 - docker
 - uv
 - python
+- nodejs 22.x (for the Vite dev server)
 
 ---
 
@@ -29,6 +30,9 @@ source .venv/bin/activate
 
 # install
 uv pip install -e '.[dev]'
+
+# install frontend deps
+npm ci --prefix frontend
 
 # bootstrap Django
 python manage.py migrate
@@ -55,6 +59,9 @@ source console/.venv/bin/activate
 
 # 3) run the web server with hot reload
 python manage.py runserver 0.0.0.0:8000
+
+# 4) (new shell) run the Vite dev server for React pages
+npm run dev --prefix frontend
 ```
 
 Open:
@@ -62,6 +69,11 @@ Open:
 * `http://localhost:8000/admin/` – Django admin  
 * `http://localhost:8000/accounts/login/` – email / Google login  
 * `http://localhost:8000/docs/` – Swagger UI (auto-generated OpenAPI)  
+
+With both servers running, `/console/agents/<agent-id>/chat/` serves the React
+shell and calls `/api/v1/ping/` via your Django session. When DEBUG is on
+(default for local dev) the template loads modules from the Vite dev server
+automatically; the legacy agent list at `/console/agents/` stays server-rendered.
 
 ---
 

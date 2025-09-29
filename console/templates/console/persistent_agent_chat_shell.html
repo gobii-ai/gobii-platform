@@ -1,0 +1,19 @@
+{% extends "console/react_shell_base.html" %}
+{% load vite_tags %}
+
+{% block page_title %}Persistent Agent Chat Shell · Gobii{% endblock %}
+
+{% block react_shell_content %}
+<div class="py-12 px-6">
+  <div id="gobii-frontend-root"
+       class="mx-auto max-w-5xl"
+       data-app="agent-chat"
+       data-agent-id="{{ agent.id }}"
+       data-agent-name="{{ agent.name|default:'' }}">
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {% vite_asset 'src/main.tsx' %}
+{% endblock %}

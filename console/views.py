@@ -2238,6 +2238,20 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         return redirect('agent_detail', pk=agent.pk)
 
 
+class ConsoleDiagnosticsView(ConsoleViewMixin, TemplateView):
+    template_name = "console/diagnostics.html"
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
+        return HttpResponseNotAllowed(['GET'])
+
+
+class PersistentAgentChatShellView(AgentDetailView):
+    template_name = "console/persistent_agent_chat_shell.html"
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
+        return HttpResponseNotAllowed(['GET'])
+
+
 class AgentAllowlistView(LoginRequiredMixin, TemplateView):
     """Manage manual allowlist and policy for an agent."""
     template_name = "console/agent_allowlist.html"

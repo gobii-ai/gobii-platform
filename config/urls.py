@@ -15,6 +15,8 @@ from console.views import (
     ApiKeyCreateModalView,
     BillingView,
     PersistentAgentsView,
+    ConsoleDiagnosticsView,
+    PersistentAgentChatShellView,
     AgentCreateContactView,
     AgentDetailView,
     AgentEnableSmsView,
@@ -74,6 +76,7 @@ urlpatterns = [
     
     # console
     path("console/", ConsoleHome.as_view(), name="console-home"),
+    path("console/diagnostics/", ConsoleDiagnosticsView.as_view(), name="console_diagnostics"),
     path("console/switch-context/", SwitchContextView.as_view(), name="switch_context"),
     path("console/api-keys/", ApiKeyListView.as_view(), name="api_keys"),
     path("console/api-keys/blank-form/", ApiKeyBlankFormView.as_view(), name="api_key_blank_form"),
@@ -89,6 +92,7 @@ urlpatterns = [
     path("console/profile/", ProfileView.as_view(), name="profile"),
 
     path("console/agents/", PersistentAgentsView.as_view(), name="agents"),
+    path("console/agents/<uuid:pk>/chat/", PersistentAgentChatShellView.as_view(), name="agent_chat_shell"),
     path("console/agents/create/contact/", AgentCreateContactView.as_view(), name="agent_create_contact"),
     path("console/agents/<uuid:pk>/", AgentDetailView.as_view(), name="agent_detail"),
     path("console/agents/<uuid:pk>/welcome/", AgentWelcomeView.as_view(), name="agent_welcome"),

@@ -26,9 +26,9 @@
     {% endif %}
 
     <meta name="twitter:card" content="summary">
-  {% else %}
+{% else %}
   <title>{% block title %}Gobii{% endblock %}</title>
-  {% endif %}
+{% endif %}
   <!-- Favicon -->
   <link rel="icon" href="{% static 'images/favicon.ico' %}?v=4" sizes="any">
   <link rel="icon" type="image/png" sizes="16x16" href="{% static 'images/favicon-16x16.png' %}?v=4">
@@ -142,6 +142,17 @@
     {% endif %}
   </script>
   <!-- End Segment -->
+{% endif %}
+
+{% if debug or not settings.SEGMENT_WEB_WRITE_KEY %}
+  <script>
+    window.analytics = window.analytics || {
+      page: () => {},
+      track: () => {},
+      identify: () => {},
+      ready: (cb) => (typeof cb === 'function' ? cb() : undefined),
+    };
+  </script>
 {% endif %}
 
 {% if not debug and settings.MIXPANEL_PROJECT_TOKEN %}
