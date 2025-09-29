@@ -15,7 +15,7 @@ from .models import (
     PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
     PersistentAgentStep, CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
-    AgentEmailAccount, ToolFriendlyName,
+    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ToolCreditCost,
     StripeConfig,
     MeteringBatch,
     UsageThresholdSent,
@@ -476,6 +476,36 @@ class TaskCreditAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(reverse("admin:api_taskcredit_changelist"))
 
         return TemplateResponse(request, "admin/grant_user_ids_credits.html", context)
+
+
+@admin.register(TaskCreditConfig)
+class TaskCreditConfigAdmin(admin.ModelAdmin):
+    list_display = ("default_task_cost", "updated_at")
+    readonly_fields = ("singleton_id", "created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("default_task_cost",)}),
+        ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
+    )
+
+    def has_add_permission(self, request):
+        if TaskCreditConfig.objects.exists():
+            return False
+        return super().has_add_permission(request)
+
+    def has_delete_permission(self, request, obj=None):  # pragma: no cover - defensive guard
+        return False
+
+
+@admin.register(ToolCreditCost)
+class ToolCreditCostAdmin(admin.ModelAdmin):
+    list_display = ("tool_name", "credit_cost", "updated_at")
+    search_fields = ("tool_name",)
+    list_filter = ("updated_at",)
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("tool_name", "credit_cost")}),
+        ("Metadata", {"fields": ("created_at", "updated_at")}),
+    )
 
 
 @admin.register(MeteringBatch)

@@ -1,4 +1,5 @@
 import hashlib, secrets, uuid, os, string
+from decimal import Decimal
 
 import ulid
 from django.conf import settings
@@ -34,6 +35,7 @@ from tasks.services import TaskCreditService
 
 from util.subscription_helper import (
     get_active_subscription, )
+from util.tool_costs import get_default_task_credit_cost
 from datetime import timedelta
 
 import logging
@@ -267,6 +269,87 @@ class TaskCredit(models.Model):
     @property
     def remaining(self):
         return (self.credits or 0) - (self.credits_used or 0)
+
+
+
+class TaskCreditConfig(models.Model):
+    """Singleton configuration for default task credit consumption."""
+
+    singleton_id = models.PositiveSmallIntegerField(
+        primary_key=True,
+        default=1,
+        editable=False,
+    )
+    default_task_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Default credit cost applied when no tool-specific override exists.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Task credit configuration"
+        verbose_name_plural = "Task credit configuration"
+
+    def save(self, *args, **kwargs):  # pragma: no cover - exercised via util tests
+        self.singleton_id = 1
+        result = super().save(*args, **kwargs)
+        from util.tool_costs import clear_tool_credit_cost_cache
+
+        clear_tool_credit_cost_cache()
+        return result
+
+    def delete(self, using=None, keep_parents=False):  # pragma: no cover - deletion discouraged
+        raise ValidationError("TaskCreditConfig cannot be deleted.")
+
+    def __str__(self):
+        return "Task credit configuration"
+
+
+class ToolCreditCost(models.Model):
+    """Per-tool overrides for task credit consumption."""
+
+    tool_name = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="Name of the tool (case-insensitive).",
+    )
+    credit_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Credit cost charged when this tool is executed.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tool_name"]
+        verbose_name = "Tool credit cost"
+        verbose_name_plural = "Tool credit costs"
+
+    def save(self, *args, **kwargs):  # pragma: no cover - exercised via util tests
+        self.tool_name = (self.tool_name or "").strip().lower()
+        if not self.tool_name:
+            raise ValidationError({"tool_name": "Tool name cannot be blank."})
+
+        result = super().save(*args, **kwargs)
+        from util.tool_costs import clear_tool_credit_cost_cache
+
+        clear_tool_credit_cost_cache()
+        return result
+
+    def delete(self, *args, **kwargs):  # pragma: no cover - exercised via util tests
+        result = super().delete(*args, **kwargs)
+        from util.tool_costs import clear_tool_credit_cost_cache
+
+        clear_tool_credit_cost_cache()
+        return result
+
+    def __str__(self):
+        return f"{self.tool_name} ({self.credit_cost} credits)"
 
 class BrowserUseAgent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -588,7 +671,8 @@ class BrowserUseAgentTask(models.Model):
 
                 # Use consolidated credit checking and consumption logic (owner-aware)
                 # Determine amount to consume; persist it on the task for auditability
-                amount = self.credits_cost if self.credits_cost is not None else settings.CREDITS_PER_TASK
+                default_cost = get_default_task_credit_cost()
+                amount = self.credits_cost if self.credits_cost is not None else default_cost
                 result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
                 
                 if not result['success']:
@@ -598,7 +682,7 @@ class BrowserUseAgentTask(models.Model):
                 self.task_credit = result['credit']
                 # Persist the actual credits charged for this task
                 if self.credits_cost is None:
-                    self.credits_cost = amount
+                    self.credits_cost = default_cost
 
                 super().save(*args, **kwargs)
         else:
@@ -3474,7 +3558,6 @@ class PersistentAgentStep(models.Model):
         # On creation, optionally consume credits for chargeable steps only.
         if self._state.adding:
             from django.core.exceptions import ValidationError
-            from django.conf import settings as dj_settings
             # Determine owner: organization if agent is org-owned; otherwise the agent's user
             owner = None
             if self.agent and getattr(self.agent, 'organization', None):
@@ -3492,7 +3575,8 @@ class PersistentAgentStep(models.Model):
             )
 
             if owner is not None and chargeable:
-                amount = self.credits_cost if self.credits_cost is not None else dj_settings.CREDITS_PER_TASK
+                default_cost = get_default_task_credit_cost()
+                amount = self.credits_cost if self.credits_cost is not None else default_cost
                 result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
 
                 if not result.get('success'):
@@ -3500,7 +3584,7 @@ class PersistentAgentStep(models.Model):
 
                 self.task_credit = result.get('credit')
                 if self.credits_cost is None:
-                    self.credits_cost = amount
+                    self.credits_cost = default_cost
 
         return super().save(*args, **kwargs)
 

@@ -16,6 +16,7 @@ from observability import traced, trace
 from util.analytics import Analytics
 from util.tool_costs import get_most_expensive_tool_cost
 from util.constants.task_constants import TASKS_UNLIMITED
+from util.tool_costs import get_default_task_credit_cost
 from django.db import transaction
 from django.conf import settings
 
@@ -453,7 +454,7 @@ class TaskCreditService:
 
             # Determine how many credits to consume for plan credits. For additional tasks,
             # always consume 1 (they are metered as whole tasks for billing).
-            plan_amount = amount if amount is not None else settings.CREDITS_PER_TASK
+            plan_amount = amount if amount is not None else get_default_task_credit_cost()
 
             last_credit = None
             if additional_task:
@@ -698,7 +699,7 @@ class TaskCreditService:
         """
         TaskCredit = apps.get_model("api", "TaskCredit")
         now = timezone.now()
-        plan_amount = Decimal(amount if amount is not None else settings.CREDITS_PER_TASK)
+        plan_amount = Decimal(amount if amount is not None else get_default_task_credit_cost())
 
         if TaskCreditService._is_organization_owner(owner):
             if additional_task:

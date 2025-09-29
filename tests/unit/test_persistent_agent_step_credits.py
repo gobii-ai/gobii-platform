@@ -1,5 +1,5 @@
 from decimal import Decimal
-from django.test import TestCase, override_settings, tag
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
@@ -9,8 +9,10 @@ from api.models import (
     PersistentAgent,
     PersistentAgentStep,
     TaskCredit,
+    TaskCreditConfig,
     Organization,
 )
+from util.tool_costs import clear_tool_credit_cost_cache
 
 
 User = get_user_model()
@@ -19,6 +21,11 @@ User = get_user_model()
 @tag("batch_pa_step_credits")
 class PersistentAgentStepCreditsTests(TestCase):
     def setUp(self):
+        clear_tool_credit_cost_cache()
+        TaskCreditConfig.objects.update_or_create(
+            singleton_id=1,
+            defaults={"default_task_cost": Decimal("0.40")},
+        )
         self.user = User.objects.create_user(
             username="credits@example.com",
             email="credits@example.com",
@@ -48,8 +55,11 @@ class PersistentAgentStepCreditsTests(TestCase):
         credit.refresh_from_db()
         self.assertGreater(credit.credits_used, 0)
 
-    @override_settings(CREDITS_PER_TASK=Decimal("0.1"))
     def test_fractional_credit_consumption(self):
+        config = TaskCreditConfig.objects.get(singleton_id=1)
+        config.default_task_cost = Decimal("0.1")
+        config.save()
+        clear_tool_credit_cost_cache()
         # Find the first valid credit block for the user
         credit = TaskCredit.objects.filter(user=self.user, expiration_date__gte=timezone.now(), voided=False).order_by("expiration_date").first()
         self.assertIsNotNone(credit)
