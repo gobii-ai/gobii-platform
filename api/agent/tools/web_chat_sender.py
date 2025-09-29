@@ -144,18 +144,14 @@ def _ensure_agent_web_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEn
     endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
         owner_agent=agent,
         channel=CommsChannel.WEB,
+        address=address,
         defaults={
-            "address": address,
             "is_primary": bool(
                 agent.preferred_contact_endpoint
                 and agent.preferred_contact_endpoint.channel == CommsChannel.WEB
             ),
         },
     )
-
-    if not endpoint.address:
-        endpoint.address = address
-        endpoint.save(update_fields=["address"])
 
     return endpoint
 
