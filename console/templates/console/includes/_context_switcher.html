@@ -173,11 +173,16 @@ function contextSwitcher() {
         });
         
         if (response.ok) {
-          // Reload page to refresh data for new context
-          window.location.reload();
+          // If currently on an agent detail page, redirect to the agents list
+          const isAgentDetail = /\/console\/agents\/[^/]+\/$/.test(window.location.pathname);
+          if (isAgentDetail) {
+            window.location = '{% url "agents" %}';
+          } else {
+            window.location.reload();
+          }
         } else {
           console.error('Failed to switch context');
-          // Restore previous context from session on error
+          // On failure, reload to show current (unchanged) context
           window.location.reload();
         }
       } catch (error) {

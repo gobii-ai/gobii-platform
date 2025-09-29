@@ -49,6 +49,42 @@
             <p class="mt-2 text-xs text-gray-500">Choose a memorable name for your agent that describes its purpose.</p>
           </div>
 
+          <!-- Ownership Section -->
+          <div class="sm:col-span-3">
+            <label for="agent-ownership" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
+              Ownership
+            </label>
+            <div class="hs-tooltip inline-block">
+              <svg class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+              </svg>
+              <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-56 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
+                Assign this agent to one of your organizations. Requires owner/admin role.
+              </span>
+            </div>
+          </div>
+          <div class="sm:col-span-9">
+            {% if agent.organization %}
+              <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-700">Currently assigned to <strong>{{ agent.organization.name }}</strong></span>
+                <button type="button" id="move-personal-btn" class="px-3 py-1.5 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700">Move to Personal</button>
+              </div>
+            {% else %}
+              <div class="flex items-center gap-2">
+                <select id="target-org-id" class="py-2 border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500">
+                  <option value="">Select organization…</option>
+                  {% for org in reassignable_orgs %}
+                    <option value="{{ org.id }}">{{ org.name }}</option>
+                  {% endfor %}
+                </select>
+                <button type="button" id="assign-org-btn" class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Assign to Organization</button>
+              </div>
+              <p class="mt-2 text-xs text-gray-500">Name must be unique within the selected organization.</p>
+            {% endif %}
+            <div id="ownership-error" class="mt-2 text-xs text-red-600 hidden"></div>
+          </div>
+
           <!-- Agent Email Section -->
           {% if primary_email %}
           <div class="sm:col-span-3">
@@ -364,6 +400,78 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // Removed policy dropdown handling - all agents now use manual mode
+    // Ownership reassignment handlers
+    const assignBtn = document.getElementById('assign-org-btn');
+    const movePersonalBtn = document.getElementById('move-personal-btn');
+    const ownershipError = document.getElementById('ownership-error');
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+
+    async function postReassign(targetOrgId) {
+        if (!csrfToken) {
+            if (ownershipError) {
+                ownershipError.textContent = 'Security token missing. Please refresh the page.';
+                ownershipError.classList.remove('hidden');
+            }
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('action', 'reassign_org');
+        formData.append('csrfmiddlewaretoken', csrfToken);
+        if (targetOrgId) formData.append('target_org_id', targetOrgId);
+
+        try {
+            const resp = await fetch('{% url "agent_detail" agent.id %}', {
+                method: 'POST',
+                body: formData,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            const data = await resp.json();
+            if (data?.success) {
+                if (data.redirect) {
+                    window.location = data.redirect;
+                } else {
+                    window.location.reload();
+                }
+                return;
+            }
+            const err = data?.error || 'Reassignment failed.';
+            if (ownershipError) {
+                ownershipError.textContent = err;
+                ownershipError.classList.remove('hidden');
+            } else {
+                alert(err);
+            }
+        } catch (e) {
+            if (ownershipError) {
+                ownershipError.textContent = 'An error occurred. Please try again.';
+                ownershipError.classList.remove('hidden');
+            } else {
+                alert('An error occurred. Please try again.');
+            }
+        }
+    }
+
+    if (assignBtn) {
+        assignBtn.addEventListener('click', function() {
+            const sel = document.getElementById('target-org-id');
+            const target = sel ? sel.value : '';
+            if (!target) {
+                if (ownershipError) {
+                    ownershipError.textContent = 'Please select an organization.';
+                    ownershipError.classList.remove('hidden');
+                }
+                return;
+            }
+            postReassign(target);
+        });
+    }
+
+    if (movePersonalBtn) {
+        movePersonalBtn.addEventListener('click', function() {
+            postReassign(null);
+        });
+    }
     
 });
 
