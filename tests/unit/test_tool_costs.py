@@ -1,14 +1,12 @@
 from decimal import Decimal
-from django.test import TestCase, override_settings, tag
-
 from django.test import TestCase, tag
-from util.tool_costs import get_tool_credit_cost, get_most_expensive_tool_cost
 
 from api.models import TaskCreditConfig, ToolCreditCost
 from util.tool_costs import (
     clear_tool_credit_cost_cache,
     get_default_task_credit_cost,
     get_tool_credit_cost,
+    get_most_expensive_tool_cost,
 )
 
 
@@ -55,20 +53,24 @@ class ToolCostTests(TestCase):
         override.save()
 
         self.assertEqual(get_tool_credit_cost("search_web"), Decimal("0.25"))
-    @override_settings(
-        CREDITS_PER_TASK=Decimal("0.50"),
-        TOOL_CREDIT_COSTS={
-            "search_web": Decimal("0.10"),
-            "sqlite_batch": Decimal("0.80"),
-            "bad": "not_a_number",
-        },
-    )
-    def test_get_most_expensive_tool_cost_uses_highest_valid_value(self):
+
+    def test_get_most_expensive_tool_cost_uses_highest_db_value(self):
+        ToolCreditCost.objects.bulk_create(
+            [
+                ToolCreditCost(tool_name="search_web", credit_cost=Decimal("0.10")),
+                ToolCreditCost(tool_name="sqlite_batch", credit_cost=Decimal("0.80")),
+            ]
+        )
+        clear_tool_credit_cost_cache()
+
         self.assertEqual(get_most_expensive_tool_cost(), Decimal("0.80"))
 
-    @override_settings(
-        CREDITS_PER_TASK=Decimal("0.75"),
-        TOOL_CREDIT_COSTS={"search_web": Decimal("0.10")},
-    )
-    def test_get_most_expensive_tool_cost_defaults_when_no_higher_value(self):
+    def test_get_most_expensive_tool_cost_defaults_when_no_override_above_default(self):
+        config = TaskCreditConfig.objects.get(singleton_id=1)
+        config.default_task_cost = Decimal("0.75")
+        config.save()
+
+        ToolCreditCost.objects.create(tool_name="search_web", credit_cost=Decimal("0.10"))
+        clear_tool_credit_cost_cache()
+
         self.assertEqual(get_most_expensive_tool_cost(), Decimal("0.75"))

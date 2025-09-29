@@ -108,13 +108,12 @@ def get_tool_credit_cost(tool_name: str | None) -> Decimal:
 
 def get_most_expensive_tool_cost() -> Decimal:
     """Return the largest configured tool credit cost, including the default."""
-    default_cost: Decimal = getattr(settings, "CREDITS_PER_TASK")
-    raw_mapping: dict[str, Any] = getattr(settings, "TOOL_CREDIT_COSTS", {}) or {}
+    default_cost, overrides = _get_tool_cost_config()
 
     max_cost = default_cost
-    for value in raw_mapping.values():
+    for value in overrides.values():
         try:
-            candidate = value if isinstance(value, Decimal) else Decimal(str(value))
+            candidate = value if isinstance(value, Decimal) else _coerce_decimal(value, default_cost)
         except Exception:
             continue
 
