@@ -111,4 +111,4 @@ RUN mkdir -p /tmp/.npm && chown -R appuser:appgroup /tmp/.npm
 USER appuser
 
 EXPOSE 8000
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "config.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--graceful-timeout", "30", "--timeout", "0"]

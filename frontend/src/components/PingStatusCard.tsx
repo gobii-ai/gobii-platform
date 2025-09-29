@@ -1,5 +1,11 @@
 import { formatTimeOfDay } from '../utils/datetime'
-import type { PingSnapshot, PingStatus } from '../hooks/usePingProbe'
+import type { PingStatus } from '../hooks/usePingProbe'
+
+export type ProbeSnapshot = {
+  timestamp: number
+}
+
+type ExtendedSnapshot = ProbeSnapshot & Record<string, unknown>
 
 export type PingDetail = {
   label: string
@@ -17,7 +23,7 @@ export type PingStatusCopy = {
 type PingStatusCardProps = {
   title: string
   status: PingStatus
-  snapshot?: PingSnapshot
+  snapshot?: ExtendedSnapshot
   errorMessage?: string
   onRunPing: () => void | Promise<void>
   details?: PingDetail[]

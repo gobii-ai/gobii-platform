@@ -87,7 +87,7 @@ services:
         condition: service_started
     restart: unless-stopped
     command: >-
-      bash -lc "gunicorn config.wsgi:application --bind 0.0.0.0:8000"
+      bash -lc "gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers ${GUNICORN_WORKERS:-4} --bind 0.0.0.0:8000 --graceful-timeout 30 --timeout 0"
 
   flower:
     image: mher/flower:2.0

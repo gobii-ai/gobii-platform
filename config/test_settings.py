@@ -53,6 +53,13 @@ CELERY_TASK_EAGER_PROPAGATES = True  # Propagate exceptions to test runner
 CELERY_BROKER_URL = ""
 CELERY_RESULT_BACKEND = ""
 
+# Channels: keep WebSocket tests in-process without Redis.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    }
+}
+
 # Ensure email delivery is simulated in tests (no network calls)
 SIMULATE_EMAIL_DELIVERY = True
 

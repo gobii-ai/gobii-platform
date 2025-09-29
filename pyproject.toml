@@ -120,6 +120,10 @@ dependencies = [
   # IMAP IDLE helper for simple, reliable IDLE sessions
   "imapclient~=2.3",
   "cron-descriptor>=2.0.6",
+  "uvicorn[standard]>=0.35.0",
+  "channels>=4.3.1",
+  "channels-redis>=4.3.0",
+  "daphne>=4.2.1",
 ]
 
 [build-system]
