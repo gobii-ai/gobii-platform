@@ -67,7 +67,7 @@ def account_info(request):
                 # If unlimited, usage is effectively 0%; else treat "can't afford a single tool" as 100%
                 'tasks_used_pct': (
                     0 if tasks_unlimited else (
-                        100 if (tasks_available != TASKS_UNLIMITED and tasks_available < max_task_cost) else TaskCreditService.get_user_task_credits_used_pct(request.user, task_credits=task_credits)
+                        100 if tasks_available < max_task_cost else TaskCreditService.get_user_task_credits_used_pct(request.user, task_credits=task_credits)
                     )
                 ),
                 'tasks_addl_enabled': allow_user_extra_tasks(request.user),
