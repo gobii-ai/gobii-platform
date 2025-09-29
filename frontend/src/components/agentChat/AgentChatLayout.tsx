@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import '../../styles/agentChatLegacy.css'
 import { AgentComposer } from './AgentComposer'
 import { ProcessingIndicator } from './ProcessingIndicator'
@@ -14,6 +14,9 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onSendMessage?: (body: string) => void | Promise<void>
   autoScrollPinned?: boolean
+  timelineRef?: Ref<HTMLDivElement>
+  loadingOlder?: boolean
+  loadingNewer?: boolean
 }
 
 export function AgentChatLayout({
@@ -30,6 +33,9 @@ export function AgentChatLayout({
   onJumpToLatest,
   onSendMessage,
   autoScrollPinned = true,
+  timelineRef,
+  loadingOlder = false,
+  loadingNewer = false,
 }: AgentChatLayoutProps) {
   return (
     <main className="min-h-screen bg-slate-50">
@@ -46,23 +52,24 @@ export function AgentChatLayout({
           data-agent-first-name={agentFirstName}
         >
           <div id="timeline-shell" className="relative flex-1">
-            <div id="timeline-events" className="flex h-full flex-col gap-3 overflow-y-auto">
+            <div ref={timelineRef} id="timeline-events" className="flex h-full flex-col gap-3 overflow-y-auto">
               <div
                 id="timeline-load-older"
                 className="timeline-load-control border-b border-slate-100"
                 data-side="older"
-                data-state={hasMoreOlder ? 'has-more' : 'exhausted'}
+                data-state={loadingOlder ? 'loading' : hasMoreOlder ? 'has-more' : 'exhausted'}
               >
                 <button
                   type="button"
                   data-role="load-older-button"
                   data-direction="older"
                   className="timeline-load-button"
-                  hidden={!hasMoreOlder}
+                  hidden={!hasMoreOlder && !loadingOlder}
                   onClick={onLoadOlder}
+                  disabled={loadingOlder}
                 >
-                  <span className="timeline-load-indicator" aria-hidden="true" />
-                  <span className="timeline-load-label">Load older</span>
+                  <span className="timeline-load-indicator" data-loading={loadingOlder ? 'true' : 'false'} aria-hidden="true" />
+                  <span className="timeline-load-label">{loadingOlder ? 'Loading…' : 'Load older'}</span>
                 </button>
                 <span data-role="history-start" className="timeline-history-label" hidden={hasMoreOlder}>
                   Beginning of history
@@ -81,19 +88,20 @@ export function AgentChatLayout({
                 id="timeline-load-newer"
                 className="timeline-load-control border-t border-slate-100"
                 data-side="newer"
-                data-state={hasMoreNewer ? 'has-more' : 'exhausted'}
-                hidden={!hasMoreNewer}
+                data-state={loadingNewer ? 'loading' : hasMoreNewer ? 'has-more' : 'exhausted'}
+                hidden={!hasMoreNewer && !loadingNewer}
               >
                 <button
                   type="button"
                   data-role="load-newer-button"
                   data-direction="newer"
                   className="timeline-load-button"
-                  hidden={!hasMoreNewer}
+                  hidden={!hasMoreNewer && !loadingNewer}
                   onClick={onLoadNewer}
+                  disabled={loadingNewer}
                 >
-                  <span className="timeline-load-indicator" aria-hidden="true" />
-                  <span className="timeline-load-label">Load newer</span>
+                  <span className="timeline-load-indicator" data-loading={loadingNewer ? 'true' : 'false'} aria-hidden="true" />
+                  <span className="timeline-load-label">{loadingNewer ? 'Loading…' : 'Load newer'}</span>
                 </button>
               </div>
             </div>
