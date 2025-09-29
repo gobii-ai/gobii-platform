@@ -16,6 +16,7 @@ from .models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     LinkShortener,
+    PersistentAgent,
 )
 from .serializers import (
     BrowserUseAgentSerializer,
@@ -38,6 +39,37 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, inline_seri
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
+
+
+def _derive_task_organization(task: BrowserUseAgentTask):
+    """Return the organization associated with a task if one can be inferred."""
+    org = None
+    try:
+        credit = getattr(task, "task_credit", None)
+        if credit is not None and getattr(credit, "organization_id", None):
+            org = credit.organization
+    except Exception:  # pragma: no cover - defensive fetch guard
+        org = None
+
+    if org is not None:
+        return org
+
+    agent = getattr(task, "agent", None)
+    if agent is None:
+        return None
+
+    try:
+        persistent = getattr(agent, "persistent_agent", None)
+        if persistent is None and isinstance(agent, BrowserUseAgent):
+            persistent = PersistentAgent.objects.filter(browser_use_agent=agent).select_related("organization").first()
+        if persistent is not None and getattr(persistent, "organization_id", None):
+            return persistent.organization
+    except PersistentAgent.DoesNotExist:  # pragma: no cover - safe fallback
+        return None
+    except Exception:  # pragma: no cover - defensive fallback
+        return None
+
+    return None
 
 # Standard Pagination (can be customized or moved to settings)
 class StandardResultsSetPagination(PageNumberPagination):
@@ -350,13 +382,23 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                 span.set_attributes(attr_for_span)
 
                 # Track task creation
+                org = _derive_task_organization(task)
+                properties = Analytics.with_org_properties(properties, organization=org)
                 Analytics.track_event(
                     user_id=task.user_id,
                     event=AnalyticsEvent.TASK_CREATED,
                     source=AnalyticsSource.API,
-                    properties=properties,
+                    properties=properties.copy(),
                     ip="0"
                 )
+                if properties.get('organization'):
+                    Analytics.track_event(
+                        user_id=task.user_id,
+                        event=AnalyticsEvent.ORGANIZATION_TASK_CREATED,
+                        source=AnalyticsSource.API,
+                        properties=properties.copy(),
+                        ip="0"
+                    )
 
             except DjangoValidationError as e:
                 raise DRFValidationError(detail=e.message_dict if hasattr(e, 'message_dict') else e.messages)
@@ -404,10 +446,27 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
             instance.deleted_at = timezone.now()
             instance.save(update_fields=['is_deleted', 'deleted_at'])
             span.add_event('TASK Deleted', {'task.id': str(instance.id), 'agent.id': str(instance.agent.id) if instance.agent else None})
-            Analytics.track_event(user_id=instance.user_id, event=AnalyticsEvent.TASK_DELETED, source=AnalyticsSource.API, properties={
-              'agent_id': str(instance.agent.id) if instance.agent else None,
-              'task_id': str(instance.id),
-            })
+            org = _derive_task_organization(instance)
+            props = Analytics.with_org_properties(
+                {
+                    'agent_id': str(instance.agent.id) if instance.agent else None,
+                    'task_id': str(instance.id),
+                },
+                organization=org,
+            )
+            Analytics.track_event(
+                user_id=instance.user_id,
+                event=AnalyticsEvent.TASK_DELETED,
+                source=AnalyticsSource.API,
+                properties=props.copy(),
+            )
+            if props.get('organization'):
+                Analytics.track_event(
+                    user_id=instance.user_id,
+                    event=AnalyticsEvent.ORGANIZATION_TASK_DELETED,
+                    source=AnalyticsSource.API,
+                    properties=props.copy(),
+                )
 
     @extend_schema(operation_id='getTaskResult', tags=['browser-use'], responses=BrowserUseAgentTaskSerializer)
     @action(detail=True, methods=['get'])
@@ -425,7 +484,13 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
 
             span.set_attributes(dict_to_attributes(task, 'task'))
 
-            Analytics.track_event(user_id=task.user_id, event=AnalyticsEvent.TASK_RESULT_VIEWED, source=AnalyticsSource.API)
+            view_props = Analytics.with_org_properties({}, organization=_derive_task_organization(task))
+            Analytics.track_event(
+                user_id=task.user_id,
+                event=AnalyticsEvent.TASK_RESULT_VIEWED,
+                source=AnalyticsSource.API,
+                properties=view_props.copy(),
+            )
             if task.status == BrowserUseAgentTask.StatusChoices.COMPLETED:
                 with traced("DB-FETCH Task Steps"):
                     result_step = BrowserUseAgentTaskStep.objects.filter(task=task, is_result=True).first()
@@ -475,10 +540,19 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                     task.save(update_fields=['status', 'updated_at'])
                     span.add_event('TASK Cancelled', {'agent.id': str(agentId)})
 
-                Analytics.track_event(user_id=task.user_id, event=AnalyticsEvent.TASK_CANCELLED, source=AnalyticsSource.API, properties={
-                  'task_id': str(task.id),
-                  'agent_id': str(agentId),
-                })
+                cancel_props = Analytics.with_org_properties(
+                    {
+                        'task_id': str(task.id),
+                        'agent_id': str(agentId),
+                    },
+                    organization=_derive_task_organization(task),
+                )
+                Analytics.track_event(
+                    user_id=task.user_id,
+                    event=AnalyticsEvent.TASK_CANCELLED,
+                    source=AnalyticsSource.API,
+                    properties=cancel_props.copy(),
+                )
 
                 return Response({'status': 'cancelled', 'message': 'Task has been cancelled.'}, status=status.HTTP_200_OK)
             else:

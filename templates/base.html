@@ -52,10 +52,14 @@
     {% get_page_meta request.path as ga_page_meta %}
 
     {% if page_meta %}
-    const gaPageTitle = "{{ ga_page_meta.0|escapejs }} - {{ ga_page_meta.1|escapejs }}";
+    let gaPageTitle = "{{ ga_page_meta.0|escapejs }} - {{ ga_page_meta.1|escapejs }}";
     {% else %}
-    const gaPageTitle = document.title;
+    let gaPageTitle = document.title;
     {% endif %}
+    const gaIsOrgContext = window.location.pathname.startsWith('/console') && {% if current_context and current_context.type == 'organization' %}true{% else %}false{% endif %};
+    if (gaIsOrgContext) {
+      gaPageTitle = `Organization ${gaPageTitle}`;
+    }
 
     const gtagConfig = {
       anonymize_ip: true,
@@ -133,12 +137,44 @@
       });
     {% else %}
       {% get_page_meta request.path as page_meta %}   {# ← call the tag, store result #}
-      analytics.page(
+      (function() {
+        const isOrganizationContext = {% if current_context and current_context.type == 'organization' %}true{% else %}false{% endif %};
+        const organizationId = {% if current_context and current_context.type == 'organization' %}"{{ current_context.id|escapejs }}"{% else %}null{% endif %};
+        const organizationName = {% if current_context and current_context.type == 'organization' %}"{{ current_context.name|escapejs }}"{% else %}null{% endif %};
+        const isConsolePath = window.location.pathname.startsWith('/console');
+        const pageProps = {};
+
+        if (isOrganizationContext && isConsolePath) {
+          pageProps.organization = true;
+          if (organizationId) {
+            pageProps.organization_id = organizationId;
+          }
+          if (organizationName) {
+            pageProps.organization_name = organizationName;
+          }
+        }
+
         {% if page_meta %}
-          "{{ page_meta.0|escapejs }}",   // category
-          "{{ page_meta.1|escapejs }}"    // name
+        let pageCategory = "{{ page_meta.0|escapejs }}";
+        let pageName = "{{ page_meta.1|escapejs }}";
+
+        if (isOrganizationContext && isConsolePath && pageName) {
+          pageName = `Organization ${pageName}`;
+        }
+
+        if (Object.keys(pageProps).length > 0) {
+          analytics.page(pageCategory, pageName, pageProps);
+        } else {
+          analytics.page(pageCategory, pageName);
+        }
+        {% else %}
+        if (Object.keys(pageProps).length > 0) {
+          analytics.page(pageProps);
+        } else {
+          analytics.page();
+        }
         {% endif %}
-      );
+      })();
     {% endif %}
   </script>
   <!-- End Segment -->

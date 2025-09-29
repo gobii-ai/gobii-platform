@@ -111,6 +111,45 @@ BILLING_MANAGE_ROLES = {
 }
 
 
+def _resolve_org_from_request(request):
+    """Return the Organization for the active console context, if any."""
+    try:
+        resolved = build_console_context(request)
+    except Exception:  # pragma: no cover - defensive guard
+        return None
+
+    membership = getattr(resolved, "current_membership", None)
+    if membership is not None and getattr(membership, "org", None) is not None:
+        return membership.org
+    return None
+
+
+def _org_event_properties(request, properties: dict | None = None, *, organization=None) -> dict:
+    """Attach organization metadata to analytics properties for console events."""
+    org = organization or _resolve_org_from_request(request)
+    return Analytics.with_org_properties(properties, organization=org)
+
+
+def _track_org_event_for_console(
+    request,
+    event: AnalyticsEvent,
+    extra_props: dict | None = None,
+    *,
+    organization=None,
+) -> dict:
+    """Track an analytics event with organization context for console actions."""
+    props = _org_event_properties(request, extra_props or {}, organization=organization)
+
+    transaction.on_commit(lambda: Analytics.track_event(
+        user_id=request.user.id,
+        event=event,
+        source=AnalyticsSource.WEB,
+        properties=props.copy(),
+    ))
+
+    return props
+
+
 def _set_overage_detach_session(request, org_id: str, subscription_id: str, price_id: str) -> None:
     """Record that the org's overage SKU was temporarily detached for seat updates."""
     if not subscription_id or not price_id:
@@ -535,15 +574,24 @@ class ApiKeyListView(ConsoleViewMixin, FormMixin, ListView):
         # which could raise ValidationError (e.g., if key limit is reached)
         raw_key, api_key = ApiKey.create_for_user(self.request.user, name=name)
 
-        transaction.on_commit(lambda : Analytics.track_event(
+        base_props = {
+            'key_id': str(api_key.id),
+            'key_name': name,
+        }
+        props = _org_event_properties(self.request, base_props)
+        transaction.on_commit(lambda: Analytics.track_event(
             user_id=self.request.user.id,
             event=AnalyticsEvent.API_KEY_CREATED,
             source=AnalyticsSource.WEB,
-            properties={
-                'key_id': str(api_key.id),
-                'key_name': name,
-            }
+            properties=props.copy(),
         ))
+        if props.get('organization'):
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=self.request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_API_KEY_CREATED,
+                source=AnalyticsSource.WEB,
+                properties=props.copy(),
+            ))
 
         if self.request.htmx:
             # Return the newly created API key notification for HTMX
@@ -599,14 +647,15 @@ class ApiKeyDetailView(LoginRequiredMixin, View):
         api_key = self.get_object()
         api_key.revoke()
 
-        transaction.on_commit(lambda : Analytics.track_event(
+        props = _org_event_properties(request, {
+            'key_id': str(api_key.id),
+            'key_name': api_key.name,
+        })
+        transaction.on_commit(lambda: Analytics.track_event(
             user_id=request.user.id,
-            event=AnalyticsEvent.API_KEY_REVOKED,
+            event=AnalyticsEvent.ORGANIZATION_API_KEY_REVOKED if props.get('organization', None) else AnalyticsEvent.API_KEY_REVOKED,
             source=AnalyticsSource.WEB,
-            properties={
-                'key_id': str(api_key.id),
-                'key_name': api_key.name,
-            }
+            properties=props.copy(),
         ))
         
         if request.htmx:
@@ -632,15 +681,23 @@ class ApiKeyDetailView(LoginRequiredMixin, View):
         key_id = api_key.id     # Store ID before deleting
         api_key.delete()
 
-        transaction.on_commit(lambda : Analytics.track_event(
+        props = _org_event_properties(request, {
+            'key_id': str(key_id),
+            'key_name': key_name,
+        })
+        transaction.on_commit(lambda: Analytics.track_event(
             user_id=request.user.id,
             event=AnalyticsEvent.API_KEY_DELETED,
             source=AnalyticsSource.WEB,
-            properties={
-                'key_id': str(key_id),
-                'key_name': key_name,
-            }
+            properties=props.copy(),
         ))
+        if props.get('organization'):
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_API_KEY_DELETED,
+                source=AnalyticsSource.WEB,
+                properties=props.copy(),
+            ))
         
         if request.htmx:
             # Render the success message partial
@@ -791,6 +848,19 @@ class BillingView(ConsoleViewMixin, TemplateView):
                     'org_has_stripe_subscription': bool(getattr(billing, "stripe_subscription_id", None)),
                     'org_pending_seat_change': overview.get('pending_seats', {}),
                 })
+                billing_view_props = Analytics.with_org_properties(
+                    {
+                        'actor_id': str(request.user.id),
+                        'has_stripe_subscription': bool(getattr(billing, "stripe_subscription_id", None)),
+                    },
+                    organization=organization,
+                )
+                Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.ORGANIZATION_BILLING_VIEWED,
+                    source=AnalyticsSource.WEB,
+                    properties=billing_view_props.copy(),
+                )
                 return render(request, self.template_name, context)
 
         # Personal billing fallback
@@ -1193,15 +1263,19 @@ def task_result_view(request, task_id):
             response['Content-Disposition'] = f'attachment; filename="task_{task_id}_result.txt"'
 
         # Track the download event
+        download_props = _org_event_properties(
+            request,
+            {
+                'task_id': str(task.id),
+                'task_status': task.status,
+                'result_step_id': str(result_step.id),
+            },
+        )
         Analytics.track_event(
             user_id=request.user.id,
             event=AnalyticsEvent.WEB_TASK_RESULT_DOWNLOADED,
             source=AnalyticsSource.WEB,
-            properties={
-                'task_id': str(task.id),
-                'task_status': task.status,
-                'result_step_id': str(result_step.id)
-            }
+            properties=download_props.copy(),
         )
 
         return response
@@ -1569,22 +1643,37 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                     if AIEmployeeTemplateService.TEMPLATE_SESSION_KEY in request.session:
                         del request.session[AIEmployeeTemplateService.TEMPLATE_SESSION_KEY]
 
-                    transaction.on_commit(lambda:  Analytics.track_event(
+                    base_props = {
+                        'agent_id': str(persistent_agent.id),
+                        'agent_name': agent_name,
+                        'contact_email': user_contact_email if user_contact_email else '',
+                        'contact_sms': user_contact_sms if user_contact_sms else '',
+                        'initial_message': initial_user_message,
+                        'charter': initial_user_message if initial_user_message else '',
+                        'preferred_contact_method': preferred_contact_method,
+                        'template_code': selected_template.code if selected_template else '',
+                        'template_schedule_applied': applied_schedule or '',
+                    }
+                    props = Analytics.with_org_properties(base_props, organization=organization)
+                    transaction.on_commit(lambda: Analytics.track_event(
                         user_id=request.user.id,
                         event=AnalyticsEvent.PERSISTENT_AGENT_CREATED,
                         source=AnalyticsSource.WEB,
-                        properties={
-                            'agent_id': str(persistent_agent.id),
-                            'agent_name': agent_name,
-                            'contact_email': user_contact_email if user_contact_email else '',
-                            'contact_sms': user_contact_sms if user_contact_sms else '',
-                            'initial_message': initial_user_message,
-                            'charter': initial_user_message if initial_user_message else '',
-                            'preferred_contact_method': preferred_contact_method,
-                            'template_code': selected_template.code if selected_template else '',
-                            'template_schedule_applied': applied_schedule or '',
-                        }
+                        properties=props.copy(),
                     ))
+                    if props.get('organization'):
+                        transaction.on_commit(lambda: Analytics.track_event(
+                            user_id=request.user.id,
+                            event=AnalyticsEvent.ORGANIZATION_PERSISTENT_AGENT_CREATED,
+                            source=AnalyticsSource.WEB,
+                            properties=props.copy(),
+                        ))
+                        transaction.on_commit(lambda: Analytics.track_event(
+                            user_id=request.user.id,
+                            event=AnalyticsEvent.ORGANIZATION_AGENT_CREATED,
+                            source=AnalyticsSource.WEB,
+                            properties=props.copy(),
+                        ))
 
                     return redirect('agent_welcome', pk=persistent_agent.id)
                     
@@ -1949,15 +2038,19 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                             allow_outbound=allow_outbound
                         )
 
+                        contact_props = Analytics.with_org_properties(
+                            {
+                                'agent_id': str(agent.id),
+                                'channel': channel,
+                                'address': address,
+                            },
+                            organization=getattr(agent, "organization", None),
+                        )
                         Analytics.track_event(
                             user_id=request.user.id,
                             event=AnalyticsEvent.AGENT_CONTACTS_APPROVED,
                             source=AnalyticsSource.WEB,
-                            properties={
-                                'agent_id': str(agent.id),
-                                'channel': channel,
-                                'address': address,
-                            }
+                            properties=contact_props.copy(),
                         )
 
                     from api.agent.tasks.process_events import process_agent_events_task
@@ -2221,16 +2314,20 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
                 messages.success(request, "Agent updated successfully.")
 
-                Analytics.track_event(
-                    user_id=request.user.id,
-                    event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
-                    source=AnalyticsSource.WEB,
-                    properties={
+                update_props = Analytics.with_org_properties(
+                    {
                         'agent_id': str(agent.pk),
                         'agent_name': new_name,
                         'is_active': new_is_active,
                         'charter': new_charter,
-                    }
+                    },
+                    organization=agent.organization,
+                )
+                Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
+                    source=AnalyticsSource.WEB,
+                    properties=update_props.copy(),
                 )
         except Exception as e:
             messages.error(request, f"Error updating agent: {e}")
@@ -2358,9 +2455,11 @@ class AgentDeleteView(LoginRequiredMixin, View):
             )
             
             agent_name = agent.name
+            agent_id = str(agent.pk)
+            agent_org = agent.organization
             # Store the browser_use_agent reference before deleting the persistent agent
             browser_use_agent = agent.browser_use_agent
-            
+
             # Delete the persistent agent first (this removes the foreign key constraint)
             agent.delete()
             
@@ -2369,15 +2468,30 @@ class AgentDeleteView(LoginRequiredMixin, View):
             
             messages.success(request, f"Agent '{agent_name}' has been deleted.")
 
+            base_props = {
+                'agent_id': agent_id,
+                'agent_name': agent_name,
+            }
+            props = Analytics.with_org_properties(base_props, organization=agent_org)
             transaction.on_commit(lambda: Analytics.track_event(
                 user_id=request.user.id,
                 event=AnalyticsEvent.PERSISTENT_AGENT_DELETED,
                 source=AnalyticsSource.WEB,
-                properties={
-                    'agent_id': str(agent.pk),
-                    'agent_name': agent_name,
-                }
+                properties=props.copy(),
             ))
+            if props.get('organization'):
+                transaction.on_commit(lambda: Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.ORGANIZATION_PERSISTENT_AGENT_DELETED,
+                    source=AnalyticsSource.WEB,
+                    properties=props.copy(),
+                ))
+                transaction.on_commit(lambda: Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.ORGANIZATION_AGENT_DELETED,
+                    source=AnalyticsSource.WEB,
+                    properties=props.copy(),
+                ))
 
             response = HttpResponse(status=200)
             response['HX-Redirect'] = reverse('agents')
@@ -3917,11 +4031,40 @@ class OrganizationCreateView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
             org.slug = slugify(org.name)
             org.created_by = request.user
             org.save()
-            OrganizationMembership.objects.create(
+            owner_membership = OrganizationMembership.objects.create(
                 org=org,
                 user=request.user,
                 role=OrganizationMembership.OrgRole.OWNER,
             )
+
+            created_props = Analytics.with_org_properties(
+                {
+                    'organization_slug': org.slug,
+                },
+                organization=org,
+            )
+            member_props = Analytics.with_org_properties(
+                {
+                    'member_id': str(request.user.id),
+                    'member_role': owner_membership.role,
+                    'actor_id': str(request.user.id),
+                },
+                organization=org,
+            )
+
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_CREATED,
+                source=AnalyticsSource.WEB,
+                properties=created_props.copy(),
+            ))
+
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_MEMBER_ADDED,
+                source=AnalyticsSource.WEB,
+                properties=member_props.copy(),
+            ))
             messages.success(request, "Organization created successfully.")
             return redirect("organization_detail", org_id=org.id)
         return render(request, self.template_name, {"form": form})
@@ -4017,6 +4160,22 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 expires_at=timezone.now() + timedelta(days=7),
                 invited_by=request.user,
             )
+            invite_props = Analytics.with_org_properties(
+                {
+                    'invite_id': str(invite.id),
+                    'invite_token': invite.token,
+                    'invite_role': invite.role,
+                    'invite_email': invite.email,
+                    'actor_id': str(request.user.id),
+                },
+                organization=self.org,
+            )
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_INVITE_SENT,
+                source=AnalyticsSource.WEB,
+                properties=invite_props.copy(),
+            ))
             # Send invitation email
             try:
                 accept_url = request.build_absolute_uri(
@@ -4174,6 +4333,8 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
                 "status": OrganizationMembership.OrgStatus.ACTIVE,
             },
         )
+        was_active = membership.status == OrganizationMembership.OrgStatus.ACTIVE
+        previous_role = membership.role
         if not created:
             # If membership already exists, reactivate and/or update role if necessary.
             if membership.status != OrganizationMembership.OrgStatus.ACTIVE or membership.role != invite.role:
@@ -4183,6 +4344,57 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
 
         invite.accepted_at = timezone.now()
         invite.save(update_fields=["accepted_at"])
+
+        invite_props = Analytics.with_org_properties(
+            {
+                'invite_id': str(invite.id),
+                'invite_token': invite.token,
+                'actor_id': str(request.user.id),
+                'role': invite.role,
+            },
+            organization=invite.org,
+        )
+        reactivated = (not created) and (not was_active or previous_role != invite.role)
+        membership_props = Analytics.with_org_properties(
+            {
+                'member_id': str(request.user.id),
+                'member_role': membership.role,
+                'actor_id': str(request.user.id),
+                'reactivated': reactivated,
+            },
+            organization=invite.org,
+        )
+        seat_props = Analytics.with_org_properties(
+            {
+                'member_id': str(request.user.id),
+                'actor_id': str(request.user.id),
+                'seat_delta': 1,
+                'reactivated': reactivated,
+            },
+            organization=invite.org,
+        )
+
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_INVITE_ACCEPTED,
+            source=AnalyticsSource.WEB,
+            properties=invite_props.copy(),
+        ))
+
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_MEMBER_ADDED,
+            source=AnalyticsSource.WEB,
+            properties=membership_props.copy(),
+        ))
+
+        if created or not was_active:
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_SEAT_ASSIGNED,
+                source=AnalyticsSource.WEB,
+                properties=seat_props.copy(),
+            ))
         messages.success(request, f"Joined {invite.org.name}.")
         return redirect("organization_detail", org_id=invite.org.id)
 
@@ -4218,6 +4430,35 @@ class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlag
         if invite.accepted_at is None and invite.revoked_at is None:
             invite.revoked_at = timezone.now()
             invite.save(update_fields=["revoked_at"])
+            decline_props = Analytics.with_org_properties(
+                {
+                    'invite_id': str(invite.id),
+                    'invite_token': invite.token,
+                    'actor_id': str(request.user.id),
+                    'reason': 'declined',
+                },
+                organization=invite.org,
+            )
+            seat_props = Analytics.with_org_properties(
+                {
+                    'actor_id': str(request.user.id),
+                    'seat_delta': -1,
+                    'reason': 'invite_declined',
+                },
+                organization=invite.org,
+            )
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_INVITE_DECLINED,
+                source=AnalyticsSource.WEB,
+                properties=decline_props.copy(),
+            ))
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
+                source=AnalyticsSource.WEB,
+                properties=seat_props.copy(),
+            ))
             messages.info(request, "Invitation declined.")
         else:
             # Should not hit due to resolver, but keep safety
@@ -4348,6 +4589,28 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                         return_url=return_url,
                     )
 
+                    _track_org_event_for_console(
+                        request,
+                        AnalyticsEvent.ORGANIZATION_SEAT_ADDED,
+                        {
+                            'actor_id': str(request.user.id),
+                            'seats_requested': seat_count,
+                            'current_quantity': current_quantity,
+                            'target_quantity': new_quantity,
+                            'method': 'portal',
+                        },
+                        organization=org,
+                    )
+                    _track_org_event_for_console(
+                        request,
+                        AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
+                        {
+                            'actor_id': str(request.user.id),
+                            'update_type': 'seats_portal_increase',
+                            'seats_requested': seat_count,
+                        },
+                        organization=org,
+                    )
                     return redirect(session.url)
                 except stripe.error.InvalidRequestError as portal_exc:
                     logger.warning(
@@ -4386,6 +4649,28 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                         messages.warning(
                             request,
                             "Stripe portal seat updates are disabled, so we applied the seat change immediately. Additional seats will activate once Stripe processes the change.",
+                        )
+                        _track_org_event_for_console(
+                            request,
+                            AnalyticsEvent.ORGANIZATION_SEAT_ADDED,
+                            {
+                                'actor_id': str(request.user.id),
+                                'seats_requested': seat_count,
+                                'current_quantity': current_quantity,
+                                'target_quantity': new_quantity,
+                                'method': 'direct_update',
+                            },
+                            organization=org,
+                        )
+                        _track_org_event_for_console(
+                            request,
+                            AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
+                            {
+                                'actor_id': str(request.user.id),
+                                'update_type': 'seats_direct_increase',
+                                'seats_requested': seat_count,
+                            },
+                            organization=org,
                         )
                     except Exception as modify_exc:
                         logger.exception(
@@ -4468,6 +4753,26 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
                 },
             )
 
+            _track_org_event_for_console(
+                request,
+                AnalyticsEvent.ORGANIZATION_SEAT_ADDED,
+                {
+                    'actor_id': str(request.user.id),
+                    'seats_requested': seat_count,
+                    'method': 'checkout',
+                },
+                organization=org,
+            )
+            _track_org_event_for_console(
+                request,
+                AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
+                {
+                    'actor_id': str(request.user.id),
+                    'update_type': 'seats_checkout_initiated',
+                    'seats_requested': seat_count,
+                },
+                organization=org,
+            )
             return redirect(session.url)
         except Exception as exc:
             logger.exception("Failed to create Stripe checkout session for org %s: %s", org.id, exc)
@@ -4683,6 +4988,27 @@ class OrganizationSeatScheduleView(WaffleFlagMixin, LoginRequiredMixin, View):
                 request,
                 "Seat reduction scheduled. The new total will apply at the start of the next billing period.",
             )
+            _track_org_event_for_console(
+                request,
+                AnalyticsEvent.ORGANIZATION_SEAT_REMOVED,
+                {
+                    'actor_id': str(request.user.id),
+                    'target_quantity': target_quantity,
+                    'current_quantity': current_quantity,
+                    'method': 'schedule',
+                },
+                organization=org,
+            )
+            _track_org_event_for_console(
+                request,
+                AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
+                {
+                    'actor_id': str(request.user.id),
+                    'update_type': 'seats_schedule_reduction',
+                    'target_quantity': target_quantity,
+                },
+                organization=org,
+            )
         except Exception as exc:  # pragma: no cover - unexpected Stripe error
             logger.exception(
                 "Failed to create Stripe seat schedule for org %s (sub %s): %s",
@@ -4756,6 +5082,15 @@ class OrganizationSeatScheduleCancelView(WaffleFlagMixin, LoginRequiredMixin, Vi
             ]
         )
 
+        _track_org_event_for_console(
+            request,
+            AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
+            {
+                'actor_id': str(request.user.id),
+                'update_type': 'seats_schedule_cancelled',
+            },
+            organization=org,
+        )
         messages.success(request, "Scheduled seat changes were cancelled.")
         return redirect("billing")
 
@@ -4852,6 +5187,35 @@ class OrganizationInviteRevokeOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
         else:
             invite.revoked_at = timezone.now()
             invite.save(update_fields=["revoked_at"])
+            revoke_props = Analytics.with_org_properties(
+                {
+                    'invite_id': str(invite.id),
+                    'invite_token': invite.token,
+                    'actor_id': str(request.user.id),
+                    'reason': 'revoked',
+                },
+                organization=org,
+            )
+            seat_props = Analytics.with_org_properties(
+                {
+                    'actor_id': str(request.user.id),
+                    'seat_delta': -1,
+                    'reason': 'invite_revoked',
+                },
+                organization=org,
+            )
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_INVITE_DECLINED,
+                source=AnalyticsSource.WEB,
+                properties=revoke_props.copy(),
+            ))
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
+                source=AnalyticsSource.WEB,
+                properties=seat_props.copy(),
+            ))
             messages.success(request, "Invitation revoked.")
         return redirect("organization_detail", org_id=org.id)
 
@@ -4903,6 +5267,21 @@ class OrganizationInviteResendOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
                 html_message=html_body,
                 fail_silently=False,
             )
+            resend_props = Analytics.with_org_properties(
+                {
+                    'invite_id': str(invite.id),
+                    'invite_token': invite.token,
+                    'actor_id': str(request.user.id),
+                    'resend': True,
+                },
+                organization=org,
+            )
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_INVITE_SENT,
+                source=AnalyticsSource.WEB,
+                properties=resend_props.copy(),
+            ))
             messages.success(request, "Invitation email resent.")
         except Exception as e:
             logger.warning("Failed resending org invite email: %s", e)
@@ -4964,6 +5343,36 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
 
         target_membership.status = OrganizationMembership.OrgStatus.REMOVED
         target_membership.save(update_fields=["status"])
+        removal_props = Analytics.with_org_properties(
+            {
+                'member_id': str(target_membership.user_id),
+                'member_role': target_membership.role,
+                'actor_id': str(request.user.id),
+                'reason': 'removed_by_admin',
+            },
+            organization=org,
+        )
+        seat_props = Analytics.with_org_properties(
+            {
+                'member_id': str(target_membership.user_id),
+                'actor_id': str(request.user.id),
+                'seat_delta': -1,
+                'reason': 'member_removed',
+            },
+            organization=org,
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_MEMBER_REMOVED,
+            source=AnalyticsSource.WEB,
+            properties=removal_props.copy(),
+        ))
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
+            source=AnalyticsSource.WEB,
+            properties=seat_props.copy(),
+        ))
         messages.success(request, "Member removed.")
         return redirect("organization_detail", org_id=org.id)
 
@@ -5004,6 +5413,36 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
 
         membership.status = OrganizationMembership.OrgStatus.REMOVED
         membership.save(update_fields=["status"])
+        removal_props = Analytics.with_org_properties(
+            {
+                'member_id': str(request.user.id),
+                'member_role': membership.role,
+                'actor_id': str(request.user.id),
+                'reason': 'left_organization',
+            },
+            organization=org,
+        )
+        seat_props = Analytics.with_org_properties(
+            {
+                'member_id': str(request.user.id),
+                'actor_id': str(request.user.id),
+                'seat_delta': -1,
+                'reason': 'member_left',
+            },
+            organization=org,
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_MEMBER_REMOVED,
+            source=AnalyticsSource.WEB,
+            properties=removal_props.copy(),
+        ))
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
+            source=AnalyticsSource.WEB,
+            properties=seat_props.copy(),
+        ))
         # After leaving, reset context back to personal
         request.session['context_type'] = 'personal'
         request.session['context_id'] = str(request.user.id)
@@ -5066,8 +5505,24 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
                 messages.error(request, "You must keep at least one owner in the organization.")
                 return redirect("organization_detail", org_id=org.id)
 
+        previous_role = target_membership.role
         target_membership.role = new_role
         target_membership.save(update_fields=["role"])
+        role_props = Analytics.with_org_properties(
+            {
+                'member_id': str(target_membership.user_id),
+                'actor_id': str(request.user.id),
+                'old_role': previous_role,
+                'new_role': new_role,
+            },
+            organization=org,
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_MEMBER_ROLE_UPDATED,
+            source=AnalyticsSource.WEB,
+            properties=role_props.copy(),
+        ))
         messages.success(request, "Member role updated.")
         return redirect("organization_detail", org_id=org.id)
 

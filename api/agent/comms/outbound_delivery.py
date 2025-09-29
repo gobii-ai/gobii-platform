@@ -325,11 +325,8 @@ def deliver_agent_email(message: PersistentAgentMessage):
                     },
                 )
 
-            Analytics.track_event(
-                user_id=message.owner_agent.user.id,
-                event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_SENT,
-                source=AnalyticsSource.AGENT,
-                properties={
+            props = Analytics.with_org_properties(
+                {
                     'agent_id': str(message.owner_agent_id),
                     'message_id': str(message.id),
                     'from_address': from_address,
@@ -337,6 +334,13 @@ def deliver_agent_email(message: PersistentAgentMessage):
                     'subject': subject,
                     'provider': 'smtp',
                 },
+                organization=getattr(message.owner_agent, "organization", None),
+            )
+            Analytics.track_event(
+                user_id=message.owner_agent.user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_SENT,
+                source=AnalyticsSource.AGENT,
+                properties=props.copy(),
             )
             return
 
@@ -641,17 +645,21 @@ def deliver_agent_email(message: PersistentAgentMessage):
         message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
 
         logger.info("Successfully sent agent email message %s via Postmark.", message.id)
-        Analytics.track_event(
-            user_id=message.owner_agent.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_SENT,
-            source=AnalyticsSource.AGENT,
-            properties={
+        success_props = Analytics.with_org_properties(
+            {
                 'agent_id': str(message.owner_agent_id),
                 'message_id': str(message.id),
                 'from_address': from_address,
                 'to_address': to_address,
                 'subject': subject,
-            }
+            },
+            organization=getattr(message.owner_agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=message.owner_agent.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_SENT,
+            source=AnalyticsSource.AGENT,
+            properties=success_props.copy(),
         )
 
     except AnymailAPIError as e:
@@ -776,11 +784,8 @@ def deliver_agent_sms(message: PersistentAgentMessage):
         message.latest_sent_at = now
         message.latest_error_message = ""
 
-        Analytics.track_event(
-            user_id=message.owner_agent.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_SMS_SENT,
-            source=AnalyticsSource.AGENT,
-            properties={
+        sms_props = Analytics.with_org_properties(
+            {
                 "agent_id": str(message.owner_agent_id),
                 "message_id": str(message.id),
                 "sms_id": provider_message_id,
@@ -789,6 +794,13 @@ def deliver_agent_sms(message: PersistentAgentMessage):
                 "is_group": len(recipient_numbers) > 1,
                 "recipient_count": len(recipient_numbers),
             },
+            organization=getattr(message.owner_agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=message.owner_agent.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SMS_SENT,
+            source=AnalyticsSource.AGENT,
+            properties=sms_props.copy(),
         )
     else:
         logger.error("Failed to send agent SMS message %s via Twilio.", message.id)
@@ -799,16 +811,20 @@ def deliver_agent_sms(message: PersistentAgentMessage):
         message.latest_status = DeliveryStatus.FAILED
         message.latest_error_message = "Failed to send SMS via Twilio."
 
-        Analytics.track_event(
-            user_id=message.owner_agent.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_SMS_FAILED,
-            source=AnalyticsSource.AGENT,
-            properties={
+        failure_props = Analytics.with_org_properties(
+            {
                 "agent_id": str(message.owner_agent_id),
                 "message_id": str(message.id),
                 "from_address": message.from_endpoint.address,
                 "to_address": message.to_endpoint.address,
             },
+            organization=getattr(message.owner_agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=message.owner_agent.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SMS_FAILED,
+            source=AnalyticsSource.AGENT,
+            properties=failure_props.copy(),
         )
 
     message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
