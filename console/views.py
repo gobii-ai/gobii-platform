@@ -25,22 +25,24 @@ from datetime import timedelta, datetime, timezone as dt_timezone
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
-from api.models import ApiKey, UserBilling, PersistentAgent, BrowserUseAgent, PersistentAgentCommsEndpoint, \
-    PersistentAgentEmailEndpoint, CommsChannel, PersistentAgentConversation, PersistentAgentMessage, \
-    PersistentAgentConversationParticipant, BrowserUseAgentTask, TaskCredit, PersistentAgentSmsEndpoint
 
 from api.models import (
     ApiKey,
     UserBilling,
-    PersistentAgent,
     BrowserUseAgent,
+    BrowserUseAgentTask,
+    PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
+    PersistentAgentMessage,
+    PersistentAgentConversationParticipant,
+    PersistentAgentSmsEndpoint,
     CommsChannel,
     UserPhoneNumber,
     Organization,
     OrganizationMembership,
     OrganizationInvite,
+    TaskCredit,
 )
 from console.mixins import ConsoleViewMixin
 from observability import traced
@@ -1975,7 +1977,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         # Provide organizations current user can reassign this agent into (owner/admin only)
         try:
-            from api.models import Organization, OrganizationMembership
             reassignable_orgs = Organization.objects.filter(
                 organizationmembership__user=self.request.user,
                 organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
@@ -1984,7 +1985,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     OrganizationMembership.OrgRole.ADMIN,
                 ],
             ).order_by('name')
-        except Exception:
+        except ImportError:
             reassignable_orgs = []
 
         context['reassignable_orgs'] = reassignable_orgs
@@ -2317,7 +2318,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     err = e.messages[0] if hasattr(e, 'messages') and e.messages else str(e)
                     return JsonResponse({'success': False, 'error': err}, status=400)
                 except Exception as e:
-                    return JsonResponse({'success': False, 'error': str(e)}, status=400)
+                    logger.exception("An error occurred during agent reassignment for agent %s", agent.id, e)
+                    return JsonResponse({'success': False, 'error': 'An unexpected error occurred. Please try again.'}, status=500)
             
             return JsonResponse({'success': False, 'error': 'Invalid action'})
         
