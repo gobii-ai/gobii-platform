@@ -309,11 +309,15 @@ class OrganizationApiKeyTests(APITestCase):
             user=self.owner,
             prompt={'detail': 'org task'},
         )
+        self.org_task.refresh_from_db()
+        self.assertEqual(self.org_task.organization, self.org)
         self.personal_task = BrowserUseAgentTask.objects.create(
             agent=self.personal_browser,
             user=self.owner,
             prompt={'detail': 'personal task'},
         )
+        self.personal_task.refresh_from_db()
+        self.assertIsNone(self.personal_task.organization)
 
         self.raw_org_key, self.org_api_key = ApiKey.create_for_org(
             self.org,
@@ -347,13 +351,19 @@ class OrganizationApiKeyTests(APITestCase):
         self.assertIn(str(self.org_task.id), task_ids)
         self.assertNotIn(str(self.personal_task.id), task_ids)
 
-    def test_org_key_requires_agent_for_task_creation(self):
+    def test_org_key_agentless_task_creation_sets_organization(self):
         self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
         url = reverse('api:user-tasks-list')
-        response = self.client.post(url, {'prompt': 'no agent provided'}, format='json')
+        response = self.client.post(url, {'prompt': 'agentless'}, format='json')
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('agent', response.data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        new_task_id = response.data['id']
+        self.assertEqual(response.data.get('agent'), None)
+        self.assertEqual(response.data.get('organization_id'), str(self.org.id))
+        task = BrowserUseAgentTask.objects.get(id=new_task_id)
+        self.assertIsNone(task.agent)
+        self.assertEqual(task.organization, self.org)
+        self.assertEqual(task.user, self.owner)
 
     def test_org_key_cannot_create_browser_agents(self):
         self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)

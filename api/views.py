@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.http import HttpResponseRedirect, Http404
 from django.views import View
+from django.db import models
 
 from observability import traced, dict_to_attributes
 from util.constants.task_constants import TASKS_UNLIMITED
@@ -240,9 +241,12 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
             if org is not None:
                 span.set_attribute('tasks.owner_type', 'organization')
                 span.set_attribute('tasks.organization_id', str(org.id))
-                qs = qs.filter(agent__persistent_agent__organization=org)
+                qs = qs.filter(
+                    models.Q(organization=org) |
+                    models.Q(agent__persistent_agent__organization=org)
+                ).distinct()
             else:
-                qs = qs.filter(user=self.request.user)
+                qs = qs.filter(user=self.request.user, organization__isnull=True)
 
         agentId = self.kwargs.get('agentId')
         properties = {}
@@ -274,9 +278,13 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
             if org is not None:
                 span.set_attribute('tasks.owner_type', 'organization')
                 span.set_attribute('tasks.organization_id', str(org.id))
-                queryset = queryset.filter(agent__persistent_agent__organization=org)
+                queryset = queryset.filter(
+                    models.Q(organization=org) |
+                    models.Q(agent__persistent_agent__organization=org)
+                ).distinct()
             else:
-                queryset = queryset.filter(user=request.user)
+                queryset = queryset.filter(user=request.user, organization__isnull=True)
+
             page = self.paginate_queryset(queryset)
             if page is not None:
                 serializer = self.get_serializer(page, many=True)
@@ -315,12 +323,14 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
             # Extract secrets before saving
             secrets = serializer.validated_data.pop('secrets', None)
 
-            if org is not None:
-                if agent is None:
-                    raise DRFValidationError(detail={'agent': 'Organization API keys must specify an agent.'})
-
             try:
-                task = serializer.save(agent=agent, user=self.request.user)
+                save_kwargs = {'agent': agent, 'user': self.request.user}
+                if org is not None:
+                    save_kwargs['organization'] = org
+                elif agent and hasattr(agent, 'persistent_agent') and getattr(agent.persistent_agent, 'organization', None):
+                    save_kwargs['organization'] = agent.persistent_agent.organization
+
+                task = serializer.save(**save_kwargs)
 
                 ctx = baggage.set_baggage("task.id", str(task.id), context.get_current())
                 context.attach(ctx)

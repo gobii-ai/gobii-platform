@@ -593,6 +593,14 @@ class BrowserUseAgentTask(models.Model):
     )
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agent_tasks", null=True, blank=True)
+    organization = models.ForeignKey(
+        'Organization',
+        on_delete=models.CASCADE,
+        related_name='browser_use_tasks',
+        null=True,
+        blank=True,
+        help_text="Owning organization, when applicable."
+    )
     # Credit used for this task
     task_credit = models.ForeignKey(
         "TaskCredit",
@@ -691,6 +699,7 @@ class BrowserUseAgentTask(models.Model):
         indexes = [
             models.Index(fields=['status', 'created_at'], name='task_status_created_idx'),
             models.Index(fields=['created_at'], name='task_created_idx'),
+            models.Index(fields=['organization', 'created_at'], name='task_org_created_idx'),
         ]
 
     def __str__(self):
@@ -711,32 +720,43 @@ class BrowserUseAgentTask(models.Model):
                 if not self.user.is_active:
                     raise ValidationError({'subscription': 'Inactive user. Cannot create tasks.'})
 
-                # Determine owner: organization if this task is for an org-owned PersistentAgent; otherwise the user
-                owner_org = None
-                try:
-                    if self.agent and hasattr(self.agent, 'persistent_agent') and self.agent.persistent_agent:
-                        owner_org = self.agent.persistent_agent.organization
-                except Exception:
-                    owner_org = None
+        owner_org = self.organization
+        agent_org = None
+        if self.agent:
+            try:
+                pa = self.agent.persistent_agent
+            except Exception:
+                pa = None
+            else:
+                if pa and getattr(pa, 'organization', None):
+                    agent_org = pa.organization
 
-                # We need a helper layer on top of this stuff to unify the logic; known duplication here
-                if owner_org:
-                    task_credits = TaskCredit.objects.filter(
-                        organization=owner_org, expiration_date__gte=timezone.now(), voided=False
-                    )
-                else:
-                    task_credits = TaskCredit.objects.filter(
-                        user=self.user, expiration_date__gte=timezone.now(), voided=False
-                    )
-                available_tasks = sum(tc.remaining for tc in task_credits)
+        if owner_org is None and agent_org is not None:
+            owner_org = agent_org
+            self.organization = agent_org
+        elif owner_org is not None and agent_org is not None and owner_org != agent_org:
+            raise ValidationError({'organization': 'Organization mismatch between task and agent ownership.'})
 
-                subscription = get_active_subscription(self.user) if not owner_org else None
+        if self.organization_id is None and owner_org is not None:
+            self.organization = owner_org
 
-                # If no active subscription and no remaining credits, block task creation
-                if available_tasks <= 0 and subscription is None:
-                    raise ValidationError(
-                        {"quota": f"Task quota exceeded. Used: {available_tasks}"}
-                    )
+        if self._state.adding:
+            if owner_org:
+                task_credits = TaskCredit.objects.filter(
+                    organization=owner_org, expiration_date__gte=timezone.now(), voided=False
+                )
+            else:
+                task_credits = TaskCredit.objects.filter(
+                    user=self.user, expiration_date__gte=timezone.now(), voided=False
+                )
+
+            available_tasks = sum(tc.remaining for tc in task_credits)
+            subscription = get_active_subscription(self.user) if owner_org is None else None
+
+            if available_tasks <= 0 and subscription is None:
+                raise ValidationError(
+                    {"quota": f"Task quota exceeded. Used: {available_tasks}"}
+                )
 
     def save(self, *args, **kwargs):
         if self._state.adding:
@@ -745,14 +765,20 @@ class BrowserUseAgentTask(models.Model):
         if self._state.adding and self.user_id:
             with transaction.atomic():
                 # Determine owner (organization or user) and consume accordingly
-                owner = self.user
-                if self.agent:
+                owner = None
+                if self.organization_id:
+                    owner = self.organization
+                if owner is None and self.agent:
                     try:
                         pa = self.agent.persistent_agent
                     except Exception:
                         pa = None
-                    if pa and getattr(pa, 'organization', None):
-                        owner = pa.organization
+                    else:
+                        if pa and getattr(pa, 'organization', None):
+                            owner = pa.organization
+
+                if owner is None:
+                    owner = self.user
 
                 # Use consolidated credit checking and consumption logic (owner-aware)
                 # Determine amount to consume; persist it on the task for auditability
@@ -769,9 +795,7 @@ class BrowserUseAgentTask(models.Model):
                 if self.credits_cost is None:
                     self.credits_cost = default_cost
 
-                super().save(*args, **kwargs)
-        else:
-            super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
 
 
 class BrowserUseAgentTaskStep(models.Model):

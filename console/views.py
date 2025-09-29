@@ -1245,22 +1245,23 @@ def tasks_view(request):
                 status=OrganizationMembership.OrgStatus.ACTIVE,
             ).exists():
                 return HttpResponseForbidden("You do not have access to this organization.")
-            # For organization context, show tasks from agents owned by the organization
-            # Get BrowserUseAgents that are linked to PersistentAgents in this organization
-            persistent_agent_ids = PersistentAgent.objects.filter(
-                organization_id=context_id
-            ).values_list('browser_use_agent_id', flat=True)
-            tasks_queryset = BrowserUseAgentTask.objects.filter(
-                agent_id__in=persistent_agent_ids,
-                is_deleted=False
-            ).order_by('-created_at')
+
+            tasks_queryset = (
+                BrowserUseAgentTask.objects.filter(
+                    models.Q(organization_id=context_id) |
+                    models.Q(agent__persistent_agent__organization_id=context_id),
+                    is_deleted=False,
+                )
+                .distinct()
+                .order_by('-created_at')
+            )
         else:
             # For personal context, show user's personal tasks only
-            # Exclude tasks for org-owned agents; include agent-less tasks
             tasks_queryset = (
                 BrowserUseAgentTask.objects.filter(
                     user=request.user,
-                    is_deleted=False
+                    is_deleted=False,
+                    organization__isnull=True,
                 )
                 .exclude(agent__persistent_agent__organization__isnull=False)
                 .order_by('-created_at')
