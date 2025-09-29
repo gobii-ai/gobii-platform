@@ -79,7 +79,8 @@
           
           <div class="space-y-4">
             {% for request in pending_requests %}
-              <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+              {% with request.is_expired as is_expired %}
+              <div class="border border-gray-200 rounded-lg p-4 transition-colors {% if is_expired %}opacity-60 bg-gray-50{% else %}hover:bg-gray-50{% endif %}">
                 <div class="flex items-start gap-x-3">
                   <div class="flex h-6 items-center">
                     <input 
@@ -87,7 +88,8 @@
                       name="approve_{{ request.id }}" 
                       id="approve_{{ request.id }}"
                       class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-                      checked
+                      {% if not is_expired %}checked{% endif %}
+                      {% if is_expired %}disabled aria-disabled="true" data-expired="true"{% endif %}
                       onchange="toggleDirectionCheckboxes('{{ request.id }}')"
                     >
                   </div>
@@ -105,6 +107,11 @@
                         {% endif %}
                         <span>{{ request.name|default:request.address }}</span>
                         <span class="text-xs text-gray-500">({{ request.address }})</span>
+                        {% if is_expired %}
+                          <span class="ml-2 inline-flex items-center rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                            Expired
+                          </span>
+                        {% endif %}
                       </div>
                     </label>
                     
@@ -128,6 +135,7 @@
                             id="inbound_{{ request.id }}"
                             class="w-4 h-4 text-green-600 bg-gray-100 border-gray-300 rounded focus:ring-green-500"
                             {% if request.request_inbound %}checked{% endif %}
+                            {% if is_expired %}disabled aria-disabled="true"{% endif %}
                           >
                           <label for="inbound_{{ request.id }}" class="text-sm text-gray-700 cursor-pointer flex items-center gap-1">
                             <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -143,6 +151,7 @@
                             id="outbound_{{ request.id }}"
                             class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
                             {% if request.request_outbound %}checked{% endif %}
+                            {% if is_expired %}disabled aria-disabled="true"{% endif %}
                           >
                           <label for="outbound_{{ request.id }}" class="text-sm text-gray-700 cursor-pointer flex items-center gap-1">
                             <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -156,6 +165,7 @@
                   </div>
                 </div>
               </div>
+              {% endwith %}
             {% endfor %}
           </div>
 
@@ -191,7 +201,10 @@
 function toggleAll(checked) {
   const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="approve_"]');
   checkboxes.forEach(checkbox => {
-    checkbox.checked = checked;
+    // Skip expired/disabled requests so they remain untouched
+    if (!checkbox.disabled) {
+      checkbox.checked = checked;
+    }
     // Get the request ID from the checkbox name
     const requestId = checkbox.name.replace('approve_', '');
     toggleDirectionCheckboxes(requestId);
@@ -205,15 +218,16 @@ function toggleDirectionCheckboxes(requestId) {
   const outboundCheckbox = document.getElementById('outbound_' + requestId);
   
   if (approveCheckbox && directionDiv) {
-    if (approveCheckbox.checked) {
-      directionDiv.style.display = 'block';
-      if (inboundCheckbox) inboundCheckbox.disabled = false;
-      if (outboundCheckbox) outboundCheckbox.disabled = false;
-    } else {
+    const shouldDisable = approveCheckbox.disabled || !approveCheckbox.checked;
+
+    if (shouldDisable) {
       directionDiv.style.display = 'none';
-      if (inboundCheckbox) inboundCheckbox.disabled = true;
-      if (outboundCheckbox) outboundCheckbox.disabled = true;
+    } else {
+      directionDiv.style.display = 'block';
     }
+
+    if (inboundCheckbox) inboundCheckbox.disabled = shouldDisable;
+    if (outboundCheckbox) outboundCheckbox.disabled = shouldDisable;
   }
 }
 
