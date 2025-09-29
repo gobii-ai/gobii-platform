@@ -3511,8 +3511,6 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                                                 fail_silently=True,  # Don't fail the whole process if email fails
                                             )
                                     except Exception as e:
-                                        import logging
-                                        logger = logging.getLogger(__name__)
                                         logger.warning("Failed to send allowlist invitation email to %s: %s", address, e)
                         
                         # Create system step to record approvals

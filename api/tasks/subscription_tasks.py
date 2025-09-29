@@ -1,8 +1,10 @@
-import os
 import logging
+from datetime import datetime, time, timedelta
 
 from celery import shared_task
 from django.utils import timezone
+from django.apps import apps
+from dateutil.relativedelta import relativedelta
 
 from config.plans import PLAN_CONFIG
 from constants.plans import PlanNamesChoices
@@ -13,6 +15,8 @@ from util.subscription_helper import (
     get_users_due_for_monthly_grant,
     filter_users_without_active_subscription
 )
+from billing.services import BillingService
+from constants.grant_types import GrantTypeChoices
 
 # --------------------------------------------------------------------------- #
 #  Optional djstripe import
@@ -50,20 +54,63 @@ def grant_monthly_free_credits() -> None:
         # Filter to those without an active subscription
         users_without_subscription = filter_users_without_active_subscription(users)
 
-        # Get the number of free credits from the current free plan
-        free_plan_credits = int(os.getenv("FREE_PLAN_TASK_CREDITS", 100))
-
         free_plan = PLAN_CONFIG[PlanNamesChoices.FREE]
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        today = timezone.now().date()
+        current_tz = timezone.get_current_timezone()
 
         for user in users_without_subscription:
-            # Get their current task credit entry, if any.
-            current_credit = TaskCreditService.get_current_task_credit(user).first()
+            grant_date = None
+            expiration_date = None
 
-            # @var current_credit: TaskCredit
-            grant_date = current_credit.expiration_date if current_credit else timezone.now()
+            billing = getattr(user, "billing", None)
+            billing_day = getattr(billing, "billing_cycle_anchor", None) if billing else None
+
+            if billing_day is not None:
+                try:
+                    billing_day = int(billing_day)
+                    period_start, period_end = BillingService.get_current_billing_period_from_day(
+                        billing_day,
+                        today,
+                    )
+                except (TypeError, ValueError):
+                    billing_day = None
+                else:
+                    grant_date = timezone.make_aware(
+                        datetime.combine(period_start, time.min),
+                        timezone=current_tz,
+                    )
+                    next_period_start = period_end + timedelta(days=1)
+                    expiration_date = timezone.make_aware(
+                        datetime.combine(next_period_start, time.min),
+                        timezone=current_tz,
+                    )
+
+            if grant_date is None:
+                last_plan_credit = (
+                    TaskCredit.objects.filter(
+                        user=user,
+                        grant_type=GrantTypeChoices.PLAN,
+                        additional_task=False,
+                        voided=False,
+                    )
+                    .order_by('-granted_date')
+                    .first()
+                )
+
+                if last_plan_credit is not None:
+                    grant_date = last_plan_credit.granted_date + relativedelta(months=1)
+                    if expiration_date is None and last_plan_credit.expiration_date is not None:
+                        expiration_date = last_plan_credit.expiration_date + relativedelta(months=1)
+                else:
+                    grant_date = timezone.now()
+
+            if expiration_date is None:
+                expiration_date = grant_date + relativedelta(months=1)
 
             TaskCreditService.grant_subscription_credits(
                 user,
                 plan=free_plan,
-                grant_date=grant_date
+                grant_date=grant_date,
+                expiration_date=expiration_date,
             )
