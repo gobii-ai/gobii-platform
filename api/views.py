@@ -18,7 +18,6 @@ from .models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     LinkShortener,
-    PersistentAgent,
 )
 from .serializers import (
     BrowserUseAgentSerializer,
@@ -43,35 +42,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
 
-def _derive_task_organization(task: BrowserUseAgentTask):
-    """Return the organization associated with a task if one can be inferred."""
-    org = None
-    try:
-        credit = getattr(task, "task_credit", None)
-        if credit is not None and getattr(credit, "organization_id", None):
-            org = credit.organization
-    except Exception:  # pragma: no cover - defensive fetch guard
-        org = None
 
-    if org is not None:
-        return org
-
-    agent = getattr(task, "agent", None)
-    if agent is None:
-        return None
-
-    try:
-        persistent = getattr(agent, "persistent_agent", None)
-        if persistent is None and isinstance(agent, BrowserUseAgent):
-            persistent = PersistentAgent.objects.filter(browser_use_agent=agent).select_related("organization").first()
-        if persistent is not None and getattr(persistent, "organization_id", None):
-            return persistent.organization
-    except PersistentAgent.DoesNotExist:  # pragma: no cover - safe fallback
-        return None
-    except Exception:  # pragma: no cover - defensive fallback
-        return None
-
-    return None
 
 # Standard Pagination (can be customized or moved to settings)
 class StandardResultsSetPagination(PageNumberPagination):
@@ -472,7 +443,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                 span.set_attributes(attr_for_span)
 
                 # Track task creation
-                org = _derive_task_organization(task)
+                org = getattr(task, "organization", None)
                 properties = Analytics.with_org_properties(properties, organization=org)
                 Analytics.track_event(
                     user_id=task.user_id,
@@ -536,7 +507,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
             instance.deleted_at = timezone.now()
             instance.save(update_fields=['is_deleted', 'deleted_at'])
             span.add_event('TASK Deleted', {'task.id': str(instance.id), 'agent.id': str(instance.agent.id) if instance.agent else None})
-            org = _derive_task_organization(instance)
+            org = getattr(instance, "organization", None)
             props = Analytics.with_org_properties(
                 {
                     'agent_id': str(instance.agent.id) if instance.agent else None,
@@ -574,7 +545,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
 
             span.set_attributes(dict_to_attributes(task, 'task'))
 
-            view_props = Analytics.with_org_properties({}, organization=_derive_task_organization(task))
+            view_props = Analytics.with_org_properties({}, organization=getattr(task, "organization", None))
             Analytics.track_event(
                 user_id=task.user_id,
                 event=AnalyticsEvent.TASK_RESULT_VIEWED,
@@ -635,7 +606,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                         'task_id': str(task.id),
                         'agent_id': str(agentId),
                     },
-                    organization=_derive_task_organization(task),
+                    organization=getattr(task, "organization", None),
                 )
                 Analytics.track_event(
                     user_id=task.user_id,
