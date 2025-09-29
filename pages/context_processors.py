@@ -10,6 +10,8 @@ from util.analytics import AnalyticsEvent, AnalyticsCTAs
 from util.subscription_helper import get_user_plan, get_user_api_rate_limit, get_user_agent_limit, \
     get_user_task_credit_limit, has_unlimited_agents, allow_user_extra_tasks, get_user_extra_task_limit, \
     get_user_max_contacts_per_agent
+from util.tool_costs import get_most_expensive_tool_cost
+
 
 def _enum_to_dict(enum_cls):
     """{'ENUM_MEMBER': 'string value', ...}"""
@@ -42,6 +44,8 @@ def account_info(request):
 
     # Get the user's task credits - there are multiple calls below that we can recycle this in to save on DB calls
     task_credits = TaskCreditService.get_current_task_credit(request.user)
+    tasks_available = TaskCreditService.get_user_task_credits_available(request.user, task_credits=task_credits)
+    max_task_cost = get_most_expensive_tool_cost()
 
     acct_info = {
         'account': {
@@ -54,8 +58,8 @@ def account_info(request):
                 'agents_in_use': AgentService.get_agents_in_use(request.user),
                 'agents_available': AGENTS_UNLIMITED if agents_unlimited is True else AgentService.get_agents_available(request.user),
                 'tasks_entitled': TaskCreditService.get_tasks_entitled(request.user),
-                'tasks_available': TaskCreditService.get_user_task_credits_available(request.user, task_credits=task_credits),
-                'tasks_used_pct': TaskCreditService.get_user_task_credits_used_pct(request.user, task_credits=task_credits),
+                'tasks_available': tasks_available,
+                'tasks_used_pct': 100 if tasks_available < max_task_cost else TaskCreditService.get_user_task_credits_used_pct(request.user, task_credits=task_credits),
                 'tasks_addl_enabled': allow_user_extra_tasks(request.user),
                 'tasks_addl_limit': get_user_extra_task_limit(request.user),
                 'task_credits_monthly': get_user_task_credit_limit(request.user),
