@@ -9,6 +9,7 @@ type AgentComposerProps = {
 
 export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentComposerProps) {
   const [body, setBody] = useState('')
+  const [isSending, setIsSending] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const MAX_COMPOSER_HEIGHT = 320
@@ -38,15 +39,20 @@ export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentCo
 
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
-    if (!trimmed || disabled) {
+    if (!trimmed || disabled || isSending) {
       return
     }
     if (onSubmit) {
-      await onSubmit(trimmed)
+      try {
+        setIsSending(true)
+        await onSubmit(trimmed)
+      } finally {
+        setIsSending(false)
+      }
     }
     setBody('')
     requestAnimationFrame(() => adjustTextareaHeight(true))
-  }, [adjustTextareaHeight, body, disabled, onSubmit])
+  }, [adjustTextareaHeight, body, disabled, isSending, onSubmit])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -87,8 +93,22 @@ export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentCo
                   <span className="ml-1 font-medium text-slate-900">{agentName}</span>
                 </div>
               </div>
-              <button type="submit" className="composer-send-button" disabled={disabled || !body.trim()}>
-                Send
+              <button
+                type="submit"
+                className="composer-send-button"
+                disabled={disabled || isSending || !body.trim()}
+              >
+                {isSending ? (
+                  <span className="inline-flex items-center gap-2 text-sm">
+                    <span
+                      className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
+                      aria-hidden="true"
+                    />
+                    Sending…
+                  </span>
+                ) : (
+                  'Send'
+                )}
               </button>
             </div>
           </div>

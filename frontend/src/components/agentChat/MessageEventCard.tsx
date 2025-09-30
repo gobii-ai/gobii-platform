@@ -1,4 +1,5 @@
 import type { AgentMessage } from './types'
+import { MessageContent } from './MessageContent'
 import { formatRelativeTimestamp } from '../../util/time'
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -31,7 +32,6 @@ export function MessageEventCard({ eventCursor, message, agentFirstName }: Messa
   const channel = message.channel || 'web'
   const channelLabel = getChannelLabel(channel)
   const showChannelTag = channel.toLowerCase() !== 'web'
-  const hasHtml = Boolean(message.bodyHtml)
   const relativeLabel = message.relativeTimestamp || formatRelativeTimestamp(message.timestamp) || ''
 
   return (
@@ -51,12 +51,12 @@ export function MessageEventCard({ eventCursor, message, agentFirstName }: Messa
             </span>
           ) : null}
         </div>
-        <div className={`chat-content prose prose-sm max-w-none leading-relaxed ${isAgent ? 'text-slate-800' : 'text-white'}`}>
-          {hasHtml ? (
-            <div dangerouslySetInnerHTML={{ __html: message.bodyHtml || '' }} />
-          ) : (
-            <p>{message.bodyText}</p>
-          )}
+        <div
+          className={`chat-content prose prose-sm max-w-none leading-relaxed ${
+            isAgent ? 'text-slate-800' : 'prose-invert text-white'
+          }`}
+        >
+          <MessageContent bodyHtml={message.bodyHtml} bodyText={message.bodyText} />
         </div>
         {message.attachments && message.attachments.length > 0 ? (
           <div className="chat-attachments">

@@ -19,6 +19,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   bottomSentinelRef?: Ref<HTMLDivElement>
   loadingOlder?: boolean
   loadingNewer?: boolean
+  initialLoading?: boolean
 }
 
 export function AgentChatLayout({
@@ -38,9 +39,12 @@ export function AgentChatLayout({
   bottomSentinelRef,
   loadingOlder = false,
   loadingNewer = false,
+  initialLoading = false,
 }: AgentChatLayoutProps) {
   const showProcessingIndicator = Boolean(processingActive && autoScrollPinned && !hasMoreNewer)
-  const showBottomSentinel = !hasMoreNewer
+  const showBottomSentinel = !initialLoading && !hasMoreNewer
+  const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
+  const showLoadNewerButton = !initialLoading && (hasMoreNewer || loadingNewer)
 
   return (
     <main className="min-h-screen">
@@ -56,24 +60,29 @@ export function AgentChatLayout({
                 className="timeline-load-control"
                 data-side="older"
                 data-state={loadingOlder ? 'loading' : hasMoreOlder ? 'has-more' : 'exhausted'}
+                hidden={!showLoadOlderButton}
               >
                 <button
                   type="button"
                   className="timeline-load-button"
-                  hidden={!hasMoreOlder && !loadingOlder}
+                  hidden={!showLoadOlderButton}
                   onClick={onLoadOlder}
                   disabled={loadingOlder}
                 >
                   <span className="timeline-load-indicator" data-loading={loadingOlder ? 'true' : 'false'} aria-hidden="true" />
                   <span className="timeline-load-label">{loadingOlder ? 'Loading…' : 'Load older'}</span>
                 </button>
-                <span className="timeline-history-label" hidden={hasMoreOlder}>
+                <span className="timeline-history-label" hidden={hasMoreOlder || initialLoading}>
                   Beginning of history
                 </span>
               </div>
 
               <div id="timeline-event-list" className="flex flex-col gap-3">
-                <TimelineEventList agentFirstName={agentFirstName} events={events} />
+                <TimelineEventList
+                  agentFirstName={agentFirstName}
+                  events={events}
+                  initialLoading={initialLoading}
+                />
               </div>
 
               <div id="processing-indicator-slot" className="processing-slot" data-visible={showProcessingIndicator ? 'true' : 'false'}>
@@ -89,12 +98,12 @@ export function AgentChatLayout({
                 className="timeline-load-control"
                 data-side="newer"
                 data-state={loadingNewer ? 'loading' : hasMoreNewer ? 'has-more' : 'exhausted'}
-                hidden={!hasMoreNewer && !loadingNewer}
+                hidden={!showLoadNewerButton}
               >
                 <button
                   type="button"
                   className="timeline-load-button"
-                  hidden={!hasMoreNewer && !loadingNewer}
+                  hidden={!showLoadNewerButton}
                   onClick={onLoadNewer}
                   disabled={loadingNewer}
                 >

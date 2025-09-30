@@ -41,6 +41,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const error = useAgentChatStore((state) => state.error)
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
+  const initialLoading = loading && events.length === 0
 
   useAgentChatSocket(agentId)
 
@@ -109,11 +110,6 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
       {error ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error}</div>
       ) : null}
-      {loading && events.length === 0 ? (
-        <div className="mx-auto flex h-[40vh] max-w-3xl items-center justify-center text-sm text-slate-500">
-          Loading conversation…
-        </div>
-      ) : null}
       <AgentChatLayout
         agentName={agentName || 'Agent'}
         agentFirstName={agentFirstName}
@@ -133,6 +129,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
         bottomSentinelRef={captureBottomSentinelRef}
         loadingOlder={loadingOlder}
         loadingNewer={loadingNewer}
+        initialLoading={initialLoading}
       />
     </div>
   )

@@ -1,5 +1,8 @@
 import { Fragment } from 'react'
+import type { ReactNode } from 'react'
 
+import { MarkdownViewer } from '../../common/MarkdownViewer'
+import { looksLikeHtml, sanitizeHtml } from '../../../util/sanitize'
 import type { ToolDetailComponent, ToolDetailProps } from '../tooling/types'
 
 function isNonEmptyString(value: unknown): value is string {
@@ -17,7 +20,7 @@ function stringify(value: unknown): string {
   }
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="space-y-1.5">
       <p className="tool-chip-panel-title">{title}</p>
@@ -26,8 +29,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function KeyValueList({ items }: { items: Array<{ label: string; value: React.ReactNode } | null> }) {
-  const filtered = items.filter(Boolean) as Array<{ label: string; value: React.ReactNode }>
+function KeyValueList({ items }: { items: Array<{ label: string; value: ReactNode } | null> }) {
+  const filtered = items.filter(Boolean) as Array<{ label: string; value: ReactNode }>
   if (!filtered.length) return null
   return (
     <dl className="grid gap-2 text-sm text-slate-600 sm:grid-cols-[auto_minmax(0,1fr)]">
@@ -42,8 +45,17 @@ function KeyValueList({ items }: { items: Array<{ label: string; value: React.Re
 }
 
 export function GenericToolDetail({ entry }: ToolDetailProps) {
-  const showParameters = entry.parameters && Object.keys(entry.parameters).length > 0
-  const hasResult = isNonEmptyString(entry.result) || typeof entry.result === 'object'
+  const parameters =
+    entry.parameters && typeof entry.parameters === 'object' && !Array.isArray(entry.parameters)
+      ? (entry.parameters as Record<string, unknown>)
+      : null
+  const showParameters = Boolean(parameters && Object.keys(parameters).length > 0)
+  const stringResult = typeof entry.result === 'string' ? entry.result.trim() : null
+  const htmlResult = stringResult && looksLikeHtml(stringResult) ? sanitizeHtml(stringResult) : null
+  const objectResult =
+    entry.result && typeof entry.result === 'object'
+      ? (entry.result as Record<string, unknown> | unknown[])
+      : null
   return (
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList
@@ -55,14 +67,23 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
       {showParameters ? (
         <Section title="Parameters">
           <pre className="max-h-56 overflow-auto rounded-xl bg-slate-900/95 p-3 text-xs text-slate-100 shadow-inner">
-            {stringify(entry.parameters)}
+            {stringify(parameters)}
           </pre>
         </Section>
       ) : null}
-      {hasResult ? (
+      {stringResult ? (
+        <Section title="Result">
+          {htmlResult ? (
+            <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: htmlResult }} />
+          ) : (
+            <MarkdownViewer content={stringResult} className="prose prose-sm max-w-none" />
+          )}
+        </Section>
+      ) : null}
+      {!stringResult && objectResult ? (
         <Section title="Result">
           <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
-            {stringify(entry.result)}
+            {stringify(objectResult)}
           </pre>
         </Section>
       ) : null}
@@ -254,19 +275,87 @@ export function AnalysisToolDetail({ entry }: ToolDetailProps) {
   )
 }
 
-export function UpdateScheduleDetail({ entry }: ToolDetailProps) {
-  const params = entry.parameters || {}
-  const summaryPieces: Array<{ label: string; value: React.ReactNode }> = []
-  if (params.schedule) {
-    summaryPieces.push({ label: 'Schedule', value: stringify(params.schedule) })
+export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
+  const params = (entry.parameters as Record<string, unknown>) || {}
+  const urlValue = params['url'] || params['start_url']
+  const targetUrl = typeof urlValue === 'string' ? urlValue : null
+  const titleValue = params['title'] || params['page_title']
+  const pageTitle = typeof titleValue === 'string' ? titleValue : entry.summary || null
+  const markdownValue = params['markdown']
+  const markdown = typeof markdownValue === 'string' && markdownValue.trim().length > 0 ? markdownValue : null
+  const htmlValue = params['html']
+  const htmlSnapshot = typeof htmlValue === 'string' && htmlValue.trim().length > 0 ? htmlValue : null
+  const screenshotValue = params['screenshot_url'] || params['screenshot']
+  const screenshotUrl = typeof screenshotValue === 'string' ? screenshotValue : null
+  const contentFromResult =
+    !markdown && !htmlSnapshot && typeof entry.result === 'string' ? entry.result : null
+  const contentMarkdown = markdown || (contentFromResult && !looksLikeHtml(contentFromResult) ? contentFromResult : null)
+  const contentHtml = htmlSnapshot || (contentFromResult && looksLikeHtml(contentFromResult) ? contentFromResult : null)
+  const sanitizedHtml = contentHtml ? sanitizeHtml(contentHtml) : null
+
+  const infoItems: Array<{ label: string; value: ReactNode }> = []
+  if (pageTitle) {
+    infoItems.push({ label: 'Page title', value: pageTitle })
   }
-  if (params.window) {
-    summaryPieces.push({ label: 'Window', value: stringify(params.window) })
+  if (targetUrl) {
+    infoItems.push({
+      label: 'URL',
+      value: (
+        <a href={targetUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">
+          {targetUrl}
+        </a>
+      ),
+    })
   }
+
   return (
     <div className="space-y-3 text-sm text-slate-600">
-      <p>The agent schedule was updated.</p>
-      {summaryPieces.length ? <KeyValueList items={summaryPieces} /> : null}
+      {infoItems.length ? <KeyValueList items={infoItems} /> : null}
+      {screenshotUrl ? (
+        <Section title="Screenshot">
+          <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
+            <img src={screenshotUrl} alt={pageTitle ? `Snapshot of ${pageTitle}` : 'Page snapshot'} className="w-full" />
+          </div>
+        </Section>
+      ) : null}
+      {contentMarkdown ? (
+        <Section title="Snapshot">
+          <MarkdownViewer content={contentMarkdown} className="prose prose-sm max-w-none" />
+        </Section>
+      ) : null}
+      {sanitizedHtml ? (
+        <Section title={contentMarkdown ? 'Raw HTML' : 'Snapshot'}>
+          <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
+        </Section>
+      ) : null}
+    </div>
+  )
+}
+
+export function UpdateScheduleDetail({ entry }: ToolDetailProps) {
+  const params = (entry.parameters as Record<string, unknown>) || {}
+  const newScheduleValue = params['new_schedule']
+  const newScheduleRaw = typeof newScheduleValue === 'string' ? newScheduleValue.trim() : null
+  const scheduleValue = newScheduleRaw && newScheduleRaw.length > 0 ? newScheduleRaw : null
+  const resultObject =
+    entry.result && typeof entry.result === 'object'
+      ? (entry.result as { status?: string; message?: string })
+      : null
+  const statusLabel = resultObject?.status ? resultObject.status.toUpperCase() : null
+  const messageText =
+    resultObject?.message || entry.summary || (scheduleValue ? 'Schedule updated successfully.' : 'Schedule disabled.')
+  const detailItems: Array<{ label: string; value: ReactNode }> = []
+  if (statusLabel) {
+    detailItems.push({ label: 'Status', value: statusLabel })
+  }
+  detailItems.push({
+    label: 'Schedule',
+    value: scheduleValue ? <code className="rounded bg-slate-100 px-1 py-0.5">{scheduleValue}</code> : 'Disabled',
+  })
+  return (
+    <div className="space-y-3 text-sm text-slate-600">
+      <p>{messageText}</p>
+      <KeyValueList items={detailItems} />
     </div>
   )
 }
@@ -282,6 +371,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   browserTask: BrowserTaskDetail,
   analysis: AnalysisToolDetail,
   updateSchedule: UpdateScheduleDetail,
+  brightDataSnapshot: BrightDataSnapshotDetail,
 }
 
 export function resolveDetailComponent(kind: string | null | undefined): ToolDetailComponent {

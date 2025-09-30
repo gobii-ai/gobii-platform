@@ -168,6 +168,14 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
       },
     },
     {
+      name: 'mcp_brightdata_scrape_as_markdown',
+      label: 'Web snapshot',
+      iconPaths: ['M4 4h16v12H4z', 'M8 20h8', 'M10 16v4', 'M14 16v4'],
+      iconBgClass: 'bg-fuchsia-100',
+      iconColorClass: 'text-fuchsia-600',
+      detailKind: 'brightDataSnapshot',
+    },
+    {
       name: 'think',
       aliases: ['reasoning'],
       label: 'Analysis',
