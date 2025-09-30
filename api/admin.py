@@ -1694,18 +1694,15 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             except (ValueError, TypeError):
                 invalid_entries.append(candidate)
 
-        # Deduplicate while preserving order
-        seen: set[str] = set()
-        unique_ids = []
-        for agent_id in parsed_ids:
-            if agent_id not in seen:
-                seen.add(agent_id)
-                unique_ids.append(agent_id)
+        # Deduplicate, preserve order, and check for existence
+        unique_ids = list(dict.fromkeys(parsed_ids))
+        existing_ids = set(map(str, PersistentAgent.objects.filter(id__in=unique_ids).values_list('id', flat=True)))
+        non_existent_ids = [agent_id for agent_id in unique_ids if agent_id not in existing_ids]
 
         queued = 0
         failures: list[str] = []
 
-        for agent_id in unique_ids:
+        for agent_id in existing_ids:
             try:
                 process_agent_events_task.delay(agent_id)
                 queued += 1
