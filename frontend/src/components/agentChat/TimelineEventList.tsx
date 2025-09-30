@@ -1,6 +1,6 @@
-import { Fragment } from 'react'
 import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
+import { ToolDetailProvider } from './tooling/ToolDetailContext'
 import type { TimelineEvent } from './types'
 
 type TimelineEventListProps = {
@@ -14,7 +14,7 @@ export function TimelineEventList({ agentFirstName, events }: TimelineEventListP
   }
 
   return (
-    <Fragment>
+    <ToolDetailProvider>
       {events.map((event) => {
         if (event.kind === 'message') {
           return (
@@ -28,6 +28,6 @@ export function TimelineEventList({ agentFirstName, events }: TimelineEventListP
         }
         return <ToolClusterCard key={event.cursor} cluster={event} />
       })}
-    </Fragment>
+    </ToolDetailProvider>
   )
 }
