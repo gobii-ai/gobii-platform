@@ -2,9 +2,8 @@ from django.test import TestCase, tag
 
 from util.text_sanitizer import strip_control_chars
 
-
-@tag("batch_sms")
-class SmsSenderSanitizationTests(TestCase):
+@tag("batch_text_sanitization")
+class TextSanitizationTests(TestCase):
     def test_strip_control_chars_removes_disallowed_characters(self):
         dirty = "Hello\x00World\u0019"
 
