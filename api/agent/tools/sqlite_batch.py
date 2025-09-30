@@ -102,18 +102,12 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     else:
         try:
             row_limit = int(provided_row_limit)
+            if not (1 <= row_limit <= MAX_SELECT_ROW_LIMIT):
+                raise ValueError
         except (TypeError, ValueError):
             return {
                 "status": "error",
-                "message": (
-                    f"'row_limit' must be an integer between 1 and {MAX_SELECT_ROW_LIMIT}."
-                ),
-            }
-
-        if row_limit < 1 or row_limit > MAX_SELECT_ROW_LIMIT:
-            return {
-                "status": "error",
-                "message": f"'row_limit' must be between 1 and {MAX_SELECT_ROW_LIMIT}.",
+                "message": f"'row_limit' must be an integer between 1 and {MAX_SELECT_ROW_LIMIT}.",
             }
 
     busy_timeout_ms = 2000
