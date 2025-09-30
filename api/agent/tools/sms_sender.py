@@ -17,6 +17,7 @@ from django.conf import settings
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from ..comms.outbound_delivery import deliver_agent_sms
+from util.text_sanitizer import strip_control_chars
 from ...models import (
     CommsChannel,
     PersistentAgent,
@@ -28,7 +29,6 @@ from urlextract import URLExtract
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
-
 
 def get_send_sms_tool() -> Dict[str, Any]:
     """Return the SMS tool definition for the LLM."""
@@ -60,7 +60,7 @@ def get_send_sms_tool() -> Dict[str, Any]:
 def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute SMS sending for a persistent agent."""
     to_number = params.get("to_number")
-    body = params.get("body")
+    body = strip_control_chars(params.get("body"))
     cc_numbers = params.get("cc_numbers", [])  # Optional list for group SMS
     
     # Temporary restriction on group SMS until Twilio Conversations API is implemented
