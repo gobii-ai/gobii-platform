@@ -177,9 +177,18 @@ function contextSwitcher() {
           const isAgentDetail = /\/console\/agents\/[^/]+\/$/.test(window.location.pathname);
           if (isAgentDetail) {
             window.location = '{% url "agents" %}';
-          } else {
-            window.location.reload();
+            return;
           }
+
+          // If currently on an organization detail page, redirect to the selected org
+          const isOrgDetail = /^\/console\/organizations\/[^/]+\/$/.test(window.location.pathname);
+          if (isOrgDetail && type === 'organization') {
+            window.location = `/console/organizations/${id}/`;
+            return;
+          }
+
+          // Default: reload current page to reflect context change
+          window.location.reload();
         } else {
           console.error('Failed to switch context');
           // On failure, reload to show current (unchanged) context
