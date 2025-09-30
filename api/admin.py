@@ -1,4 +1,5 @@
 import logging
+import uuid
 
 import djstripe
 from django.contrib import admin, messages
@@ -8,6 +9,7 @@ from django.db.models import Count  # For annotated counts
 from django.db.models.expressions import OuterRef, Exists
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from api.agent.tasks import process_agent_events_task
 from .admin_forms import TestSmsForm, GrantPlanCreditsForm, GrantCreditsByUserIdsForm, AgentEmailAccountForm, StripeConfigForm
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
@@ -1524,6 +1526,7 @@ class AgentMessageInline(admin.TabularInline):
 
 @admin.register(PersistentAgent)
 class PersistentAgentAdmin(admin.ModelAdmin):
+    change_list_template = "admin/persistentagent_change_list.html"
     list_display = (
         'name', 'user_email', 'ownership_scope', 'organization', 'browser_use_agent_link',
         'is_active', 'execution_environment', 'schedule', 'life_state', 'last_interaction_at',
@@ -1578,6 +1581,11 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 '<path:object_id>/simulate-sms/',
                 self.admin_site.admin_view(self.simulate_sms_view),
                 name='api_persistentagent_simulate_sms',
+            ),
+            path(
+                'trigger-processing/',
+                self.admin_site.admin_view(self.trigger_processing_view),
+                name='api_persistentagent_trigger_processing',
             ),
         ]
         return custom_urls + urls
@@ -1661,6 +1669,79 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             buttons += f'&nbsp;<a class="button" href="{simulate_sms_url}">Simulate SMS</a>'
             return format_html(buttons)
         return "Save agent to see actions"
+
+    def trigger_processing_view(self, request):
+        """Queue event processing for the provided persistent agent IDs."""
+        changelist_url = reverse('admin:api_persistentagent_changelist')
+
+        if request.method != 'POST':
+            return TemplateResponse(
+                request,
+                "admin/persistentagent_trigger_processing.html",
+                {"title": "Trigger Event Processing", "agent_ids": ""},
+            )
+
+        raw_ids = request.POST.get('agent_ids', '')
+        parsed_ids: list[str] = []
+        invalid_entries: list[str] = []
+
+        for line in raw_ids.splitlines():
+            candidate = line.strip()
+            if not candidate:
+                continue
+            try:
+                parsed_ids.append(str(uuid.UUID(candidate)))
+            except (ValueError, TypeError):
+                invalid_entries.append(candidate)
+
+        # Deduplicate while preserving order
+        seen: set[str] = set()
+        unique_ids = []
+        for agent_id in parsed_ids:
+            if agent_id not in seen:
+                seen.add(agent_id)
+                unique_ids.append(agent_id)
+
+        queued = 0
+        failures: list[str] = []
+
+        for agent_id in unique_ids:
+            try:
+                process_agent_events_task.delay(agent_id)
+                queued += 1
+            except Exception:  # pragma: no cover - defensive logging
+                logging.exception("Failed to queue event processing for persistent agent %s", agent_id)
+                failures.append(agent_id)
+
+        if queued:
+            plural = "s" if queued != 1 else ""
+            self.message_user(
+                request,
+                f"Queued event processing for {queued} persistent agent{plural}.",
+                level=messages.SUCCESS,
+            )
+        else:
+            self.message_user(
+                request,
+                "No persistent agents were queued. Provide at least one valid persistent agent ID.",
+                level=messages.WARNING,
+            )
+
+        if invalid_entries:
+            self.message_user(
+                request,
+                "Skipped invalid ID(s): " + ", ".join(invalid_entries),
+                level=messages.WARNING,
+            )
+
+        if failures:
+            self.message_user(
+                request,
+                "Failed to queue ID(s): " + ", ".join(failures),
+                level=messages.ERROR,
+            )
+
+        return HttpResponseRedirect(changelist_url)
 
     def simulate_email_view(self, request, object_id):
         """Handle email simulation for an agent."""
