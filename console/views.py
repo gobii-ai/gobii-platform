@@ -1599,6 +1599,15 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                         else:
                             organization = membership.org
 
+                        if organization is not None:
+                            billing = getattr(organization, "billing", None)
+                            seats_purchased = getattr(billing, "purchased_seats", 0) if billing else 0
+                            if seats_purchased <= 0:
+                                message_text = "Looks like your organization doesn’t have any seats yet. Add seats to create organization-owned agents."
+                                messages.error(request, message_text)
+                                form.add_error(None, message_text)
+                                return self.render_to_response(self.get_context_data(form=form))
+
                     # Generate a unique agent name after confirming permissions
                     agent_name = self._generate_unique_agent_name(request.user)
 
