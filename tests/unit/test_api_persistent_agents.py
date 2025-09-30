@@ -2,13 +2,14 @@ from django.test import TestCase, TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from unittest.mock import patch, MagicMock
-from api.models import PersistentAgent, BrowserUseAgent, UserQuota, TaskCredit, PersistentAgentStep, \
-    PersistentAgentSystemStep
+from api.models import PersistentAgent, BrowserUseAgent, UserQuota, TaskCredit
 from constants.grant_types import GrantTypeChoices
 from django.utils import timezone
 from datetime import timedelta
 
 from constants.plans import PlanNamesChoices
+from api.models import Organization, OrganizationBilling, OrganizationMembership
+from django.db import IntegrityError, transaction
 
 
 def create_browser_agent_without_proxy(user, name):
@@ -90,6 +91,99 @@ class PersistentAgentModelTests(TestCase):
                 )
                 with self.assertRaises(ValidationError):
                     agent.full_clean()
+
+    def test_reassign_user_agent_to_org_success(self):
+        """User-owned agent can be reassigned to an org when seats are purchased and membership is owner/admin."""
+        # Setup org with seats and membership
+        org = Organization.objects.create(name='Acme Corp', slug='acme', created_by=self.user)
+        # Bump seats on initialized billing record
+        billing = OrganizationBilling.objects.get(organization=org)
+        billing.purchased_seats = 1
+        billing.save()
+        org.refresh_from_db()
+        OrganizationMembership.objects.create(org=org, user=self.user, role=OrganizationMembership.OrgRole.OWNER)
+
+        browser_agent = create_browser_agent_without_proxy(self.user, "reassign-browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="reassign-agent",
+            charter="Test charter",
+            schedule="@daily",
+            browser_use_agent=browser_agent
+        )
+
+        # Reassign to org
+        agent.organization = org
+        agent.full_clean()  # should validate seats
+        agent.save(update_fields=['organization'])
+
+        refreshed = PersistentAgent.objects.get(id=agent.id)
+        self.assertEqual(refreshed.organization_id, org.id)
+
+    def test_reassign_user_agent_to_org_without_seats_fails(self):
+        """Reassignment should fail when org has no purchased seats."""
+        org = Organization.objects.create(name='Beta LLC', slug='beta', created_by=self.user)
+        billing = OrganizationBilling.objects.get(organization=org)
+        billing.purchased_seats = 0
+        billing.save()
+        org.refresh_from_db()
+        OrganizationMembership.objects.create(org=org, user=self.user, role=OrganizationMembership.OrgRole.ADMIN)
+
+        browser_agent = create_browser_agent_without_proxy(self.user, "reassign-no-seat-browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="reassign-no-seat",
+            charter="Test charter",
+            schedule="@daily",
+            browser_use_agent=browser_agent
+        )
+
+        agent.organization = org
+        with self.assertRaises(ValidationError):
+            agent.full_clean()  # _validate_org_seats triggers here via model.clean
+
+    def test_reassign_name_conflict_in_target_org(self):
+        """Reassignment should enforce name uniqueness within organization scope."""
+        org = Organization.objects.create(name='Gamma Inc', slug='gamma', created_by=self.user)
+        billing = OrganizationBilling.objects.get(organization=org)
+        billing.purchased_seats = 1
+        billing.save()
+        org.refresh_from_db()
+        OrganizationMembership.objects.create(org=org, user=self.user, role=OrganizationMembership.OrgRole.OWNER)
+
+        # Existing agent in org with conflicting name
+        # Suppress default filespace creation to avoid uniqueness conflicts across same-user, same-name agents
+        from django.db.models.signals import post_save
+        from api.models import PersistentAgent as PAP, create_default_filespace_for_agent
+        post_save.disconnect(create_default_filespace_for_agent, sender=PAP)
+        try:
+            browser_agent_org = create_browser_agent_without_proxy(self.user, "org-browser")
+            PersistentAgent.objects.create(
+                user=self.user,
+                organization=org,
+                name="duplicate-name",
+                charter="Org agent",
+                schedule="@daily",
+                browser_use_agent=browser_agent_org
+            )
+        finally:
+            post_save.connect(create_default_filespace_for_agent, sender=PAP)
+
+        # User-owned agent with same name
+        browser_agent_user = create_browser_agent_without_proxy(self.user, "user-browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="duplicate-name",
+            charter="User agent",
+            schedule="@daily",
+            browser_use_agent=browser_agent_user
+        )
+
+        agent.organization = org
+        # Saving should raise IntegrityError due to UniqueConstraint (org, name)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                agent.save(update_fields=['organization'])
 
     @patch('api.models.os.getenv')
     @patch('api.models.logger')

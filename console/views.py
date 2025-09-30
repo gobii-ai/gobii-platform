@@ -26,22 +26,24 @@ from functools import cached_property
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
-from api.models import ApiKey, UserBilling, PersistentAgent, BrowserUseAgent, PersistentAgentCommsEndpoint, \
-    PersistentAgentEmailEndpoint, CommsChannel, PersistentAgentConversation, PersistentAgentMessage, \
-    PersistentAgentConversationParticipant, BrowserUseAgentTask, TaskCredit, PersistentAgentSmsEndpoint
 
 from api.models import (
     ApiKey,
     UserBilling,
-    PersistentAgent,
     BrowserUseAgent,
+    BrowserUseAgentTask,
+    PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
+    PersistentAgentMessage,
+    PersistentAgentConversationParticipant,
+    PersistentAgentSmsEndpoint,
     CommsChannel,
     UserPhoneNumber,
     Organization,
     OrganizationMembership,
     OrganizationInvite,
+    TaskCredit,
 )
 from console.mixins import ConsoleViewMixin
 from observability import traced
@@ -2110,6 +2112,22 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         except:
             context['owner_phone'] = None
 
+        # Provide organizations current user can reassign this agent into (owner/admin only)
+        try:
+            reassignable_orgs = Organization.objects.filter(
+                organizationmembership__user=self.request.user,
+                organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
+                organizationmembership__role__in=[
+                    OrganizationMembership.OrgRole.OWNER,
+                    OrganizationMembership.OrgRole.ADMIN,
+                ],
+            ).order_by('name')
+        except ImportError:
+            reassignable_orgs = []
+
+        context['reassignable_orgs'] = reassignable_orgs
+        context['can_reassign'] = True
+
         return context
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - Post")
@@ -2361,6 +2379,84 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     
                 except Exception as e:
                     return JsonResponse({'success': False, 'error': str(e)})
+
+            elif action == 'reassign_org':
+                # Reassign a user-owned agent to an organization, or move org-owned back to personal
+                target_org_id = (request.POST.get('target_org_id') or '').strip() or None
+                try:
+                    from api.models import OrganizationMembership, PersistentAgent
+                    if target_org_id:
+                        # Ensure user is owner/admin in target org
+                        has_rights = OrganizationMembership.objects.filter(
+                            org_id=target_org_id,
+                            user=request.user,
+                            status=OrganizationMembership.OrgStatus.ACTIVE,
+                            role__in=[
+                                OrganizationMembership.OrgRole.OWNER,
+                                OrganizationMembership.OrgRole.ADMIN,
+                            ],
+                        ).exists()
+                        if not has_rights:
+                            return JsonResponse({'success': False, 'error': 'You must be an organization owner or admin to assign agents to that organization.'}, status=403)
+
+                        # Pre-check name uniqueness within target org
+                        if PersistentAgent.objects.filter(organization_id=target_org_id, name=agent.name).exclude(id=agent.id).exists():
+                            return JsonResponse({'success': False, 'error': 'An agent with this name already exists in the selected organization. Please rename the agent first.'}, status=400)
+
+                        # Assign; model-level validators will enforce seat availability
+                        agent.organization_id = target_org_id
+                        agent.full_clean()
+                        agent.save(update_fields=['organization'])
+                        messages.success(request, 'Agent assigned to organization.')
+                        # Also switch the server-side session context so subsequent requests
+                        # operate under the correct organization scope immediately.
+                        try:
+                            # Validate membership again and set session context
+                            membership = OrganizationMembership.objects.get(
+                                org_id=target_org_id,
+                                user=request.user,
+                                status=OrganizationMembership.OrgStatus.ACTIVE,
+                            )
+                            request.session['context_type'] = 'organization'
+                            request.session['context_id'] = str(membership.org.id)
+                            request.session['context_name'] = membership.org.name
+                        except OrganizationMembership.DoesNotExist:
+                            # If for some reason membership is missing, do not crash; client may still handle switch
+                            pass
+                        # Instruct client to switch to organization context and redirect back to this agent
+                        return JsonResponse({
+                            'success': True,
+                            'switch': {
+                                'type': 'organization',
+                                'id': str(target_org_id),
+                            },
+                            'redirect': request.build_absolute_uri(reverse('agent_detail', args=[agent.id]))
+                        })
+                    else:
+                        # Move to personal scope
+                        if PersistentAgent.objects.filter(user_id=agent.user_id, organization__isnull=True, name=agent.name).exclude(id=agent.id).exists():
+                            return JsonResponse({'success': False, 'error': 'You already have a personal agent with this name. Please rename the agent first.'}, status=400)
+                        agent.organization = None
+                        agent.save(update_fields=['organization'])
+                        messages.success(request, 'Agent moved to personal ownership.')
+                        # Switch server-side session back to personal context
+                        request.session['context_type'] = 'personal'
+                        request.session['context_id'] = str(request.user.id)
+                        request.session['context_name'] = request.user.get_full_name() or request.user.username
+                        return JsonResponse({
+                            'success': True,
+                            'switch': {
+                                'type': 'personal',
+                                'id': str(request.user.id),
+                            },
+                            'redirect': request.build_absolute_uri(reverse('agent_detail', args=[agent.id]))
+                        })
+                except ValidationError as e:
+                    err = e.messages[0] if hasattr(e, 'messages') and e.messages else str(e)
+                    return JsonResponse({'success': False, 'error': err}, status=400)
+                except Exception as e:
+                    logger.exception("An error occurred during agent reassignment for agent %s", agent.id, e)
+                    return JsonResponse({'success': False, 'error': 'An unexpected error occurred. Please try again.'}, status=500)
             
             return JsonResponse({'success': False, 'error': 'Invalid action'})
         
