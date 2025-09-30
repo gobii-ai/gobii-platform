@@ -7,7 +7,12 @@ from channels.layers import get_channel_layer
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
-from api.models import BrowserUseAgentTask, PersistentAgentMessage, PersistentAgentStep
+from api.models import (
+    BrowserUseAgentTask,
+    PersistentAgentMessage,
+    PersistentAgentStep,
+    PersistentAgentToolCall,
+)
 
 from .timeline import (
     build_tool_cluster_from_steps,
@@ -50,7 +55,9 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
         return
     if not instance.agent_id:
         return
-    if not hasattr(instance, "tool_call") or instance.tool_call is None:
+    try:
+        instance.tool_call
+    except PersistentAgentToolCall.DoesNotExist:
         return
     try:
         payload = build_tool_cluster_from_steps([instance])
@@ -61,6 +68,28 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
 
     # Also refresh processing indicator, tool steps usually signal completion
     _broadcast_processing(instance.agent)
+
+
+@receiver(post_save, sender=PersistentAgentToolCall)
+def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: bool, **kwargs):
+    if not created:
+        return
+    step = instance.step
+    if not step.agent_id:
+        return
+    try:
+        payload = build_tool_cluster_from_steps([step])
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception(
+            "Failed to serialize tool call step %s: %s",
+            getattr(step, "id", None),
+            exc,
+        )
+        return
+    _send(_group_name(step.agent_id), "timeline_event", payload)
+
+    # Tool completions also update the processing indicator
+    _broadcast_processing(step.agent)
 
 
 @receiver(post_save, sender=BrowserUseAgentTask)
