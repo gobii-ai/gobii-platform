@@ -41,6 +41,35 @@ def _get_db_size_mb(db_path: str) -> float:
         pass
     return 0.0
 
+def _normalize_operations(value: Any) -> Optional[List[str]]:
+    """Best-effort coercion of operations into a list of SQL strings."""
+    if isinstance(value, list) and value:
+        if all(isinstance(item, str) for item in value):
+            return value  # already in correct form
+        # Support list of dicts with "sql" keys, common in structured tool outputs
+        sqlified = []
+        for item in value:
+            if isinstance(item, dict) and "sql" in item and isinstance(item["sql"], str):
+                sqlified.append(item["sql"])
+            else:
+                return None
+        return sqlified if sqlified else None
+
+    if isinstance(value, str) and value.strip():
+        # Attempt to parse JSON arrays encoded as strings
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            # Treat as single statement string
+            return [value]
+
+        return _normalize_operations(parsed)
+
+    return None
+
+DEFAULT_SELECT_ROW_LIMIT = 200
+MAX_SELECT_ROW_LIMIT = 1000
+
 
 def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute a batch of SQL operations against the agent's SQLite DB.
@@ -50,8 +79,16 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         - mode: 'atomic' | 'per_statement' (default 'atomic')
     """
 
-    ops = params.get("operations")
-    if not isinstance(ops, list) or not ops or not all(isinstance(s, str) for s in ops):
+    ops_raw = params.get("operations")
+    ops: Optional[List[str]] = None
+
+    ops = _normalize_operations(ops_raw)
+
+    if not ops or not all(isinstance(s, str) and s.strip() for s in ops):
+        logger.warning(
+            "sqlite_batch received invalid operations payload: %s",
+            json.dumps(ops_raw)[:400] if isinstance(ops_raw, (str, list, dict)) else str(type(ops_raw)),
+        )
         return {"status": "error", "message": "'operations' must be a non-empty array of SQL strings."}
 
     mode = params.get("mode", "atomic")
@@ -59,7 +96,20 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         return {"status": "error", "message": f"Invalid mode '{mode}'. Must be 'atomic' or 'per_statement'."}
 
     # Fixed defaults to keep API simple
-    row_limit = 1000
+    provided_row_limit = params.get("row_limit")
+    if provided_row_limit is None:
+        row_limit = DEFAULT_SELECT_ROW_LIMIT
+    else:
+        try:
+            row_limit = int(provided_row_limit)
+            if not (1 <= row_limit <= MAX_SELECT_ROW_LIMIT):
+                raise ValueError
+        except (TypeError, ValueError):
+            return {
+                "status": "error",
+                "message": f"'row_limit' must be an integer between 1 and {MAX_SELECT_ROW_LIMIT}.",
+            }
+
     busy_timeout_ms = 2000
 
     db_path = _sqlite_db_path_var.get(None)
@@ -231,6 +281,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                         "schema": columns,
                         "changes": 0,
                         "last_insert_rowid": None,
+                        "truncated_rows": truncated,
                     }
                     results.append(res)
                     succeeded += 1
@@ -301,6 +352,8 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             "results": results,
             "db_size_mb": round(db_size_mb, 2),
             "warnings": warnings,
+            "truncated_rows": any_truncated,
+            "row_limit": row_limit,
         }
     except Exception as outer:
         return {"status": "error", "message": f"SQLite batch failed: {outer}"}
@@ -323,6 +376,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                 "Provide exactly ONE SQL statement per item in 'operations' (no semicolon-chaining). "
                 "Do NOT include BEGIN/COMMIT/ROLLBACK; the tool manages transactions for mode='atomic'. "
                 "Escape single quotes by doubling them (e.g., 'What''s new'); avoid backslash escaping. "
+                f"Each SELECT will return at most {DEFAULT_SELECT_ROW_LIMIT} rows by default. "
+                f"If you truly need more, set 'row_limit' (max {MAX_SELECT_ROW_LIMIT}) explicitly and page through results. "
                 "Prefer 'INSERT OR IGNORE' or 'INSERT ... ON CONFLICT(col) DO UPDATE ...' to avoid UNIQUE violations. "
                 "Use mode='atomic' for dependent ops (all-or-nothing) or 'per_statement' to continue past individual errors. "
                 "For a single query, pass a single-item 'operations' array."
@@ -337,6 +392,15 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                         "description": "List of SQL statements to execute in order.",
                     },
                     "mode": {"type": "string", "enum": ["atomic", "per_statement"], "default": "atomic"},
+                    "row_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_SELECT_ROW_LIMIT,
+                        "description": (
+                            f"Maximum rows to return per SELECT (default {DEFAULT_SELECT_ROW_LIMIT}). "
+                            "Use sparingly and page results yourself."
+                        ),
+                    },
                 },
                 "required": ["operations"],
             },
