@@ -77,6 +77,7 @@ export type AgentChatState = {
   loadingNewer: boolean
   error: string | null
   autoScrollPinned: boolean
+  pendingEvents: TimelineEvent[]
   initialize: (agentId: string) => Promise<void>
   refreshProcessing: () => Promise<void>
   loadOlder: () => Promise<void>
@@ -102,6 +103,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   loadingNewer: false,
   error: null,
   autoScrollPinned: true,
+  pendingEvents: [],
 
   async initialize(agentId) {
     set({ loading: true, agentId, error: null, autoScrollPinned: true })
@@ -121,6 +123,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         processingActive: snapshot.processing_active,
         loading: false,
         autoScrollPinned: true,
+        pendingEvents: [],
       })
     } catch (error) {
       console.error('Failed to initialize agent chat:', error)
@@ -237,6 +240,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         processingActive: snapshot.processing_active,
         hasUnseenActivity: false,
         loading: false,
+        pendingEvents: [],
       })
     } catch (error) {
       set({
@@ -269,7 +273,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   receiveRealtimeEvent(event) {
     const state = get()
     if (!state.autoScrollPinned) {
-      set({ hasUnseenActivity: true })
+      const pendingEvents = mergeEvents(state.pendingEvents, [event])
+      set({
+        pendingEvents,
+        hasUnseenActivity: true,
+      })
       return
     }
     let events: TimelineEvent[]
@@ -290,14 +298,37 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       events,
       newestCursor,
       oldestCursor,
+      pendingEvents: [],
     })
   },
 
   updateProcessing(active) {
-    set({ processingActive: active })
+    set((state) => ({
+      processingActive: active,
+      hasUnseenActivity: !state.autoScrollPinned && active ? true : state.hasUnseenActivity,
+    }))
   },
 
   setAutoScrollPinned(pinned) {
-    set({ autoScrollPinned: pinned })
+    set((state) => {
+      if (pinned && state.pendingEvents.length) {
+        const merged = mergeEvents(state.events, state.pendingEvents)
+        const newestCursor = merged.length ? merged[merged.length - 1].cursor : state.newestCursor
+        const oldestCursor = merged.length ? merged[0].cursor : state.oldestCursor
+        return {
+          autoScrollPinned: true,
+          hasUnseenActivity: false,
+          events: merged,
+          newestCursor,
+          oldestCursor,
+          pendingEvents: [],
+        }
+      }
+
+      return {
+        autoScrollPinned: pinned,
+        hasUnseenActivity: pinned ? false : state.hasUnseenActivity,
+      }
+    })
   },
 }))

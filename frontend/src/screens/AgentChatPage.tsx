@@ -20,6 +20,10 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
     timelineRef.current = node
   }, [])
+  const bottomSentinelRef = useRef<HTMLDivElement | null>(null)
+  const captureBottomSentinelRef = useCallback((node: HTMLDivElement | null) => {
+    bottomSentinelRef.current = node
+  }, [])
 
   const initialize = useAgentChatStore((state) => state.initialize)
   const loadOlder = useAgentChatStore((state) => state.loadOlder)
@@ -58,19 +62,29 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
     scrollToBottom()
   }, [scrollToBottom, events, processingActive])
 
+  const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])
+
   useEffect(() => {
-    const handleScroll = () => {
-      const scroller = getScrollContainer()
-      const distanceFromBottom = scroller.scrollHeight - window.scrollY - window.innerHeight
-      setAutoScrollPinned(distanceFromBottom < 96)
+    const sentinel = bottomSentinelRef.current
+    if (!sentinel) {
+      setAutoScrollPinned(false)
+      return
     }
 
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [getScrollContainer, setAutoScrollPinned])
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries.find((item) => item.target === sentinel)
+        setAutoScrollPinned(Boolean(entry?.isIntersecting))
+      },
+      { root: null, threshold: 0.75 },
+    )
 
+    observer.observe(sentinel)
 
-  const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])
+    return () => {
+      observer.disconnect()
+    }
+  }, [setAutoScrollPinned, hasMoreNewer])
 
   const handleJumpToLatest = async () => {
     await jumpToLatest()
@@ -116,6 +130,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
         autoScrollPinned={autoScrollPinned}
         hasUnseenActivity={hasUnseenActivity}
         timelineRef={captureTimelineRef}
+        bottomSentinelRef={captureBottomSentinelRef}
         loadingOlder={loadingOlder}
         loadingNewer={loadingNewer}
       />

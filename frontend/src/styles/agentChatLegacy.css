@@ -212,6 +212,11 @@
   color: #64748b;
 }
 
+.timeline-bottom-sentinel {
+  width: 100%;
+  height: 1px;
+}
+
 .timeline-load-button {
   display: inline-flex;
   align-items: center;

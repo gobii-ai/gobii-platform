@@ -16,6 +16,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   autoScrollPinned?: boolean
   hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>
+  bottomSentinelRef?: Ref<HTMLDivElement>
   loadingOlder?: boolean
   loadingNewer?: boolean
 }
@@ -34,9 +35,13 @@ export function AgentChatLayout({
   autoScrollPinned = true,
   hasUnseenActivity = false,
   timelineRef,
+  bottomSentinelRef,
   loadingOlder = false,
   loadingNewer = false,
 }: AgentChatLayoutProps) {
+  const showProcessingIndicator = Boolean(processingActive && autoScrollPinned && !hasMoreNewer)
+  const showBottomSentinel = !hasMoreNewer
+
   return (
     <main className="min-h-screen">
       <div className="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-6 sm:px-6 lg:px-10">
@@ -71,9 +76,13 @@ export function AgentChatLayout({
                 <TimelineEventList agentFirstName={agentFirstName} events={events} />
               </div>
 
-              <div id="processing-indicator-slot" className="processing-slot" data-visible={processingActive ? 'true' : 'false'}>
-                <ProcessingIndicator agentFirstName={agentFirstName} active={!!processingActive} />
+              <div id="processing-indicator-slot" className="processing-slot" data-visible={showProcessingIndicator ? 'true' : 'false'}>
+                <ProcessingIndicator agentFirstName={agentFirstName} active={showProcessingIndicator} />
               </div>
+
+              {showBottomSentinel ? (
+                <div ref={bottomSentinelRef} id="timeline-bottom-sentinel" className="timeline-bottom-sentinel" aria-hidden="true" />
+              ) : null}
 
               <div
                 id="timeline-load-newer"
