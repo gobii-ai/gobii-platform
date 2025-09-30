@@ -9,6 +9,7 @@ import type {
 const SKIP_TOOL_NAMES = new Set([
   'send_email',
   'send_web_message',
+  'send_chat_message',
   'sleep',
   'sleep_until_next_trigger',
   'action',
