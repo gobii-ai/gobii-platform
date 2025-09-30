@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone as dt_timezone
+import re
 import uuid
 from typing import Iterable, Literal, Sequence
 
@@ -10,6 +11,11 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.html import escape
 from django.utils.timesince import timesince
+
+from bleach.sanitizer import ALLOWED_ATTRIBUTES as BLEACH_ALLOWED_ATTRIBUTES_BASE
+from bleach.sanitizer import ALLOWED_PROTOCOLS as BLEACH_ALLOWED_PROTOCOLS_BASE
+from bleach.sanitizer import ALLOWED_TAGS as BLEACH_ALLOWED_TAGS_BASE
+from bleach.sanitizer import Cleaner
 
 from api.models import (
     BrowserUseAgentTask,
@@ -25,6 +31,42 @@ from api.models import (
 DEFAULT_PAGE_SIZE = 40
 MAX_PAGE_SIZE = 100
 COLLAPSE_THRESHOLD = 3
+
+HTML_TAG_PATTERN = re.compile(r"<([a-z][\w-]*)(?:\s[^>]*)?>", re.IGNORECASE)
+
+
+def _build_html_cleaner() -> Cleaner:
+    """Create a Bleach cleaner that preserves common email formatting."""
+
+    allowed_tags = set(BLEACH_ALLOWED_TAGS_BASE).union(
+        {
+            "p",
+            "br",
+            "div",
+            "span",
+            "ul",
+            "ol",
+            "li",
+            "pre",
+        }
+    )
+
+    allowed_attributes = dict(BLEACH_ALLOWED_ATTRIBUTES_BASE)
+    anchor_attrs = set(allowed_attributes.get("a", ())).union({"href", "title", "target", "rel"})
+    allowed_attributes["a"] = sorted(anchor_attrs)
+    allowed_attributes.setdefault("span", [])
+
+    allowed_protocols = set(BLEACH_ALLOWED_PROTOCOLS_BASE).union({"mailto", "tel"})
+
+    return Cleaner(
+        tags=sorted(allowed_tags),
+        attributes=allowed_attributes,
+        protocols=allowed_protocols,
+        strip=True,
+    )
+
+
+HTML_CLEANER = _build_html_cleaner()
 
 TimelineDirection = Literal["initial", "older", "newer"]
 
@@ -74,7 +116,13 @@ class TimelineWindow:
     processing_active: bool
 
 
+def _looks_like_html(body: str) -> bool:
+    return bool(HTML_TAG_PATTERN.search(body))
+
+
 def _humanize_body(body: str) -> str:
+    if _looks_like_html(body):
+        return HTML_CLEANER.clean(body)
     escaped = escape(body)
     return escaped.replace("\n", "<br />")
 

@@ -107,6 +107,45 @@ class AgentChatAPITests(TestCase):
         self.assertIsNotNone(payload.get("processing_active"))
 
     @tag("batch_agent_chat")
+    def test_timeline_preserves_html_email_body(self):
+        html_body = "<p>Email intro</p><p><strong>Bold</strong> value</p><ul><li>Bullet</li></ul>"
+        email_address = "louise@example.com"
+
+        email_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+            is_primary=False,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=email_sender,
+            conversation=email_conversation,
+            body=html_body,
+            owner_agent=self.agent,
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        html_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == html_body
+        )
+
+        rendered_html = html_event["message"]["bodyHtml"]
+        self.assertIn("<strong>Bold</strong>", rendered_html)
+        self.assertIn("<li>Bullet</li>", rendered_html)
+        self.assertNotIn("&lt;", rendered_html)
+
+    @tag("batch_agent_chat")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_message_post_creates_console_message(self, mock_delay):
         body = "Run weekly summary"

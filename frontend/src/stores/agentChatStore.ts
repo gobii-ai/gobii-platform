@@ -61,7 +61,7 @@ function mergeEvents(existing: TimelineEvent[], incoming: TimelineEvent[]): Time
   return sortEvents(Array.from(map.values()))
 }
 
-const TIMELINE_WINDOW_SIZE = 10
+const TIMELINE_WINDOW_SIZE = 100
 
 export type AgentChatState = {
   agentId: string | null

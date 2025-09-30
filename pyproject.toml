@@ -8,6 +8,7 @@ dependencies = [
   "pottery==3.0.1",
   "boto3~=1.38.39",
   "browser-use==0.7.10",
+  "bleach~=6.2.0",
   "openai==1.106.1",
   "pypandoc-binary==1.15",
   "inscriptis==2.6.0",
