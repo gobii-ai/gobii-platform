@@ -206,6 +206,29 @@ class GrantCreditsByUserIdsForm(forms.Form):
         help_text="When the credits are considered granted",
         widget=AdminSplitDateTime,
     )
+    expiration_date = forms.SplitDateTimeField(
+        label="Expiration Date",
+        help_text="When the credits expire",
+        widget=AdminSplitDateTime,
+    )
+    dry_run = forms.BooleanField(
+        label="Dry Run",
+        required=False,
+        initial=False,
+        help_text="If checked, shows how many users would be granted without creating TaskCredits",
+    )
+    only_if_out_of_credits = forms.BooleanField(
+        label="Only if out of credits",
+        required=False,
+        initial=False,
+        help_text="Grant only to users who currently have 0 available credits",
+    )
+    export_csv = forms.BooleanField(
+        label="Export CSV (dry‑run)",
+        required=False,
+        initial=False,
+        help_text="When Dry Run is checked, download a CSV of affected users",
+    )
 
 
 class LLMProviderForm(ModelForm):
