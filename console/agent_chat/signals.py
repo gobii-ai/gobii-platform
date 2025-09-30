@@ -4,6 +4,7 @@ import logging
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
@@ -35,6 +36,28 @@ def _send(group: str, message_type: str, payload: dict) -> None:
     async_to_sync(channel_layer.group_send)(group, {"type": message_type, "payload": payload})
 
 
+def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
+    if not step.agent_id:
+        return
+    try:
+        payload = build_tool_cluster_from_steps([step])
+    except ValueError:
+        # Step does not yet have a tool call attached
+        return
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("Failed to serialize tool step %s: %s", getattr(step, "id", None), exc)
+        return
+
+    _send(_group_name(step.agent_id), "timeline_event", payload)
+    _broadcast_processing(step.agent)
+
+
+def emit_tool_call_realtime(step: PersistentAgentStep) -> None:
+    """Public helper to broadcast a tool call cluster for a fully populated step."""
+
+    _broadcast_tool_cluster(step)
+
+
 @receiver(post_save, sender=PersistentAgentMessage)
 def broadcast_new_message(sender, instance: PersistentAgentMessage, created: bool, **kwargs):  # noqa: D401
     if not created:
@@ -55,19 +78,18 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
         return
     if not instance.agent_id:
         return
-    try:
-        instance.tool_call
-    except PersistentAgentToolCall.DoesNotExist:
-        return
-    try:
-        payload = build_tool_cluster_from_steps([instance])
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("Failed to serialize tool step %s: %s", instance.id, exc)
-        return
-    _send(_group_name(instance.agent_id), "timeline_event", payload)
 
-    # Also refresh processing indicator, tool steps usually signal completion
-    _broadcast_processing(instance.agent)
+    def _on_commit():
+        try:
+            step = (
+                PersistentAgentStep.objects.select_related("agent", "tool_call")
+                .get(id=instance.id)
+            )
+        except PersistentAgentStep.DoesNotExist:  # pragma: no cover - defensive guard
+            return
+        emit_tool_call_realtime(step)
+
+    transaction.on_commit(_on_commit)
 
 
 @receiver(post_save, sender=PersistentAgentToolCall)
@@ -75,21 +97,7 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
     if not created:
         return
     step = instance.step
-    if not step.agent_id:
-        return
-    try:
-        payload = build_tool_cluster_from_steps([step])
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception(
-            "Failed to serialize tool call step %s: %s",
-            getattr(step, "id", None),
-            exc,
-        )
-        return
-    _send(_group_name(step.agent_id), "timeline_event", payload)
-
-    # Tool completions also update the processing indicator
-    _broadcast_processing(step.agent)
+    emit_tool_call_realtime(step)
 
 
 @receiver(post_save, sender=BrowserUseAgentTask)

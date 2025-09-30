@@ -1191,6 +1191,17 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                             tool_params=tool_params,
                             result=result_content,
                         )
+                        try:
+                            from console.agent_chat.signals import emit_tool_call_realtime  # noqa: WPS433
+
+                            emit_tool_call_realtime(step)
+                        except Exception:  # pragma: no cover - defensive logging
+                            logger.debug(
+                                "Failed to broadcast realtime tool call for agent %s step %s",
+                                agent.id,
+                                getattr(step, "id", None),
+                                exc_info=True,
+                            )
                         logger.info("Agent %s: persisted tool call step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
                     except OperationalError:
                         close_old_connections()
@@ -1215,6 +1226,17 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                             tool_params=tool_params,
                             result=result_content,
                         )
+                        try:
+                            from console.agent_chat.signals import emit_tool_call_realtime  # noqa: WPS433
+
+                            emit_tool_call_realtime(step)
+                        except Exception:  # pragma: no cover - defensive logging
+                            logger.debug(
+                                "Failed to broadcast realtime tool call (retry) for agent %s step %s",
+                                agent.id,
+                                getattr(step, "id", None),
+                                exc_info=True,
+                            )
                         logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
                     executed_calls += 1
 
