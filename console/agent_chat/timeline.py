@@ -283,7 +283,15 @@ def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cur
     if direction == "older" and cursor is not None:
         qs = qs.filter(timestamp__lte=_dt_from_cursor(cursor))
     elif direction == "newer" and cursor is not None:
-        qs = qs.filter(timestamp__gte=_dt_from_cursor(cursor))
+        # For "newer", we need messages AFTER the cursor
+        # This includes: timestamp > cursor_time OR (timestamp == cursor_time AND seq > cursor_seq)
+        dt = _dt_from_cursor(cursor)
+        if cursor.kind == "message":
+            qs = qs.filter(
+                Q(timestamp__gt=dt) | Q(timestamp=dt, seq__gt=cursor.identifier)
+            )
+        else:
+            qs = qs.filter(timestamp__gt=dt)
     return list(qs[:limit])
 
 
@@ -297,7 +305,19 @@ def _steps_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor
     if direction == "older" and cursor is not None:
         qs = qs.filter(created_at__lte=_dt_from_cursor(cursor))
     elif direction == "newer" and cursor is not None:
-        qs = qs.filter(created_at__gte=_dt_from_cursor(cursor))
+        # For "newer", we need events AFTER the cursor
+        # This includes: created_at > cursor_time OR (created_at == cursor_time AND id > cursor_id)
+        dt = _dt_from_cursor(cursor)
+        if cursor.kind == "step":
+            try:
+                cursor_uuid = uuid.UUID(cursor.identifier)
+                qs = qs.filter(
+                    Q(created_at__gt=dt) | Q(created_at=dt, id__gt=cursor_uuid)
+                )
+            except Exception:
+                qs = qs.filter(created_at__gt=dt)
+        else:
+            qs = qs.filter(created_at__gt=dt)
     return list(qs[:limit])
 
 
@@ -388,6 +408,7 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
         ).exists()
     step_exists = PersistentAgentStep.objects.filter(
         agent=agent,
+        tool_call__isnull=False,
         created_at__lt=dt,
     ).exists()
     if cursor.kind == "step":
@@ -395,6 +416,7 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
             uuid_identifier = uuid.UUID(cursor.identifier)
             step_exists = step_exists or PersistentAgentStep.objects.filter(
                 agent=agent,
+                tool_call__isnull=False,
                 created_at=dt,
                 id__lt=uuid_identifier,
             ).exists()
@@ -407,6 +429,7 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
     if cursor is None:
         return False
     dt = _dt_from_cursor(cursor)
+
     message_exists = PersistentAgentMessage.objects.filter(
         owner_agent=agent,
         timestamp__gt=dt,
@@ -417,8 +440,10 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
             timestamp=dt,
             seq__gt=cursor.identifier,
         ).exists()
+
     step_exists = PersistentAgentStep.objects.filter(
         agent=agent,
+        tool_call__isnull=False,
         created_at__gt=dt,
     ).exists()
     if cursor.kind == "step":
@@ -426,11 +451,13 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
             uuid_identifier = uuid.UUID(cursor.identifier)
             step_exists = step_exists or PersistentAgentStep.objects.filter(
                 agent=agent,
+                tool_call__isnull=False,
                 created_at=dt,
                 id__gt=uuid_identifier,
             ).exists()
         except Exception:
             pass
+
     return message_exists or step_exists
 
 
