@@ -46,6 +46,8 @@ export function AgentChatLayout({
   const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
   const showLoadNewerButton = !initialLoading && (hasMoreNewer || loadingNewer)
 
+  const showJumpButton = hasMoreNewer || hasUnseenActivity || !autoScrollPinned
+
   return (
     <main className="min-h-screen">
       <div className="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-6 sm:px-6 lg:px-10">
@@ -120,12 +122,13 @@ export function AgentChatLayout({
 
       <button
         id="jump-to-latest"
-        className={`jump-to-latest ${autoScrollPinned && !hasMoreNewer ? '!hidden' : ''}`}
+        className="jump-to-latest"
         type="button"
         aria-label="Jump to latest"
-        aria-hidden={autoScrollPinned && !hasMoreNewer ? 'true' : 'false'}
+        aria-hidden={showJumpButton ? 'false' : 'true'}
         onClick={onJumpToLatest}
         data-has-activity={hasUnseenActivity ? 'true' : 'false'}
+        data-visible={showJumpButton ? 'true' : 'false'}
       >
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />

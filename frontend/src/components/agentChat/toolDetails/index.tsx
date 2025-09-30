@@ -3,6 +3,8 @@ import type { ReactNode } from 'react'
 
 import { MarkdownViewer } from '../../common/MarkdownViewer'
 import { looksLikeHtml, sanitizeHtml } from '../../../util/sanitize'
+import { describeSchedule } from '../../../util/schedule'
+import type { ScheduleDescription } from '../../../util/schedule'
 import type { ToolDetailComponent, ToolDetailProps } from '../tooling/types'
 
 function isNonEmptyString(value: unknown): value is string {
@@ -15,7 +17,7 @@ function stringify(value: unknown): string {
   }
   try {
     return JSON.stringify(value, null, 2)
-  } catch (error) {
+  } catch {
     return String(value)
   }
 }
@@ -93,12 +95,14 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
 
 export function UpdateCharterDetail({ entry }: ToolDetailProps) {
   const charter = entry.charterText || (entry.parameters?.new_charter as string | undefined) || (entry.parameters?.charter as string | undefined)
+  const summary = isNonEmptyString(entry.summary) ? entry.summary : null
+  const charterMarkdown = isNonEmptyString(charter) ? charter : null
   return (
-    <div className="space-y-3 text-sm text-slate-600">
-      <p>The agent assignment was updated.</p>
-      {isNonEmptyString(charter) ? (
-        <Section title="New Charter">
-          <div className="whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-slate-700 shadow-inner">{charter}</div>
+    <div className="space-y-4 text-sm text-slate-600">
+      <p className="text-slate-700">{summary ?? 'The agent assignment was updated.'}</p>
+      {charterMarkdown ? (
+        <Section title="Updated Charter">
+          <MarkdownViewer content={charterMarkdown} className="prose prose-sm max-w-none" />
         </Section>
       ) : null}
     </div>
@@ -344,18 +348,16 @@ export function UpdateScheduleDetail({ entry }: ToolDetailProps) {
   const statusLabel = resultObject?.status ? resultObject.status.toUpperCase() : null
   const messageText =
     resultObject?.message || entry.summary || (scheduleValue ? 'Schedule updated successfully.' : 'Schedule disabled.')
+  const scheduleDetails = describeSchedule(scheduleValue)
   const detailItems: Array<{ label: string; value: ReactNode }> = []
   if (statusLabel) {
     detailItems.push({ label: 'Status', value: statusLabel })
   }
-  detailItems.push({
-    label: 'Schedule',
-    value: scheduleValue ? <code className="rounded bg-slate-100 px-1 py-0.5">{scheduleValue}</code> : 'Disabled',
-  })
   return (
-    <div className="space-y-3 text-sm text-slate-600">
-      <p>{messageText}</p>
+    <div className="space-y-4 text-sm text-slate-600">
+      <p className="text-slate-700">{messageText}</p>
       <KeyValueList items={detailItems} />
+      {renderScheduleDetails(scheduleDetails)}
     </div>
   )
 }
@@ -377,4 +379,78 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
 export function resolveDetailComponent(kind: string | null | undefined): ToolDetailComponent {
   if (!kind) return GenericToolDetail
   return TOOL_DETAIL_COMPONENTS[kind] ?? GenericToolDetail
+}
+
+function formatSummaryText(summary: string): string {
+  return /[.!?]\s*$/.test(summary) ? summary : `${summary}.`
+}
+
+function renderScheduleDetails(schedule: ScheduleDescription): ReactNode {
+  switch (schedule.kind) {
+    case 'disabled':
+      return (
+        <Section title="Schedule">
+          <p className="text-slate-700">No automated runs are scheduled.</p>
+        </Section>
+      )
+    case 'preset':
+      return (
+        <Section title="Preset Interval">
+          <div className="schedule-card">
+            <span className="schedule-card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10m-12 8h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </span>
+            <div>
+              <p className="schedule-card-label">{schedule.raw}</p>
+              <p className="schedule-card-description">{schedule.description}</p>
+            </div>
+          </div>
+        </Section>
+      )
+    case 'interval':
+      return (
+        <Section title="Repeats Every">
+          <div className="schedule-interval">
+            {schedule.parts.map((part, index) => (
+              <span key={`${part.unit}-${index}`} className="schedule-pill">
+                <span className="schedule-pill-value">{part.magnitude}</span>
+                <span className="schedule-pill-unit">{part.label.replace(/^[0-9]+\s/, '')}</span>
+              </span>
+            ))}
+          </div>
+          <p className="schedule-note">{formatSummaryText(schedule.summary)}</p>
+        </Section>
+      )
+    case 'cron':
+      return (
+        <Section title="Cron Fields">
+          {schedule.summary ? <p className="schedule-note">{formatSummaryText(schedule.summary)}</p> : null}
+          <dl className="schedule-cron-grid">
+            {schedule.fields.map((field) => (
+              <Fragment key={field.label}>
+                <dt>{field.label}</dt>
+                <dd>
+                  <code>{field.value}</code>
+                </dd>
+              </Fragment>
+            ))}
+          </dl>
+          {!schedule.summary ? (
+            <p className="schedule-note">Standard cron expression with {schedule.fields.length} field(s).</p>
+          ) : null}
+        </Section>
+      )
+    case 'unknown':
+      return (
+        <Section title="Schedule">
+          <p className="schedule-note">
+            Unable to parse schedule format. Raw value: <code>{schedule.raw}</code>
+          </p>
+        </Section>
+      )
+    default:
+      return null
+  }
 }

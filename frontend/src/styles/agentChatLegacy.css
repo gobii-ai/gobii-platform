@@ -170,7 +170,14 @@
   justify-content: center;
   box-shadow: 0 12px 32px rgba(79, 70, 229, 0.18);
   transform: translate(-50%, 0);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.15s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, visibility 0.18s ease;
+}
+
+.jump-to-latest[data-visible='false'] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 12px);
 }
 
 .jump-to-latest svg {
@@ -627,6 +634,102 @@
   margin-top: 0.35rem;
   font-size: 0.86rem;
   color: #334155;
+}
+
+.schedule-card {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(99, 102, 241, 0.12);
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(129, 140, 248, 0.04));
+  padding: 0.85rem 1rem;
+}
+
+.schedule-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  background: rgba(79, 70, 229, 0.14);
+  color: #3730a3;
+}
+
+.schedule-card-icon svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.schedule-card-label {
+  font-weight: 600;
+  color: #312e81;
+}
+
+.schedule-card-description {
+  margin-top: 0.2rem;
+  color: #4c1d95;
+  font-size: 0.85rem;
+}
+
+.schedule-interval {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.schedule-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  border-radius: 999px;
+  background: rgba(2, 132, 199, 0.12);
+  color: #0c4a6e;
+  padding: 0.35rem 0.75rem;
+  font-weight: 600;
+}
+
+.schedule-pill-value {
+  font-size: 0.95rem;
+}
+
+.schedule-pill-unit {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.schedule-note {
+  margin-top: 0.75rem;
+  color: #475569;
+  font-size: 0.85rem;
+}
+
+.schedule-cron-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+  gap: 0.65rem 1.2rem;
+  font-size: 0.85rem;
+}
+
+.schedule-cron-grid dt {
+  font-weight: 600;
+  color: #1e293b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.schedule-cron-grid dd {
+  margin: 0;
+  color: #334155;
+}
+
+.schedule-cron-grid code {
+  background: rgba(15, 118, 110, 0.08);
+  color: #0f766e;
+  border-radius: 0.35rem;
+  padding: 0.15rem 0.4rem;
 }
 
 .chat-bubble--user {

@@ -195,6 +195,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
                   </span>
                   <span className="tool-chip-body">
                     <span className="tool-chip-label">{entry.label}</span>
+                    {entry.caption ? <span className="tool-chip-caption">{entry.caption}</span> : null}
                   </span>
                 </button>
               </li>

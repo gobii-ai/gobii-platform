@@ -1,4 +1,5 @@
 import { resolveDetailComponent } from '../toolDetails'
+import { summarizeSchedule } from '../../../util/schedule'
 import type { ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
 import type {
   ToolClusterTransform,
@@ -58,7 +59,10 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
     {
       name: 'update_charter',
       label: 'Assignment updated',
-      iconPaths: ['M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'],
+      iconPaths: [
+        'M9 12h5M9 16h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+        'M9.5 13.75l2 2L17 10',
+      ],
       iconBgClass: 'bg-indigo-100',
       iconColorClass: 'text-indigo-600',
       detailKind: 'updateCharter',
@@ -73,10 +77,21 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
     {
       name: 'update_schedule',
       label: 'Schedule updated',
-      iconPaths: ['M8 7V3m8 4V3m-9 8h10m-12 8h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'],
+      iconPaths: [
+        'M8 7V3m8 4V3m-9 8h10m-12 8h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+        'M15.5 16.5a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0z',
+        'M15.5 16.5L13.75 15.25',
+      ],
       iconBgClass: 'bg-sky-100',
       iconColorClass: 'text-sky-600',
       detailKind: 'updateSchedule',
+      derive(entry, parameters) {
+        const scheduleValue = coerceString(parameters?.new_schedule)
+        const summary = summarizeSchedule(scheduleValue)
+        return {
+          caption: summary ?? (scheduleValue ? truncate(scheduleValue, 40) : 'Disabled'),
+        }
+      },
     },
     {
       name: 'sqlite_batch',

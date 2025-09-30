@@ -43,13 +43,66 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const initialLoading = loading && events.length === 0
 
+  const autoScrollPinnedRef = useRef(autoScrollPinned)
+  useEffect(() => {
+    autoScrollPinnedRef.current = autoScrollPinned
+  }, [autoScrollPinned])
+
   useAgentChatSocket(agentId)
 
   useEffect(() => {
     initialize(agentId)
   }, [agentId, initialize])
 
-  const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement, [])
+  const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
+
+  useEffect(() => {
+    const scroller = getScrollContainer()
+
+    const threshold = 160
+    let ticking = false
+
+    const readScrollPosition = () => {
+      const target = scroller || document.documentElement || document.body
+      const distanceToBottom = target.scrollHeight - target.clientHeight - target.scrollTop
+      return distanceToBottom
+    }
+
+    const handleScroll = () => {
+      if (ticking) {
+        return
+      }
+      ticking = true
+      requestAnimationFrame(() => {
+        ticking = false
+        const distanceToBottom = readScrollPosition()
+        const currentlyPinned = autoScrollPinnedRef.current
+
+        if (!currentlyPinned && distanceToBottom <= 12) {
+          setAutoScrollPinned(true)
+          return
+        }
+
+        if (!currentlyPinned) {
+          return
+        }
+
+        if (distanceToBottom > threshold) {
+          setAutoScrollPinned(false)
+        }
+      })
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    document.addEventListener('scroll', handleScroll, { passive: true })
+    scroller?.addEventListener('scroll', handleScroll, { passive: true })
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      document.removeEventListener('scroll', handleScroll)
+      scroller?.removeEventListener('scroll', handleScroll)
+    }
+  }, [getScrollContainer, setAutoScrollPinned])
 
   const scrollToBottom = useCallback(() => {
     if (!autoScrollPinned) return
@@ -75,7 +128,8 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries.find((item) => item.target === sentinel)
-        setAutoScrollPinned(Boolean(entry?.isIntersecting))
+        const nextPinned = Boolean(entry?.isIntersecting)
+        setAutoScrollPinned(nextPinned)
       },
       { root: null, threshold: 0.75 },
     )
