@@ -2384,7 +2384,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 # Reassign a user-owned agent to an organization, or move org-owned back to personal
                 target_org_id = (request.POST.get('target_org_id') or '').strip() or None
                 try:
-                    from api.models import OrganizationMembership, PersistentAgent
                     if target_org_id:
                         # Ensure user is owner/admin in target org
                         has_rights = OrganizationMembership.objects.filter(
