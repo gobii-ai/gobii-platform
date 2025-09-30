@@ -21,3 +21,10 @@ class TextSanitizationTests(TestCase):
     def test_strip_control_chars_handles_non_string_input(self):
         self.assertEqual(strip_control_chars(None), "")
         self.assertEqual(strip_control_chars(123), "")
+
+    def test_strip_control_chars_normalizes_known_sequences(self):
+        dirty = "We\x00b9re seeing 50\x1390% and DCSEU\x00B9s letter \x14 final draft."
+
+        cleaned = strip_control_chars(dirty)
+
+        self.assertEqual(cleaned, "We're seeing 50-90% and DCSEU's letter - final draft.")
