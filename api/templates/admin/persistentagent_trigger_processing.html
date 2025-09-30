@@ -1,0 +1,29 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' 'api' %}">API</a>
+    &rsaquo; <a href="{% url 'admin:api_persistentagent_changelist' %}">{% trans 'Persistent Agents' %}</a>
+    &rsaquo; Trigger Event Processing
+  </div>
+{% endblock %}
+
+{% block content %}
+  <h1>Trigger Event Processing</h1>
+  <p>Paste one or more persistent agent IDs (UUID) to queue event processing for each.</p>
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      <div class="form-row">
+        <label for="id_agent_ids"><strong>Persistent Agent IDs</strong></label>
+        <textarea name="agent_ids" id="id_agent_ids" rows="8" cols="60" placeholder="One persistent agent ID per line">{{ agent_ids|default_if_none:'' }}</textarea>
+      </div>
+    </fieldset>
+    <div class="submit-row">
+      <a class="button" href="{% url 'admin:api_persistentagent_changelist' %}">Cancel</a>
+      <button type="submit" class="button default">Queue Processing</button>
+    </div>
+  </form>
+{% endblock %}
