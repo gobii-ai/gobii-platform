@@ -90,4 +90,6 @@ class EchoConsumer(AsyncJsonWebsocketConsumer):
         await self.accept()
 
     async def receive_json(self, content, **kwargs):
-        await self.send_json(content)
+        """Mirror the payload using the legacy diagnostic echo format."""
+
+        await self.send_json({"you_sent": content})
