@@ -111,15 +111,36 @@ class SqliteBatchToolTests(TestCase):
 
     def test_select_truncation_flag(self):
         with self._with_temp_db() as (db_path, token, tmp):
-            # Create and fill with >1000 rows to trigger truncation flag
+            # Create and fill with > default row limit rows to trigger truncation flag
             ops = ["CREATE TABLE t(a INTEGER)"] + [
-                f"INSERT INTO t(a) VALUES ({i})" for i in range(1001)
+                f"INSERT INTO t(a) VALUES ({i})" for i in range(400)
             ] + [
                 "SELECT a FROM t ORDER BY a",
             ]
             out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
             results = out.get("results", [])
             select_res = results[-1]
-            self.assertEqual(len(select_res["rows"]), 1000)
+            self.assertEqual(len(select_res["rows"]), 200)
+            self.assertTrue(select_res["truncated_rows"])
+            self.assertTrue(out.get("truncated_rows"))
+            self.assertEqual(out.get("row_limit"), 200)
             # db size present
             self.assertIsInstance(out.get("db_size_mb"), (int, float))
+
+    def test_row_limit_override(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            ops = ["CREATE TABLE t(a INTEGER)"] + [
+                f"INSERT INTO t(a) VALUES ({i})" for i in range(300)
+            ] + [
+                "SELECT a FROM t ORDER BY a",
+            ]
+            out = execute_sqlite_batch(
+                self.agent,
+                {"operations": ops, "mode": "atomic", "row_limit": 500},
+            )
+            results = out.get("results", [])
+            select_res = results[-1]
+            self.assertEqual(len(select_res["rows"]), 300)
+            self.assertFalse(select_res["truncated_rows"])
+            self.assertFalse(out.get("truncated_rows"))
+            self.assertEqual(out.get("row_limit"), 500)
