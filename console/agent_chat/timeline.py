@@ -9,7 +9,6 @@ from typing import Iterable, Literal, Sequence
 from django.contrib.humanize.templatetags.humanize import naturaltime
 from django.db.models import Q
 from django.utils import timezone
-from django.utils.html import escape
 from django.utils.timesince import timesince
 
 from bleach.sanitizer import ALLOWED_ATTRIBUTES as BLEACH_ALLOWED_ATTRIBUTES_BASE
@@ -121,10 +120,10 @@ def _looks_like_html(body: str) -> bool:
 
 
 def _humanize_body(body: str) -> str:
+    body = body or ""
     if _looks_like_html(body):
         return HTML_CLEANER.clean(body)
-    escaped = escape(body)
-    return escaped.replace("\n", "<br />")
+    return ""
 
 
 def _format_timestamp(dt: datetime | None) -> str | None:

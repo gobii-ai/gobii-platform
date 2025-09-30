@@ -11,11 +11,13 @@
   },
   "dependencies": {
     "dompurify": "^3.1.6",
+    "highlight.js": "^11.10.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^9.1.0",
     "remark-breaks": "^3.0.3",
     "remark-gfm": "^4.0.0",
+    "rehype-highlight": "^7.0.1",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

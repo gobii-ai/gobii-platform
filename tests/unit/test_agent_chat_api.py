@@ -146,6 +146,41 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("&lt;", rendered_html)
 
     @tag("batch_agent_chat")
+    def test_plaintext_and_markdown_prefer_body_text(self):
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        original_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == "Hello from the owner"
+        )
+
+        self.assertEqual(original_event["message"].get("bodyHtml"), "")
+
+        markdown_body = "# Heading\n\n- Item"
+        PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            conversation=self.conversation,
+            body=markdown_body,
+            owner_agent=self.agent,
+        )
+
+        refreshed = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(refreshed.status_code, 200)
+        payload = refreshed.json()
+
+        markdown_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == markdown_body
+        )
+
+        self.assertEqual(markdown_event["message"].get("bodyHtml"), "")
+
+    @tag("batch_agent_chat")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_message_post_creates_console_message(self, mock_delay):
         body = "Run weekly summary"
