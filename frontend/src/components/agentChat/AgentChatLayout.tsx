@@ -26,8 +26,6 @@ export function AgentChatLayout({
   events,
   hasMoreOlder,
   hasMoreNewer,
-  oldestCursor,
-  newestCursor,
   processingActive,
   onLoadOlder,
   onLoadNewer,

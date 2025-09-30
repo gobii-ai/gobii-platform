@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 
 import type { TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
-import type { TimelineResponse } from '../api/agentChat'
 import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
 
 function parseCursorValue(cursor: string): number {
@@ -157,15 +156,20 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         cursor: state.oldestCursor ?? undefined,
         limit: TIMELINE_WINDOW_SIZE,
       })
-      const events = sortEvents(snapshot.events)
+      const incoming = sortEvents(snapshot.events)
+      const merged = mergeEvents(state.events, incoming)
+      const windowSize = Math.min(TIMELINE_WINDOW_SIZE, merged.length)
+      const events = merged.slice(0, windowSize)
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
+      const trimmedNewer = merged.length > events.length
+      const hasMoreNewer = incoming.length === 0 ? state.hasMoreNewer : snapshot.has_more_newer || trimmedNewer
       set({
         events,
         oldestCursor,
         newestCursor,
         hasMoreOlder: snapshot.has_more_older,
-        hasMoreNewer: snapshot.has_more_newer,
+        hasMoreNewer,
         loadingOlder: false,
       })
     } catch (error) {
@@ -188,14 +192,19 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         cursor: state.newestCursor ?? undefined,
         limit: TIMELINE_WINDOW_SIZE,
       })
-      const events = sortEvents(snapshot.events)
+      const incoming = sortEvents(snapshot.events)
+      const merged = mergeEvents(state.events, incoming)
+      const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
+      const events = merged.slice(windowStart)
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
+      const trimmedOlder = merged.length > events.length
+      const hasMoreOlder = incoming.length === 0 ? state.hasMoreOlder : snapshot.has_more_older || trimmedOlder
       set({
         events,
         oldestCursor,
         newestCursor,
-        hasMoreOlder: snapshot.has_more_older,
+        hasMoreOlder,
         hasMoreNewer: snapshot.has_more_newer,
         processingActive: snapshot.processing_active,
         loadingNewer: false,
