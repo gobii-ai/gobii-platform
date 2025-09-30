@@ -38,7 +38,7 @@ export function AgentChatLayout({
   loadingNewer = false,
 }: AgentChatLayoutProps) {
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="min-h-screen">
       <div className="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-6 sm:px-6 lg:px-10">
         <div
           id="agent-workspace-root"
@@ -48,7 +48,7 @@ export function AgentChatLayout({
             <div ref={timelineRef} id="timeline-events" className="flex flex-col gap-3">
               <div
                 id="timeline-load-older"
-                className="timeline-load-control border-b border-slate-100"
+                className="timeline-load-control"
                 data-side="older"
                 data-state={loadingOlder ? 'loading' : hasMoreOlder ? 'has-more' : 'exhausted'}
               >
@@ -77,7 +77,7 @@ export function AgentChatLayout({
 
               <div
                 id="timeline-load-newer"
-                className="timeline-load-control border-t border-slate-100"
+                className="timeline-load-control"
                 data-side="newer"
                 data-state={loadingNewer ? 'loading' : hasMoreNewer ? 'has-more' : 'exhausted'}
                 hidden={!hasMoreNewer && !loadingNewer}

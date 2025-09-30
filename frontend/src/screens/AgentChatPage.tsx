@@ -82,7 +82,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen">
       {error ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error}</div>
       ) : null}
