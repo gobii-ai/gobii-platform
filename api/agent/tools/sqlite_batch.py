@@ -41,6 +41,32 @@ def _get_db_size_mb(db_path: str) -> float:
         pass
     return 0.0
 
+def _normalize_operations(value: Any) -> Optional[List[str]]:
+    """Best-effort coercion of operations into a list of SQL strings."""
+    if isinstance(value, list) and value:
+        if all(isinstance(item, str) for item in value):
+            return value  # already in correct form
+        # Support list of dicts with "sql" keys, common in structured tool outputs
+        sqlified = []
+        for item in value:
+            if isinstance(item, dict) and "sql" in item and isinstance(item["sql"], str):
+                sqlified.append(item["sql"])
+            else:
+                return None
+        return sqlified if sqlified else None
+
+    if isinstance(value, str) and value.strip():
+        # Attempt to parse JSON arrays encoded as strings
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            # Treat as single statement string
+            return [value]
+
+        return _normalize_operations(parsed)
+
+    return None
+
 DEFAULT_SELECT_ROW_LIMIT = 200
 MAX_SELECT_ROW_LIMIT = 1000
 
@@ -53,8 +79,16 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         - mode: 'atomic' | 'per_statement' (default 'atomic')
     """
 
-    ops = params.get("operations")
-    if not isinstance(ops, list) or not ops or not all(isinstance(s, str) for s in ops):
+    ops_raw = params.get("operations")
+    ops: Optional[List[str]] = None
+
+    ops = _normalize_operations(ops_raw)
+
+    if not ops or not all(isinstance(s, str) and s.strip() for s in ops):
+        logger.warning(
+            "sqlite_batch received invalid operations payload: %s",
+            json.dumps(ops_raw)[:400] if isinstance(ops_raw, (str, list, dict)) else str(type(ops_raw)),
+        )
         return {"status": "error", "message": "'operations' must be a non-empty array of SQL strings."}
 
     mode = params.get("mode", "atomic")

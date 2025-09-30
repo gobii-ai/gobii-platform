@@ -4,6 +4,7 @@ from django.utils import timezone
 import tempfile
 import os
 import sqlite3
+import json
 
 from api.models import PersistentAgent, BrowserUseAgent
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
@@ -144,3 +145,48 @@ class SqliteBatchToolTests(TestCase):
             self.assertFalse(select_res["truncated_rows"])
             self.assertFalse(out.get("truncated_rows"))
             self.assertEqual(out.get("row_limit"), 500)
+
+    def test_operations_stringified_json_is_normalized(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            ops = [
+                "CREATE TABLE t(a INTEGER)",
+                "INSERT INTO t(a) VALUES (1)",
+                "SELECT a FROM t",
+            ]
+            payload = {
+                "operations": json.dumps(ops),
+                "mode": "atomic",
+            }
+            out = execute_sqlite_batch(self.agent, payload)
+            self.assertEqual(out.get("status"), "ok")
+            rows = out["results"][-1]["rows"]
+            self.assertEqual(rows[0]["a"], 1)
+
+    def test_operations_plain_string_is_wrapped(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            payload = {
+                "operations": "CREATE TABLE t(a INTEGER)",
+                "mode": "atomic",
+            }
+            out = execute_sqlite_batch(self.agent, payload)
+            self.assertEqual(out.get("status"), "ok")
+            # Subsequent insert using proper list to confirm table exists
+            insert_out = execute_sqlite_batch(
+                self.agent,
+                {"operations": ["INSERT INTO t(a) VALUES (5)"]},
+            )
+            self.assertEqual(insert_out.get("status"), "ok")
+
+    def test_operations_list_of_dicts_with_sql_key(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            payload = {
+                "operations": [
+                    {"sql": "CREATE TABLE t(a INTEGER)"},
+                    {"sql": "INSERT INTO t(a) VALUES (7)"},
+                    {"sql": "SELECT a FROM t"},
+                ]
+            }
+            out = execute_sqlite_batch(self.agent, payload)
+            self.assertEqual(out.get("status"), "ok")
+            rows = out["results"][-1]["rows"]
+            self.assertEqual(rows[0]["a"], 7)
