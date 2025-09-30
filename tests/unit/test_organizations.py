@@ -122,6 +122,33 @@ class OrganizationInvitesTest(TestCase):
         self.assertIn("already has a pending invitation", " ".join(form.errors.get("email", [])))
         self.assertEqual(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).count(), 1)
 
+    @tag("batch_organizations")
+    def test_second_invite_blocked_when_only_one_seat_available(self):
+        """With 1 purchased seat (beyond founder), only one pending invite should be allowed."""
+        # Setup: 1 seat purchased beyond founder allowance
+        billing = self.org.billing
+        billing.purchased_seats = 1
+        billing.save(update_fields=["purchased_seats"])
+
+        self.client.force_login(self.inviter)
+        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
+
+        # First invite should succeed
+        email1 = "first@example.com"
+        resp1 = self.client.post(detail_url, {"email": email1, "role": OrganizationMembership.OrgRole.MEMBER})
+        self.assertEqual(resp1.status_code, 302)
+        self.assertTrue(OrganizationInvite.objects.filter(org=self.org, email__iexact=email1).exists())
+
+        # Second invite (different email) should be blocked due to seats_reserved including pending invite
+        email2 = "second@example.com"
+        resp2 = self.client.post(detail_url, {"email": email2, "role": OrganizationMembership.OrgRole.MEMBER})
+        self.assertEqual(resp2.status_code, 200)
+        form = resp2.context.get("invite_form")
+        self.assertIsNotNone(form)
+        # Non-field error should indicate no seats available
+        self.assertTrue(any("No seats available" in e for e in form.non_field_errors()))
+        self.assertFalse(OrganizationInvite.objects.filter(org=self.org, email__iexact=email2).exists())
+
     @patch("config.stripe_config._load_from_database", return_value=None)
     @patch("console.views.stripe.checkout.Session.create")
     @patch("console.views.get_or_create_stripe_customer")

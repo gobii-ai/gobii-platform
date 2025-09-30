@@ -76,19 +76,46 @@
 
   <div>
     <h2 class="text-lg font-medium text-gray-800 mb-2">Invite Member</h2>
+    {% if org_billing and org_billing.seats_available <= 0 %}
+      <div class="mb-3 rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 flex gap-2">
+        <svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-yellow-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        </svg>
+        <div>
+          <span class="font-medium">No seats available.</span> Purchase additional seats to invite new members.
+          {% if can_manage_billing %}
+            <a href="{% url 'billing' %}" class="underline font-medium">Manage seats</a>.
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
     <form method="post" class="space-y-4">
       {% csrf_token %}
-      <div>
-        {{ invite_form.email.label_tag }}
-        {{ invite_form.email }}
-        {{ invite_form.email.errors }}
-      </div>
-      <div>
-        {{ invite_form.role.label_tag }}
-        {{ invite_form.role }}
-        {{ invite_form.role.errors }}
-      </div>
-      <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Send Invite</button>
+      <fieldset {% if org_billing and org_billing.seats_available <= 0 %}disabled aria-disabled="true"{% endif %}>
+        <div>
+          {{ invite_form.email.label_tag }}
+          {{ invite_form.email }}
+          {{ invite_form.email.errors }}
+        </div>
+        <div>
+          {{ invite_form.role.label_tag }}
+          {{ invite_form.role }}
+          {{ invite_form.role.errors }}
+        </div>
+      </fieldset>
+      {% if org_billing and org_billing.seats_available <= 0 %}
+        <button type="submit"
+                class="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed bg-gray-400"
+                disabled aria-disabled="true" title="No seats available">
+          Send Invite
+        </button>
+        <p class="text-xs text-gray-600 mt-1">Purchase more seats to invite members.</p>
+      {% else %}
+        <button type="submit"
+                class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+          Send Invite
+        </button>
+      {% endif %}
     </form>
   </div>
 

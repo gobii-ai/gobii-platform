@@ -4368,7 +4368,8 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
             {
                 "org": self.org,
                 "members": members,
-                "invite_form": OrganizationInviteForm(),
+                # Pass org to invite form so server-side validation context is explicit
+                "invite_form": OrganizationInviteForm(org=self.org),
                 "pending_invites": org_pending_invites,
                 "can_manage_members": bool(can_manage_members),
                 "can_manage_billing": bool(can_manage_billing),
@@ -4384,6 +4385,10 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     @transaction.atomic
     def post(self, request, *args, **kwargs):
         form = OrganizationInviteForm(request.POST, org=self.org)
+        # Defensive check: block when no seats available, even if submitted concurrently
+        billing = getattr(self.org, "billing", None)
+        if billing and billing.seats_available <= 0:
+            form.add_error(None, "No seats available. Increase the seat count before inviting new members.")
         if form.is_valid():
             invite = OrganizationInvite.objects.create(
                 org=self.org,
