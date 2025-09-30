@@ -39,7 +39,6 @@ export function AgentChatLayout({
   loadingOlder = false,
   loadingNewer = false,
 }: AgentChatLayoutProps) {
-
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-6 sm:px-6 lg:px-10">
@@ -105,10 +104,10 @@ export function AgentChatLayout({
 
       <button
         id="jump-to-latest"
-        className={`jump-to-latest ${autoScrollPinned ? 'hidden' : ''}`}
+        className={`jump-to-latest ${autoScrollPinned && !hasMoreNewer ? '!hidden' : ''}`}
         type="button"
         aria-label="Jump to latest"
-        aria-hidden={autoScrollPinned ? 'true' : 'false'}
+        aria-hidden={autoScrollPinned && !hasMoreNewer ? 'true' : 'false'}
         onClick={onJumpToLatest}
         data-has-activity={hasUnseenActivity ? 'true' : 'false'}
       >

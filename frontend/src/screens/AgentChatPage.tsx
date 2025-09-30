@@ -52,8 +52,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
       const scrollTop = window.scrollY
       const clientHeight = window.innerHeight
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      const shouldPin = distanceFromBottom < 64
-      setAutoScrollPinned(shouldPin)
+      setAutoScrollPinned(distanceFromBottom < 64)
     }
 
     window.addEventListener('scroll', handleScroll, { passive: true })
