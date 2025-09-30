@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
@@ -17,6 +17,9 @@ export type AgentChatPageProps = {
 
 export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const timelineRef = useRef<HTMLDivElement | null>(null)
+  const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
+    timelineRef.current = node
+  }, [])
 
   const initialize = useAgentChatStore((state) => state.initialize)
   const loadOlder = useAgentChatStore((state) => state.loadOlder)
@@ -41,44 +44,50 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
     initialize(agentId)
   }, [agentId, initialize])
 
-  useLayoutEffect(() => {
+  const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement, [])
+
+  const scrollToBottom = useCallback(() => {
     if (!autoScrollPinned) return
-    window.scrollTo(0, document.documentElement.scrollHeight)
-  }, [events, autoScrollPinned])
+    const scroller = getScrollContainer()
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: scroller.scrollHeight })
+    })
+  }, [autoScrollPinned, getScrollContainer])
+
+  useLayoutEffect(() => {
+    scrollToBottom()
+  }, [scrollToBottom, events, processingActive])
 
   useEffect(() => {
     const handleScroll = () => {
-      const scrollHeight = document.documentElement.scrollHeight
-      const scrollTop = window.scrollY
-      const clientHeight = window.innerHeight
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      setAutoScrollPinned(distanceFromBottom < 64)
+      const scroller = getScrollContainer()
+      const distanceFromBottom = scroller.scrollHeight - window.scrollY - window.innerHeight
+      setAutoScrollPinned(distanceFromBottom < 96)
     }
 
     window.addEventListener('scroll', handleScroll, { passive: true })
     return () => window.removeEventListener('scroll', handleScroll)
-  }, [setAutoScrollPinned])
+  }, [getScrollContainer, setAutoScrollPinned])
+
 
   const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])
 
   const handleJumpToLatest = async () => {
     await jumpToLatest()
-    const node = timelineRef.current
-    if (!node) return
+    const scroller = getScrollContainer()
     requestAnimationFrame(() => {
-      node.scrollTop = node.scrollHeight
+      window.scrollTo({ top: scroller.scrollHeight })
       setAutoScrollPinned(true)
     })
   }
 
   const handleSend = async (body: string) => {
     await sendMessage(body)
-    const node = timelineRef.current
-    if (node) {
-      requestAnimationFrame(() => {
-        node.scrollTop = node.scrollHeight
-      })
-    }
+    if (!autoScrollPinned) return
+    const scroller = getScrollContainer()
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: scroller.scrollHeight })
+    })
   }
 
   return (
@@ -106,7 +115,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
         onJumpToLatest={handleJumpToLatest}
         autoScrollPinned={autoScrollPinned}
         hasUnseenActivity={hasUnseenActivity}
-        timelineRef={timelineRef}
+        timelineRef={captureTimelineRef}
         loadingOlder={loadingOlder}
         loadingNewer={loadingNewer}
       />

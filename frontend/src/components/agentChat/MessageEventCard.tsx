@@ -1,4 +1,5 @@
 import type { AgentMessage } from './types'
+import { formatRelativeTimestamp } from '../../util/time'
 
 const CHANNEL_LABELS: Record<string, string> = {
   email: 'Email',
@@ -31,6 +32,7 @@ export function MessageEventCard({ eventCursor, message, agentFirstName }: Messa
   const channelLabel = getChannelLabel(channel)
   const showChannelTag = channel.toLowerCase() !== 'web'
   const hasHtml = Boolean(message.bodyHtml)
+  const relativeLabel = message.relativeTimestamp || formatRelativeTimestamp(message.timestamp) || ''
 
   return (
     <article className={`timeline-event chat-event ${isAgent ? 'is-agent' : 'is-user'}`} data-cursor={eventCursor}>
@@ -74,7 +76,9 @@ export function MessageEventCard({ eventCursor, message, agentFirstName }: Messa
           </div>
         ) : null}
       </div>
-      <div className={metaTheme}>{message.relativeTimestamp}</div>
+      <div className={metaTheme} title={message.timestamp || undefined}>
+        {relativeLabel || message.timestamp}
+      </div>
     </article>
   )
 }

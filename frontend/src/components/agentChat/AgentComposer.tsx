@@ -1,5 +1,5 @@
-import type { FormEvent } from 'react'
-import { useState } from 'react'
+import type { FormEvent, KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 type AgentComposerProps = {
   agentName: string
@@ -9,16 +9,58 @@ type AgentComposerProps = {
 
 export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentComposerProps) {
   const [body, setBody] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!body.trim() || disabled) {
+  const MAX_COMPOSER_HEIGHT = 320
+
+  const adjustTextareaHeight = useCallback(
+    (reset = false) => {
+      const node = textareaRef.current
+      if (!node) return
+      if (reset) {
+        node.style.height = ''
+      }
+      node.style.height = 'auto'
+      const nextHeight = Math.min(node.scrollHeight, MAX_COMPOSER_HEIGHT)
+      node.style.height = `${nextHeight}px`
+      node.style.overflowY = node.scrollHeight > MAX_COMPOSER_HEIGHT ? 'auto' : 'hidden'
+    },
+    [MAX_COMPOSER_HEIGHT],
+  )
+
+  useEffect(() => {
+    adjustTextareaHeight()
+  }, [body, adjustTextareaHeight])
+
+  useEffect(() => {
+    adjustTextareaHeight(true)
+  }, [adjustTextareaHeight])
+
+  const submitMessage = useCallback(async () => {
+    const trimmed = body.trim()
+    if (!trimmed || disabled) {
       return
     }
     if (onSubmit) {
-      await onSubmit(body.trim())
+      await onSubmit(trimmed)
     }
     setBody('')
+    requestAnimationFrame(() => adjustTextareaHeight(true))
+  }, [adjustTextareaHeight, body, disabled, onSubmit])
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    await submitMessage()
+  }
+
+  const handleKeyDown = async (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const isPlainEnter =
+      event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+    if (!isPlainEnter || event.nativeEvent.isComposing) {
+      return
+    }
+    event.preventDefault()
+    await submitMessage()
   }
 
   return (
@@ -34,7 +76,9 @@ export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentCo
               placeholder="Send a message..."
               value={body}
               onChange={(event) => setBody(event.target.value)}
+              onKeyDown={handleKeyDown}
               disabled={disabled}
+              ref={textareaRef}
             />
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-col gap-1.5 text-xs text-slate-500 sm:flex-row sm:items-center sm:gap-3.5">

@@ -3,6 +3,7 @@ import { useToolDetailController, entryKey } from './tooling/ToolDetailContext'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
+import { formatRelativeTimestamp } from '../../util/time'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
@@ -106,6 +107,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
 
   const renderDetail = (entry: ToolEntryDisplay) => {
     const DetailComponent = entry.detailComponent
+    const detailRelative = formatRelativeTimestamp(entry.timestamp) || entry.timestamp || ''
     return (
       <div className="tool-chip-detail">
         <div className="tool-chip-detail-header">
@@ -119,8 +121,8 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
           <div className="tool-chip-detail-text">
             <span className="tool-chip-detail-label">{entry.label}</span>
             {entry.timestamp ? (
-              <time dateTime={entry.timestamp || undefined} className="tool-chip-detail-meta">
-                {entry.timestamp}
+              <time dateTime={entry.timestamp ?? undefined} className="tool-chip-detail-meta" title={entry.timestamp ?? undefined}>
+                {detailRelative}
               </time>
             ) : null}
           </div>
@@ -204,8 +206,12 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
           {!collapsed && activeEntry ? renderDetail(activeEntry) : null}
         </div>
         {transformed.latestTimestamp ? (
-          <div className="tool-cluster-timestamp chat-meta" data-role="cluster-timestamp">
-            {transformed.latestTimestamp}
+          <div
+            className="tool-cluster-timestamp chat-meta"
+            data-role="cluster-timestamp"
+            title={transformed.latestTimestamp}
+          >
+            {formatRelativeTimestamp(transformed.latestTimestamp) ?? transformed.latestTimestamp}
           </div>
         ) : null}
       </div>
