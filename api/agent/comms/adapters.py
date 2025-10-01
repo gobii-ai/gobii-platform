@@ -247,3 +247,118 @@ class PostmarkEmailAdapter(EmailAdapter):
             raw_payload=payload_dict,
             msg_channel=CommsChannel.EMAIL,
         )
+
+
+class MailgunEmailAdapter(EmailAdapter):
+    """Adapter that normalizes Mailgun inbound webhook payloads."""
+
+    @tracer.start_as_current_span("MAILGUN Email Parse")
+    def parse_request(self, request: HttpRequest) -> ParsedMessage:
+        """Parse a Mailgun webhook request into a :class:`ParsedMessage`."""
+        span = trace.get_current_span()
+
+        if hasattr(request, "data") and not request.POST:
+            post_data = request.data
+        else:
+            post_data = request.POST
+
+        if isinstance(post_data, QueryDict):
+            payload_dict: MutableMapping[str, Any] = {
+                key: post_data.getlist(key) if len(post_data.getlist(key)) > 1 else post_data.get(key)
+                for key in post_data.keys()
+            }
+        else:
+            payload_dict = dict(post_data or {})  # type: ignore[arg-type]
+
+        attachments: List[Any] = []
+        if hasattr(request, "FILES") and request.FILES:
+            attachments = list(request.FILES.values())
+
+        span.set_attribute("mailgun.attachments.count", len(attachments))
+
+        def _first_value(value: Any) -> Any:
+            if isinstance(value, (list, tuple)):
+                return value[0] if value else ""
+            return value
+
+        subject = (_first_value(payload_dict.get("subject")) or "").strip()
+
+        text_body = (
+            _first_value(payload_dict.get("stripped-text"))
+            or _first_value(payload_dict.get("body-plain"))
+            or _first_value(payload_dict.get("text"))
+            or ""
+        )
+        html_body = (
+            _first_value(payload_dict.get("stripped-html"))
+            or _first_value(payload_dict.get("body-html"))
+            or _first_value(payload_dict.get("html"))
+            or ""
+        )
+
+        working_text = text_body or _html_to_text(html_body)
+        body_used = (
+            "stripped-text"
+            if payload_dict.get("stripped-text")
+            else "body-plain"
+            if payload_dict.get("body-plain")
+            else "html"
+            if html_body
+            else "None"
+        )
+
+        body = working_text
+
+        if EMAIL_STRIP_REPLIES is True:
+            span.set_attribute("mailgun.strip_replies", "True")
+            attachments_meta = []
+            for att in attachments:
+                content_type = getattr(att, "content_type", "")
+                if content_type:
+                    attachments_meta.append({"ContentType": content_type})
+            is_forward = _is_forward_like(subject, working_text, attachments_meta)
+            span.set_attribute("mailgun.is_forward", bool(is_forward))
+
+            if is_forward:
+                preamble, forwarded = _extract_forward_sections(working_text)
+                if forwarded and preamble:
+                    body = f"{preamble}\n\n{forwarded}"
+                    body_used = "Forward+Preamble+Block"
+                elif forwarded:
+                    body = forwarded
+                    body_used = "Forward+BlockOnly"
+                elif preamble:
+                    body = preamble
+                    body_used = "Forward+PreambleOnly"
+                else:
+                    body = working_text.strip()
+                    body_used = "Forward+WorkingTextFallback"
+            else:
+                for field in ("stripped-text", "body-plain", "stripped-html", "body-html", "text", "html"):
+                    value = _first_value(payload_dict.get(field)) if field in payload_dict else ""
+                    if value:
+                        body = value
+                        body_used = field
+                        break
+        span.set_attribute("mailgun.body_used", body_used)
+
+        sender = (
+            _first_value(payload_dict.get("sender"))
+            or _first_value(payload_dict.get("from"))
+            or ""
+        ).strip()
+        recipient = (
+            _first_value(payload_dict.get("recipient"))
+            or _first_value(payload_dict.get("to"))
+            or ""
+        ).strip()
+
+        return ParsedMessage(
+            sender=sender,
+            recipient=recipient,
+            subject=_first_value(payload_dict.get("subject")),
+            body=body,
+            attachments=attachments,
+            raw_payload=payload_dict,
+            msg_channel=CommsChannel.EMAIL,
+        )

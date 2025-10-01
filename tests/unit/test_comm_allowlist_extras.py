@@ -13,7 +13,7 @@ from api.models import (
     CommsChannel,
     BrowserUseAgent,
 )
-from api.webhooks import email_webhook
+from api.webhooks import email_webhook_postmark
 from config import settings
 
 
@@ -67,6 +67,6 @@ class ManualEmailDisplayNameAndCaseTests(TestCase):
     @patch("api.webhooks.ingest_inbound_message")
     def test_display_name_and_case_insensitive_match(self, mock_ingest):
         req = self._postmark_req('"Friend" <FRIEND@EXAMPLE.COM>')
-        resp = email_webhook(req)
+        resp = email_webhook_postmark(req)
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_called_once()

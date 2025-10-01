@@ -13,7 +13,7 @@ from api.models import (
     Organization,
     OrganizationMembership,
 )
-from api.webhooks import email_webhook
+from api.webhooks import email_webhook_postmark
 from config import settings
 
 
@@ -66,7 +66,7 @@ class ManualAllowlistEmailTests(TestCase):
             agent=self.agent, channel=CommsChannel.EMAIL, address="friend@example.com"
         )
         req = self._postmark_req("friend@example.com")
-        resp = email_webhook(req)
+        resp = email_webhook_postmark(req)
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_called_once()
 
@@ -77,7 +77,7 @@ class ManualAllowlistEmailTests(TestCase):
             agent=self.agent, channel=CommsChannel.EMAIL, address="friend@example.com"
         )
         req = self._postmark_req("stranger@example.com")
-        resp = email_webhook(req)
+        resp = email_webhook_postmark(req)
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_not_called()
 
@@ -144,7 +144,7 @@ class OrgDefaultAllowlistEmailTests(TestCase):
     @patch("api.webhooks.ingest_inbound_message")
     def test_org_member_email_allowed(self, mock_ingest):
         req = self._postmark_req(self.member.email)
-        resp = email_webhook(req)
+        resp = email_webhook_postmark(req)
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_called_once()
 
@@ -152,7 +152,7 @@ class OrgDefaultAllowlistEmailTests(TestCase):
     @patch("api.webhooks.ingest_inbound_message")
     def test_non_member_email_rejected(self, mock_ingest):
         req = self._postmark_req(self.non_member.email)
-        resp = email_webhook(req)
+        resp = email_webhook_postmark(req)
         self.assertEqual(resp.status_code, 200)
         mock_ingest.assert_not_called()
 
