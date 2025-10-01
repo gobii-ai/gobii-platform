@@ -11,8 +11,10 @@ from constants.plans import PlanNames
 from datetime import datetime, timedelta, date, time
 from django.utils import timezone
 import logging
+import os
 from typing import Literal, Tuple, Any
 
+from django.conf import settings
 from observability import traced, trace
 from util.constants.task_constants import TASKS_UNLIMITED
 from util.payments_helper import PaymentsHelper
@@ -911,6 +913,19 @@ def downgrade_user_to_free_plan(user):
 def downgrade_organization_to_free_plan(organization):
     downgrade_owner_to_free_plan(organization)
 
+
+def is_community_unlimited_mode() -> bool:
+    """Return True when Community Edition should ignore plan agent limits."""
+    try:
+        if 'test_settings' in os.environ.get('DJANGO_SETTINGS_MODULE', ''):
+            return False
+        return (not getattr(settings, "GOBII_PROPRIETARY_MODE", False)) and bool(
+            getattr(settings, "GOBII_ENABLE_COMMUNITY_UNLIMITED", False)
+        )
+    except Exception:
+        return False
+
+
 def has_unlimited_agents(user) -> bool:
     """
     Checks if the user has unlimited agents based on their plan.
@@ -926,6 +941,9 @@ def has_unlimited_agents(user) -> bool:
         bool: True if the user has unlimited agents, False otherwise.
     """
     with traced("SUBSCRIPTION Has Unlimited Agents"):
+        if is_community_unlimited_mode():
+            return True
+
         plan = get_user_plan(user)
 
         if not plan:
