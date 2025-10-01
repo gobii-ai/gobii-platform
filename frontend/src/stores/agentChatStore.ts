@@ -1,7 +1,65 @@
 import { create } from 'zustand'
 
-import type { TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
+import type { AgentMessage, TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
 import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
+import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
+
+const HTML_TAG_FALLBACK_PATTERN = /<\/?[a-zA-Z][^>]*>/
+
+function pickHtmlCandidate(message: AgentMessage): string | null {
+  const htmlValue = message.bodyHtml?.trim()
+  if (htmlValue) {
+    return htmlValue
+  }
+
+  const textValue = message.bodyText?.trim()
+  if (!textValue) {
+    return null
+  }
+
+  if (looksLikeHtml(textValue) || HTML_TAG_FALLBACK_PATTERN.test(textValue)) {
+    return textValue
+  }
+
+  return null
+}
+
+function normalizeEvent(event: TimelineEvent): TimelineEvent {
+  if (event.kind !== 'message') {
+    return event
+  }
+
+  const candidate = pickHtmlCandidate(event.message)
+  if (!candidate) {
+    if (event.message.bodyHtml === undefined) {
+      return {
+        ...event,
+        message: {
+          ...event.message,
+          bodyHtml: '',
+        },
+      }
+    }
+    return event
+  }
+
+  const sanitized = sanitizeHtml(candidate)
+  if ((event.message.bodyHtml ?? '') === sanitized) {
+    return event
+  }
+
+  return {
+    ...event,
+    message: {
+      ...event.message,
+      bodyHtml: sanitized,
+    },
+  }
+}
+
+function normalizeEvents(events: TimelineEvent[]): TimelineEvent[] {
+  return events.map(normalizeEvent)
+}
 
 function parseCursorValue(cursor: string): number {
   const [raw] = cursor.split(':', 1)
@@ -48,14 +106,16 @@ function mergeClusters(base: ToolClusterEvent, incoming: ToolClusterEvent): Tool
 function mergeEvents(existing: TimelineEvent[], incoming: TimelineEvent[]): TimelineEvent[] {
   const map = new Map<string, TimelineEvent>()
   for (const event of existing) {
-    map.set(event.cursor, event)
+    const normalized = normalizeEvent(event)
+    map.set(normalized.cursor, normalized)
   }
   for (const event of incoming) {
-    const current = map.get(event.cursor)
-    if (current && current.kind === 'steps' && event.kind === 'steps') {
-      map.set(event.cursor, mergeClusters(current, event))
+    const normalized = normalizeEvent(event)
+    const current = map.get(normalized.cursor)
+    if (current && current.kind === 'steps' && normalized.kind === 'steps') {
+      map.set(normalized.cursor, mergeClusters(current, normalized))
     } else {
-      map.set(event.cursor, event)
+      map.set(normalized.cursor, normalized)
     }
   }
   return sortEvents(Array.from(map.values()))
@@ -110,7 +170,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
     try {
       const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
-      const events = sortEvents(snapshot.events)
+      const events = sortEvents(normalizeEvents(snapshot.events))
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
 
@@ -159,7 +219,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         cursor: state.oldestCursor ?? undefined,
         limit: TIMELINE_WINDOW_SIZE,
       })
-      const incoming = sortEvents(snapshot.events)
+      const incoming = sortEvents(normalizeEvents(snapshot.events))
       const merged = mergeEvents(state.events, incoming)
       const windowSize = Math.min(TIMELINE_WINDOW_SIZE, merged.length)
       const events = merged.slice(0, windowSize)
@@ -195,7 +255,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         cursor: state.newestCursor ?? undefined,
         limit: TIMELINE_WINDOW_SIZE,
       })
-      const incoming = sortEvents(snapshot.events)
+      const incoming = sortEvents(normalizeEvents(snapshot.events))
       const merged = mergeEvents(state.events, incoming)
       const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
       const events = merged.slice(windowStart)
@@ -228,7 +288,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     set({ loading: true })
     try {
       const snapshot = await fetchAgentTimeline(state.agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
-      const events = sortEvents(snapshot.events)
+      const events = sortEvents(normalizeEvents(snapshot.events))
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
       set({
@@ -272,8 +332,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   receiveRealtimeEvent(event) {
     const state = get()
+    const normalized = normalizeEvent(event)
     if (!state.autoScrollPinned) {
-      const pendingEvents = mergeEvents(state.pendingEvents, [event])
+      const pendingEvents = mergeEvents(state.pendingEvents, [normalized])
       set({
         pendingEvents,
         hasUnseenActivity: true,
@@ -281,16 +342,16 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       return
     }
     let events: TimelineEvent[]
-    if (event.kind === 'steps') {
+    if (normalized.kind === 'steps') {
       const last = state.events[state.events.length - 1]
       if (last && last.kind === 'steps') {
-        const mergedLast = mergeClusters(last, event)
+        const mergedLast = mergeClusters(last, normalized)
         events = sortEvents([...state.events.slice(0, -1), mergedLast])
       } else {
-        events = mergeEvents(state.events, [event])
+        events = mergeEvents(state.events, [normalized])
       }
     } else {
-      events = mergeEvents(state.events, [event])
+      events = mergeEvents(state.events, [normalized])
     }
     const newestCursor = events.length ? events[events.length - 1].cursor : null
     const oldestCursor = events.length ? events[0].cursor : null
