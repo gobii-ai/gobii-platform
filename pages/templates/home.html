@@ -302,21 +302,21 @@
       <!-- Featured Templates Grid -->
       <div class="grid gap-6 md:grid-cols-3 mb-8">
         {% for template in homepage_templates %}
-        <div class="group relative overflow-hidden rounded-xl border border-slate-200 bg-white/80 backdrop-blur p-6 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5">
+        <div class="group relative overflow-hidden rounded-xl border border-slate-200 bg-white/80 backdrop-blur p-6 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5 flex flex-col">
           <div class="flex items-start justify-between mb-3">
             <span class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600">
               <span class="size-2 rounded-full bg-indigo-400"></span>{{ template.category|default:"General" }}
             </span>
           </div>
           <h3 class="text-xl font-medium text-slate-900 mb-2">{{ template.display_name }}</h3>
-          <p class="text-sm text-slate-600 mb-4">{{ template.tagline }}</p>
+          <p class="text-sm text-slate-600 mb-4 flex-grow">{{ template.tagline }}</p>
           <div class="space-y-2 text-xs text-slate-500 mb-4">
             <div class="flex items-center gap-2">
               <span>🗓️</span>
               <span>{{ template.schedule_description|default:template.base_schedule }}</span>
             </div>
           </div>
-          <form method="post" action="{% url 'pages:ai_employee_hire' template.code %}" class="mt-auto">
+          <form method="post" action="{% url 'pages:ai_employee_hire' template.code %}">
             {% csrf_token %}
             <button type="submit" class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:shadow-md hover:from-indigo-500 hover:to-blue-500 transition">
               Hire
