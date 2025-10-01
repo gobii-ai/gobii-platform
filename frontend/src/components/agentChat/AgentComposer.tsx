@@ -11,6 +11,7 @@ export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentCo
   const [body, setBody] = useState('')
   const [isSending, setIsSending] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const shellRef = useRef<HTMLDivElement | null>(null)
 
   const MAX_COMPOSER_HEIGHT = 320
 
@@ -36,6 +37,34 @@ export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentCo
   useEffect(() => {
     adjustTextareaHeight(true)
   }, [adjustTextareaHeight])
+
+  useEffect(() => {
+    const node = shellRef.current
+    if (!node || typeof window === 'undefined') return
+
+    const updateComposerHeight = () => {
+      const height = node.getBoundingClientRect().height
+      document.documentElement.style.setProperty('--composer-height', `${height}px`)
+      const jumpButton = document.getElementById('jump-to-latest')
+      if (jumpButton) {
+        jumpButton.style.setProperty('--composer-height', `${height}px`)
+      }
+    }
+
+    updateComposerHeight()
+
+    const observer = new ResizeObserver(updateComposerHeight)
+    observer.observe(node)
+
+    return () => {
+      observer.disconnect()
+      document.documentElement.style.removeProperty('--composer-height')
+      const jumpButton = document.getElementById('jump-to-latest')
+      if (jumpButton) {
+        jumpButton.style.removeProperty('--composer-height')
+      }
+    }
+  }, [])
 
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
@@ -70,7 +99,7 @@ export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentCo
   }
 
   return (
-    <div className="composer-shell" id="agent-composer-shell">
+    <div className="composer-shell" id="agent-composer-shell" ref={shellRef}>
       <div className="composer-surface">
         <form className="flex flex-col" onSubmit={handleSubmit}>
           <div className="composer-input-surface flex flex-col gap-2 rounded-2xl border border-slate-200/70 bg-white px-4 py-3 transition">
