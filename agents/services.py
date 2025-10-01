@@ -11,7 +11,7 @@ import logging
 from cron_descriptor import get_description, Options
 from cron_descriptor.Exception import FormatError
 
-from util.subscription_helper import has_unlimited_agents
+from util.subscription_helper import has_unlimited_agents, is_community_unlimited_mode
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
@@ -72,17 +72,24 @@ class AgentService:
 
         in_use = AgentService.get_agents_in_use(user)
 
+        community_unlimited = is_community_unlimited_mode()
+        plan_unlimited = has_unlimited_agents(user)
+
         # Step 1: Determine the user's plan/quota limit.
         # Prefer explicit per-user quota when present; fall back to plan-based checks.
         UserQuota = apps.get_model("api", "UserQuota")
-        try:
-            user_quota = UserQuota.objects.get(user_id=user.id)
-            user_limit = min(user_quota.agent_limit, MAX_AGENT_LIMIT)
-        except UserQuota.DoesNotExist:
-            # Without an explicit per-user quota, treat as no capacity.
-            # Tests and safety expectations prefer an explicit quota to be present.
-            logger.warning(f"UserQuota not found for user_id: {user.id}")
-            return 0
+
+        if community_unlimited or plan_unlimited:
+            user_limit = MAX_AGENT_LIMIT
+        else:
+            try:
+                user_quota = UserQuota.objects.get(user_id=user.id)
+                user_limit = min(user_quota.agent_limit, MAX_AGENT_LIMIT)
+            except UserQuota.DoesNotExist:
+                # Without an explicit per-user quota, treat as no capacity.
+                # Tests and safety expectations prefer an explicit quota to be present.
+                logger.warning(f"UserQuota not found for user_id: {user.id}")
+                return 0
 
         # Step 2: Calculate remaining slots (never negative).
         remaining = max(user_limit - in_use, 0)

@@ -1,4 +1,6 @@
-from django.test import TestCase, tag
+import os
+
+from django.test import TestCase, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from unittest.mock import patch, MagicMock
@@ -7,6 +9,7 @@ from api.models import BrowserUseAgent, UserQuota
 from agents.services import AgentService
 from config.plans import MAX_AGENT_LIMIT, AGENTS_UNLIMITED, PLAN_CONFIG
 from constants.plans import PlanNames
+from util.subscription_helper import has_unlimited_agents, is_community_unlimited_mode
 
 
 User = get_user_model()
@@ -199,6 +202,25 @@ class AgentLimitTests(TestCase):
         free_limit = PLAN_CONFIG[PlanNames.FREE]["agent_limit"]
         self.assertLess(free_limit, MAX_AGENT_LIMIT)
         self.assertEqual(free_limit, 5)  # Explicit check for current value
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False, GOBII_ENABLE_COMMUNITY_UNLIMITED=True)
+    def test_community_unlimited_mode_ignores_quota(self):
+        """Community Edition unlimited mode should bypass per-user quota caps."""
+        quota = UserQuota.objects.get(user=self.free_user)
+        quota.agent_limit = 2
+        quota.save()
+
+        for i in range(2):
+            BrowserUseAgent.objects.create(user=self.free_user, name=f'community-agent-{i}')
+
+        # Baseline: with default test settings (community unlimited disabled) we enforce quota.
+        self.assertEqual(AgentService.get_agents_available(self.free_user), 0)
+
+        with patch.dict(os.environ, {"DJANGO_SETTINGS_MODULE": "config.settings"}, clear=False):
+            available = AgentService.get_agents_available(self.free_user)
+            self.assertEqual(available, MAX_AGENT_LIMIT - 2)
+            self.assertTrue(has_unlimited_agents(self.free_user))
+            self.assertTrue(is_community_unlimited_mode())
 
 
 @tag("batch_agent_limits")

@@ -2014,6 +2014,10 @@ class PersistentAgentTemplate(models.Model):
         help_text="Lower numbers appear first in the directory UI.",
     )
     is_active = models.BooleanField(default=True)
+    show_on_homepage = models.BooleanField(
+        default=False,
+        help_text="Whether to feature this template on the home page.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
