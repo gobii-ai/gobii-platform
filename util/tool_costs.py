@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any, Dict, Tuple
 
 from django.apps import apps
+from django.db import models as django_models
 from django.conf import settings
 from django.core.cache import cache
 from django.db import OperationalError, ProgrammingError
@@ -25,6 +26,15 @@ def _get_models() -> Tuple[Any, Any]:
     """Return the TaskCreditConfig and ToolCreditCost models lazily."""
     TaskCreditConfig = apps.get_model("api", "TaskCreditConfig")
     ToolCreditCost = apps.get_model("api", "ToolCreditCost")
+
+    # Tests often patch `apps.get_model` with MagicMocks, which lack the
+    # Django model metadata we rely on. Treat those mock values as missing so
+    # downstream callers fall back to the default settings-based configuration
+    # rather than caching unpicklable mock objects.
+    if not isinstance(TaskCreditConfig, type) or not issubclass(TaskCreditConfig, django_models.Model):
+        TaskCreditConfig = None
+    if not isinstance(ToolCreditCost, type) or not issubclass(ToolCreditCost, django_models.Model):
+        ToolCreditCost = None
     return TaskCreditConfig, ToolCreditCost
 
 
