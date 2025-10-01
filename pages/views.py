@@ -125,6 +125,28 @@ class HomePage(TemplateView):
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
 
+        # Featured AI employee templates for homepage
+        homepage_templates = AIEmployeeTemplateService.get_active_templates().filter(
+            show_on_homepage=True
+        ).order_by('priority')[:3]
+
+        templates_list = list(homepage_templates)
+        tool_names = set()
+
+        for template in templates_list:
+            template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
+            tool_names.update(template.default_tools or [])
+
+        tool_display_map = AIEmployeeTemplateService.get_tool_display_map(tool_names)
+
+        for template in templates_list:
+            template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+                template.default_tools or [],
+                display_map=tool_display_map,
+            )
+
+        context["homepage_templates"] = templates_list
+
         if self.request.user.is_authenticated:
             recent_agents_qs = PersistentAgent.objects.filter(user_id=self.request.user.id)
             total_agents = recent_agents_qs.count()
