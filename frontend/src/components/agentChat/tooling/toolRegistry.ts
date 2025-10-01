@@ -85,7 +85,7 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
       iconBgClass: 'bg-sky-100',
       iconColorClass: 'text-sky-600',
       detailKind: 'updateSchedule',
-      derive(entry, parameters) {
+      derive(_, parameters) {
         const scheduleValue = coerceString(parameters?.new_schedule)
         const summary = summarizeSchedule(scheduleValue)
         return {
