@@ -180,7 +180,11 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             depth=next_depth,
         )
         
-        return {"status": "pending", "task_id": str(task.id)}
+        return {
+            "status": "pending",
+            "task_id": str(task.id),
+            "auto_sleep_ok": True,
+        }
 
     except Exception as e:
         logger.exception(

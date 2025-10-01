@@ -140,7 +140,11 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
 
         deliver_agent_sms(message)
 
-        return {"status": "ok", "message": f"SMS queued for {to_number}."}
+        return {
+            "status": "ok",
+            "message": f"SMS queued for {to_number}.",
+            "auto_sleep_ok": True,
+        }
 
     except Exception as e:
         logger.exception("Failed to create PersistentAgentMessage for agent %s", agent.id)

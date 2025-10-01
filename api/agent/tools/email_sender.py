@@ -191,7 +191,11 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         if message.latest_status == DeliveryStatus.FAILED:
             return {"status": "error", "message": f"Email failed to send: {message.latest_error_message}"}
 
-        return {"status": "ok", "message": f"Email sent to {to_address}."}
+        return {
+            "status": "ok",
+            "message": f"Email sent to {to_address}.",
+            "auto_sleep_ok": True,
+        }
 
     except Exception as e:
         logger.exception("Failed to create and deliver email for agent %s", agent.id)
