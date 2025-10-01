@@ -88,10 +88,6 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
     setOpenKey(null)
   }, [setOpenKey])
 
-  if (!isClusterRenderable(transformed)) {
-    return null
-  }
-
   const articleClasses = useMemo(() => {
     const classes = ['timeline-event', 'tool-cluster']
     if (transformed.collapsible) {
@@ -104,6 +100,10 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
   }, [collapsed, transformed.collapsible])
 
   const detailHostId = useMemo(() => `tool-detail-host-${slugify(cluster.cursor)}`, [cluster.cursor])
+
+  if (!isClusterRenderable(transformed)) {
+    return null
+  }
 
   const renderDetail = (entry: ToolEntryDisplay) => {
     const DetailComponent = entry.detailComponent
