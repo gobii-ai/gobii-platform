@@ -1042,19 +1042,19 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                     if tool_name == "sleep_until_next_trigger":
                         # Ignore sleep tool if there are other actionable tools in this batch
                         is_trailing_sleep = last_call_is_sleep and idx == len(tool_calls)
-                        if has_non_sleep_calls and not is_trailing_sleep:
-                            logger.info(
-                                "Agent %s: ignoring sleep_until_next_trigger because other tools are present in this batch.",
-                                agent.id,
-                            )
-                            # Do not consume credits or record a step for ignored sleep
-                            continue
                         if has_non_sleep_calls:
-                            logger.info(
-                                "Agent %s: respecting trailing sleep_until_next_trigger; will exit loop after this batch.",
-                                agent.id,
-                            )
-                            should_sleep_after_batch = True
+                            if is_trailing_sleep:
+                                logger.info(
+                                    "Agent %s: respecting trailing sleep_until_next_trigger; will exit loop after this batch.",
+                                    agent.id,
+                                )
+                                should_sleep_after_batch = True
+                            else:  # non-trailing sleep in a mixed batch
+                                logger.info(
+                                    "Agent %s: ignoring sleep_until_next_trigger because other tools are present in this batch.",
+                                    agent.id,
+                                )
+                            # In a mixed batch, we don't execute the sleep tool itself, just acknowledge it.
                             continue
                         # All tool calls are sleep; consume credits once per call and record step
                         credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
