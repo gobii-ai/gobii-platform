@@ -56,7 +56,7 @@ export function AgentChatLayout({
           className="relative flex flex-1 flex-col gap-4"
         >
           <div id="timeline-shell" className="relative flex-1">
-            <div ref={timelineRef} id="timeline-events" className="flex flex-col gap-3">
+            <div ref={timelineRef} id="timeline-events" className="flex flex-col gap-3" data-has-jump-button={showJumpButton ? 'true' : 'false'}>
               <div
                 id="timeline-load-older"
                 className="timeline-load-control"

@@ -17,6 +17,10 @@
   padding: 1rem 0.75rem calc(var(--composer-height, 6.5rem) - 0.5rem);
 }
 
+#timeline-events[data-has-jump-button="true"] {
+  padding-bottom: calc(var(--composer-height, 6.5rem) + 2rem);
+}
+
 #timeline-events.timeline-align-end {
   justify-content: flex-end;
 }
@@ -821,6 +825,10 @@
 
   #timeline-events {
     padding-bottom: calc(var(--composer-height, 6.5rem) - 0.75rem);
+  }
+
+  #timeline-events[data-has-jump-button="true"] {
+    padding-bottom: calc(var(--composer-height, 6.5rem) + 1.5rem);
   }
 
   .jump-to-latest {
