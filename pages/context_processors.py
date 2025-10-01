@@ -7,6 +7,7 @@ from config.plans import AGENTS_UNLIMITED
 from constants.plans import PlanNames
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs
+from util.constants.task_constants import TASKS_UNLIMITED
 from util.subscription_helper import get_user_plan, get_user_api_rate_limit, get_user_agent_limit, \
     get_user_task_credit_limit, has_unlimited_agents, allow_user_extra_tasks, get_user_extra_task_limit, \
     get_user_max_contacts_per_agent
@@ -66,7 +67,7 @@ def account_info(request):
                 'tasks_available': tasks_available,
                 # If unlimited, usage is effectively 0%; else treat "can't afford a single tool" as 100%
                 'tasks_used_pct': (
-                    0 if tasks_unlimited else (
+                    0 if (tasks_unlimited or tasks_available == TASKS_UNLIMITED) else (
                         100 if tasks_available < max_task_cost else TaskCreditService.get_user_task_credits_used_pct(request.user, task_credits=task_credits)
                     )
                 ),

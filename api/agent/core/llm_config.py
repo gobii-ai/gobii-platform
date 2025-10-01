@@ -140,8 +140,8 @@ def get_llm_config() -> Tuple[str, dict]:
     if not configs:
         raise ValueError("No DB-configured LLM providers/endpoints available")
     _provider_key, model, params = configs[0]
-    # Remove any internal-only hints
-    params = {k: v for k, v in params.items() if k != "supports_tool_choice"}
+    # Remove any internal-only hints that shouldn't be passed to litellm
+    params = {k: v for k, v in params.items() if k not in ("supports_tool_choice", "use_parallel_tool_calls")}
     return model, params
 
 
@@ -347,10 +347,10 @@ def get_llm_config_with_failover(
 def get_summarization_llm_config() -> Tuple[str, dict]:
     """
     Get LiteLLM configuration specifically for summarization tasks.
-    
-    Uses the same provider priority as get_llm_config() but with 
+
+    Uses the same provider priority as get_llm_config() but with
     temperature=0 for deterministic summarization.
-    
+
     Returns:
         Tuple of (model_name, litellm_params)
     """
@@ -359,6 +359,7 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
     if not configs:
         raise ValueError("No DB-configured LLM providers/endpoints available for summarization")
     _provider_key, model, params = configs[0]
-    params = {k: v for k, v in params.items() if k != "supports_tool_choice"}
+    # Remove internal-only hints that shouldn't be passed to litellm
+    params = {k: v for k, v in params.items() if k not in ("supports_tool_choice", "use_parallel_tool_calls")}
     params["temperature"] = 0
     return model, params

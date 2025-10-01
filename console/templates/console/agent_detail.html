@@ -331,9 +331,18 @@
 
         <!-- Action Buttons -->
         <div class="mt-8 pt-6 border-t border-gray-200 flex justify-end gap-x-3">
-          <a href="{% url 'agents' %}" 
+          <a href="{% url 'agents' %}"
              class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
             Cancel
+          </a>
+          <a href="{% url 'agent_chat_shell' pk=agent.id %}"
+             target="_blank"
+             rel="noopener noreferrer"
+             class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-4 3-1-3H5a2 2 0 01-2-2V8a2 2 0 012-2z"/>
+            </svg>
+            Open Web Chat
           </a>
           <a href="{% url 'agent_secrets' agent.id %}"
              class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">

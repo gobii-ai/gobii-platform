@@ -140,6 +140,8 @@ jobs:
             tag: batch_xvfb
           - batch: websocket
             tag: batch_websocket
+          - batch: agent_chat
+            tag: batch_agent_chat
           - batch: allowlist_direction
             tag: batch_allowlist_direction
           - batch: console_context

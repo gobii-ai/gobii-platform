@@ -3,7 +3,7 @@ import { StrictMode, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import './styles/consoleShell.css'
-import { AgentChatShellScreen } from './screens/AgentChatShellScreen'
+import { AgentChatPage } from './screens/AgentChatPage'
 import { DiagnosticsScreen } from './screens/DiagnosticsScreen'
 
 const mountNode = document.getElementById('gobii-frontend-root')
@@ -21,7 +21,10 @@ let screen: ReactElement
 
 switch (appName) {
   case 'agent-chat':
-    screen = <AgentChatShellScreen agentId={agentId} agentName={agentName} />
+    if (!agentId) {
+      throw new Error('Agent identifier is required for the chat experience')
+    }
+    screen = <AgentChatPage agentId={agentId} agentName={agentName} />
     break
   case 'diagnostics':
     screen = <DiagnosticsScreen />

@@ -63,6 +63,7 @@ from ..tools.mcp_tools import (
     execute_search_tools, execute_mcp_tool
 )
 from ..tools.mcp_manager import get_mcp_manager
+from ..tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
 from ...models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -348,6 +349,9 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
     Returns True if execution may proceed; False if insufficient or consumption fails.
     In failure cases, this function records a step + system step and logging.
     """
+    if tool_name == "send_chat_message":
+        return True
+
     if not settings.GOBII_PROPRIETARY_MODE or not getattr(agent, "user_id", None):
         return True
 
@@ -677,9 +681,26 @@ def process_agent_events(
         # Clear local budget context
         set_budget_context(None)
 
+        # Broadcast final processing state to websocket clients after all processing is complete
+        try:
+            from console.agent_chat.signals import _broadcast_processing
+            from api.models import PersistentAgent
+            agent_obj = PersistentAgent.objects.get(id=persistent_agent_id)
+            _broadcast_processing(agent_obj)
+        except Exception as e:
+            logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
+
 
 def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) -> None:
     """Core event processing logic, called while holding the distributed lock."""
+    # Broadcast processing state at start of processing (when lock is acquired)
+    try:
+        from console.agent_chat.signals import _broadcast_processing
+        agent_obj = PersistentAgent.objects.get(id=persistent_agent_id)
+        _broadcast_processing(agent_obj)
+    except Exception as e:
+        logger.debug("Failed to broadcast processing state at start for agent %s: %s", persistent_agent_id, e)
+
     # Exit early in proprietary mode if the agent's owner has no credits
     try:
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
@@ -1092,6 +1113,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         result = execute_send_email(agent, tool_params)
                     elif tool_name == "send_sms":
                         result = execute_send_sms(agent, tool_params)
+                    elif tool_name == "send_chat_message":
+                        result = execute_send_chat_message(agent, tool_params)
                     elif tool_name == "update_schedule":
                         result = execute_update_schedule(agent, tool_params)
                     elif tool_name == "update_charter":
@@ -1168,6 +1191,17 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                             tool_params=tool_params,
                             result=result_content,
                         )
+                        try:
+                            from console.agent_chat.signals import emit_tool_call_realtime  # noqa: WPS433
+
+                            emit_tool_call_realtime(step)
+                        except Exception:  # pragma: no cover - defensive logging
+                            logger.debug(
+                                "Failed to broadcast realtime tool call for agent %s step %s",
+                                agent.id,
+                                getattr(step, "id", None),
+                                exc_info=True,
+                            )
                         logger.info("Agent %s: persisted tool call step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
                     except OperationalError:
                         close_old_connections()
@@ -1192,6 +1226,17 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                             tool_params=tool_params,
                             result=result_content,
                         )
+                        try:
+                            from console.agent_chat.signals import emit_tool_call_realtime  # noqa: WPS433
+
+                            emit_tool_call_realtime(step)
+                        except Exception:  # pragma: no cover - defensive logging
+                            logger.debug(
+                                "Failed to broadcast realtime tool call (retry) for agent %s step %s",
+                                agent.id,
+                                getattr(step, "id", None),
+                                exc_info=True,
+                            )
                         logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
                     executed_calls += 1
 
@@ -2161,6 +2206,7 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         },
         get_send_email_tool(),
         get_send_sms_tool(),
+        get_send_chat_tool(),
         get_search_web_tool(),
         get_spawn_web_task_tool(),
         get_update_schedule_tool(),

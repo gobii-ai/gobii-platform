@@ -1,7 +1,7 @@
 {% extends "console/react_shell_base.html" %}
 {% load vite_tags %}
 
-{% block page_title %}Persistent Agent Chat Shell · Gobii{% endblock %}
+{% block page_title %}Chat - {{ agent.name|default:'Agent' }} · Gobii{% endblock %}
 
 {% block react_shell_content %}
 <div class="py-12 px-6">

@@ -38,11 +38,10 @@ export function AgentChatShellScreen({ agentId, agentName }: AgentChatShellScree
       <header className="app-header">
         <div className="app-badge">Gobii</div>
         <div>
-          <h1 className="app-title">Persistent Agent Chat Shell</h1>
+          <h1 className="app-title">Chat - {agentLabel}</h1>
           <p className="app-subtitle">
             This entry point talks to Django through the existing session-powered API.
           </p>
-          <p className="app-context">Target: {agentLabel}</p>
         </div>
       </header>
 

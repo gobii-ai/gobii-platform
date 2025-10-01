@@ -44,6 +44,10 @@
                 Text your agent
               </a>
               {% endif %}
+              <a href="{% url 'agent_chat_shell' pk=agent.id %}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-indigo-600 text-white hover:bg-indigo-700">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-4 3-1-3H5a2 2 0 01-2-2V8a2 2 0 012-2z"/></svg>
+                Open web chat
+              </a>
             </div>
             <div class="mt-3 text-xs text-gray-500">
               Examples: "Summarize my latest updates" &bull; "What should I prioritize today?" &bull; "Draft a response to this"

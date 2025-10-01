@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db.models.aggregates import Sum
 from django.db.models.expressions import F
+from django.db.models import Q
 from django.utils import timezone
 from datetime import timezone as dt_timezone
 from django.utils.dateparse import parse_datetime, parse_date
@@ -34,7 +35,6 @@ from util.subscription_helper import (
 )
 
 from datetime import timedelta, datetime
-from dateutil.relativedelta import relativedelta
 from numbers import Number
 from typing import Any, Mapping
 from django.apps import apps
@@ -366,18 +366,14 @@ class TaskCreditService:
             # renewal should refresh that block (reset usage) rather than add a
             # second copy which would double-count the entitlement.
             if replace_current:
-                grant_local = timezone.localtime(grant_date)
-                period_start = grant_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                period_end = period_start + relativedelta(months=1)
                 existing_credit = (
                     TaskCredit.objects.filter(
                         organization=organization,
                         grant_type=GrantTypeChoices.PLAN,
                         additional_task=False,
                         voided=False,
-                        granted_date__gte=period_start,
-                        granted_date__lt=period_end,
                     )
+                    .filter(Q(expiration_date__isnull=True) | Q(expiration_date__gte=grant_date))
                     .order_by("-granted_date")
                     .first()
                 )
