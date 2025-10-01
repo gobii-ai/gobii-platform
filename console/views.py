@@ -940,6 +940,32 @@ class BillingView(ConsoleViewMixin, TemplateView):
                 "Seat checkout was cancelled before completion.",
             )
 
+        requested_org_id = request.GET.get("org_id")
+        if requested_org_id:
+            try:
+                membership_for_switch = OrganizationMembership.objects.select_related("org").get(
+                    user=request.user,
+                    org_id=requested_org_id,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                )
+            except OrganizationMembership.DoesNotExist:
+                messages.error(request, "You don't have access to that organization.")
+            else:
+                request.session['context_type'] = 'organization'
+                request.session['context_id'] = str(membership_for_switch.org.id)
+                request.session['context_name'] = membership_for_switch.org.name
+                request.session.modified = True
+
+                resolved_context = build_console_context(request)
+                context['current_context'] = {
+                    'type': resolved_context.current_context.type,
+                    'id': resolved_context.current_context.id,
+                    'name': resolved_context.current_context.name,
+                }
+                if resolved_context.current_membership is not None:
+                    context['current_membership'] = resolved_context.current_membership
+                context['can_manage_org_agents'] = resolved_context.can_manage_org_agents
+
         current_context = context.get('current_context', {}) or {}
         if current_context.get('type') == 'organization' and current_context.get('id'):
             try:
@@ -1603,7 +1629,16 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                             billing = getattr(organization, "billing", None)
                             seats_purchased = getattr(billing, "purchased_seats", 0) if billing else 0
                             if seats_purchased <= 0:
-                                message_text = "Looks like your organization doesn’t have any seats yet. Add seats to create organization-owned agents."
+                                billing_url = f"{reverse('billing')}?org_id={organization.id}"
+                                request.session['context_type'] = 'organization'
+                                request.session['context_id'] = str(organization.id)
+                                request.session['context_name'] = organization.name
+                                request.session.modified = True
+
+                                message_text = format_html(
+                                    "Looks like your organization doesn't have any seats yet. <a class=\"underline font-medium\" href=\"{}\">Add seats in Billing</a> to create organization-owned agents.",
+                                    billing_url,
+                                )
                                 messages.error(request, message_text)
                                 form.add_error(None, message_text)
                                 return self.render_to_response(self.get_context_data(form=form))
