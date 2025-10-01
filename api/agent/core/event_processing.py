@@ -974,14 +974,17 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
 
             reasoning_only_streak = 0
 
+            # Normalise tool calls to a concrete list so we can index and reuse it safely
+            tool_calls = list(tool_calls or [])
+
             # Log high-level summary of tool calls
             try:
                 logger.info(
                     "Agent %s: model returned %d tool_call(s)",
                     agent.id,
-                    len(tool_calls) if isinstance(tool_calls, list) else 0,
+                    len(tool_calls),
                 )
-                for idx, call in enumerate(list(tool_calls) or [], start=1):
+                for idx, call in enumerate(tool_calls, start=1):
                     try:
                         fn_name = getattr(getattr(call, "function", None), "name", None) or (
                             call.get("function", {}).get("name") if isinstance(call, dict) else None
@@ -1005,8 +1008,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
             except Exception:
                 logger.debug("Tool call summary logging failed", exc_info=True)
 
-            all_calls_sleep = True
-            sleep_requested = False  # set only when all calls are sleep
+            should_sleep_after_batch = False
             executed_calls = 0
             try:
                 has_non_sleep_calls = any(
@@ -1015,10 +1017,20 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         or (c.get("function", {}).get("name") if isinstance(c, dict) else None)
                     )
                     != "sleep_until_next_trigger"
-                    for c in (tool_calls or [])
+                    for c in tool_calls
                 )
             except Exception:
                 has_non_sleep_calls = True  # be safe: treat as having actionable tools
+
+            try:
+                last_call = tool_calls[-1] if tool_calls else None
+                last_call_name = (
+                    getattr(getattr(last_call, "function", None), "name", None)
+                    or (last_call.get("function", {}).get("name") if isinstance(last_call, dict) else None)
+                )
+                last_call_is_sleep = last_call_name == "sleep_until_next_trigger"
+            except Exception:
+                last_call_is_sleep = False
 
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
@@ -1029,12 +1041,20 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
 
                     if tool_name == "sleep_until_next_trigger":
                         # Ignore sleep tool if there are other actionable tools in this batch
-                        if has_non_sleep_calls:
+                        is_trailing_sleep = last_call_is_sleep and idx == len(tool_calls)
+                        if has_non_sleep_calls and not is_trailing_sleep:
                             logger.info(
                                 "Agent %s: ignoring sleep_until_next_trigger because other tools are present in this batch.",
                                 agent.id,
                             )
                             # Do not consume credits or record a step for ignored sleep
+                            continue
+                        if has_non_sleep_calls:
+                            logger.info(
+                                "Agent %s: respecting trailing sleep_until_next_trigger; will exit loop after this batch.",
+                                agent.id,
+                            )
+                            should_sleep_after_batch = True
                             continue
                         # All tool calls are sleep; consume credits once per call and record step
                         credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
@@ -1055,11 +1075,9 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                                 "llm_provider": token_usage.get("provider"),
                             })
                         PersistentAgentStep.objects.create(**step_kwargs)
-                        sleep_requested = True
+                        should_sleep_after_batch = True
                         logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
                         continue
-
-                    all_calls_sleep = False
                     # Ensure credit is available and consume just-in-time for actionable tools
                     credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
                     if not credits_consumed:
@@ -1240,7 +1258,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
                     executed_calls += 1
 
-            if all_calls_sleep:
+            if should_sleep_after_batch:
                 logger.info("Agent %s is sleeping.", agent.id)
                 # Only close the cycle if no outstanding child tasks remain
                 if budget_ctx is not None:

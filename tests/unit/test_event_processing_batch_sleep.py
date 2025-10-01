@@ -1,7 +1,6 @@
 """
-Tests that when an LLM completion returns multiple tool calls including
-sleep_until_next_trigger, the sleep call is ignored if other tools are present
-so results can be processed in the next iteration.
+Tests handling of sleep_until_next_trigger in multi-tool batches.
+Ensures trailing sleep requests cause the agent loop to exit after the batch.
 """
 from unittest.mock import patch, MagicMock
 
@@ -38,7 +37,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "queued"})
     @patch('api.agent.core.event_processing._build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_batch_of_tools_ignores_sleep_when_others_present(self, mock_completion, mock_build_prompt, *_mocks):
+    def test_batch_of_tools_ignores_sleep_record_but_exits(self, mock_completion, mock_build_prompt, *_mocks):
         # Minimal prompt context and token usage
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
 
@@ -66,7 +65,7 @@ class TestBatchToolCallsWithSleep(TestCase):
 
         # Run a single loop iteration
         from api.agent.core import event_processing as ep
-        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
             result_usage = ep._run_agent_loop(self.agent, is_first_run=False)
 
         # Validate DB records: 3 tool calls persisted and NO sleep step recorded
@@ -81,3 +80,6 @@ class TestBatchToolCallsWithSleep(TestCase):
         # Assert token usage aggregated
         self.assertIn('total_tokens', result_usage)
         self.assertGreaterEqual(result_usage['total_tokens'], 15)
+
+        # A trailing sleep should end the loop, so only one LLM completion occurs
+        self.assertEqual(mock_completion.call_count, 1)
