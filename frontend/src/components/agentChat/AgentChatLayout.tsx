@@ -50,10 +50,10 @@ export function AgentChatLayout({
 
   return (
     <main className="min-h-screen">
-      <div className="mx-auto flex min-h-screen w-full flex-col gap-6 px-4 pb-0 pt-6 sm:px-6 lg:px-10">
+      <div className="mx-auto flex min-h-screen w-full flex-col px-4 pb-0 sm:px-6 lg:px-10">
         <div
           id="agent-workspace-root"
-          className="relative flex flex-1 flex-col gap-4"
+          className="relative flex flex-1 flex-col gap-2"
         >
           <div id="timeline-shell" className="relative flex-1">
             <div ref={timelineRef} id="timeline-events" className="flex flex-col gap-3" data-has-jump-button={showJumpButton ? 'true' : 'false'}>

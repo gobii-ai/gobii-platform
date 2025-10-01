@@ -12,9 +12,9 @@ type TimelineEventListProps = {
 export function TimelineEventList({ agentFirstName, events, initialLoading = false }: TimelineEventListProps) {
   if (initialLoading) {
     return (
-      <div className="timeline-empty flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200/80 bg-white/60 px-4 py-6 text-sm text-slate-500">
-        <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-indigo-400" aria-hidden="true" />
-        <span>Loading conversation…</span>
+      <div className="timeline-loading-state flex items-center justify-center gap-3 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-purple-50/60 px-6 py-8 shadow-sm">
+        <span className="loading-pip" aria-hidden="true" />
+        <span className="text-sm font-semibold text-indigo-900/80">Loading conversation…</span>
       </div>
     )
   }
