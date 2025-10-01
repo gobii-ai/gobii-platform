@@ -1006,21 +1006,12 @@ class BillingView(ConsoleViewMixin, TemplateView):
         sub = get_active_subscription(self.request.user)
         paid_subscriber = sub is not None
 
-        if sub:
-            start = sub.stripe_data['current_period_start']
-            end = sub.stripe_data['current_period_end']
-            cancel_at = getattr(sub.stripe_data, "cancel_at", None)
-
-            dt_start = datetime.fromtimestamp(int(start), tz=dt_timezone.utc)
-            dt_end = datetime.fromtimestamp(int(end), tz=dt_timezone.utc)
-            dt_cancel_at = datetime.fromtimestamp(int(cancel_at), tz=dt_timezone.utc) if cancel_at else None
-
-
-            context['period_start_date'] = dt_start.strftime("%B %d, %Y")
-            context['period_end_date'] = dt_end.strftime("%B %d, %Y")
+        if paid_subscriber:
+            context['period_start_date'] = sub.current_period_start.strftime("%B %d, %Y")
+            context['period_end_date'] = sub.current_period_end.strftime("%B %d, %Y")
             context['subscription_active'] = sub.is_status_current()
-            context['cancel_at'] = dt_cancel_at
-            context['cancel_at_period_end'] = getattr(sub.stripe_data, "cancel_at_period_end", False)
+            context['cancel_at'] = sub.cancel_at.strftime("%B %d, %Y") if sub.cancel_at else None
+            context['cancel_at_period_end'] = sub.cancel_at_period_end
 
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
