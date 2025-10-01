@@ -55,6 +55,31 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent_id).exists())
         self.assertFalse(BrowserUseAgent.objects.filter(id=browser_agent_id).exists())
 
+    @tag("batch_console_agents")
+    def test_delete_persistent_agent_handles_missing_browser_agent(self):
+        """Deletion should succeed even if the BrowserUseAgent record is missing."""
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Missing Browser Agent'
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Agent With Missing Browser',
+            charter='Charter',
+            browser_use_agent=browser_agent
+        )
+
+        empty_qs = BrowserUseAgent.objects.none()
+        url = reverse('agent_delete', kwargs={'pk': persistent_agent.id})
+
+        with patch.object(BrowserUseAgent.objects, 'filter', return_value=empty_qs):
+            response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
+
     @patch("console.views.AgentService.has_agents_available", return_value=True)
     @tag("batch_console_agents")
     def test_org_agent_creation_blocked_without_seat(self, _mock_agents_available):
