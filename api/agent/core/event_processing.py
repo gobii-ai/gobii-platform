@@ -23,7 +23,6 @@ from pottery import Redlock
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction, close_old_connections
 from django.db.utils import OperationalError
-from django.utils import timezone as django_timezone
 from tenacity import (
     before_sleep_log,
     retry,
@@ -65,7 +64,6 @@ from ..tools.mcp_tools import (
 )
 from ..tools.mcp_manager import get_mcp_manager
 from ..tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
-from constants.security import SecretLimits
 from ...models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -2327,6 +2325,27 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
             non_shrinkable=True
         )
 
+def _format_secrets(secrets_qs, is_pending: bool) -> list[str]:
+    """Helper to format a queryset of secrets."""
+    secret_lines: list[str] = []
+    current_domain: str | None = None
+    for secret in secrets_qs:
+        # Group by domain pattern
+        if secret.domain_pattern != current_domain:
+            if current_domain is not None:
+                secret_lines.append("")  # blank line between domains
+            secret_lines.append(f"Domain: {secret.domain_pattern}")
+            current_domain = secret.domain_pattern
+
+        # Format secret info
+        parts = [f"  - Name: {secret.name}"]
+        if secret.description:
+            parts.append(f"Description: {secret.description}")
+        if is_pending:
+            parts.append("Status: awaiting user input")
+        parts.append(f"Key: {secret.key}")
+        secret_lines.append(", ".join(parts))
+    return secret_lines
 
 def _get_secrets_block(agent: PersistentAgent) -> str:
     """Return a formatted list of available secrets for this agent.
@@ -2349,41 +2368,12 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
 
     if available_secrets:
         lines.append("These are the secrets available to you:")
-
-        current_domain: str | None = None
-        for secret in available_secrets:
-            # Group by domain pattern
-            if secret.domain_pattern != current_domain:
-                if current_domain is not None:
-                    lines.append("")  # blank line between domains
-                lines.append(f"Domain: {secret.domain_pattern}")
-                current_domain = secret.domain_pattern
-
-            # Format secret info
-            parts = [f"  - Name: {secret.name}"]
-            if secret.description:
-                parts.append(f"Description: {secret.description}")
-            parts.append(f"Key: {secret.key}")
-            lines.append(", ".join(parts))
+        lines.extend(_format_secrets(available_secrets, is_pending=False))
 
     if pending_secrets:
         if lines:
             lines.append("")
         lines.append("Pending credential requests (waiting on the user to provide values):")
-
-        current_domain = None
-        for secret in pending_secrets:
-            if secret.domain_pattern != current_domain:
-                if current_domain is not None:
-                    lines.append("")
-                lines.append(f"Domain: {secret.domain_pattern}")
-                current_domain = secret.domain_pattern
-
-            parts = [f"  - Name: {secret.name}"]
-            if secret.description:
-                parts.append(f"Description: {secret.description}")
-            parts.append("Status: awaiting user input")
-            parts.append(f"Key: {secret.key}")
-            lines.append(", ".join(parts))
+        lines.extend(_format_secrets(pending_secrets, is_pending=True))
 
     return "\n".join(lines)
