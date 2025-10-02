@@ -59,6 +59,90 @@ except ImportError as e:  # e.g. when running manage.py commands
 
 logger = logging.getLogger(__name__)
 
+
+def _schedule_agent_follow_up(
+    task_obj: BrowserUseAgentTask,
+    *,
+    budget_id: str | None,
+    branch_id: str | None,
+    depth: int | None,
+) -> None:
+    """Trigger agent event processing after a background web task completes."""
+
+    agent = getattr(task_obj, "agent", None)
+    if agent is None:
+        return
+
+    try:
+        persistent_agent = agent.persistent_agent
+    except PersistentAgent.DoesNotExist:
+        logger.info(
+            "Skipping follow-up for task %s because browser agent %s has no persistent agent",
+            task_obj.id,
+            getattr(agent, "id", None),
+        )
+        return
+
+    agent_id = str(persistent_agent.id)
+
+    try:
+        from api.agent.tasks.process_events import process_agent_events_task
+    except Exception as exc:  # pragma: no cover - defensive import guard
+        logger.error(
+            "Unable to import process_agent_events_task for agent %s: %s",
+            agent_id,
+            exc,
+        )
+        return
+
+    status = None
+    active_id = None
+    if budget_id:
+        try:
+            status = AgentBudgetManager.get_cycle_status(agent_id=agent_id)
+            active_id = AgentBudgetManager.get_active_budget_id(agent_id=agent_id)
+        except Exception:  # pragma: no cover - read failures fall back to fresh scheduling
+            logger.warning(
+                "Failed reading budget status for agent %s; scheduling fresh follow-up",
+                agent_id,
+                exc_info=True,
+            )
+
+    try:
+        if (
+            budget_id
+            and status == "active"
+            and (active_id == budget_id)
+        ):
+            parent_depth = max((depth or 1) - 1, 0)
+            process_agent_events_task.delay(
+                agent_id,
+                budget_id=budget_id,
+                branch_id=branch_id,
+                depth=parent_depth,
+            )
+            logger.info(
+                "Triggered agent event processing for persistent agent %s after task %s completion",
+                agent_id,
+                task_obj.id,
+            )
+        else:
+            process_agent_events_task.delay(agent_id)
+            logger.info(
+                "Triggered fresh agent event processing for persistent agent %s after task %s completion (status=%s active_id=%s ctx_id=%s)",
+                agent_id,
+                task_obj.id,
+                status,
+                active_id,
+                budget_id,
+            )
+    except Exception as exc:  # pragma: no cover - Celery failure logging
+        logger.error(
+            "Failed to trigger agent event processing for task %s: %s",
+            task_obj.id,
+            exc,
+        )
+
 # --------------------------------------------------------------------------- #
 #  Robust temp‑dir helpers
 # --------------------------------------------------------------------------- #
@@ -1430,33 +1514,13 @@ def _process_browser_use_task_core(
                 ])
 
             # Trigger agent event processing if this task belongs to a persistent agent
-            if task_obj.agent and hasattr(task_obj.agent, 'persistent_agent'):
-                try:
-                    from api.agent.tasks.process_events import process_agent_events_task
-                    # Calculate parent depth by subtracting 1 from current depth
-                    # Since we spawned at depth+1, returning to parent means depth-1
-                    parent_depth = max((depth or 1) - 1, 0)
-                    # Skip follow-up if the active cycle no longer matches the context budget
-                    status = AgentBudgetManager.get_cycle_status(agent_id=str(task_obj.agent.persistent_agent.id))
-                    active_id = AgentBudgetManager.get_active_budget_id(agent_id=str(task_obj.agent.persistent_agent.id))
-                    if status != "active" or (budget_id is not None and active_id != budget_id):
-                        logger.info(
-                            "Skipping follow-up; cycle status=%s active_id=%s ctx_id=%s",
-                            status,
-                            active_id,
-                            budget_id,
-                        )
-                        return
-                    process_agent_events_task.delay(
-                        str(task_obj.agent.persistent_agent.id),
-                        budget_id=budget_id,
-                        branch_id=branch_id,
-                        depth=parent_depth,
-                    )
-                    logger.info("Triggered agent event processing for persistent agent %s after task %s completion",
-                               task_obj.agent.persistent_agent.id, task_obj.id)
-                except Exception as e:
-                    logger.error("Failed to trigger agent event processing for task %s: %s", task_obj.id, e)
+            if task_obj.agent:
+                _schedule_agent_follow_up(
+                    task_obj,
+                    budget_id=budget_id,
+                    branch_id=branch_id,
+                    depth=depth,
+                )
 
 
 @shared_task(bind=True, name="gobii_platform.api.tasks.process_browser_use_task")
