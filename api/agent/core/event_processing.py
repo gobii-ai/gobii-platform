@@ -126,7 +126,7 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
 
 # Token budget for prompts using promptree
-PROMPT_TOKEN_BUDGET = 96000
+PROMPT_TOKEN_BUDGET = 120000
 # PROMPT_TOKEN_BUDGET = 20000
 
 # Default reference model for token estimation and rare fallbacks
