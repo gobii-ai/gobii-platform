@@ -3695,6 +3695,39 @@ class PersistentAgentMessageAttachment(models.Model):
         return f"Attachment({self.filename})"
 
 
+class PersistentAgentWebSession(models.Model):
+    """Represents an interactive web chat session between a user and an agent."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="web_sessions",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agent_web_sessions",
+    )
+    session_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    started_at = models.DateTimeField(default=timezone.now)
+    last_seen_at = models.DateTimeField(default=timezone.now)
+    last_seen_source = models.CharField(max_length=32, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("agent", "user")
+        indexes = [
+            models.Index(fields=["agent", "last_seen_at"], name="pa_web_session_agent_idx"),
+            models.Index(fields=["session_key"], name="pa_web_session_key_idx"),
+            models.Index(fields=["ended_at", "last_seen_at"], name="pa_web_session_end_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"WebSession<{self.agent_id}:{self.user_id}:{self.session_key}>"
+
 class PersistentAgentStep(models.Model):
     """A single action taken by a PersistentAgent (tool call, internal reasoning, etc.)."""
 

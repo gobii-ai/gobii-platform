@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from ..comms.message_service import _get_or_create_conversation, _ensure_participant
@@ -18,6 +19,7 @@ from ...models import (
     build_web_agent_address,
     parse_web_user_address,
 )
+from ...services.web_sessions import get_active_web_session
 
 
 def get_send_chat_tool() -> Dict[str, Any]:
@@ -89,6 +91,21 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         return {
             "status": "error",
             "message": "Recipient address is not valid for this agent.",
+        }
+
+    User = get_user_model()
+    try:
+        recipient_user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        recipient_user = None
+
+    if not recipient_user or get_active_web_session(agent, recipient_user) is None:
+        return {
+            "status": "error",
+            "message": (
+                "No active web chat session exists for this user. Retry using the user's most recently "
+                "active non-web communication channel (e.g., email or SMS)."
+            ),
         }
 
     if not agent.is_recipient_whitelisted(CommsChannel.WEB, to_address):

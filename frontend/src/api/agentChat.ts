@@ -12,6 +12,15 @@ export type TimelineResponse = {
   processing_active: boolean
 }
 
+export type AgentWebSessionSnapshot = {
+  session_key: string
+  ttl_seconds: number
+  expires_at: string
+  last_seen_at: string
+  last_seen_source: string | null
+  ended_at?: string
+}
+
 export async function fetchAgentTimeline(
   agentId: string,
   params: { cursor?: string | null; direction?: TimelineDirection; limit?: number } = {},
@@ -38,4 +47,46 @@ export async function sendAgentMessage(agentId: string, body: string): Promise<T
 export async function fetchProcessingStatus(agentId: string): Promise<{ processing_active: boolean }> {
   const url = `/console/api/agents/${agentId}/processing/`
   return jsonFetch<{ processing_active: boolean }>(url)
+}
+
+type WebSessionPayload = {
+  session_key?: string
+  ttl_seconds?: number
+}
+
+async function postWebSession(
+  agentId: string,
+  endpoint: 'start' | 'heartbeat' | 'end',
+  payload: WebSessionPayload,
+  init?: RequestInit,
+): Promise<AgentWebSessionSnapshot> {
+  const url = `/console/api/agents/${agentId}/web-sessions/${endpoint}/`
+  return jsonFetch<AgentWebSessionSnapshot>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    ...init,
+  })
+}
+
+export function startAgentWebSession(agentId: string, ttlSeconds?: number): Promise<AgentWebSessionSnapshot> {
+  return postWebSession(agentId, 'start', ttlSeconds ? { ttl_seconds: ttlSeconds } : {})
+}
+
+export function heartbeatAgentWebSession(
+  agentId: string,
+  sessionKey: string,
+  ttlSeconds?: number,
+): Promise<AgentWebSessionSnapshot> {
+  const payload: WebSessionPayload = { session_key: sessionKey }
+  if (ttlSeconds) payload.ttl_seconds = ttlSeconds
+  return postWebSession(agentId, 'heartbeat', payload)
+}
+
+export function endAgentWebSession(
+  agentId: string,
+  sessionKey: string,
+  { keepalive = false }: { keepalive?: boolean } = {},
+): Promise<AgentWebSessionSnapshot> {
+  return postWebSession(agentId, 'end', { session_key: sessionKey }, { keepalive })
 }

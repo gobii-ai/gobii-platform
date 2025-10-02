@@ -10,6 +10,9 @@ from console.api_views import (
     AgentMessageCreateAPIView,
     AgentProcessingStatusAPIView,
     AgentTimelineAPIView,
+    AgentWebSessionEndAPIView,
+    AgentWebSessionHeartbeatAPIView,
+    AgentWebSessionStartAPIView,
 )
 from console.views import (
     ConsoleHome,
@@ -101,6 +104,9 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
     path("console/api/agents/<uuid:agent_id>/messages/", AgentMessageCreateAPIView.as_view(), name="console_agent_message_create"),
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),
+    path("console/api/agents/<uuid:agent_id>/web-sessions/start/", AgentWebSessionStartAPIView.as_view(), name="console_agent_web_session_start"),
+    path("console/api/agents/<uuid:agent_id>/web-sessions/heartbeat/", AgentWebSessionHeartbeatAPIView.as_view(), name="console_agent_web_session_heartbeat"),
+    path("console/api/agents/<uuid:agent_id>/web-sessions/end/", AgentWebSessionEndAPIView.as_view(), name="console_agent_web_session_end"),
     path("console/agents/create/contact/", AgentCreateContactView.as_view(), name="agent_create_contact"),
     path("console/agents/<uuid:pk>/", AgentDetailView.as_view(), name="agent_detail"),
     path("console/agents/<uuid:pk>/welcome/", AgentWelcomeView.as_view(), name="agent_welcome"),
