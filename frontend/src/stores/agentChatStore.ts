@@ -12,15 +12,6 @@ import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus } from '../
 import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
 
 const HTML_TAG_FALLBACK_PATTERN = /<\/?[a-zA-Z][^>]*>/
-const DEBUG_AGENT_CHAT_STORE = import.meta.env.DEV
-
-function debugLog(...args: unknown[]) {
-  if (!DEBUG_AGENT_CHAT_STORE) {
-    return
-  }
-  // eslint-disable-next-line no-console
-  console.debug('[AgentChatStore]', ...args)
-}
 
 function pickHtmlCandidate(message: AgentMessage): string | null {
   const htmlValue = message.bodyHtml?.trim()
@@ -173,11 +164,6 @@ function normalizeProcessingUpdate(input: ProcessingUpdateInput): ProcessingSnap
   if (typeof input === 'boolean') {
     return { active: input, webTasks: [] }
   }
-  debugLog('normalizeProcessingUpdate', {
-    hasSnapshot: Boolean(input),
-    active: input?.active,
-    webTaskCount: Array.isArray(input?.webTasks) ? input.webTasks.length : 0,
-  })
   return coerceProcessingSnapshot(input)
 }
 
@@ -443,15 +429,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   updateProcessing(snapshotInput) {
     const snapshot = normalizeProcessingUpdate(snapshotInput)
     set((state) => ({
-      ...(DEBUG_AGENT_CHAT_STORE
-        ? (debugLog('updateProcessing set', {
-            prevActive: state.processingActive,
-            prevTaskCount: state.processingWebTasks.length,
-            nextActive: snapshot.active,
-            nextTaskCount: snapshot.webTasks.length,
-          }),
-          {})
-        : {}),
       processingActive: snapshot.active,
       processingWebTasks: snapshot.webTasks,
       hasUnseenActivity: !state.autoScrollPinned && snapshot.active ? true : state.hasUnseenActivity,
@@ -460,14 +437,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   setAutoScrollPinned(pinned) {
     set((state) => {
-      if (DEBUG_AGENT_CHAT_STORE) {
-        debugLog('setAutoScrollPinned called', {
-          prevPinned: state.autoScrollPinned,
-          nextPinned: pinned,
-          pendingEvents: state.pendingEvents.length,
-          suppressedUntil: state.autoScrollPinSuppressedUntil,
-        })
-      }
       if (pinned && state.pendingEvents.length) {
         const merged = mergeEvents(state.events, state.pendingEvents)
         const newestCursor = merged.length ? merged[merged.length - 1].cursor : state.newestCursor
@@ -496,12 +465,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     set((state) => {
       if (state.autoScrollPinSuppressedUntil && state.autoScrollPinSuppressedUntil >= until) {
         return state
-      }
-      if (DEBUG_AGENT_CHAT_STORE) {
-        debugLog('suppressAutoScrollPin', {
-          previous: state.autoScrollPinSuppressedUntil,
-          until,
-        })
       }
       return { autoScrollPinSuppressedUntil: until }
     })

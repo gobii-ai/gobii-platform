@@ -5,15 +5,6 @@ type ScrollIntoViewOptions = {
 }
 
 const DEFAULT_MARGIN = 16
-const DEBUG_SCROLL_HELPER = import.meta.env.DEV
-
-function debugLog(...args: unknown[]) {
-  if (!DEBUG_SCROLL_HELPER) {
-    return
-  }
-  // eslint-disable-next-line no-console
-  console.debug('[scrollIntoViewIfNeeded]', ...args)
-}
 
 function findScrollParent(element: HTMLElement): HTMLElement | null {
   let parent: HTMLElement | null = element.parentElement
@@ -76,12 +67,6 @@ export function scrollIntoViewIfNeeded(element: HTMLElement | null, options: Scr
     }
 
     const { top: marginTop, bottom: marginBottom } = measureViewportMargins(options)
-    debugLog('evaluating', {
-      element,
-      scrollParent,
-      marginTop,
-      marginBottom,
-    })
 
     if (scrollParent === document.scrollingElement || scrollParent === document.documentElement || scrollParent === document.body) {
       const rect = element.getBoundingClientRect()
@@ -90,7 +75,6 @@ export function scrollIntoViewIfNeeded(element: HTMLElement | null, options: Scr
       const visibleBottom = viewportHeight - marginBottom
 
       if (rect.top < visibleTop) {
-        debugLog('scrolling window up', { delta: rect.top - visibleTop, rectTop: rect.top, visibleTop })
         window.scrollBy({ top: rect.top - visibleTop, behavior })
         return
       }
@@ -98,7 +82,6 @@ export function scrollIntoViewIfNeeded(element: HTMLElement | null, options: Scr
       if (rect.bottom > visibleBottom) {
         const maxDelta = rect.top - visibleTop
         const neededDelta = rect.bottom - visibleBottom
-        debugLog('scrolling window down', { maxDelta, neededDelta })
         window.scrollBy({ top: Math.min(neededDelta, maxDelta), behavior })
       }
 
@@ -111,7 +94,6 @@ export function scrollIntoViewIfNeeded(element: HTMLElement | null, options: Scr
     const visibleBottom = parentRect.bottom - marginBottom
 
     if (rect.top < visibleTop) {
-      debugLog('scrolling parent up', { delta: rect.top - visibleTop, rectTop: rect.top, visibleTop })
       scrollElement(scrollParent, rect.top - visibleTop, behavior)
       return
     }
@@ -119,7 +101,6 @@ export function scrollIntoViewIfNeeded(element: HTMLElement | null, options: Scr
     if (rect.bottom > visibleBottom) {
       const maxDelta = rect.top - visibleTop
       const neededDelta = rect.bottom - visibleBottom
-      debugLog('scrolling parent down', { maxDelta, neededDelta })
       scrollElement(scrollParent, Math.min(neededDelta, maxDelta), behavior)
     }
   })

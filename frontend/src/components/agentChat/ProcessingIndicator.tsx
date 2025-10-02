@@ -5,16 +5,6 @@ import type { ProcessingWebTask } from '../../types/agentChat'
 import { scrollIntoViewIfNeeded } from './scrollIntoView'
 import { useAgentChatStore } from '../../stores/agentChatStore'
 
-const DEBUG_PROCESSING_INDICATOR = import.meta.env.DEV
-
-function debugLog(...args: unknown[]) {
-  if (!DEBUG_PROCESSING_INDICATOR) {
-    return
-  }
-  // eslint-disable-next-line no-console
-  console.debug('[ProcessingIndicator]', ...args)
-}
-
 function combineClassNames(...values: Array<string | undefined | false>) {
   return values.filter(Boolean).join(' ')
 }
@@ -88,10 +78,6 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
   const pendingPanelActionRef = useRef<'expand' | 'collapse' | null>(null)
 
   useEffect(() => {
-    debugLog('activeTasks updated', { count: activeTasks.length })
-  }, [activeTasks])
-
-  useEffect(() => {
     if (!active || !activeTasks.length) {
       return () => undefined
     }
@@ -110,7 +96,6 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
 
   const toggleTaskExpanded = (taskId: string) => {
     const wasExpanded = expandedTaskIds.has(taskId)
-    debugLog('toggleTaskExpanded', { taskId, wasExpanded })
 
     if (wasExpanded) {
       panelScrollSnapshotRef.current = window.scrollY
@@ -127,7 +112,6 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
         return next
       })
       setLastExpandedTaskId(taskId)
-      debugLog('task expanded scheduled', { taskId })
     }
   }
 
@@ -140,11 +124,8 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
       pendingPanelActionRef.current = prev ? 'collapse' : 'expand'
       if (prev) {
         panelScrollSnapshotRef.current = window.scrollY
-        debugLog('panel collapsed')
         return false
       }
-
-      debugLog('panel expansion scheduled')
       return true
     })
   }
@@ -163,7 +144,6 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
       return
     }
 
-    debugLog('scrollIntoViewIfNeeded for expanded task', { taskId: lastExpandedTaskId })
     scrollIntoViewIfNeeded(cardElement)
     setLastExpandedTaskId(null)
     panelScrollSnapshotRef.current = null
@@ -178,7 +158,6 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
       pendingTaskExpansionRef.current = null
       return
     }
-    debugLog('task expansion finalized', { taskId: pendingTaskId })
     suppressAutoScrollPin()
     setAutoScrollPinned(false)
     pendingTaskExpansionRef.current = null
@@ -186,7 +165,6 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
 
   useEffect(() => {
     if (!isExpanded && panelScrollSnapshotRef.current !== null) {
-      debugLog('restoring scroll snapshot')
       window.scrollTo({ top: panelScrollSnapshotRef.current })
       panelScrollSnapshotRef.current = null
     }
@@ -202,7 +180,6 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
 
     const container = containerRef.current
     if (container) {
-      debugLog('scrollIntoViewIfNeeded for panel container')
       scrollIntoViewIfNeeded(container)
       panelScrollSnapshotRef.current = null
     }
@@ -215,11 +192,8 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
     }
     pendingPanelActionRef.current = null
     if (pendingAction === 'expand') {
-      debugLog('panel expansion finalized')
       suppressAutoScrollPin(1500)
       setAutoScrollPinned(false)
-    } else {
-      debugLog('panel collapse finalized')
     }
   }, [isExpanded, setAutoScrollPinned, suppressAutoScrollPin])
 
@@ -269,7 +243,6 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
                 if (event.detail !== 0) {
                   event.currentTarget.blur()
                 }
-                debugLog('task card clicked', { taskId: task.id, expanded: !isTaskExpanded, pointerEvent: event.detail })
               }
 
               return (
