@@ -134,6 +134,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         "status": "ok",
         "message": f"Web chat message sent to {to_address}",
         "message_id": str(message.id),
+        "auto_sleep_ok": True,
     }
 
 

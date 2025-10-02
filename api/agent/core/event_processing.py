@@ -92,6 +92,38 @@ MESSAGE_HISTORY_LIMIT = 15
 TOOL_CALL_HISTORY_LIMIT = 10
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
+AUTO_SLEEP_FLAG = "auto_sleep_ok"
+def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[BudgetContext]) -> None:
+    """Best-effort attempt to close the budget cycle when the agent goes idle."""
+
+    if budget_ctx is None:
+        return
+
+    try:
+        current_depth = (
+            AgentBudgetManager.get_branch_depth(
+                agent_id=budget_ctx.agent_id,
+                branch_id=budget_ctx.branch_id,
+            )
+            or 0
+        )
+    except Exception:
+        current_depth = getattr(budget_ctx, "depth", 0) or 0
+
+    if current_depth > 0:
+        logger.info(
+            "Agent %s sleeping with %s outstanding child tasks; leaving cycle active.",
+            agent.id,
+            current_depth,
+        )
+        return
+
+    try:
+        AgentBudgetManager.close_cycle(
+            agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id
+        )
+    except Exception:
+        logger.debug("Failed to close budget cycle on sleep", exc_info=True)
 
 # Token budget for prompts using promptree
 PROMPT_TOKEN_BUDGET = 96000
@@ -1008,6 +1040,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
             all_calls_sleep = True
             sleep_requested = False  # set only when all calls are sleep
             executed_calls = 0
+            followup_required = False
             try:
                 has_non_sleep_calls = any(
                     (
@@ -1096,6 +1129,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         except Exception:
                             logger.debug("Failed to persist correction step", exc_info=True)
                         # Abort remaining tool calls this iteration; retry next loop
+                        followup_required = True
                         break
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
@@ -1238,37 +1272,26 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                                 exc_info=True,
                             )
                         logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
+                    if isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True:
+                        tool_requires_followup = False
+                    else:
+                        tool_requires_followup = True
+
+                    if tool_requires_followup:
+                        followup_required = True
+
                     executed_calls += 1
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)
-                # Only close the cycle if no outstanding child tasks remain
-                if budget_ctx is not None:
-                    try:
-                        current_depth = (
-                            AgentBudgetManager.get_branch_depth(
-                                agent_id=budget_ctx.agent_id,
-                                branch_id=budget_ctx.branch_id,
-                            )
-                            or 0
-                        )
-                    except Exception:
-                        current_depth = getattr(budget_ctx, "depth", 0) or 0
-
-                    if current_depth > 0:
-                        logger.info(
-                            "Agent %s sleeping with %s outstanding child tasks; leaving cycle active.",
-                            agent.id,
-                            current_depth,
-                        )
-                        return cumulative_token_usage
-
-                    try:
-                        AgentBudgetManager.close_cycle(
-                            agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id
-                        )
-                    except Exception:
-                        logger.debug("Failed to close budget cycle on sleep", exc_info=True)
+                _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                return cumulative_token_usage
+            elif not followup_required and executed_calls > 0:
+                logger.info(
+                    "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",
+                    agent.id,
+                )
+                _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
             else:
                 logger.info(

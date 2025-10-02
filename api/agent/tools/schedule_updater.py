@@ -62,8 +62,16 @@ def execute_update_schedule(agent, params: dict) -> dict:
         agent.clean()  # This only validates the schedule field
         agent.save(update_fields=['schedule'])
         if new_schedule_str:
-            return {"status": "ok", "message": f"Schedule updated to '{new_schedule_str}'."}
-        return {"status": "ok", "message": "Schedule has been disabled."}
+            return {
+                "status": "ok",
+                "message": f"Schedule updated to '{new_schedule_str}'.",
+                "auto_sleep_ok": True,
+            }
+        return {
+            "status": "ok",
+            "message": "Schedule has been disabled.",
+            "auto_sleep_ok": True,
+        }
 
     except (ValidationError, ValueError) as e:
         agent.schedule = original_schedule

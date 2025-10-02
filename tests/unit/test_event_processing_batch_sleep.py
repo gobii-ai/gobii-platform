@@ -81,3 +81,50 @@ class TestBatchToolCallsWithSleep(TestCase):
         # Assert token usage aggregated
         self.assertIn('total_tokens', result_usage)
         self.assertGreaterEqual(result_usage['total_tokens'], 15)
+
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch('api.agent.core.event_processing._build_prompt_context')
+    @patch('api.agent.core.event_processing._completion_with_failover')
+    def test_successful_actions_short_circuit_to_sleep(self, mock_completion, mock_build_prompt, *_mocks):
+        """A tool batch that opts-in to auto-sleep should end the loop immediately."""
+
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
+
+        def mk_tc(name, args):
+            tc = MagicMock()
+            tc.function = MagicMock()
+            tc.function.name = name
+            tc.function.arguments = args
+            return tc
+
+        tc_email = mk_tc('send_email', '{"to": "a@example.com", "subject": "hi", "mobile_first_html": "<p>Hi</p>"}')
+        tc_charter = mk_tc('update_charter', '{"new_charter": "Stay focused"}')
+
+        msg = MagicMock()
+        msg.tool_calls = [tc_email, tc_charter]
+        msg.content = None
+        choice = MagicMock(); choice.message = msg
+        resp = MagicMock(); resp.choices = [choice]
+        resp.model_extra = {"usage": MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15, prompt_tokens_details=MagicMock(cached_tokens=0))}
+
+        mock_completion.return_value = (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"})
+
+        from api.agent.core import event_processing as ep
+        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+            result_usage = ep._run_agent_loop(self.agent, is_first_run=False)
+
+        # Only the initial completion should occur because the loop auto-sleeps
+        self.assertEqual(mock_completion.call_count, 1)
+
+        calls = list(PersistentAgentToolCall.objects.all().order_by('step__created_at'))
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([c.tool_name for c in calls], ['send_email', 'update_charter'])
+
+        # No explicit sleep step should exist because the loop short-circuited
+        sleep_steps = PersistentAgentStep.objects.filter(description__icontains='sleep until next trigger')
+        self.assertFalse(sleep_steps.exists())
+
+        self.assertIn('total_tokens', result_usage)
+        self.assertGreaterEqual(result_usage['total_tokens'], 15)
