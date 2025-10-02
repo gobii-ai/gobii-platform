@@ -18,6 +18,13 @@ from api.models import (
     build_web_agent_address,
     build_web_user_address,
 )
+from api.services.web_sessions import (
+    WEB_SESSION_TTL_SECONDS,
+    end_web_session,
+    heartbeat_web_session,
+    start_web_session,
+    touch_web_session,
+)
 
 from console.agent_chat.access import resolve_agent
 from console.agent_chat.timeline import (
@@ -117,6 +124,15 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
 
         sender_address, recipient_address = _ensure_console_endpoints(agent, request.user)
 
+        # Keep the web session alive whenever the user sends a message from the console UI.
+        touch_web_session(
+            agent,
+            request.user,
+            source="message",
+            create=True,
+            ttl_seconds=WEB_SESSION_TTL_SECONDS,
+        )
+
         if not agent.is_sender_whitelisted(CommsChannel.WEB, sender_address):
             return HttpResponseForbidden("You are not allowed to message this agent.")
 
@@ -141,3 +157,103 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent(request.user, request.session, agent_id)
         return JsonResponse({"processing_active": compute_processing_status(agent)})
+
+
+def _parse_ttl(payload: dict | None) -> int:
+    if not payload:
+        return WEB_SESSION_TTL_SECONDS
+    ttl_raw = payload.get("ttl_seconds")
+    if ttl_raw is None:
+        return WEB_SESSION_TTL_SECONDS
+    try:
+        ttl = int(ttl_raw)
+    except (TypeError, ValueError):
+        raise ValueError("ttl_seconds must be an integer")
+    return max(10, ttl)
+
+
+def _parse_session_key(payload: dict | None) -> str:
+    key = (payload or {}).get("session_key")
+    if not key:
+        raise ValueError("session_key is required")
+    return str(key)
+
+
+def _session_response(result) -> JsonResponse:
+    session = result.session
+    payload = {
+        "session_key": str(session.session_key),
+        "ttl_seconds": result.ttl_seconds,
+        "expires_at": result.expires_at.isoformat(),
+        "last_seen_at": session.last_seen_at.isoformat(),
+        "last_seen_source": session.last_seen_source,
+    }
+    if session.ended_at:
+        payload["ended_at"] = session.ended_at.isoformat()
+    return JsonResponse(payload)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentWebSessionStartAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        try:
+            ttl = _parse_ttl(body)
+            result = start_web_session(agent, request.user, ttl_seconds=ttl)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        return _session_response(result)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentWebSessionHeartbeatAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        try:
+            ttl = _parse_ttl(body)
+            session_key = _parse_session_key(body)
+            result = heartbeat_web_session(
+                session_key,
+                agent,
+                request.user,
+                ttl_seconds=ttl,
+            )
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        return _session_response(result)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentWebSessionEndAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        try:
+            session_key = _parse_session_key(body)
+            result = end_web_session(session_key, agent, request.user)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        return _session_response(result)

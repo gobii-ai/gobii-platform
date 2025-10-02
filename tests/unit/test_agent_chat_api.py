@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -19,6 +20,7 @@ from api.models import (
     build_web_user_address,
 )
 from api.agent.tools.web_chat_sender import execute_send_chat_message
+from api.services.web_sessions import start_web_session
 
 CHANNEL_LAYER_SETTINGS = {
     "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
@@ -159,6 +161,49 @@ class AgentChatAPITests(TestCase):
 
         self.assertEqual(original_event["message"].get("bodyHtml"), "")
 
+    @tag("batch_agent_chat")
+    def test_web_session_api_flow(self):
+        start_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/start/",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+        self.assertEqual(start_response.status_code, 200)
+        start_payload = start_response.json()
+        session_key = start_payload["session_key"]
+
+        heartbeat_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/heartbeat/",
+            data=json.dumps({"session_key": session_key}),
+            content_type="application/json",
+        )
+        self.assertEqual(heartbeat_response.status_code, 200)
+
+        end_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/end/",
+            data=json.dumps({"session_key": session_key}),
+            content_type="application/json",
+        )
+        self.assertEqual(end_response.status_code, 200)
+        end_payload = end_response.json()
+        self.assertIn("ended_at", end_payload)
+
+    @tag("batch_agent_chat")
+    def test_web_chat_tool_requires_active_session(self):
+        result = execute_send_chat_message(
+            self.agent,
+            {"body": "Ping", "to_address": self.user_address},
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertIn("No active web chat session", result["message"])
+
+        start_web_session(self.agent, self.user)
+        success = execute_send_chat_message(
+            self.agent,
+            {"body": "Ping", "to_address": self.user_address},
+        )
+        self.assertEqual(success["status"], "ok")
+
         markdown_body = "# Heading\n\n- Item"
         PersistentAgentMessage.objects.create(
             is_outbound=False,
@@ -211,6 +256,7 @@ class AgentChatAPITests(TestCase):
 
     @tag("batch_agent_chat")
     def test_send_chat_tool_creates_outbound_message(self):
+        start_web_session(self.agent, self.user)
         params = {"body": "Tool says hi", "to_address": self.user_address}
         result = execute_send_chat_message(self.agent, params)
         self.assertEqual(result["status"], "ok")
@@ -222,8 +268,9 @@ class AgentChatAPITests(TestCase):
 
     @tag("batch_agent_chat")
     def test_send_chat_tool_rejects_unlisted_address(self):
+        start_web_session(self.agent, self.user)
         stranger_address = build_web_user_address(self.user.id + 999, self.agent.id)
         params = {"body": "Nope", "to_address": stranger_address}
         result = execute_send_chat_message(self.agent, params)
         self.assertEqual(result["status"], "error")
-        self.assertIn("authorized", result["message"].lower())
+        self.assertIn("no active web chat session", result["message"].lower())

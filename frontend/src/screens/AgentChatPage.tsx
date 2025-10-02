@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
+import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentChatStore } from '../stores/agentChatStore'
 
 function deriveFirstName(agentName?: string | null): string {
@@ -42,6 +43,8 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const initialLoading = loading && events.length === 0
+
+  const { error: sessionError } = useAgentWebSession(agentId)
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   useEffect(() => {
@@ -161,8 +164,8 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
 
   return (
     <div className="min-h-screen">
-      {error ? (
-        <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error}</div>
+      {error || sessionError ? (
+        <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
       <AgentChatLayout
         agentName={agentName || 'Agent'}
