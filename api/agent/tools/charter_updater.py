@@ -47,7 +47,11 @@ def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Di
     try:
         agent.charter = new_charter.strip()
         agent.save(update_fields=["charter"])
-        return {"status": "ok", "message": "Charter updated successfully."}
+        return {
+            "status": "ok",
+            "message": "Charter updated successfully.",
+            "auto_sleep_ok": True,
+        }
     except Exception as e:
         logger.exception("Failed to update charter for agent %s", agent.id)
         return {"status": "error", "message": f"Failed to update charter: {e}"} 

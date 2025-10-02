@@ -83,6 +83,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         self.assertGreaterEqual(result_usage['total_tokens'], 15)
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing._build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
@@ -99,9 +100,10 @@ class TestBatchToolCallsWithSleep(TestCase):
             return tc
 
         tc_email = mk_tc('send_email', '{"to": "a@example.com", "subject": "hi", "mobile_first_html": "<p>Hi</p>"}')
+        tc_charter = mk_tc('update_charter', '{"new_charter": "Stay focused"}')
 
         msg = MagicMock()
-        msg.tool_calls = [tc_email]
+        msg.tool_calls = [tc_email, tc_charter]
         msg.content = None
         choice = MagicMock(); choice.message = msg
         resp = MagicMock(); resp.choices = [choice]
@@ -116,9 +118,9 @@ class TestBatchToolCallsWithSleep(TestCase):
         # Only the initial completion should occur because the loop auto-sleeps
         self.assertEqual(mock_completion.call_count, 1)
 
-        calls = list(PersistentAgentToolCall.objects.all())
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0].tool_name, 'send_email')
+        calls = list(PersistentAgentToolCall.objects.all().order_by('step__created_at'))
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([c.tool_name for c in calls], ['send_email', 'update_charter'])
 
         # No explicit sleep step should exist because the loop short-circuited
         sleep_steps = PersistentAgentStep.objects.filter(description__icontains='sleep until next trigger')
