@@ -938,6 +938,30 @@
   color: #334155;
 }
 
+.tool-search-callout-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.tool-search-callout-list-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: #1f2937;
+}
+
+.tool-search-callout-list-label {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.tool-search-callout-list-items {
+  color: #334155;
+}
+
 .tool-search-callout-body p {
   margin: 0;
 }

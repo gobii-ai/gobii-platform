@@ -220,14 +220,34 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
     }
   }
 
-  const calloutLines = combinedMessage.length ? combinedMessage : derivedMessage
+  const suppressedGroupTitles = new Set<string>()
+
+  const calloutLists: Array<{ label: string; items: string[] }> = []
+  let calloutLines = combinedMessage.length ? [...combinedMessage] : [...derivedMessage]
+
+  if (combinedMessage.length) {
+    calloutLines = calloutLines.filter((line) => {
+      const trimmed = line.trim()
+      if (outcome.enabledTools.length && /^enabled:/i.test(trimmed)) {
+        calloutLists.push({ label: 'Enabled', items: outcome.enabledTools })
+        suppressedGroupTitles.add('Now enabled')
+        return false
+      }
+      if (outcome.alreadyEnabledTools.length && /^already enabled:/i.test(trimmed)) {
+        calloutLists.push({ label: 'Already enabled', items: outcome.alreadyEnabledTools })
+        suppressedGroupTitles.add('Already enabled')
+        return false
+      }
+      return true
+    })
+  }
 
   const summaryGroups = [
     { title: 'Now enabled', items: outcome.enabledTools },
     { title: 'Already enabled', items: outcome.alreadyEnabledTools },
     { title: 'Not available', items: outcome.invalidTools },
     { title: 'Replaced to stay within limits', items: outcome.evictedTools },
-  ].filter((group) => group.items.length)
+  ].filter((group) => group.items.length && !suppressedGroupTitles.has(group.title))
 
   const toolSuggestions = outcome.tools
 
@@ -241,7 +261,7 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
     <div className="space-y-4 text-sm text-slate-600">
       <KeyValueList items={infoItems} />
 
-      {calloutLines.length ? (
+      {calloutLines.length || calloutLists.length ? (
         <div className={`tool-search-callout tool-search-callout--${calloutVariant}`}>
           <span className="tool-search-callout-icon" aria-hidden="true">
             {calloutVariant === 'error' ? (
@@ -263,11 +283,23 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
             )}
           </span>
           <div className="tool-search-callout-content">
-            <div className="tool-search-callout-body">
-              {calloutLines.map((line, idx) => (
-                <p key={idx}>{line}</p>
-              ))}
-            </div>
+            {calloutLines.length ? (
+              <div className="tool-search-callout-body">
+                {calloutLines.map((line, idx) => (
+                  <p key={idx}>{line}</p>
+                ))}
+              </div>
+            ) : null}
+            {calloutLists.length ? (
+              <div className="tool-search-callout-list">
+                {calloutLists.map((group) => (
+                  <div key={group.label} className="tool-search-callout-list-group">
+                    <span className="tool-search-callout-list-label">{group.label}</span>
+                    <span className="tool-search-callout-list-items">{group.items.join(', ')}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
