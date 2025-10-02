@@ -276,6 +276,56 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
       },
     },
     {
+      name: 'secure_credentials_request',
+      label: 'Credentials request',
+      iconPaths: [
+        'M8 11V7a4 4 0 118 0v4',
+        'M5 11h14v10H5z',
+        'M12 15v2',
+      ],
+      iconBgClass: 'bg-amber-100',
+      iconColorClass: 'text-amber-600',
+      detailKind: 'secureCredentials',
+      derive(entry, parameters) {
+        const result = parseResultObject(entry.result)
+        const credentialsRaw = parameters?.credentials
+        const credentials = Array.isArray(credentialsRaw) ? credentialsRaw : []
+        const createdCountRaw = result?.['created_count']
+        const message = result ? coerceString(result['message']) : null
+        const status = result ? coerceString(result['status']) : null
+        const errorsRaw = result && Array.isArray(result['errors']) ? (result['errors'] as unknown[]) : null
+        const createdCount = typeof createdCountRaw === 'number' ? createdCountRaw : null
+        const firstCredential = credentials.length ? (credentials[0] as Record<string, unknown>) : null
+        const firstName = firstCredential ? coerceString(firstCredential['name']) : null
+
+        let caption: string | null = null
+        if (createdCount && createdCount > 0) {
+          caption = `Awaiting ${createdCount} credential${createdCount === 1 ? '' : 's'}`
+        } else if (firstName) {
+          caption = `Requesting ${firstName}`
+        } else if (credentials.length) {
+          caption = `Requesting ${credentials.length} credential${credentials.length === 1 ? '' : 's'}`
+        } else if (status) {
+          caption = status
+        }
+
+        const summaryPieces: string[] = []
+        if (message) {
+          summaryPieces.push(message)
+        }
+        if (errorsRaw && errorsRaw.length) {
+          summaryPieces.push(`Errors: ${errorsRaw.length}`)
+        }
+
+        const summaryText = summaryPieces.length ? truncate(summaryPieces.join(' • '), 120) : entry.summary ?? null
+
+        return {
+          caption: caption ?? entry.caption ?? 'Credentials request',
+          summary: summaryText,
+        }
+      },
+    },
+    {
       name: 'mcp_brightdata_scrape_as_markdown',
       label: 'Web snapshot',
       iconPaths: ['M4 4h16v12H4z', 'M8 20h8', 'M10 16v4', 'M14 16v4'],

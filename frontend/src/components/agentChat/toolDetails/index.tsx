@@ -78,6 +78,33 @@ function formatChannelLabel(channel: string | null): string | null {
   }
 }
 
+type CredentialDetail = {
+  name: string | null
+  key: string | null
+  domainPattern: string | null
+  description: string | null
+}
+
+function normalizeCredential(value: unknown): CredentialDetail | null {
+  if (!isRecord(value)) return null
+  const nameValue = value['name']
+  const keyValue = value['key']
+  const domainValue = value['domain_pattern']
+  const descriptionValue = value['description']
+  const name = typeof nameValue === 'string' && nameValue.trim().length ? nameValue : null
+  const key = typeof keyValue === 'string' && keyValue.trim().length ? keyValue : null
+  const domainPattern = typeof domainValue === 'string' && domainValue.trim().length ? domainValue : null
+  const description = typeof descriptionValue === 'string' && descriptionValue.trim().length ? descriptionValue : null
+  return { name, key, domainPattern, description }
+}
+
+function extractFirstUrl(text: string | null | undefined): string | null {
+  if (!text) return null
+  const match = text.match(/https?:\/\/[^\s)]+/i)
+  if (!match) return null
+  return match[0].replace(/[.,!?]+$/, '')
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="space-y-1.5">
@@ -550,13 +577,18 @@ export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {
     : []
 
   const result = parseResultObject(entry.result)
+  const statusValue = typeof result?.['status'] === 'string' ? (result['status'] as string) : null
+  const messageValue = typeof result?.['message'] === 'string' ? (result['message'] as string) : null
   const createdCount = typeof result?.['created_count'] === 'number' ? (result['created_count'] as number) : null
   const alreadyAllowed = typeof result?.['already_allowed_count'] === 'number' ? (result['already_allowed_count'] as number) : null
   const alreadyPending = typeof result?.['already_pending_count'] === 'number' ? (result['already_pending_count'] as number) : null
   const approvalRaw = typeof result?.['approval_url'] === 'string' ? (result['approval_url'] as string) : null
   const approvalUrl = approvalRaw && /^https?:\/\//i.test(approvalRaw) ? approvalRaw : null
+  const statusLabel = statusValue ? statusValue.toUpperCase() : null
+  const messageText = isNonEmptyString(messageValue) ? messageValue : entry.summary || entry.caption || null
 
   const infoItems: Array<{ label: string; value: ReactNode } | null> = [
+    statusLabel ? { label: 'Status', value: statusLabel } : null,
     createdCount !== null ? { label: 'Created requests', value: createdCount } : null,
     alreadyAllowed !== null ? { label: 'Already allowed', value: alreadyAllowed } : null,
     alreadyPending !== null ? { label: 'Already pending', value: alreadyPending } : null,
@@ -576,6 +608,7 @@ export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {
 
   return (
     <div className="space-y-4 text-sm text-slate-600">
+      {messageText ? <p className="whitespace-pre-line text-slate-700">{messageText}</p> : null}
       <KeyValueList items={infoItems} />
       {contacts.length ? (
         <Section title={`Contact request${contacts.length === 1 ? '' : 's'}`}>
@@ -596,7 +629,78 @@ export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {
               ]
               return (
                 <li key={`contact-${index}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
+                  <p className="font-semibold text-slate-800">{heading}</p>
                   <KeyValueList items={contactItems} />
+                </li>
+              )
+            })}
+          </ol>
+        </Section>
+      ) : null}
+    </div>
+  )
+}
+
+export function SecureCredentialsDetail({ entry }: ToolDetailProps) {
+  const params = (entry.parameters as Record<string, unknown>) || {}
+  const credentialsRaw = params['credentials']
+  const credentials = Array.isArray(credentialsRaw)
+    ? (credentialsRaw.map(normalizeCredential).filter(Boolean) as CredentialDetail[])
+    : []
+
+  const result = parseResultObject(entry.result)
+  const messageValue = typeof result?.['message'] === 'string' ? (result['message'] as string) : null
+  const createdCount = typeof result?.['created_count'] === 'number' ? (result['created_count'] as number) : null
+  const errorsRaw = Array.isArray(result?.['errors']) ? (result?.['errors'] as unknown[]) : []
+  const errors = errorsRaw
+    .map((error) => (typeof error === 'string' ? error : stringify(error)))
+    .filter((value): value is string => Boolean(value && value.trim()))
+  const messageText = isNonEmptyString(messageValue) ? messageValue : entry.summary || entry.caption || null
+  const submissionUrl = extractFirstUrl(messageText)
+
+  const infoItems: Array<{ label: string; value: ReactNode } | null> = [
+    createdCount !== null ? { label: 'Created requests', value: createdCount } : null,
+    submissionUrl
+      ? {
+          label: 'Submission link',
+          value: (
+            <a href={submissionUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">
+              {submissionUrl}
+            </a>
+          ),
+        }
+      : null,
+  ]
+
+  return (
+    <div className="space-y-4 text-sm text-slate-600">
+      <KeyValueList items={infoItems} />
+      {errors.length ? (
+        <Section title="Errors">
+          <ul className="list-disc space-y-1 pl-5 text-sm text-rose-600">
+            {errors.map((error, index) => (
+              <li key={`error-${index}`}>{error}</li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {credentials.length ? (
+        <Section title={`Credential${credentials.length === 1 ? '' : 's'} requested`}>
+          <ol className="space-y-3">
+            {credentials.map((credential, index) => {
+              const credentialItems: Array<{ label: string; value: ReactNode } | null> = [
+                credential.key ? { label: 'Key', value: credential.key } : null,
+                credential.domainPattern ? { label: 'Domain', value: credential.domainPattern } : null,
+                credential.description
+                  ? {
+                      label: 'Description',
+                      value: <span className="whitespace-pre-line">{credential.description}</span>,
+                    }
+                  : null,
+              ]
+              return (
+                <li key={`credential-${index}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
+                  <KeyValueList items={credentialItems} />
                 </li>
               )
             })}
@@ -713,6 +817,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   fileWrite: FileWriteDetail,
   browserTask: BrowserTaskDetail,
   contactPermission: RequestContactPermissionDetail,
+  secureCredentials: SecureCredentialsDetail,
   analysis: AnalysisToolDetail,
   updateSchedule: UpdateScheduleDetail,
   brightDataSnapshot: BrightDataSnapshotDetail,
