@@ -17,7 +17,7 @@ from api.models import CommsChannel
 import  logging
 import re
 
-from config.settings import EMAIL_STRIP_REPLIES
+from config.settings import EMAIL_STRIP_REPLIES, MAX_FILE_SIZE
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -314,8 +314,15 @@ class MailgunEmailAdapter(EmailAdapter):
             attachments_meta = []
             for att in attachments:
                 content_type = getattr(att, "content_type", "")
-                if content_type:
+                file_size = getattr(att, "size", 0)
+                if file_size > MAX_FILE_SIZE:
+                    logger.warning(f"Attachment {att.name} is too large to process. Skipping.");
+                    span.add_event(f"Attachment {att.name} is too large to process. Skipping. Size in bytes: {file_size}")
+                    continue
+
+                elif content_type:
                     attachments_meta.append({"ContentType": content_type})
+
             is_forward = _is_forward_like(subject, working_text, attachments_meta)
             span.set_attribute("mailgun.is_forward", bool(is_forward))
 
