@@ -334,12 +334,19 @@ class MailgunEmailAdapter(EmailAdapter):
                     body = working_text.strip()
                     body_used = "Forward+WorkingTextFallback"
             else:
-                for field in ("stripped-text", "body-plain", "stripped-html", "body-html", "text", "html"):
-                    value = _first_value(payload_dict.get(field)) if field in payload_dict else ""
+                for field in ("stripped-text", "body-plain", "text"):
+                    value = _first_value(payload_dict.get(field))
                     if value:
                         body = value
                         body_used = field
                         break
+                else:  # No plain text body found, try HTML
+                    for field in ("stripped-html", "body-html", "html"):
+                        value = _first_value(payload_dict.get(field))
+                        if value:
+                            body = _html_to_text(value)
+                            body_used = field
+                            break
         span.set_attribute("mailgun.body_used", body_used)
 
         sender = (
