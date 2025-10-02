@@ -363,7 +363,7 @@ class MailgunEmailAdapter(EmailAdapter):
         return ParsedMessage(
             sender=sender,
             recipient=recipient,
-            subject=_first_value(payload_dict.get("subject")),
+            subject=subject,
             body=body,
             attachments=attachments,
             raw_payload=payload_dict,
