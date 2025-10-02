@@ -89,7 +89,7 @@ class GetSecretsBlockTests(TestCase):
         
         # Get the secrets block
         result = _get_secrets_block(self.agent)
-        
+
         # Verify fulfilled secrets ARE in the result
         self.assertIn("api_key", result)
         self.assertIn("auth_token", result)
@@ -100,6 +100,7 @@ class GetSecretsBlockTests(TestCase):
 
         # Verify requested secrets are surfaced as pending (not as available)
         self.assertIn("Pending credential requests", result)
+        self.assertIn("follow up with the user", result)
         self.assertIn("pending_secret", result)
         self.assertIn("waiting_secret", result)
         self.assertIn("https://pending.example.com", result)

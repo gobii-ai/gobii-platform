@@ -2373,7 +2373,11 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
     if pending_secrets:
         if lines:
             lines.append("")
-        lines.append("Pending credential requests (waiting on the user to provide values):")
+        lines.append(
+            "Pending credential requests (user has not provided these yet; "
+            "if you just requested them, follow up with the user through the "
+            "appropriate communication channel):"
+        )
         lines.extend(_format_secrets(pending_secrets, is_pending=True))
 
     return "\n".join(lines)
