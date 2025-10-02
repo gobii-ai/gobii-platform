@@ -202,6 +202,16 @@ class ConsoleContextTests(TestCase):
         content2 = resp2.content.decode()
         self.assertIn("Profile", content2)
 
+    def test_billing_query_switches_to_org_context(self):
+        self._set_personal_context()
+        billing_url = f"{reverse('billing')}?org_id={self.org.id}"
+        resp = self.client.get(billing_url)
+        self.assertEqual(resp.status_code, 200)
+        session = self.client.session
+        self.assertEqual(session.get('context_type'), 'organization')
+        self.assertEqual(session.get('context_id'), str(self.org.id))
+        self.assertEqual(session.get('context_name'), self.org.name)
+
     def test_agent_contact_view_shows_org_context_banner(self):
         self._set_org_context()
         session = self.client.session

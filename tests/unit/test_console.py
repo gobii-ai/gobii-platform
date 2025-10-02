@@ -120,5 +120,23 @@ class ConsoleViewsTest(TestCase):
         form = response.context.get("form")
         self.assertIsNotNone(form)
         non_field_errors = form.non_field_errors()
-        self.assertTrue(any("Purchase organization seats" in err for err in non_field_errors))
+        billing_url = f"{reverse('billing')}?org_id={org.id}"
+        self.assertTrue(any("Add seats in Billing" in err for err in non_field_errors))
+        context_data = response.context
+        if hasattr(context_data, 'get'):
+            messages_iter = context_data.get('messages')
+            self.assertIsNotNone(messages_iter)
+        else:
+            messages_iter = None
+            for ctx in context_data:
+                if 'messages' in ctx:
+                    messages_iter = ctx['messages']
+            self.assertIsNotNone(messages_iter)
+        django_messages = list(messages_iter)
+        self.assertTrue(
+            any(
+                "Add seats in Billing" in msg.message and billing_url in msg.message
+                for msg in django_messages
+            )
+        )
         self.assertEqual(PersistentAgent.objects.filter(organization=org).count(), 0)
