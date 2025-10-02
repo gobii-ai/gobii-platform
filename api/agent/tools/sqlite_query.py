@@ -39,7 +39,9 @@ def execute_sqlite_query(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     query_preview = query.strip()
     if len(query_preview) > 500:
         query_preview = query_preview[:500] + f"... [TRUNCATED, total {len(query)} chars]"
-    
+
+    is_insert = query.lstrip().upper().startswith("INSERT")
+
     logger.info(
         "Agent %s executing SQL query: %s",
         agent.id, query_preview
@@ -78,28 +80,34 @@ def execute_sqlite_query(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 "Agent %s SQL query returned %d rows, DB size: %.2f MB",
                 agent.id, len(results), db_size_mb
             )
-            
-            return {
+
+            response = {
                 "status": "ok", 
                 "result": results, 
                 "db_size_mb": round(db_size_mb, 2),
                 "message": f"Query returned {len(results)} rows. Database size: {db_size_mb:.2f} MB.{size_warning}"
             }
+            if is_insert:
+                response["auto_sleep_ok"] = True
+            return response
         else:
             affected = cursor.rowcount
             conn.commit()
-            
+
             # Log query results for non-SELECT queries
             logger.info(
                 "Agent %s SQL query affected %d rows, DB size: %.2f MB",
                 agent.id, affected, db_size_mb
             )
-            
-            return {
+
+            response = {
                 "status": "ok", 
                 "message": f"{affected} rows affected. Database size: {db_size_mb:.2f} MB.{size_warning}",
                 "db_size_mb": round(db_size_mb, 2)
             }
+            if is_insert:
+                response["auto_sleep_ok"] = True
+            return response
     except Exception as e:
         return {"status": "error", "message": f"SQLite query failed: {e}"}
     finally:

@@ -118,8 +118,7 @@
 }
 
 .composer-surface {
-  width: 100%;
-  max-width: min(60rem, calc(100% - 2.5rem));
+  width: min(60rem, 100%);
   padding: 0;
   background: transparent;
   border: 0;
@@ -168,7 +167,6 @@
 
 .composer-input-surface:focus-within {
   border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
 }
 
 .jump-to-latest {
@@ -494,7 +492,7 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 0.45rem;
-  flex: 0 0 auto;
+  max-width: min(100%, 22rem);
 }
 
 .tool-chip-trigger {
@@ -508,7 +506,7 @@
   padding: 0.35rem 0.7rem;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #1f2937;
+  color: #0f172a;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   cursor: pointer;
 }
@@ -539,12 +537,13 @@
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
+  min-width: 0;
 }
 
 .tool-chip-label {
   font-size: 0.74rem;
   font-weight: 600;
-  color: #0f172a;
+  overflow-wrap: anywhere;
 }
 
 .tool-chip-caption {

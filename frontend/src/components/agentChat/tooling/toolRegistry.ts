@@ -114,15 +114,16 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
     },
     {
       name: 'search_tools',
-      aliases: ['web_search', 'search'],
+      aliases: ['search_web', 'web_search', 'search'],
       label: 'Web search',
       iconPaths: ['M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'],
       iconBgClass: 'bg-blue-100',
       iconColorClass: 'text-blue-600',
       detailKind: 'search',
-      derive(_, parameters) {
+      derive(entry, parameters) {
         const query = coerceString(parameters?.query) || coerceString(parameters?.prompt)
         return {
+          label: entry.toolName?.toLowerCase() === 'search_tools' ? 'Tool search' : 'Web search',
           caption: query ? `“${truncate(query)}”` : 'Search',
         }
       },

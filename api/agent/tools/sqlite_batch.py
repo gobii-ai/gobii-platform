@@ -20,6 +20,12 @@ from .sqlite_state import _sqlite_db_path_var  # type: ignore
 
 logger = logging.getLogger(__name__)
 
+INSERT_PATTERN = re.compile(r"^\s*(?:WITH\b.*?\bINSERT\b|INSERT\b)", re.IGNORECASE | re.DOTALL)
+
+
+def _is_insert_statement(sql: str) -> bool:
+    return bool(INSERT_PATTERN.match(sql))
+
 
 def _classify_sqlite_error(exc: Exception) -> str:
     msg = str(exc).lower()
@@ -122,6 +128,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     succeeded = 0
     failed = 0
     warnings: List[str] = []
+    only_inserts = True
 
     # Log a preview of the batch for observability (truncate SQL text)
     try:
@@ -231,6 +238,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     "error": {"code": "invalid_input", "message": "Operation must be a non-empty SQL string", "at_index": idx},
                 })
                 failed += 1
+                only_inserts = False
                 if mode == "atomic":
                     error_occurred = True
                     break
@@ -241,7 +249,9 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             try:
                 # Preflight checks and best-effort sanitisation
                 sql_sanitized = _sanitize_sql(sql)
+                only_inserts = only_inserts and _is_insert_statement(sql_sanitized)
                 if _is_transaction_control(sql_sanitized):
+                    only_inserts = False
                     should_break = _handle_preflight_error(
                         "transaction_control_disallowed",
                         "Remove explicit BEGIN/COMMIT/ROLLBACK. The tool manages transactions automatically in atomic mode.",
@@ -254,6 +264,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                         continue
 
                 if _has_multiple_statements(sql_sanitized):
+                    only_inserts = False
                     should_break = _handle_preflight_error(
                         "multiple_statements",
                         "Provide exactly one SQL statement per operation. Split statements into separate items in the operations array.",
@@ -318,6 +329,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     "time_ms": elapsed,
                 })
                 failed += 1
+                only_inserts = False
 
                 # Rollback strategy
                 if mode == "atomic":
@@ -347,7 +359,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             warnings.append("WARNING: DB SIZE EXCEEDS 50MB. CONSIDER CLEANUP/VACUUM TO AVOID WIPE AT 100MB.")
 
         status = "ok" if failed == 0 else "error"
-        return {
+        response = {
             "status": status,
             "results": results,
             "db_size_mb": round(db_size_mb, 2),
@@ -355,6 +367,9 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             "truncated_rows": any_truncated,
             "row_limit": row_limit,
         }
+        if status == "ok" and succeeded > 0 and only_inserts:
+            response["auto_sleep_ok"] = True
+        return response
     except Exception as outer:
         return {"status": "error", "message": f"SQLite batch failed: {outer}"}
     finally:
