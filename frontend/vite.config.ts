@@ -6,7 +6,13 @@ import { fileURLToPath } from 'node:url'
 const projectRootDir = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react()],
+  plugins: [
+    react({
+      babel: {
+        plugins: ['babel-plugin-react-compiler'],
+      },
+    }),
+  ],
   base: mode === 'development' ? '/' : '/static/',
   resolve: {
     alias: {
