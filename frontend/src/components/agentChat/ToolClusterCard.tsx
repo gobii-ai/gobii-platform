@@ -224,6 +224,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
           {transformed.entries.map((entry) => {
             const key = entryKey(entry)
             const isOpen = key === openKey && !collapsed
+            const chipTitle = entry.caption && entry.caption !== entry.label ? `${entry.label} — ${entry.caption}` : entry.label
             return (
               <li key={entry.id} className={`tool-chip${isOpen ? ' is-open' : ''}`}>
                 <button
@@ -231,6 +232,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
                   type="button"
                   aria-expanded={isOpen ? 'true' : 'false'}
                   aria-controls={detailHostId}
+                  title={chipTitle}
                   onClick={() => handleChipClick(entry)}
                 >
                   <span className={`tool-chip-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
@@ -242,7 +244,12 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
                   </span>
                   <span className="tool-chip-body">
                     <span className="tool-chip-label">{entry.label}</span>
-                    {entry.caption ? <span className="tool-chip-caption">{entry.caption}</span> : null}
+                    {entry.caption ? (
+                      <>
+                        <span className="tool-chip-separator" aria-hidden="true" />
+                        <span className="tool-chip-caption">{entry.caption}</span>
+                      </>
+                    ) : null}
                   </span>
                 </button>
               </li>
