@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import type { ProcessingWebTask } from '../../types/agentChat'
+import { scrollIntoViewIfNeeded } from './scrollIntoView'
 
 function combineClassNames(...values: Array<string | undefined | false>) {
   return values.filter(Boolean).join(' ')
@@ -66,6 +67,10 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
   const [isExpanded, setIsExpanded] = useState(false)
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set())
   const taskCardRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  const [lastExpandedTaskId, setLastExpandedTaskId] = useState<string | null>(null)
+  const panelScrollSnapshotRef = useRef<number | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const wasExpandedRef = useRef<boolean>(false)
 
   useEffect(() => {
     if (!active || !activeTasks.length) {
@@ -84,14 +89,11 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
     setCurrentTime(Date.now())
   }, [active, activeTasks])
 
-  if (!active) {
-    return null
-  }
-
   const toggleTaskExpanded = (taskId: string) => {
     const wasExpanded = expandedTaskIds.has(taskId)
 
     if (wasExpanded) {
+      panelScrollSnapshotRef.current = window.scrollY
       setExpandedTaskIds((prev) => {
         const next = new Set(prev)
         next.delete(taskId)
@@ -103,37 +105,66 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
         next.add(taskId)
         return next
       })
-
-      // Wait for React to update the DOM, then wait for layout to complete
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const cardElement = taskCardRefs.current.get(taskId)
-          if (!cardElement) return
-
-          // Find the timeline scroll container
-          const timelineContainer = document.getElementById('timeline-events')
-          if (!timelineContainer) {
-            // Fallback to regular scrollIntoView
-            cardElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-            return
-          }
-
-          // Calculate positions
-          const cardRect = cardElement.getBoundingClientRect()
-          const containerRect = timelineContainer.getBoundingClientRect()
-
-          // Check if the bottom of the card is below the visible area
-          const cardBottom = cardRect.bottom
-          const containerBottom = containerRect.bottom
-
-          if (cardBottom > containerBottom) {
-            // Scroll to show the entire card with some padding
-            const scrollOffset = cardBottom - containerBottom + 20 // 20px padding
-            timelineContainer.scrollBy({ top: scrollOffset, behavior: 'smooth' })
-          }
-        })
-      })
+      setLastExpandedTaskId(taskId)
     }
+  }
+
+  const togglePanelExpanded = () => {
+    if (!activeTasks.length) {
+      return
+    }
+
+    setIsExpanded((prev) => {
+      if (prev) {
+        panelScrollSnapshotRef.current = window.scrollY
+      }
+      return !prev
+    })
+  }
+
+  useEffect(() => {
+    if (!isExpanded || !lastExpandedTaskId) {
+      return
+    }
+
+    if (!expandedTaskIds.has(lastExpandedTaskId)) {
+      return
+    }
+
+    const cardElement = taskCardRefs.current.get(lastExpandedTaskId)
+    if (!cardElement) {
+      return
+    }
+
+    scrollIntoViewIfNeeded(cardElement)
+    setLastExpandedTaskId(null)
+    panelScrollSnapshotRef.current = null
+  }, [expandedTaskIds, isExpanded, lastExpandedTaskId])
+
+  useEffect(() => {
+    if (!isExpanded && panelScrollSnapshotRef.current !== null) {
+      window.scrollTo({ top: panelScrollSnapshotRef.current })
+      panelScrollSnapshotRef.current = null
+    }
+  }, [isExpanded, expandedTaskIds])
+
+  useEffect(() => {
+    const wasExpanded = wasExpandedRef.current
+    wasExpandedRef.current = isExpanded
+
+    if (!isExpanded || wasExpanded) {
+      return
+    }
+
+    const container = containerRef.current
+    if (container) {
+      scrollIntoViewIfNeeded(container)
+      panelScrollSnapshotRef.current = null
+    }
+  }, [isExpanded])
+
+  if (!active) {
+    return null
   }
 
   const now = currentTime
@@ -141,15 +172,16 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
   const taskCountLabel = activeTasks.length === 1 ? '1 web task running' : `${activeTasks.length} web tasks running`
 
   return (
-    <div id="agent-processing-indicator" className={classes} data-visible={active ? 'true' : 'false'} data-expanded={isExpanded ? 'true' : 'false'}>
+    <div
+      id="agent-processing-indicator"
+      ref={containerRef}
+      className={classes}
+      data-visible={active ? 'true' : 'false'}
+      data-expanded={isExpanded ? 'true' : 'false'}
+    >
       <span className="processing-pip" aria-hidden="true" />
       <div className="processing-content">
-        <button
-          className="processing-label"
-          onClick={() => activeTasks.length && setIsExpanded(!isExpanded)}
-          type="button"
-          disabled={!activeTasks.length}
-        >
+        <button className="processing-label" onClick={togglePanelExpanded} type="button" disabled={!activeTasks.length}>
           <strong>{agentFirstName}</strong> is working
           {activeTasks.length ? <span className="processing-count">{taskCountLabel}</span> : null}
         </button>

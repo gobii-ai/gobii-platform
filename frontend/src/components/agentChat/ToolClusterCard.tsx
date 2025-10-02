@@ -4,6 +4,7 @@ import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistr
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
+import { scrollIntoViewIfNeeded } from './scrollIntoView'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
@@ -22,6 +23,9 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
   const { openKey, setOpenKey } = useToolDetailController()
   const [collapsed, setCollapsed] = useState<boolean>(transformed.collapsible)
   const detailHostRef = useRef<HTMLDivElement>(null)
+  const closeScrollRef = useRef<number | null>(null)
+  const pendingScrollKeyRef = useRef<string | null>(null)
+  const lastOpenKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!transformed.collapsible) {
@@ -33,6 +37,8 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
     if (!openKey) return null
     return transformed.entries.find((entry) => entryKey(entry) === openKey) ?? null
   }, [openKey, transformed.entries])
+
+  const detailHostId = useMemo(() => `tool-detail-host-${slugify(cluster.cursor)}`, [cluster.cursor])
 
   useEffect(() => {
     if (collapsed && activeEntry) {
@@ -49,7 +55,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
         return current
       })
     }
-  }, [cluster.cursor, transformed.entries.length, setOpenKey])
+  }, [cluster.cursor, setOpenKey, transformed])
 
   const handleToggleCluster = useCallback(() => {
     if (!transformed.collapsible) return
@@ -69,65 +75,67 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
 
   const handleChipClick = useCallback(
     (entry: ToolEntryDisplay) => {
-      const scrollToDetail = () => {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (!detailHostRef.current) return
-
-            const timelineContainer = document.getElementById('timeline-events')
-            if (!timelineContainer) {
-              detailHostRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-              return
-            }
-
-            // Get the actual detail content (the panel inside detailHostRef)
-            const detailContent = detailHostRef.current.querySelector('.tool-chip-detail')
-            const targetElement = detailContent || detailHostRef.current
-
-            const detailRect = targetElement.getBoundingClientRect()
-            const containerRect = timelineContainer.getBoundingClientRect()
-
-            // Check if detail extends below visible area
-            const detailBottom = detailRect.bottom
-            const containerBottom = containerRect.bottom
-
-            if (detailBottom > containerBottom) {
-              // Scroll to show the entire detail with padding
-              const scrollOffset = detailBottom - containerBottom + 40 // 40px padding
-              timelineContainer.scrollBy({ top: scrollOffset, behavior: 'smooth' })
-            } else if (detailRect.top < containerRect.top) {
-              // If detail is above visible area, scroll to show it
-              const scrollOffset = detailRect.top - containerRect.top - 20 // 20px padding from top
-              timelineContainer.scrollBy({ top: scrollOffset, behavior: 'smooth' })
-            }
-          })
-        })
-      }
+      const key = entryKey(entry)
 
       if (collapsed && transformed.collapsible) {
         setCollapsed(false)
-        setOpenKey(entryKey(entry))
-        scrollToDetail()
+        pendingScrollKeyRef.current = key
+        setOpenKey(key)
         return
       }
 
-      const key = entryKey(entry)
-      const willOpen = openKey !== key
       if (openKey === key) {
         setOpenKey(null)
-      } else {
-        setOpenKey(key)
-        if (willOpen) {
-          scrollToDetail()
-        }
+        pendingScrollKeyRef.current = null
+        return
       }
+
+      setOpenKey((current) => (current === key ? null : key))
+      pendingScrollKeyRef.current = key
     },
     [collapsed, openKey, setOpenKey, transformed.collapsible],
   )
 
   const handleCloseDetail = useCallback(() => {
+    closeScrollRef.current = window.scrollY
     setOpenKey(null)
+    pendingScrollKeyRef.current = null
   }, [setOpenKey])
+
+  useEffect(() => {
+    const previousOpenKey = lastOpenKeyRef.current
+
+    if (collapsed || !openKey || !activeEntry) {
+      if (!openKey && closeScrollRef.current !== null) {
+        window.scrollTo({ top: closeScrollRef.current })
+        closeScrollRef.current = null
+      }
+      if (!openKey) {
+        pendingScrollKeyRef.current = null
+      }
+      lastOpenKeyRef.current = openKey ?? null
+      return
+    }
+
+    const shouldScroll =
+      pendingScrollKeyRef.current === openKey || previousOpenKey !== openKey
+
+    lastOpenKeyRef.current = openKey
+
+    if (!shouldScroll) {
+      return
+    }
+
+    const host = detailHostRef.current
+    if (!host) {
+      return
+    }
+
+    const detail = host.querySelector('.tool-chip-detail') as HTMLElement | null
+    scrollIntoViewIfNeeded(detail ?? host)
+    pendingScrollKeyRef.current = null
+    closeScrollRef.current = null
+  }, [activeEntry, collapsed, openKey])
 
   const articleClasses = useMemo(() => {
     const classes = ['timeline-event', 'tool-cluster']
@@ -139,8 +147,6 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
     }
     return classes.join(' ')
   }, [collapsed, transformed.collapsible])
-
-  const detailHostId = useMemo(() => `tool-detail-host-${slugify(cluster.cursor)}`, [cluster.cursor])
 
   if (!isClusterRenderable(transformed)) {
     return null
