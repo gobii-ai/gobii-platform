@@ -50,23 +50,37 @@
 
 #agent-processing-indicator {
   display: inline-flex;
-  align-items: stretch;
-  gap: 0.65rem;
-  border-radius: 9999px;
+  align-items: center;
+  gap: 0.6rem;
+  border-radius: 1.25rem;
   padding: 0.5rem 0.85rem;
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(248, 249, 255, 0.95);
   color: #312e81;
   font-size: 0.8rem;
   font-weight: 500;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.12);
-  border: 1px solid rgba(99, 102, 241, 0.18);
-  transition: opacity 0.22s ease, transform 0.22s ease;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  transition: opacity 0.22s ease, transform 0.22s ease, box-shadow 0.22s ease;
+  pointer-events: auto;
+}
+
+#agent-processing-indicator[data-expanded='true'] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+  padding: 0.65rem 0.85rem;
+}
+
+#agent-processing-indicator[data-expanded='true'] .processing-pip {
+  display: none;
 }
 
 .processing-content {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.6rem;
+  width: 100%;
 }
 
 #agent-processing-indicator.processing-indicator--fade {
@@ -75,10 +89,12 @@
 }
 
 .processing-pip {
-  width: 0.6rem;
-  height: 0.6rem;
+  width: 0.5rem;
+  height: 0.5rem;
   border-radius: 9999px;
   background: #4f46e5;
+  flex-shrink: 0;
+  align-self: center;
   box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.4);
   animation: processingPulse 1.6s ease-in-out infinite;
 }
@@ -92,23 +108,46 @@
   animation: processingPulse 1.6s ease-in-out infinite;
 }
 
-.processing-label strong {
-  font-weight: 600;
-}
-
 .processing-label {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: opacity 0.18s ease;
+  text-align: left;
+  width: 100%;
+}
+
+.processing-label:disabled {
+  cursor: default;
+}
+
+.processing-label:not(:disabled):hover {
+  opacity: 0.8;
+}
+
+.processing-label:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.4);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+.processing-label strong {
+  font-weight: 600;
 }
 
 .processing-count {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 9999px;
-  background: rgba(79, 70, 229, 0.12);
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.4rem;
+  background: rgba(79, 70, 229, 0.1);
   color: #4338ca;
   font-size: 0.68rem;
   font-weight: 600;
@@ -118,16 +157,35 @@
 
 .processing-task-list {
   display: grid;
-  gap: 0.4rem;
-  padding-left: 0.05rem;
+  gap: 0.5rem;
 }
 
 .processing-task-card {
-  background: rgba(255, 255, 255, 0.78);
-  border-radius: 0.9rem;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid rgba(79, 70, 229, 0.18);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 0.85rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.processing-task-card:hover {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(99, 102, 241, 0.3);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.1);
+}
+
+.processing-task-card:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.4);
+  outline-offset: 2px;
+}
+
+.processing-task-card[data-expanded='true'] {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(99, 102, 241, 0.25);
 }
 
 .processing-task-header {
@@ -135,7 +193,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.4rem;
 }
 
 .processing-task-status {
@@ -151,11 +209,11 @@
 
 .processing-task-status::before {
   content: '';
-  width: 0.4rem;
-  height: 0.4rem;
+  width: 0.35rem;
+  height: 0.35rem;
   border-radius: 9999px;
   background: currentColor;
-  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.22);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
 }
 
 .processing-task-status[data-status='pending'] {
@@ -173,18 +231,64 @@
 }
 
 .processing-task-duration {
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  color: #312e81;
+  color: #64748b;
 }
 
 .processing-task-body {
   margin: 0;
+}
+
+.processing-task-preview {
+  margin: 0;
   font-size: 0.78rem;
-  line-height: 1.35;
-  color: #312e81;
-  opacity: 0.92;
+  line-height: 1.4;
+  color: #334155;
   word-break: break-word;
+}
+
+.processing-task-markdown {
+  font-size: 0.78rem;
+  color: #334155;
+}
+
+.processing-task-markdown p {
+  margin: 0.5em 0;
+}
+
+.processing-task-markdown p:first-child {
+  margin-top: 0;
+}
+
+.processing-task-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.processing-task-markdown ul,
+.processing-task-markdown ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.processing-task-markdown li {
+  margin: 0.25em 0;
+}
+
+.processing-task-markdown code {
+  background: rgba(15, 23, 42, 0.06);
+  padding: 0.15em 0.3em;
+  border-radius: 0.25em;
+  font-size: 0.9em;
+}
+
+.processing-task-id {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(203, 213, 225, 0.4);
+  font-size: 0.68rem;
+  color: #94a3b8;
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
 }
 
 @keyframes processingPulse {
@@ -596,11 +700,11 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  border-radius: 9999px;
+  border-radius: 1.25rem;
   border: 1px solid rgba(203, 213, 225, 0.6);
   background: rgba(248, 250, 252, 0.92);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
-  padding: 0.35rem 0.7rem;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+  padding: 0.35rem 0.75rem;
   font-size: 0.75rem;
   font-weight: 600;
   color: #0f172a;
@@ -611,13 +715,13 @@
 .tool-chip-trigger:hover,
 .tool-chip-trigger:focus-visible {
   border-color: rgba(99, 102, 241, 0.35);
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.16);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.18);
   outline: none;
 }
 
 .tool-chip.is-open .tool-chip-trigger {
   border-color: rgba(99, 102, 241, 0.45);
-  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.22);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.22);
   background: rgba(238, 242, 255, 0.92);
 }
 

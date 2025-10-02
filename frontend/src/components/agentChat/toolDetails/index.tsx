@@ -252,15 +252,49 @@ export function FileWriteDetail({ entry }: ToolDetailProps) {
 
 export function BrowserTaskDetail({ entry }: ToolDetailProps) {
   const params = entry.parameters || {}
+  let prompt = (params.prompt as string) || null
+  // Remove "Task:" prefix if present
+  if (prompt?.toLowerCase().startsWith('task:')) {
+    prompt = prompt.slice(5).trim()
+  }
   const url = (params.url as string) || (params.start_url as string) || null
-  const status = params.status || entry.result
+
+  // Parse result if it's a JSON string
+  let resultData = entry.result
+  if (typeof resultData === 'string') {
+    try {
+      resultData = JSON.parse(resultData)
+    } catch {
+      // Keep as string if not valid JSON
+    }
+  }
+
+  const status = typeof resultData === 'object' && resultData !== null
+    ? (resultData as Record<string, unknown>).status as string || null
+    : null
+  const taskId = typeof resultData === 'object' && resultData !== null
+    ? (resultData as Record<string, unknown>).task_id as string || null
+    : null
+
+  const statusLabel = status === 'pending' ? 'Running in background'
+    : status === 'completed' ? 'Completed'
+    : status === 'failed' ? 'Failed'
+    : status ? status.charAt(0).toUpperCase() + status.slice(1)
+    : null
+
   return (
     <div className="space-y-3 text-sm text-slate-600">
-      <KeyValueList items={[url ? { label: 'URL', value: url } : null]} />
-      {status ? (
-        <Section title="Outcome">
-          <div className="whitespace-pre-wrap text-sm text-slate-700">{stringify(status)}</div>
+      {prompt ? (
+        <Section title="Task">
+          <MarkdownViewer content={prompt} className="prose prose-sm max-w-none" />
         </Section>
+      ) : null}
+      <KeyValueList items={[
+        statusLabel ? { label: 'Status', value: statusLabel } : null,
+        url ? { label: 'Starting URL', value: url } : null,
+      ]} />
+      {taskId ? (
+        <p className="text-xs text-slate-500">Task ID: {taskId}</p>
       ) : null}
     </div>
   )

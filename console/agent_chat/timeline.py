@@ -543,6 +543,7 @@ def _build_web_task_payload(task: BrowserUseAgentTask, *, now: datetime | None =
         "id": str(task.id),
         "status": task.status,
         "statusLabel": task.get_status_display(),
+        "prompt": prompt,
         "promptPreview": prompt_preview,
         "startedAt": _format_timestamp(started_at),
         "updatedAt": _format_timestamp(updated_at),

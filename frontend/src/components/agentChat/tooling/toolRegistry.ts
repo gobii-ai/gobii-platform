@@ -179,8 +179,12 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
       iconColorClass: 'text-violet-600',
       detailKind: 'browserTask',
       derive(_, parameters) {
-        const url = coerceString(parameters?.url) || coerceString(parameters?.start_url)
-        return { caption: url ? truncate(url, 40) : 'Browser task' }
+        let prompt = coerceString(parameters?.prompt)
+        // Remove "Task:" prefix if present
+        if (prompt?.toLowerCase().startsWith('task:')) {
+          prompt = prompt.slice(5).trim()
+        }
+        return { caption: prompt ? truncate(prompt, 52) : null }
       },
     },
     {

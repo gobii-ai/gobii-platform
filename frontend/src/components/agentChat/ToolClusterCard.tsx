@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToolDetailController, entryKey } from './tooling/ToolDetailContext'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
 import type { ToolClusterEvent } from './types'
@@ -21,6 +21,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
 
   const { openKey, setOpenKey } = useToolDetailController()
   const [collapsed, setCollapsed] = useState<boolean>(transformed.collapsible)
+  const detailHostRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!transformed.collapsible) {
@@ -68,17 +69,57 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
 
   const handleChipClick = useCallback(
     (entry: ToolEntryDisplay) => {
+      const scrollToDetail = () => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (!detailHostRef.current) return
+
+            const timelineContainer = document.getElementById('timeline-events')
+            if (!timelineContainer) {
+              detailHostRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+              return
+            }
+
+            // Get the actual detail content (the panel inside detailHostRef)
+            const detailContent = detailHostRef.current.querySelector('.tool-chip-detail')
+            const targetElement = detailContent || detailHostRef.current
+
+            const detailRect = targetElement.getBoundingClientRect()
+            const containerRect = timelineContainer.getBoundingClientRect()
+
+            // Check if detail extends below visible area
+            const detailBottom = detailRect.bottom
+            const containerBottom = containerRect.bottom
+
+            if (detailBottom > containerBottom) {
+              // Scroll to show the entire detail with padding
+              const scrollOffset = detailBottom - containerBottom + 40 // 40px padding
+              timelineContainer.scrollBy({ top: scrollOffset, behavior: 'smooth' })
+            } else if (detailRect.top < containerRect.top) {
+              // If detail is above visible area, scroll to show it
+              const scrollOffset = detailRect.top - containerRect.top - 20 // 20px padding from top
+              timelineContainer.scrollBy({ top: scrollOffset, behavior: 'smooth' })
+            }
+          })
+        })
+      }
+
       if (collapsed && transformed.collapsible) {
         setCollapsed(false)
         setOpenKey(entryKey(entry))
+        scrollToDetail()
         return
       }
 
       const key = entryKey(entry)
+      const willOpen = openKey !== key
       if (openKey === key) {
         setOpenKey(null)
       } else {
         setOpenKey(key)
+        if (willOpen) {
+          scrollToDetail()
+        }
       }
     },
     [collapsed, openKey, setOpenKey, transformed.collapsible],
@@ -202,7 +243,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
             )
           })}
         </ul>
-        <div className="tool-cluster-detail-host" hidden={!activeEntry || collapsed} id={detailHostId} aria-live="polite">
+        <div ref={detailHostRef} className="tool-cluster-detail-host" hidden={!activeEntry || collapsed} id={detailHostId} aria-live="polite">
           {!collapsed && activeEntry ? renderDetail(activeEntry) : null}
         </div>
         {transformed.latestTimestamp ? (
