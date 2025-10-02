@@ -188,6 +188,19 @@ class AgentChatAPITests(TestCase):
         end_payload = end_response.json()
         self.assertIn("ended_at", end_payload)
 
+        # Ending an already-deleted session should still succeed idempotently.
+        repeat_end = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/end/",
+            data=json.dumps({"session_key": session_key}),
+            content_type="application/json",
+        )
+        self.assertEqual(repeat_end.status_code, 200)
+        repeat_payload = repeat_end.json()
+        self.assertTrue(
+            repeat_payload.get("ended") or repeat_payload.get("ended_at"),
+            repeat_payload,
+        )
+
     @tag("batch_agent_chat")
     def test_web_chat_tool_requires_active_session(self):
         result = execute_send_chat_message(

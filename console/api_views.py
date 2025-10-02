@@ -254,6 +254,8 @@ class AgentWebSessionEndAPIView(LoginRequiredMixin, View):
             session_key = _parse_session_key(body)
             result = end_web_session(session_key, agent, request.user)
         except ValueError as exc:
+            if str(exc) == "Unknown web session.":
+                return JsonResponse({"session_key": session_key, "ended": True})
             return HttpResponseBadRequest(str(exc))
 
         return _session_response(result)
