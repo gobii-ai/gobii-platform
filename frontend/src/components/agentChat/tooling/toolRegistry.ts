@@ -10,6 +10,7 @@ import { summarizeToolSearchForCaption } from './searchUtils'
 
 const SKIP_TOOL_NAMES = new Set([
   'send_email',
+  'send_sms',
   'send_web_message',
   'send_chat_message',
   'send_agent_message',
