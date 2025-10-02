@@ -23,6 +23,61 @@ function stringify(value: unknown): string {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseResultObject(value: unknown): Record<string, unknown> | null {
+  if (!value) return null
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return isRecord(parsed) ? parsed : null
+    } catch {
+      return null
+    }
+  }
+  if (isRecord(value)) {
+    return value
+  }
+  return null
+}
+
+type ContactDetail = {
+  channel: string | null
+  address: string | null
+  name: string | null
+  reason: string | null
+  purpose: string | null
+}
+
+function normalizeContact(value: unknown): ContactDetail | null {
+  if (!isRecord(value)) return null
+  const channelValue = value['channel']
+  const addressValue = value['address']
+  const nameValue = value['name']
+  const reasonValue = value['reason']
+  const purposeValue = value['purpose']
+  const channel = typeof channelValue === 'string' && channelValue.trim().length ? channelValue : null
+  const address = typeof addressValue === 'string' && addressValue.trim().length ? addressValue : null
+  const name = typeof nameValue === 'string' && nameValue.trim().length ? nameValue : null
+  const reason = typeof reasonValue === 'string' && reasonValue.trim().length ? reasonValue : null
+  const purpose = typeof purposeValue === 'string' && purposeValue.trim().length ? purposeValue : null
+  return { channel, address, name, reason, purpose }
+}
+
+function formatChannelLabel(channel: string | null): string | null {
+  if (!channel) return null
+  switch (channel.toLowerCase()) {
+    case 'email':
+      return 'Email'
+    case 'sms':
+      return 'SMS text'
+    default:
+      return channel
+  }
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="space-y-1.5">
@@ -487,6 +542,71 @@ export function BrowserTaskDetail({ entry }: ToolDetailProps) {
   )
 }
 
+export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {
+  const params = (entry.parameters as Record<string, unknown>) || {}
+  const contactsRaw = params['contacts']
+  const contacts = Array.isArray(contactsRaw)
+    ? (contactsRaw.map(normalizeContact).filter(Boolean) as ContactDetail[])
+    : []
+
+  const result = parseResultObject(entry.result)
+  const createdCount = typeof result?.['created_count'] === 'number' ? (result['created_count'] as number) : null
+  const alreadyAllowed = typeof result?.['already_allowed_count'] === 'number' ? (result['already_allowed_count'] as number) : null
+  const alreadyPending = typeof result?.['already_pending_count'] === 'number' ? (result['already_pending_count'] as number) : null
+  const approvalRaw = typeof result?.['approval_url'] === 'string' ? (result['approval_url'] as string) : null
+  const approvalUrl = approvalRaw && /^https?:\/\//i.test(approvalRaw) ? approvalRaw : null
+
+  const infoItems: Array<{ label: string; value: ReactNode } | null> = [
+    createdCount !== null ? { label: 'Created requests', value: createdCount } : null,
+    alreadyAllowed !== null ? { label: 'Already allowed', value: alreadyAllowed } : null,
+    alreadyPending !== null ? { label: 'Already pending', value: alreadyPending } : null,
+    approvalRaw
+      ? {
+          label: 'Approval link',
+          value: approvalUrl ? (
+            <a href={approvalUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">
+              {approvalRaw}
+            </a>
+          ) : (
+            approvalRaw
+          ),
+        }
+      : null,
+  ]
+
+  return (
+    <div className="space-y-4 text-sm text-slate-600">
+      <KeyValueList items={infoItems} />
+      {contacts.length ? (
+        <Section title={`Contact request${contacts.length === 1 ? '' : 's'}`}>
+          <ol className="space-y-3">
+            {contacts.map((contact, index) => {
+              const channelLabel = formatChannelLabel(contact.channel)
+              const heading = contact.name || contact.address || `Contact ${index + 1}`
+              const contactItems: Array<{ label: string; value: ReactNode } | null> = [
+                channelLabel ? { label: 'Channel', value: channelLabel } : null,
+                contact.address && contact.address !== heading ? { label: 'Address', value: contact.address } : null,
+                contact.purpose ? { label: 'Purpose', value: contact.purpose } : null,
+                contact.reason
+                  ? {
+                      label: 'Reason',
+                      value: <span className="whitespace-pre-line">{contact.reason}</span>,
+                    }
+                  : null,
+              ]
+              return (
+                <li key={`contact-${index}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
+                  <KeyValueList items={contactItems} />
+                </li>
+              )
+            })}
+          </ol>
+        </Section>
+      ) : null}
+    </div>
+  )
+}
+
 export function AnalysisToolDetail({ entry }: ToolDetailProps) {
   const content = isNonEmptyString(entry.result) ? entry.result : entry.summary || entry.caption || null
   return (
@@ -592,6 +712,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   fileRead: FileReadDetail,
   fileWrite: FileWriteDetail,
   browserTask: BrowserTaskDetail,
+  contactPermission: RequestContactPermissionDetail,
   analysis: AnalysisToolDetail,
   updateSchedule: UpdateScheduleDetail,
   brightDataSnapshot: BrightDataSnapshotDetail,

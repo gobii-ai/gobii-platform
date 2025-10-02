@@ -43,6 +43,22 @@ function coerceString(value: unknown): string | null {
   return null
 }
 
+function parseResultObject(value: unknown): Record<string, unknown> | null {
+  if (!value) return null
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return isPlainObject(parsed) ? parsed : null
+    } catch {
+      return null
+    }
+  }
+  if (isPlainObject(value)) {
+    return value
+  }
+  return null
+}
+
 function normalizeDescriptor(config: ToolDescriptorConfig): ToolDescriptor {
   return {
     name: config.name,
@@ -202,6 +218,61 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
           prompt = prompt.slice(5).trim()
         }
         return { caption: prompt ? truncate(prompt, 52) : null }
+      },
+    },
+    {
+      name: 'request_contact_permission',
+      label: 'Contact permission',
+      iconPaths: [
+        'M8.5 11A3.5 3.5 0 1112 7.5 3.5 3.5 0 018.5 11z',
+        'M15.5 11A3.5 3.5 0 1119 7.5 3.5 3.5 0 0115.5 11z',
+        'M5 18a5 5 0 015-5h0a5 5 0 014.472 2.778M19 21l-3-3 3-3 3 3-3 3z',
+      ],
+      iconBgClass: 'bg-rose-100',
+      iconColorClass: 'text-rose-600',
+      detailKind: 'contactPermission',
+      derive(entry, parameters) {
+        const result = parseResultObject(entry.result)
+        const contactsRaw = parameters?.contacts
+        const contacts = Array.isArray(contactsRaw) ? contactsRaw : []
+        const createdCountRaw = result?.['created_count']
+        const alreadyAllowedRaw = result?.['already_allowed_count']
+        const alreadyPendingRaw = result?.['already_pending_count']
+        const message = result ? coerceString(result['message']) : null
+        const status = result ? coerceString(result['status']) : null
+        const createdCount = typeof createdCountRaw === 'number' ? createdCountRaw : null
+        const alreadyAllowedCount = typeof alreadyAllowedRaw === 'number' ? alreadyAllowedRaw : null
+        const alreadyPendingCount = typeof alreadyPendingRaw === 'number' ? alreadyPendingRaw : null
+
+        let caption: string | null = null
+        if (createdCount && createdCount > 0) {
+          caption = `Awaiting approval for ${createdCount} contact${createdCount === 1 ? '' : 's'}`
+        } else if (contacts.length) {
+          caption = `Requested permission for ${contacts.length} contact${contacts.length === 1 ? '' : 's'}`
+        } else if (message) {
+          caption = truncate(message, 48)
+        } else if (status) {
+          caption = status
+        }
+
+        const summaryPieces: string[] = []
+        if (message) {
+          summaryPieces.push(message)
+        }
+        if (createdCount && createdCount > 0) {
+          summaryPieces.push(`Created: ${createdCount}`)
+        }
+        if (alreadyAllowedCount && alreadyAllowedCount > 0) {
+          summaryPieces.push(`Already allowed: ${alreadyAllowedCount}`)
+        }
+        if (alreadyPendingCount && alreadyPendingCount > 0) {
+          summaryPieces.push(`Already pending: ${alreadyPendingCount}`)
+        }
+
+        return {
+          caption: caption ?? entry.caption ?? 'Contact permission',
+          summary: summaryPieces.length ? summaryPieces.join(' • ') : entry.summary ?? null,
+        }
       },
     },
     {
