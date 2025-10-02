@@ -8,6 +8,11 @@ import json
 
 from api.models import PersistentAgent, BrowserUseAgent
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
+from api.agent.tools.sqlite_query import (
+    execute_sqlite_query,
+    set_sqlite_db_path as set_query_db_path,
+    reset_sqlite_db_path as reset_query_db_path,
+)
 from api.agent.tools.sqlite_state import set_sqlite_db_path, reset_sqlite_db_path
 
 
@@ -34,17 +39,21 @@ class SqliteBatchToolTests(TestCase):
         """Helper context manager to set/reset the sqlite DB path."""
         tmp = tempfile.TemporaryDirectory()
         db_path = os.path.join(tmp.name, "state.db")
-        token = set_sqlite_db_path(db_path)
+        token_state = set_sqlite_db_path(db_path)
+        token_query = set_query_db_path(db_path)
 
         class _Cxt:
             def __enter__(self_inner):
-                return (db_path, token, tmp)
+                return (db_path, token_state, tmp)
 
             def __exit__(self_inner, exc_type, exc, tb):
                 try:
-                    reset_sqlite_db_path(token)
+                    reset_sqlite_db_path(token_state)
                 finally:
-                    tmp.cleanup()
+                    try:
+                        reset_query_db_path(token_query)
+                    finally:
+                        tmp.cleanup()
 
         return _Cxt()
 
@@ -190,3 +199,34 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(out.get("status"), "ok")
             rows = out["results"][-1]["rows"]
             self.assertEqual(rows[0]["a"], 7)
+
+    def test_all_insert_batch_sets_auto_sleep_flag(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            execute_sqlite_batch(self.agent, {"operations": ["CREATE TABLE t(a INTEGER)"]})
+            out = execute_sqlite_batch(
+                self.agent,
+                {"operations": ["INSERT INTO t(a) VALUES (1)", "INSERT INTO t(a) VALUES (2)"]},
+            )
+            self.assertEqual(out.get("status"), "ok")
+            self.assertTrue(out.get("auto_sleep_ok"))
+
+    def test_batch_with_select_does_not_auto_sleep(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            ops = [
+                "CREATE TABLE t(a INTEGER)",
+                "INSERT INTO t(a) VALUES (1)",
+                "SELECT a FROM t",
+            ]
+            out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
+            self.assertIsNone(out.get("auto_sleep_ok"))
+
+    def test_sqlite_query_insert_sets_auto_sleep(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            execute_sqlite_batch(self.agent, {"operations": ["CREATE TABLE t(a INTEGER)"]})
+            insert_out = execute_sqlite_query(self.agent, {"query": "INSERT INTO t(a) VALUES (5)"})
+            self.assertEqual(insert_out.get("status"), "ok")
+            self.assertTrue(insert_out.get("auto_sleep_ok"))
+
+            select_out = execute_sqlite_query(self.agent, {"query": "SELECT a FROM t"})
+            self.assertEqual(select_out.get("status"), "ok")
+            self.assertIsNone(select_out.get("auto_sleep_ok"))
