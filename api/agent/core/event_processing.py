@@ -1042,16 +1042,21 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
             executed_calls = 0
             followup_required = False
             try:
-                has_non_sleep_calls = any(
+                tool_names = [
                     (
                         getattr(getattr(c, "function", None), "name", None)
                         or (c.get("function", {}).get("name") if isinstance(c, dict) else None)
                     )
-                    != "sleep_until_next_trigger"
                     for c in (tool_calls or [])
+                ]
+                has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
+                actionable_calls_total = sum(
+                    1 for name in tool_names if name != "sleep_until_next_trigger"
                 )
             except Exception:
-                has_non_sleep_calls = True  # be safe: treat as having actionable tools
+                # Defensive fallback: assume we have actionable work so the agent keeps processing
+                has_non_sleep_calls = True
+                actionable_calls_total = len(tool_calls or []) if tool_calls else 0
 
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
@@ -1272,7 +1277,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                                 exc_info=True,
                             )
                         logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
-                    if isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True:
+                    allow_auto_sleep = isinstance(result, dict) and bool(result.get(AUTO_SLEEP_FLAG))
+                    if allow_auto_sleep:
                         tool_requires_followup = False
                     else:
                         tool_requires_followup = True
@@ -1286,7 +1292,11 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                 logger.info("Agent %s is sleeping.", agent.id)
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
-            elif not followup_required and executed_calls > 0:
+            elif (
+                not followup_required
+                and executed_calls > 0
+                and executed_calls >= actionable_calls_total
+            ):
                 logger.info(
                     "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",
                     agent.id,
