@@ -10,6 +10,7 @@ from .adapters import (
     EmailAdapter,
     TwilioSmsAdapter,
     PostmarkEmailAdapter,
+    MailgunEmailAdapter,
     ParsedMessage,
 )
 from .senders import SmsSender, EmailSender
@@ -21,6 +22,7 @@ __all__ = [
     "EmailAdapter",
     "TwilioSmsAdapter",
     "PostmarkEmailAdapter",
+    "MailgunEmailAdapter",
     "SmsSender",
     "EmailSender",
     "ingest_inbound_message",

@@ -87,6 +87,7 @@ RUN DJANGO_SECRET_KEY=dummy-build-key \
     GRAFANA_API_KEY=dummy-grafana-key \
     POSTMARK_SERVER_TOKEN=dummy-postmark-token \
     POSTMARK_INCOMING_WEBHOOK_TOKEN=dummy-postmark-incoming-token \
+    MAILGUN_INCOMING_WEBHOOK_TOKEN=dummy-mailgun-incoming-token \
     GOOGLE_API_KEY=dummy-google-key \
     EXA_SEARCH_API_KEY=dummy-exa-key \
     python manage.py collectstatic --noinput --clear

@@ -7,7 +7,14 @@ from .views import (
     BrowserUseAgentViewSet,
     BrowserUseAgentTaskViewSet
 )
-from .webhooks import sms_webhook, sms_status_webhook, email_webhook, open_and_link_webhook, pipedream_connect_webhook
+from .webhooks import (
+    sms_webhook,
+    sms_status_webhook,
+    email_webhook_postmark,
+    email_webhook_mailgun,
+    open_and_link_webhook,
+    pipedream_connect_webhook,
+)
 
 app_name = "api"
 
@@ -65,7 +72,8 @@ urlpatterns = [
     #  Webhooks for messages endpoint
     path('webhooks/inbound/sms/', sms_webhook, name='sms_webhook'),
     path('webhooks/status/sms/', sms_status_webhook, name='sms_status_webhook'),
-    path('webhooks/inbound/email/', email_webhook, name='email_webhook'),
+    path('webhooks/inbound/email/', email_webhook_postmark, name='email_webhook'),
+    path('webhooks/inbound/email/mg/', email_webhook_mailgun, name='email_webhook_mailgun'),
     # Pipedream Connect webhook (one-time)
     path('webhooks/pipedream/connect/<uuid:session_id>/', pipedream_connect_webhook, name='pipedream_connect_webhook'),
 
