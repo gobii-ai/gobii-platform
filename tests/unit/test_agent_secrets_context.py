@@ -97,14 +97,13 @@ class GetSecretsBlockTests(TestCase):
         self.assertIn("Auth Token", result)
         self.assertIn("https://api.example.com", result)
         self.assertIn("https://auth.example.com", result)
-        
-        # Verify requested secrets are NOT in the result
-        self.assertNotIn("pending_secret", result)
-        self.assertNotIn("waiting_secret", result)
-        self.assertNotIn("Pending Secret", result)
-        self.assertNotIn("Waiting Secret", result)
-        self.assertNotIn("https://pending.example.com", result)
-        self.assertNotIn("https://waiting.example.com", result)
+
+        # Verify requested secrets are surfaced as pending (not as available)
+        self.assertIn("Pending credential requests", result)
+        self.assertIn("pending_secret", result)
+        self.assertIn("waiting_secret", result)
+        self.assertIn("https://pending.example.com", result)
+        self.assertIn("https://waiting.example.com", result)
     
     def test_no_secrets_returns_empty_message(self):
         """Test that when no fulfilled secrets exist, appropriate message is returned."""
@@ -120,8 +119,8 @@ class GetSecretsBlockTests(TestCase):
         
         result = _get_secrets_block(self.agent)
         
-        self.assertEqual(result, "No secrets configured.")
-        self.assertNotIn("requested_key", result)
+        self.assertIn("Pending credential requests", result)
+        self.assertIn("requested_key", result)
     
     def test_secrets_grouped_by_domain(self):
         """Test that secrets are properly grouped by domain pattern."""
@@ -207,10 +206,13 @@ class GetSecretsBlockTests(TestCase):
         
         result = _get_secrets_block(self.agent)
         
-        # Only fulfilled secrets should appear
+        # Fulfilled secrets should be listed as available
         self.assertIn("fulfilled_key", result)
         self.assertIn("other_key", result)
-        self.assertNotIn("requested_secret", result)
+
+        # Pending secrets should be surfaced under the pending section
+        self.assertIn("Pending credential requests", result)
+        self.assertIn("requested_secret", result)
         
         # Both domains with fulfilled secrets should appear
         self.assertIn("https://api.com", result)
@@ -365,9 +367,10 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertTrue(fulfilled.requested)
         self.assertEqual(fulfilled.encrypted_value, b"")
 
-        # It should not appear in context while requested
+        # It should appear in the pending section while requested
         context_block = _get_secrets_block(self.agent)
-        self.assertEqual(context_block, "No secrets configured.")
+        self.assertIn("Pending credential requests", context_block)
+        self.assertIn("api_key", context_block)
 
         # Simulate fulfilling again and ensure it appears
         fulfilled.set_value("new-value")
@@ -601,9 +604,10 @@ class SecretContextIntegrationTests(TestCase):
         result = execute_secure_credentials_request(self.agent, request_params)
         self.assertEqual(result["status"], "ok")
         
-        # Step 2: Verify secret is requested but not in context
+        # Step 2: Verify secret is surfaced as pending but not usable yet
         context_before = _get_secrets_block(self.agent)
-        self.assertEqual(context_before, "No secrets configured.")
+        self.assertIn("Pending credential requests", context_before)
+        self.assertIn("api_key", context_before)
         
         # Step 3: Simulate user providing the credential value
         secret = PersistentAgentSecret.objects.get(
