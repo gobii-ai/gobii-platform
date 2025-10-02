@@ -5,6 +5,16 @@ import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentChatStore } from '../stores/agentChatStore'
 
+const DEBUG_AGENT_CHAT = import.meta.env.DEV
+
+function debugLog(...args: unknown[]) {
+  if (!DEBUG_AGENT_CHAT) {
+    return
+  }
+  // eslint-disable-next-line no-console
+  console.debug('[AgentChatPage]', ...args)
+}
+
 function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
   const [first] = agentName.trim().split(/\s+/, 1)
@@ -42,6 +52,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
   const error = useAgentChatStore((state) => state.error)
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
+  const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const initialLoading = loading && events.length === 0
 
@@ -51,6 +62,15 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   useEffect(() => {
     autoScrollPinnedRef.current = autoScrollPinned
   }, [autoScrollPinned])
+
+  useEffect(() => {
+    debugLog('autoScrollPinned state changed', { autoScrollPinned })
+  }, [autoScrollPinned])
+
+  const autoScrollPinSuppressedUntilRef = useRef(autoScrollPinSuppressedUntil)
+  useEffect(() => {
+    autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
+  }, [autoScrollPinSuppressedUntil])
 
   useAgentChatSocket(agentId)
 
@@ -81,8 +101,12 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
         ticking = false
         const distanceToBottom = readScrollPosition()
         const currentlyPinned = autoScrollPinnedRef.current
+        const suppressedUntil = autoScrollPinSuppressedUntilRef.current
+        const suppressionActive = typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
+        debugLog('scroll event', { distanceToBottom, currentlyPinned, suppressedUntil, suppressionActive })
 
-        if (!currentlyPinned && distanceToBottom <= 12) {
+        if (!currentlyPinned && !suppressionActive && distanceToBottom <= 12) {
+          debugLog('auto-scroll re-pinned due to reaching bottom')
           setAutoScrollPinned(true)
           return
         }
@@ -92,6 +116,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
         }
 
         if (distanceToBottom > threshold) {
+          debugLog('auto-scroll unpinned due to exceeding threshold', { threshold })
           setAutoScrollPinned(false)
         }
       })
@@ -111,12 +136,18 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const scrollToBottom = useCallback(() => {
     if (!autoScrollPinned) return
     const scroller = getScrollContainer()
+    debugLog('scrollToBottom requested', { pinned: autoScrollPinned })
     requestAnimationFrame(() => {
+      debugLog('scrollToBottom executing', { scrollHeight: scroller.scrollHeight })
       window.scrollTo({ top: scroller.scrollHeight })
     })
   }, [autoScrollPinned, getScrollContainer])
 
   useLayoutEffect(() => {
+    debugLog('useLayoutEffect triggered for events/processing', {
+      eventCount: events.length,
+      processingActive,
+    })
     scrollToBottom()
   }, [scrollToBottom, events, processingActive])
 
@@ -133,6 +164,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
       (entries) => {
         const entry = entries.find((item) => item.target === sentinel)
         const nextPinned = Boolean(entry?.isIntersecting)
+        debugLog('intersection observer update', { isIntersecting: entry?.isIntersecting })
         setAutoScrollPinned(nextPinned)
       },
       { root: null, threshold: 0.75 },
@@ -146,19 +178,23 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   }, [setAutoScrollPinned, hasMoreNewer])
 
   const handleJumpToLatest = async () => {
+    debugLog('jump to latest invoked')
     await jumpToLatest()
     const scroller = getScrollContainer()
     requestAnimationFrame(() => {
+      debugLog('jump to latest scrolling to bottom', { scrollHeight: scroller.scrollHeight })
       window.scrollTo({ top: scroller.scrollHeight })
       setAutoScrollPinned(true)
     })
   }
 
   const handleSend = async (body: string) => {
+    debugLog('handleSend', { bodyLength: body.length })
     await sendMessage(body)
     if (!autoScrollPinned) return
     const scroller = getScrollContainer()
     requestAnimationFrame(() => {
+      debugLog('handleSend scrolling to bottom', { scrollHeight: scroller.scrollHeight })
       window.scrollTo({ top: scroller.scrollHeight })
     })
   }

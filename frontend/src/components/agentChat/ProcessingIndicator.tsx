@@ -1,8 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import type { ProcessingWebTask } from '../../types/agentChat'
 import { scrollIntoViewIfNeeded } from './scrollIntoView'
+import { useAgentChatStore } from '../../stores/agentChatStore'
+
+const DEBUG_PROCESSING_INDICATOR = import.meta.env.DEV
+
+function debugLog(...args: unknown[]) {
+  if (!DEBUG_PROCESSING_INDICATOR) {
+    return
+  }
+  // eslint-disable-next-line no-console
+  console.debug('[ProcessingIndicator]', ...args)
+}
 
 function combineClassNames(...values: Array<string | undefined | false>) {
   return values.filter(Boolean).join(' ')
@@ -71,6 +82,14 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
   const panelScrollSnapshotRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const wasExpandedRef = useRef<boolean>(false)
+  const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
+  const suppressAutoScrollPin = useAgentChatStore((state) => state.suppressAutoScrollPin)
+  const pendingTaskExpansionRef = useRef<string | null>(null)
+  const pendingPanelActionRef = useRef<'expand' | 'collapse' | null>(null)
+
+  useEffect(() => {
+    debugLog('activeTasks updated', { count: activeTasks.length })
+  }, [activeTasks])
 
   useEffect(() => {
     if (!active || !activeTasks.length) {
@@ -91,6 +110,7 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
 
   const toggleTaskExpanded = (taskId: string) => {
     const wasExpanded = expandedTaskIds.has(taskId)
+    debugLog('toggleTaskExpanded', { taskId, wasExpanded })
 
     if (wasExpanded) {
       panelScrollSnapshotRef.current = window.scrollY
@@ -100,12 +120,14 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
         return next
       })
     } else {
+      pendingTaskExpansionRef.current = taskId
       setExpandedTaskIds((prev) => {
         const next = new Set(prev)
         next.add(taskId)
         return next
       })
       setLastExpandedTaskId(taskId)
+      debugLog('task expanded scheduled', { taskId })
     }
   }
 
@@ -115,10 +137,15 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
     }
 
     setIsExpanded((prev) => {
+      pendingPanelActionRef.current = prev ? 'collapse' : 'expand'
       if (prev) {
         panelScrollSnapshotRef.current = window.scrollY
+        debugLog('panel collapsed')
+        return false
       }
-      return !prev
+
+      debugLog('panel expansion scheduled')
+      return true
     })
   }
 
@@ -136,13 +163,30 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
       return
     }
 
+    debugLog('scrollIntoViewIfNeeded for expanded task', { taskId: lastExpandedTaskId })
     scrollIntoViewIfNeeded(cardElement)
     setLastExpandedTaskId(null)
     panelScrollSnapshotRef.current = null
   }, [expandedTaskIds, isExpanded, lastExpandedTaskId])
 
   useEffect(() => {
+    const pendingTaskId = pendingTaskExpansionRef.current
+    if (!pendingTaskId) {
+      return
+    }
+    if (!expandedTaskIds.has(pendingTaskId)) {
+      pendingTaskExpansionRef.current = null
+      return
+    }
+    debugLog('task expansion finalized', { taskId: pendingTaskId })
+    suppressAutoScrollPin()
+    setAutoScrollPinned(false)
+    pendingTaskExpansionRef.current = null
+  }, [expandedTaskIds, setAutoScrollPinned, suppressAutoScrollPin])
+
+  useEffect(() => {
     if (!isExpanded && panelScrollSnapshotRef.current !== null) {
+      debugLog('restoring scroll snapshot')
       window.scrollTo({ top: panelScrollSnapshotRef.current })
       panelScrollSnapshotRef.current = null
     }
@@ -158,10 +202,26 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
 
     const container = containerRef.current
     if (container) {
+      debugLog('scrollIntoViewIfNeeded for panel container')
       scrollIntoViewIfNeeded(container)
       panelScrollSnapshotRef.current = null
     }
   }, [isExpanded])
+
+  useEffect(() => {
+    const pendingAction = pendingPanelActionRef.current
+    if (!pendingAction) {
+      return
+    }
+    pendingPanelActionRef.current = null
+    if (pendingAction === 'expand') {
+      debugLog('panel expansion finalized')
+      suppressAutoScrollPin(1500)
+      setAutoScrollPinned(false)
+    } else {
+      debugLog('panel collapse finalized')
+    }
+  }, [isExpanded, setAutoScrollPinned, suppressAutoScrollPin])
 
   if (!active) {
     return null
@@ -204,6 +264,14 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
                 previewPrompt = previewPrompt.slice(5).trim()
               }
 
+              const handleTaskCardClick = (event: MouseEvent<HTMLButtonElement>) => {
+                toggleTaskExpanded(task.id)
+                if (event.detail !== 0) {
+                  event.currentTarget.blur()
+                }
+                debugLog('task card clicked', { taskId: task.id, expanded: !isTaskExpanded, pointerEvent: event.detail })
+              }
+
               return (
                 <button
                   key={task.id}
@@ -216,7 +284,7 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
                   }}
                   className="processing-task-card"
                   data-expanded={isTaskExpanded ? 'true' : 'false'}
-                  onClick={() => toggleTaskExpanded(task.id)}
+                  onClick={handleTaskCardClick}
                   title={isTaskExpanded ? 'Click to collapse' : undefined}
                   type="button"
                 >
