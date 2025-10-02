@@ -1277,11 +1277,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                                 exc_info=True,
                             )
                         logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
-                    allow_auto_sleep = isinstance(result, dict) and bool(result.get(AUTO_SLEEP_FLAG))
-                    if allow_auto_sleep:
-                        tool_requires_followup = False
-                    else:
-                        tool_requires_followup = True
+                    allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
+                    tool_requires_followup = not allow_auto_sleep
 
                     if tool_requires_followup:
                         followup_required = True
