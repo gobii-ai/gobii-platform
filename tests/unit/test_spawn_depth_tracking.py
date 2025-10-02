@@ -67,8 +67,9 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             max_depth=3
         )
     
+    @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
-    def test_parallel_spawn_increments_outstanding_children(self, mock_process_task):
+    def test_parallel_spawn_increments_outstanding_children(self, mock_process_task, _mock_consume_credit):
         """Parallel spawns should each pass recursion depth=1 and increment outstanding-children counter."""
         mock_process_task.delay = MagicMock()
         
@@ -152,8 +153,9 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             f"Branch counter should equal number of parallel spawns; got {final_branch_depth}"
         )
     
+    @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
-    def test_sequential_spawn_depth_tracking(self, mock_process_task):
+    def test_sequential_spawn_depth_tracking(self, mock_process_task, _mock_consume_credit):
         """Test that sequential spawns work correctly (baseline test).
         
         This should pass even with the current buggy implementation

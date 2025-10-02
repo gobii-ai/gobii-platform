@@ -42,6 +42,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
   const error = useAgentChatStore((state) => state.error)
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
+  const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const initialLoading = loading && events.length === 0
 
@@ -51,6 +52,11 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   useEffect(() => {
     autoScrollPinnedRef.current = autoScrollPinned
   }, [autoScrollPinned])
+
+  const autoScrollPinSuppressedUntilRef = useRef(autoScrollPinSuppressedUntil)
+  useEffect(() => {
+    autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
+  }, [autoScrollPinSuppressedUntil])
 
   useAgentChatSocket(agentId)
 
@@ -81,8 +87,10 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
         ticking = false
         const distanceToBottom = readScrollPosition()
         const currentlyPinned = autoScrollPinnedRef.current
+        const suppressedUntil = autoScrollPinSuppressedUntilRef.current
+        const suppressionActive = typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
 
-        if (!currentlyPinned && distanceToBottom <= 12) {
+        if (!currentlyPinned && !suppressionActive && distanceToBottom <= 12) {
           setAutoScrollPinned(true)
           return
         }

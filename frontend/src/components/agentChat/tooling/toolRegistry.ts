@@ -6,6 +6,7 @@ import type {
   ToolDescriptor,
   ToolEntryDisplay,
 } from './types'
+import { summarizeToolSearchForCaption } from './searchUtils'
 
 const SKIP_TOOL_NAMES = new Set([
   'send_email',
@@ -121,10 +122,24 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
       iconColorClass: 'text-blue-600',
       detailKind: 'search',
       derive(entry, parameters) {
-        const query = coerceString(parameters?.query) || coerceString(parameters?.prompt)
+        const rawQuery = coerceString(parameters?.query) || coerceString(parameters?.prompt)
+        const truncatedQuery = rawQuery ? truncate(rawQuery, 48) : null
+        const isToolSearch = entry.toolName?.toLowerCase() === 'search_tools'
+
+        if (isToolSearch) {
+          const { caption, summary } = summarizeToolSearchForCaption(entry, truncatedQuery)
+          const safeCaption = caption ? truncate(caption, 56) : null
+          return {
+            label: 'Tool search',
+            caption: safeCaption ?? (truncatedQuery ? `“${truncatedQuery}”` : 'Tool search'),
+            summary,
+          }
+        }
+
+        const fallbackCaption = truncatedQuery ? `“${truncatedQuery}”` : null
         return {
-          label: entry.toolName?.toLowerCase() === 'search_tools' ? 'Tool search' : 'Web search',
-          caption: query ? `“${truncate(query)}”` : 'Search',
+          label: 'Web search',
+          caption: fallbackCaption ?? 'Search',
         }
       },
     },
@@ -179,8 +194,12 @@ const TOOL_DESCRIPTORS: ToolDescriptorMap = (() => {
       iconColorClass: 'text-violet-600',
       detailKind: 'browserTask',
       derive(_, parameters) {
-        const url = coerceString(parameters?.url) || coerceString(parameters?.start_url)
-        return { caption: url ? truncate(url, 40) : 'Browser task' }
+        let prompt = coerceString(parameters?.prompt)
+        // Remove "Task:" prefix if present
+        if (prompt?.toLowerCase().startsWith('task:')) {
+          prompt = prompt.slice(5).trim()
+        }
+        return { caption: prompt ? truncate(prompt, 52) : null }
       },
     },
     {

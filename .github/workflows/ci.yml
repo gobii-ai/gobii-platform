@@ -104,6 +104,8 @@ jobs:
             tag: batch_outbound_delivery
           - batch: browser_task_db
             tag: batch_browser_task_db
+          - batch: browser_task_followup
+            tag: batch_web_task_followup
           - batch: redis_budget_cleanup
             tag: batch_redis_budget_cleanup
           - batch: agent_invite

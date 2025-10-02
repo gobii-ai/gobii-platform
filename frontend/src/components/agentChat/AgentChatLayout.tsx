@@ -44,7 +44,7 @@ export function AgentChatLayout({
   loadingNewer = false,
   initialLoading = false,
 }: AgentChatLayoutProps) {
-  const showProcessingIndicator = Boolean(processingActive && autoScrollPinned && !hasMoreNewer)
+  const showProcessingIndicator = Boolean(processingActive && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
   const showLoadNewerButton = !initialLoading && (hasMoreNewer || loadingNewer)

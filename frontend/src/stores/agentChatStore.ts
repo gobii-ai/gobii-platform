@@ -146,6 +146,7 @@ function coerceProcessingSnapshot(snapshot: Partial<ProcessingSnapshot> | null |
           id: task.id,
           status: task.status,
           statusLabel: task.statusLabel,
+          prompt: typeof task.prompt === 'string' ? task.prompt : undefined,
           promptPreview: task.promptPreview,
           startedAt: task.startedAt ?? null,
           updatedAt: task.updatedAt ?? null,
@@ -181,6 +182,7 @@ export type AgentChatState = {
   loadingNewer: boolean
   error: string | null
   autoScrollPinned: boolean
+  autoScrollPinSuppressedUntil: number | null
   pendingEvents: TimelineEvent[]
   initialize: (agentId: string) => Promise<void>
   refreshProcessing: () => Promise<void>
@@ -191,6 +193,7 @@ export type AgentChatState = {
   receiveRealtimeEvent: (event: TimelineEvent) => void
   updateProcessing: (snapshot: ProcessingUpdateInput) => void
   setAutoScrollPinned: (pinned: boolean) => void
+  suppressAutoScrollPin: (durationMs?: number) => void
 }
 
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
@@ -208,10 +211,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   loadingNewer: false,
   error: null,
   autoScrollPinned: true,
+  autoScrollPinSuppressedUntil: null,
   pendingEvents: [],
 
   async initialize(agentId) {
-    set({ loading: true, agentId, error: null, autoScrollPinned: true })
+    set({ loading: true, agentId, error: null, autoScrollPinned: true, autoScrollPinSuppressedUntil: null })
 
     try {
       const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
@@ -232,6 +236,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         processingWebTasks: processingSnapshot.webTasks,
         loading: false,
         autoScrollPinned: true,
+        autoScrollPinSuppressedUntil: null,
         pendingEvents: [],
       })
     } catch (error) {
@@ -443,13 +448,25 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           newestCursor,
           oldestCursor,
           pendingEvents: [],
+          autoScrollPinSuppressedUntil: null,
         }
       }
 
       return {
         autoScrollPinned: pinned,
         hasUnseenActivity: pinned ? false : state.hasUnseenActivity,
+        autoScrollPinSuppressedUntil: pinned ? null : state.autoScrollPinSuppressedUntil,
       }
+    })
+  },
+  suppressAutoScrollPin(durationMs = 1000) {
+    const now = Date.now()
+    const until = now + Math.max(0, durationMs)
+    set((state) => {
+      if (state.autoScrollPinSuppressedUntil && state.autoScrollPinSuppressedUntil >= until) {
+        return state
+      }
+      return { autoScrollPinSuppressedUntil: until }
     })
   },
 }))

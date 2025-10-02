@@ -54,6 +54,7 @@ export type ProcessingWebTask = {
   id: string
   status: string
   statusLabel: string
+  prompt?: string
   promptPreview: string
   startedAt?: string | null
   updatedAt?: string | null
