@@ -2325,36 +2325,59 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
             non_shrinkable=True
         )
 
-
-def _get_secrets_block(agent: PersistentAgent) -> str:
-    """Return a formatted list of available secrets for this agent.
-    The caller is responsible for adding any surrounding instructional text and for
-    wrapping the section with <secrets> tags via Prompt.section_text().
-    """
-    secrets = (
-        PersistentAgentSecret.objects.filter(agent=agent, requested=False)
-        .order_by('domain_pattern', 'name')
-    )
-
-    if not secrets:
-        return "No secrets configured."
-
-    lines: list[str] = ["These are the secrets available to you:"]
-
+def _format_secrets(secrets_qs, is_pending: bool) -> list[str]:
+    """Helper to format a queryset of secrets."""
+    secret_lines: list[str] = []
     current_domain: str | None = None
-    for secret in secrets:
+    for secret in secrets_qs:
         # Group by domain pattern
         if secret.domain_pattern != current_domain:
             if current_domain is not None:
-                lines.append("")  # blank line between domains
-            lines.append(f"Domain: {secret.domain_pattern}")
+                secret_lines.append("")  # blank line between domains
+            secret_lines.append(f"Domain: {secret.domain_pattern}")
             current_domain = secret.domain_pattern
 
         # Format secret info
         parts = [f"  - Name: {secret.name}"]
         if secret.description:
             parts.append(f"Description: {secret.description}")
+        if is_pending:
+            parts.append("Status: awaiting user input")
         parts.append(f"Key: {secret.key}")
-        lines.append(", ".join(parts))
+        secret_lines.append(", ".join(parts))
+    return secret_lines
+
+def _get_secrets_block(agent: PersistentAgent) -> str:
+    """Return a formatted list of available secrets for this agent.
+    The caller is responsible for adding any surrounding instructional text and for
+    wrapping the section with <secrets> tags via Prompt.section_text().
+    """
+    available_secrets = (
+        PersistentAgentSecret.objects.filter(agent=agent, requested=False)
+        .order_by('domain_pattern', 'name')
+    )
+    pending_secrets = (
+        PersistentAgentSecret.objects.filter(agent=agent, requested=True)
+        .order_by('domain_pattern', 'name')
+    )
+
+    if not available_secrets and not pending_secrets:
+        return "No secrets configured."
+
+    lines: list[str] = []
+
+    if available_secrets:
+        lines.append("These are the secrets available to you:")
+        lines.extend(_format_secrets(available_secrets, is_pending=False))
+
+    if pending_secrets:
+        if lines:
+            lines.append("")
+        lines.append(
+            "Pending credential requests (user has not provided these yet; "
+            "if you just requested them, follow up with the user through the "
+            "appropriate communication channel):"
+        )
+        lines.extend(_format_secrets(pending_secrets, is_pending=True))
 
     return "\n".join(lines)
