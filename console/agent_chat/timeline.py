@@ -106,13 +106,23 @@ class StepEnvelope:
 
 
 @dataclass(slots=True)
+class ProcessingSnapshot:
+    active: bool
+    web_tasks: list[dict]
+
+
+@dataclass(slots=True)
 class TimelineWindow:
     events: list[dict]
     oldest_cursor: str | None
     newest_cursor: str | None
     has_more_older: bool
     has_more_newer: bool
-    processing_active: bool
+    processing_snapshot: ProcessingSnapshot
+
+    @property
+    def processing_active(self) -> bool:
+        return self.processing_snapshot.active
 
 
 def _looks_like_html(body: str) -> bool:
@@ -508,30 +518,73 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
     return message_exists or step_exists
 
 
-def _compute_processing(agent: PersistentAgent) -> bool:
+WEB_TASK_ACTIVE_STATUSES = (
+    BrowserUseAgentTask.StatusChoices.PENDING,
+    BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+)
+
+
+def _build_web_task_payload(task: BrowserUseAgentTask, *, now: datetime | None = None) -> dict:
+    """Serialize an active browser task for frontend consumption."""
+
+    if now is None:
+        now = timezone.now()
+
+    started_at = task.created_at
+    updated_at = task.updated_at
+    elapsed_seconds: float | None = None
+    if started_at:
+        elapsed_seconds = max((now - started_at).total_seconds(), 0.0)
+
+    prompt = (task.prompt or "").strip()
+    prompt_preview = prompt if len(prompt) <= 160 else f"{prompt[:157].rstrip()}…"
+
+    return {
+        "id": str(task.id),
+        "status": task.status,
+        "statusLabel": task.get_status_display(),
+        "promptPreview": prompt_preview,
+        "startedAt": _format_timestamp(started_at),
+        "updatedAt": _format_timestamp(updated_at),
+        "elapsedSeconds": elapsed_seconds,
+    }
+
+
+def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
+    """Compute current processing activity and active web tasks for an agent."""
+
     # Check if the agent event processing lock is held
     # Note: Redlock prefixes keys with "redlock:" internally
     from config.redis_client import get_redis_client
+
     lock_key = f"redlock:agent-event-processing:{agent.id}"
+    lock_active = False
     try:
         redis_client = get_redis_client()
-        if redis_client.exists(lock_key):
-            return True
+        lock_active = bool(redis_client.exists(lock_key))
     except Exception:
-        pass  # Fall through to browser task check
+        lock_active = False
 
-    # Also check for active browser tasks
-    if not getattr(agent, "browser_use_agent_id", None):
-        return False
-    task_qs: BrowserUseAgentTaskQuerySet = BrowserUseAgentTask.objects
-    return task_qs.filter(
-        agent=agent.browser_use_agent,
-        status__in=[
-            BrowserUseAgentTask.StatusChoices.PENDING,
-            BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
-        ],
-        is_deleted=False,
-    ).exists()
+    web_tasks: list[dict] = []
+    if getattr(agent, "browser_use_agent_id", None):
+        task_qs: BrowserUseAgentTaskQuerySet = BrowserUseAgentTask.objects
+        active_tasks = task_qs.filter(
+            agent=agent.browser_use_agent,
+            status__in=WEB_TASK_ACTIVE_STATUSES,
+            is_deleted=False,
+        ).order_by("created_at")
+        now = timezone.now()
+        web_tasks = [_build_web_task_payload(task, now=now) for task in active_tasks]
+
+    active = bool(lock_active or web_tasks)
+    return ProcessingSnapshot(active=active, web_tasks=web_tasks)
+
+
+def serialize_processing_snapshot(snapshot: ProcessingSnapshot) -> dict:
+    return {
+        "active": snapshot.active,
+        "webTasks": snapshot.web_tasks,
+    }
 
 
 def fetch_timeline_window(
@@ -577,13 +630,15 @@ def fetch_timeline_window(
     has_more_older = _has_more_before(agent, oldest_cursor)
     has_more_newer = False if direction == "initial" else _has_more_after(agent, newest_cursor)
 
+    processing_snapshot = build_processing_snapshot(agent)
+
     return TimelineWindow(
         events=timeline_events,
         oldest_cursor=oldest_cursor.encode() if oldest_cursor else None,
         newest_cursor=newest_cursor.encode() if newest_cursor else None,
         has_more_older=has_more_older,
         has_more_newer=has_more_newer,
-        processing_active=_compute_processing(agent),
+        processing_snapshot=processing_snapshot,
     )
 
 
@@ -601,7 +656,7 @@ def serialize_step_entry(step: PersistentAgentStep) -> dict:
 
 def compute_processing_status(agent: PersistentAgent) -> bool:
     """Expose processing state computation for external callers."""
-    return _compute_processing(agent)
+    return build_processing_snapshot(agent).active
 
 
 def build_tool_cluster_from_steps(steps: Sequence[PersistentAgentStep]) -> dict:

@@ -50,6 +50,21 @@ export type ToolClusterEvent = {
   entries: ToolCallEntry[]
 }
 
+export type ProcessingWebTask = {
+  id: string
+  status: string
+  statusLabel: string
+  promptPreview: string
+  startedAt?: string | null
+  updatedAt?: string | null
+  elapsedSeconds?: number | null
+}
+
+export type ProcessingSnapshot = {
+  active: boolean
+  webTasks: ProcessingWebTask[]
+}
+
 export type MessageEvent = {
   kind: 'message'
   cursor: string
@@ -65,4 +80,5 @@ export type AgentTimelineSnapshot = {
   hasMoreOlder?: boolean
   hasMoreNewer?: boolean
   processingActive?: boolean
+  processingSnapshot?: ProcessingSnapshot
 }

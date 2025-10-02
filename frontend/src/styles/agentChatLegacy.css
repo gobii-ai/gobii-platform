@@ -50,7 +50,7 @@
 
 #agent-processing-indicator {
   display: inline-flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0.65rem;
   border-radius: 9999px;
   padding: 0.5rem 0.85rem;
@@ -61,6 +61,12 @@
   box-shadow: 0 4px 14px rgba(99, 102, 241, 0.12);
   border: 1px solid rgba(99, 102, 241, 0.18);
   transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.processing-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
 }
 
 #agent-processing-indicator.processing-indicator--fade {
@@ -88,6 +94,97 @@
 
 .processing-label strong {
   font-weight: 600;
+}
+
+.processing-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.processing-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  background: rgba(79, 70, 229, 0.12);
+  color: #4338ca;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.processing-task-list {
+  display: grid;
+  gap: 0.4rem;
+  padding-left: 0.05rem;
+}
+
+.processing-task-card {
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 0.9rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(79, 70, 229, 0.18);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.processing-task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.processing-task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #4f46e5;
+}
+
+.processing-task-status::before {
+  content: '';
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 9999px;
+  background: currentColor;
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.22);
+}
+
+.processing-task-status[data-status='pending'] {
+  color: #6366f1;
+}
+
+.processing-task-status[data-status='completed'],
+.processing-task-status[data-status='succeeded'] {
+  color: #0f766e;
+}
+
+.processing-task-status[data-status='failed'],
+.processing-task-status[data-status='cancelled'] {
+  color: #dc2626;
+}
+
+.processing-task-duration {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #312e81;
+}
+
+.processing-task-body {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #312e81;
+  opacity: 0.92;
+  word-break: break-word;
 }
 
 @keyframes processingPulse {

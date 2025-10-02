@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-import type { TimelineEvent } from '../types/agentChat'
+import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import { useAgentChatStore } from '../stores/agentChatStore'
 
 const MAX_RETRIES = 5
@@ -49,7 +49,7 @@ export function useAgentChatSocket(agentId: string | null) {
           if (payload?.type === 'timeline.event' && payload.payload) {
             receiveEventRef.current(payload.payload as TimelineEvent)
           } else if (payload?.type === 'processing' && payload.payload) {
-            updateProcessingRef.current(Boolean(payload.payload.active))
+            updateProcessingRef.current(payload.payload as Partial<ProcessingSnapshot>)
           }
         } catch (error) {
           console.error('Failed to process websocket message', error)

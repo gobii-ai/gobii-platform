@@ -36,6 +36,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   const hasMoreNewer = useAgentChatStore((state) => state.hasMoreNewer)
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const processingActive = useAgentChatStore((state) => state.processingActive)
+  const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const loading = useAgentChatStore((state) => state.loading)
   const loadingOlder = useAgentChatStore((state) => state.loadingOlder)
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
@@ -176,6 +177,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
         oldestCursor={events.length ? events[0].cursor : null}
         newestCursor={events.length ? events[events.length - 1].cursor : null}
         processingActive={processingActive}
+        processingWebTasks={processingWebTasks}
         onLoadOlder={hasMoreOlder ? loadOlder : undefined}
         onLoadNewer={hasMoreNewer ? loadNewer : undefined}
         onSendMessage={handleSend}

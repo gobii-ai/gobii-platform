@@ -1,4 +1,4 @@
-import type { TimelineEvent } from '../types/agentChat'
+import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import { jsonFetch } from './http'
 
 export type TimelineDirection = 'initial' | 'older' | 'newer'
@@ -10,6 +10,7 @@ export type TimelineResponse = {
   has_more_older: boolean
   has_more_newer: boolean
   processing_active: boolean
+  processing_snapshot?: ProcessingSnapshot
 }
 
 export type AgentWebSessionSnapshot = {
@@ -44,9 +45,14 @@ export async function sendAgentMessage(agentId: string, body: string): Promise<T
   return response.event
 }
 
-export async function fetchProcessingStatus(agentId: string): Promise<{ processing_active: boolean }> {
+export type ProcessingStatusResponse = {
+  processing_active: boolean
+  processing_snapshot?: ProcessingSnapshot
+}
+
+export async function fetchProcessingStatus(agentId: string): Promise<ProcessingStatusResponse> {
   const url = `/console/api/agents/${agentId}/processing/`
-  return jsonFetch<{ processing_active: boolean }>(url)
+  return jsonFetch<ProcessingStatusResponse>(url)
 }
 
 type WebSessionPayload = {

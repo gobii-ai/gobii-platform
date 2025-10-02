@@ -16,9 +16,10 @@ from api.models import (
 )
 
 from .timeline import (
+    build_processing_snapshot,
     build_tool_cluster_from_steps,
-    compute_processing_status,
     serialize_message_event,
+    serialize_processing_snapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,6 @@ def broadcast_processing_state(sender, instance: BrowserUseAgentTask, **kwargs):
 
 
 def _broadcast_processing(agent):
-    state = compute_processing_status(agent)
-    payload = {"active": state}
+    snapshot = build_processing_snapshot(agent)
+    payload = serialize_processing_snapshot(snapshot)
     _send(_group_name(agent.id), "processing_event", payload)

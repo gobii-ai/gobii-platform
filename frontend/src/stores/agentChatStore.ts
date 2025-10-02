@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 
-import type { AgentMessage, TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
+import type {
+  AgentMessage,
+  ProcessingSnapshot,
+  ProcessingWebTask,
+  TimelineEvent,
+  ToolClusterEvent,
+  ToolCallEntry,
+} from '../types/agentChat'
 import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
 import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
 
@@ -123,6 +130,42 @@ function mergeEvents(existing: TimelineEvent[], incoming: TimelineEvent[]): Time
 
 const TIMELINE_WINDOW_SIZE = 100
 
+const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [] }
+
+type ProcessingUpdateInput = boolean | Partial<ProcessingSnapshot> | null | undefined
+
+function coerceProcessingSnapshot(snapshot: Partial<ProcessingSnapshot> | null | undefined): ProcessingSnapshot {
+  if (!snapshot) {
+    return EMPTY_PROCESSING_SNAPSHOT
+  }
+
+  const webTasks: ProcessingWebTask[] = Array.isArray(snapshot.webTasks)
+    ? snapshot.webTasks
+        .filter((task): task is ProcessingWebTask => Boolean(task) && typeof task.id === 'string')
+        .map((task) => ({
+          id: task.id,
+          status: task.status,
+          statusLabel: task.statusLabel,
+          promptPreview: task.promptPreview,
+          startedAt: task.startedAt ?? null,
+          updatedAt: task.updatedAt ?? null,
+          elapsedSeconds: task.elapsedSeconds ?? null,
+        }))
+    : []
+
+  return {
+    active: Boolean(snapshot.active) || webTasks.length > 0,
+    webTasks,
+  }
+}
+
+function normalizeProcessingUpdate(input: ProcessingUpdateInput): ProcessingSnapshot {
+  if (typeof input === 'boolean') {
+    return { active: input, webTasks: [] }
+  }
+  return coerceProcessingSnapshot(input)
+}
+
 export type AgentChatState = {
   agentId: string | null
   events: TimelineEvent[]
@@ -132,6 +175,7 @@ export type AgentChatState = {
   hasMoreNewer: boolean
   hasUnseenActivity: boolean
   processingActive: boolean
+  processingWebTasks: ProcessingWebTask[]
   loading: boolean
   loadingOlder: boolean
   loadingNewer: boolean
@@ -145,7 +189,7 @@ export type AgentChatState = {
   jumpToLatest: () => Promise<void>
   sendMessage: (body: string) => Promise<void>
   receiveRealtimeEvent: (event: TimelineEvent) => void
-  updateProcessing: (active: boolean) => void
+  updateProcessing: (snapshot: ProcessingUpdateInput) => void
   setAutoScrollPinned: (pinned: boolean) => void
 }
 
@@ -158,6 +202,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   hasMoreNewer: false,
   hasUnseenActivity: false,
   processingActive: false,
+  processingWebTasks: [],
   loading: false,
   loadingOlder: false,
   loadingNewer: false,
@@ -173,6 +218,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const events = sortEvents(normalizeEvents(snapshot.events))
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
+      const processingSnapshot = normalizeProcessingUpdate(
+        snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
+      )
 
       set({
         events,
@@ -180,7 +228,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         newestCursor,
         hasMoreOlder: snapshot.has_more_older,
         hasMoreNewer: snapshot.has_more_newer,
-        processingActive: snapshot.processing_active,
+        processingActive: processingSnapshot.active,
+        processingWebTasks: processingSnapshot.webTasks,
         loading: false,
         autoScrollPinned: true,
         pendingEvents: [],
@@ -198,8 +247,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const agentId = get().agentId
     if (!agentId) return
     try {
-      const { processing_active } = await fetchProcessingStatus(agentId)
-      set({ processingActive: processing_active })
+      const { processing_active, processing_snapshot } = await fetchProcessingStatus(agentId)
+      const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
+      set({ processingActive: snapshot.active, processingWebTasks: snapshot.webTasks })
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Failed to refresh processing status',
@@ -263,13 +313,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const newestCursor = events.length ? events[events.length - 1].cursor : null
       const trimmedOlder = merged.length > events.length
       const hasMoreOlder = incoming.length === 0 ? state.hasMoreOlder : snapshot.has_more_older || trimmedOlder
+      const processingSnapshot = normalizeProcessingUpdate(
+        snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
+      )
       set({
         events,
         oldestCursor,
         newestCursor,
         hasMoreOlder,
         hasMoreNewer: snapshot.has_more_newer,
-        processingActive: snapshot.processing_active,
+        processingActive: processingSnapshot.active,
+        processingWebTasks: processingSnapshot.webTasks,
         loadingNewer: false,
       })
     } catch (error) {
@@ -291,13 +345,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const events = sortEvents(normalizeEvents(snapshot.events))
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
+      const processingSnapshot = normalizeProcessingUpdate(
+        snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
+      )
       set({
         events,
         oldestCursor,
         newestCursor,
         hasMoreOlder: snapshot.has_more_older,
         hasMoreNewer: snapshot.has_more_newer,
-        processingActive: snapshot.processing_active,
+        processingActive: processingSnapshot.active,
+        processingWebTasks: processingSnapshot.webTasks,
         hasUnseenActivity: false,
         loading: false,
         pendingEvents: [],
@@ -363,10 +421,12 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     })
   },
 
-  updateProcessing(active) {
+  updateProcessing(snapshotInput) {
+    const snapshot = normalizeProcessingUpdate(snapshotInput)
     set((state) => ({
-      processingActive: active,
-      hasUnseenActivity: !state.autoScrollPinned && active ? true : state.hasUnseenActivity,
+      processingActive: snapshot.active,
+      processingWebTasks: snapshot.webTasks,
+      hasUnseenActivity: !state.autoScrollPinned && snapshot.active ? true : state.hasUnseenActivity,
     }))
   },
 

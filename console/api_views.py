@@ -30,9 +30,11 @@ from console.agent_chat.access import resolve_agent
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
     TimelineDirection,
+    build_processing_snapshot,
     compute_processing_status,
     fetch_timeline_window,
     serialize_message_event,
+    serialize_processing_snapshot,
 )
 
 
@@ -103,6 +105,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "has_more_older": window.has_more_older,
             "has_more_newer": window.has_more_newer,
             "processing_active": window.processing_active,
+            "processing_snapshot": serialize_processing_snapshot(window.processing_snapshot),
         }
         return JsonResponse(payload)
 
@@ -156,7 +159,13 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent(request.user, request.session, agent_id)
-        return JsonResponse({"processing_active": compute_processing_status(agent)})
+        snapshot = build_processing_snapshot(agent)
+        return JsonResponse(
+            {
+                "processing_active": snapshot.active,
+                "processing_snapshot": serialize_processing_snapshot(snapshot),
+            }
+        )
 
 
 def _parse_ttl(payload: dict | None) -> int:

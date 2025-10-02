@@ -8,6 +8,7 @@ from django.test import Client, TestCase, override_settings, tag
 
 from api.models import (
     BrowserUseAgent,
+    BrowserUseAgentTask,
     CommsChannel,
     DeliveryStatus,
     PersistentAgent,
@@ -107,6 +108,11 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(tool_cluster["entries"][0]["toolName"], "send_email")
         self.assertTrue(payload.get("newest_cursor"))
         self.assertIsNotNone(payload.get("processing_active"))
+        snapshot = payload.get("processing_snapshot")
+        self.assertIsInstance(snapshot, dict)
+        self.assertIn("active", snapshot)
+        self.assertIn("webTasks", snapshot)
+        self.assertIsInstance(snapshot.get("webTasks"), list)
 
     @tag("batch_agent_chat")
     def test_timeline_preserves_html_email_body(self):
@@ -200,6 +206,33 @@ class AgentChatAPITests(TestCase):
             repeat_payload.get("ended") or repeat_payload.get("ended_at"),
             repeat_payload,
         )
+
+    @tag("batch_agent_chat")
+    def test_processing_status_endpoint_includes_active_web_tasks(self):
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="Visit example.com",
+            status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/processing/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        snapshot = payload.get("processing_snapshot")
+
+        self.assertIsInstance(snapshot, dict)
+        self.assertTrue(snapshot.get("active"))
+
+        web_tasks = snapshot.get("webTasks") or []
+        self.assertEqual(len(web_tasks), 1)
+        web_task = web_tasks[0]
+
+        self.assertEqual(web_task.get("id"), str(task.id))
+        self.assertEqual(web_task.get("status"), BrowserUseAgentTask.StatusChoices.IN_PROGRESS)
+        self.assertEqual(web_task.get("statusLabel"), task.get_status_display())
+        self.assertEqual(web_task.get("promptPreview"), "Visit example.com")
+
 
     @tag("batch_agent_chat")
     def test_web_chat_tool_requires_active_session(self):

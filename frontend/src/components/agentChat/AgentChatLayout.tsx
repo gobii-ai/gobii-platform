@@ -4,6 +4,7 @@ import { AgentComposer } from './AgentComposer'
 import { ProcessingIndicator } from './ProcessingIndicator'
 import { TimelineEventList } from './TimelineEventList'
 import type { AgentTimelineProps } from './types'
+import type { ProcessingWebTask } from '../../types/agentChat'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   agentName: string
@@ -20,6 +21,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   loadingOlder?: boolean
   loadingNewer?: boolean
   initialLoading?: boolean
+  processingWebTasks?: ProcessingWebTask[]
 }
 
 export function AgentChatLayout({
@@ -29,6 +31,7 @@ export function AgentChatLayout({
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
+  processingWebTasks = [],
   onLoadOlder,
   onLoadNewer,
   onJumpToLatest,
@@ -88,7 +91,11 @@ export function AgentChatLayout({
               </div>
 
               <div id="processing-indicator-slot" className="processing-slot" data-visible={showProcessingIndicator ? 'true' : 'false'}>
-                <ProcessingIndicator agentFirstName={agentFirstName} active={showProcessingIndicator} />
+                <ProcessingIndicator
+                  agentFirstName={agentFirstName}
+                  active={showProcessingIndicator}
+                  tasks={processingWebTasks}
+                />
               </div>
 
               {showBottomSentinel ? (
