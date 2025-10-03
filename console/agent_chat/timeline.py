@@ -277,6 +277,26 @@ def _serialize_message(env: MessageEnvelope) -> dict:
     elif message.from_endpoint_id:
         channel = message.from_endpoint.channel
     attachments = [_serialize_attachment(att) for att in message.attachments.all()]
+    conversation = message.conversation
+    peer_link_id: str | None = None
+    is_peer_dm = False
+    if conversation and conversation.is_peer_dm:
+        is_peer_dm = True
+        if conversation.peer_link_id:
+            peer_link_id = str(conversation.peer_link_id)
+
+    peer_payload: dict | None = None
+    if message.peer_agent_id:
+        peer_agent = getattr(message, "peer_agent", None)
+        peer_payload = {
+            "id": str(message.peer_agent_id),
+            "name": getattr(peer_agent, "name", None),
+        }
+        is_peer_dm = True
+
+    self_agent = getattr(message, "owner_agent", None)
+    self_agent_name = getattr(self_agent, "name", None)
+
     return {
         "kind": "message",
         "cursor": env.cursor.encode(),
@@ -291,6 +311,10 @@ def _serialize_message(env: MessageEnvelope) -> dict:
             "attachments": attachments,
             "timestamp": _format_timestamp(timestamp),
             "relativeTimestamp": _relative_timestamp(timestamp),
+            "isPeer": is_peer_dm,
+            "peerAgent": peer_payload,
+            "peerLinkId": peer_link_id,
+            "selfAgentName": self_agent_name,
         },
     }
 
@@ -333,7 +357,13 @@ def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cur
     limit = MAX_PAGE_SIZE * 3
     qs = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
-        .select_related("from_endpoint", "to_endpoint", "conversation")
+        .select_related(
+            "from_endpoint",
+            "to_endpoint",
+            "conversation__peer_link",
+            "peer_agent",
+            "owner_agent",
+        )
         .prefetch_related("attachments")
         .order_by("-timestamp", "-seq")
     )
