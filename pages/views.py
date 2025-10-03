@@ -35,8 +35,6 @@ from .utils_markdown import (
     load_page,
     get_prev_next,
     get_all_doc_pages,
-    load_blog_post,
-    get_all_blog_posts,
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from django.contrib import sitemaps
@@ -451,153 +449,6 @@ class MarkdownPageView(TemplateView):
         ctx["all_doc_pages"] = get_all_doc_pages()
         return ctx
 
-
-class BlogIndexView(TemplateView):
-    template_name = "blog/index.html"
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        posts = get_all_blog_posts()
-        context["posts"] = posts
-
-        seo_title = "Gobii Blog"
-        seo_description = (
-            "Updates from the Gobii team on AI employees, automation strategies, and product releases."
-        )
-
-        canonical_url = self.request.build_absolute_uri(self.request.path)
-        default_image_url = self.request.build_absolute_uri(static("images/noBgBlue.png"))
-
-        blog_posts_schema = []
-        for post in posts[:10]:
-            entry = {
-                "@type": "BlogPosting",
-                "headline": post["title"],
-                "url": self.request.build_absolute_uri(post["url"]),
-            }
-            published_at = post.get("published_at")
-            if published_at:
-                iso_value = published_at.isoformat()
-                entry["datePublished"] = iso_value
-                entry["dateModified"] = iso_value
-            blog_posts_schema.append(entry)
-
-        structured_data = {
-            "@context": "https://schema.org",
-            "@type": "Blog",
-            "name": seo_title,
-            "description": seo_description,
-            "url": canonical_url,
-            "publisher": {
-                "@type": "Organization",
-                "name": "Gobii",
-                "logo": {
-                    "@type": "ImageObject",
-                    "url": default_image_url,
-                },
-            },
-            "blogPost": blog_posts_schema,
-        }
-
-        context.update(
-            {
-                "seo_title": seo_title,
-                "seo_description": seo_description,
-                "canonical_url": canonical_url,
-                "og_image_url": default_image_url,
-                "structured_data_json": json.dumps(structured_data, ensure_ascii=False),
-            }
-        )
-
-        return context
-
-
-class BlogPostView(TemplateView):
-    template_name = "blog/detail.html"
-
-    def get_context_data(self, **kwargs):
-        slug = self.kwargs["slug"].rstrip("/")
-        try:
-            post = load_blog_post(slug)
-        except FileNotFoundError:
-            raise Http404(f"Blog post not found: {slug}")
-
-        context = super().get_context_data(**kwargs)
-        canonical_url = self.request.build_absolute_uri(self.request.path)
-        default_image_url = self.request.build_absolute_uri(static("images/noBgBlue.png"))
-
-        image_path = post["meta"].get("image")
-        if image_path:
-            og_image_url = image_path if image_path.startswith("http") else self.request.build_absolute_uri(image_path)
-        else:
-            og_image_url = default_image_url
-
-        seo_title = post["meta"].get("seo_title") or post["meta"].get("title") or slug.replace("-", " ").title()
-        seo_description = (
-            post["meta"].get("seo_description")
-            or post["meta"].get("description")
-            or post.get("summary")
-            or "Read the latest update from the Gobii team."
-        )
-
-        published_at = post.get("published_at")
-        published_iso = published_at.isoformat() if published_at else None
-        author_name = post["meta"].get("author")
-        if author_name:
-            author_type = post["meta"].get("author_type")
-            if not author_type:
-                lowered = str(author_name).lower()
-                author_type = "Organization" if "team" in lowered or "gobii" in lowered else "Person"
-        else:
-            author_name = "Gobii"
-            author_type = "Organization"
-
-        structured_data = {
-            "@context": "https://schema.org",
-            "@type": "BlogPosting",
-            "headline": seo_title,
-            "description": seo_description,
-            "author": {
-                "@type": author_type,
-                "name": author_name,
-            },
-            "publisher": {
-                "@type": "Organization",
-                "name": "Gobii",
-                "logo": {
-                    "@type": "ImageObject",
-                    "url": default_image_url,
-                },
-            },
-            "mainEntityOfPage": {
-                "@type": "WebPage",
-                "@id": canonical_url,
-            },
-            "image": og_image_url,
-            "url": canonical_url,
-        }
-
-        if published_iso:
-            structured_data["datePublished"] = published_iso
-            structured_data["dateModified"] = published_iso
-
-        recent_posts = [p for p in get_all_blog_posts() if p["slug"] != post["slug"]][:3]
-
-        context.update(
-            {
-                "post": post,
-                "seo_title": seo_title,
-                "seo_description": seo_description,
-                "canonical_url": canonical_url,
-                "og_image_url": og_image_url,
-                "recent_posts": recent_posts,
-                "structured_data_json": json.dumps(structured_data, ensure_ascii=False),
-            }
-        )
-
-        return context
-
-
 class DocsIndexRedirectView(RedirectView):
     """
     Redirect /docs/ to the first available documentation page.
@@ -773,7 +624,6 @@ class StaticViewSitemap(sitemaps.Sitemap):
         # List of all static view names that should be included in the sitemap
         items = [
             'pages:home',
-            'pages:blog_index',
             'pages:docs_index',
         ]
         # Include pricing only when proprietary mode is enabled
@@ -785,6 +635,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 items.insert(4, 'proprietary:about')
                 items.insert(5, 'proprietary:careers')
                 items.insert(5, 'proprietary:startup_checkout')
+                items.insert(6, 'proprietary:blog_index')
         except Exception:
             pass
         return items

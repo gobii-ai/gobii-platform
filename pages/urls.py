@@ -16,9 +16,6 @@ from .views import (
     AIEmployeeDirectoryView,
     AIEmployeeDetailView,
     AIEmployeeHireView,
-    BlogIndexView,
-    BlogPostView,
-    BlogSitemap,
 )
 
 from djstripe import views as djstripe_views
@@ -29,7 +26,6 @@ app_name = "pages"
 
 sitemaps = {
     'static': StaticViewSitemap,
-    'blog': BlogSitemap,
 }
 
 urlpatterns = [
@@ -41,10 +37,6 @@ urlpatterns = [
     path("health/", health_check, name="health_check"),
     # Kubernetes health check endpoint - matches /healthz/ in BackendConfig
     path("healthz/", health_check, name="health_check_k8s"),
-
-    # Blog URLs
-    path("blog/", BlogIndexView.as_view(), name="blog_index"),
-    path("blog/<slug:slug>/", BlogPostView.as_view(), name="blog_post"),
 
     # Documentation URLs
     path("docs/", DocsIndexRedirectView.as_view(), name="docs_index"),
