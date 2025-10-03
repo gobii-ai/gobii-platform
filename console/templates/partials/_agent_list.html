@@ -95,9 +95,13 @@
        <div class="p-4 md:p-5 flex-1 flex flex-col">
          <!-- Charter (truncated) -->
          <div class="flex-1">
+           {% if agent.listing_description_source == "placeholder" %}
+           <p class="text-sm text-gray-400 italic">{{ agent.listing_description }}</p>
+           {% else %}
            <p class="text-sm text-gray-600" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">
-             {{ agent.charter|truncatewords:30 }}
+             {{ agent.listing_description }}
            </p>
+           {% endif %}
          </div>
  
          <!-- Agent Details -->

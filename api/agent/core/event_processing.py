@@ -39,6 +39,8 @@ from .budget import (
     get_current_context as get_budget_context,
     set_current_context as set_budget_context,
 )
+from .llm_utils import run_completion
+from ..short_description import maybe_schedule_short_description
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from tasks.services import TaskCreditService
 from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
@@ -92,8 +94,8 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
-MESSAGE_HISTORY_LIMIT = 15
-TOOL_CALL_HISTORY_LIMIT = 10
+MESSAGE_HISTORY_LIMIT = 20
+TOOL_CALL_HISTORY_LIMIT = 20
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
@@ -267,30 +269,14 @@ def _completion_with_failover(
                 if (provider.startswith("openai") or provider == "openai") and safety_identifier:
                     params["safety_identifier"] = str(safety_identifier)
                 
-                # Respect endpoint tool-choice capability if provided via params hint
-                tool_choice_supported = params.pop("supports_tool_choice", True)
-                # Endpoint preference for parallel tool calling (caller hint)
-                use_parallel_tool_calls = params.pop("use_parallel_tool_calls", True)
-                if not tool_choice_supported:
-                    response = litellm.completion(
-                        model=model,
-                        messages=messages,
-                        tools=tools,
-                        parallel_tool_calls=bool(use_parallel_tool_calls),
-                        drop_params=True,
-                        **params,
-                    )
-                else:
-                    response = litellm.completion(
-                        model=model,
-                        messages=messages,
-                        tools=tools,
-                        tool_choice="auto",
-                        parallel_tool_calls=bool(use_parallel_tool_calls),
-                        drop_params=True,
-                        **params,
-                    )
-                
+                response = run_completion(
+                    model=model,
+                    messages=messages,
+                    params=params,
+                    tools=tools,
+                    drop_params=True,
+                )
+
                 logger.info(
                     "Provider %s succeeded for agent %s",
                     provider,
@@ -740,6 +726,14 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     # Exit early in proprietary mode if the agent's owner has no credits
     try:
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
+
+        try:
+            maybe_schedule_short_description(agent)
+        except Exception:
+            logger.exception(
+                "Failed to evaluate short description scheduling for agent %s",
+                persistent_agent_id,
+            )
 
         if settings.GOBII_PROPRIETARY_MODE:
             owner_user = getattr(agent, "user", None)

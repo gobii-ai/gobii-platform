@@ -2075,6 +2075,21 @@ class PersistentAgent(models.Model):
     )
     name = models.CharField(max_length=255)
     charter = models.TextField()
+    short_description = models.CharField(
+        max_length=280,
+        blank=True,
+        help_text="Generated short summary of the agent charter for listings.",
+    )
+    short_description_charter_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter used to generate short_description.",
+    )
+    short_description_requested_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter currently pending short description generation.",
+    )
     schedule = models.CharField(
         max_length=128,
         null=True,

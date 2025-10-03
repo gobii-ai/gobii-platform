@@ -180,6 +180,8 @@ jobs:
             tag: batch_api_org_keys
           - batch: console_api_keys
             tag: batch_console_api_keys
+          - batch: charter_tools
+            tag: batch_charter_tools
           - batch: text_sanitization
             tag: batch_text_sanitization
     env:

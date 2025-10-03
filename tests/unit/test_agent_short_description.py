@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from unittest.mock import patch
+
+from api.agent.short_description import (
+    compute_charter_hash,
+    maybe_schedule_short_description,
+)
+from api.agent.tasks.short_description import generate_agent_short_description_task
+from api.models import BrowserUseAgent, PersistentAgent
+
+
+class AgentShortDescriptionTests(TestCase):
+    def setUp(self) -> None:
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username="owner",
+            email="user@example.com",
+            password="testpass",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
+
+    def _create_agent(self, charter: str = "Help with operations") -> PersistentAgent:
+        return PersistentAgent.objects.create(
+            user=self.user,
+            name="Test Persistent Agent",
+            charter=charter,
+            browser_use_agent=self.browser_agent,
+        )
+
+    def test_maybe_schedule_short_description_skips_without_charter(self) -> None:
+        agent = self._create_agent(charter="  ")
+        with patch("api.agent.tasks.short_description.generate_agent_short_description_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_short_description(agent)
+        self.assertFalse(scheduled)
+        self.assertFalse(mocked_delay.called)
+        agent.refresh_from_db()
+        self.assertEqual(agent.short_description_requested_hash, "")
+
+    def test_maybe_schedule_short_description_enqueues_when_missing(self) -> None:
+        agent = self._create_agent()
+        with patch("api.agent.tasks.short_description.generate_agent_short_description_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_short_description(agent)
+        self.assertTrue(scheduled)
+        agent.refresh_from_db()
+        expected_hash = compute_charter_hash(agent.charter)
+        self.assertEqual(agent.short_description_requested_hash, expected_hash)
+        mocked_delay.assert_called_once_with(str(agent.id), expected_hash)
+
+    def test_generate_short_description_updates_fields(self) -> None:
+        agent = self._create_agent()
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.short_description_requested_hash = charter_hash
+        agent.save(update_fields=["short_description_requested_hash"])
+
+        with patch("api.agent.tasks.short_description._generate_via_llm", return_value="Summarise company ops"):
+            generate_agent_short_description_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.short_description, "Summarise company ops")
+        self.assertEqual(agent.short_description_charter_hash, charter_hash)
+        self.assertEqual(agent.short_description_requested_hash, "")
+
+    def test_generate_short_description_skips_when_charter_changed(self) -> None:
+        agent = self._create_agent()
+        old_hash = compute_charter_hash(agent.charter)
+        agent.short_description_requested_hash = old_hash
+        agent.save(update_fields=["short_description_requested_hash"])
+
+        agent.charter = "New responsibilities"
+        agent.save(update_fields=["charter"])
+
+        with patch("api.agent.tasks.short_description._generate_via_llm", return_value="Updated summary"):
+            generate_agent_short_description_task.run(str(agent.id), old_hash)
+
+        agent.refresh_from_db()
+        # No summary stored because hash mismatch
+        self.assertEqual(agent.short_description, "")
+        self.assertEqual(agent.short_description_charter_hash, "")
+        self.assertEqual(agent.short_description_requested_hash, "")

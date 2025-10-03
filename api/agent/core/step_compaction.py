@@ -41,9 +41,9 @@ from ...models import (
 
 import logging
 from opentelemetry import trace
-import litellm
 
 from .llm_config import get_summarization_llm_config
+from .llm_utils import run_completion
 
 __all__ = [
     "ensure_steps_compacted",
@@ -428,7 +428,7 @@ def llm_summarise_steps(previous: str, steps: Sequence[StepData], safety_identif
             if safety_identifier:
                 params["safety_identifier"] = safety_identifier
 
-        resp = litellm.completion(model=model, messages=prompt, **params)
+        resp = run_completion(model=model, messages=prompt, params=params)
         return resp.choices[0].message.content.strip()
     except Exception:
         logger.exception("LiteLLM step summarisation failed – falling back to fallback summariser")

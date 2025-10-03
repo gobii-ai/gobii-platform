@@ -23,7 +23,6 @@ from datetime import datetime, timedelta, UTC
 
 import requests
 
-import litellm
 from fastmcp import Client
 from mcp.types import Tool as MCPTool
 from opentelemetry import trace
@@ -31,6 +30,7 @@ from django.conf import settings
 
 from ...models import PersistentAgent, PersistentAgentEnabledTool
 from ..core.llm_config import get_llm_config_with_failover
+from ..core.llm_utils import run_completion
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -780,9 +780,6 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
                     provider,
                     model,
                 )
-                # Remove internal-only hints (not accepted by litellm)
-                params = {k: v for k, v in params.items() if k not in ('supports_tool_choice', 'use_parallel_tool_calls')}
-
                 enable_tools_def = {
                     "type": "function",
                     "function": {
@@ -807,16 +804,15 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
                     },
                 }
 
-                response = litellm.completion(
+                response = run_completion(
                     model=model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
+                    params=params,
                     tools=[enable_tools_def],
-                    tool_choice="auto",
                     safety_identifier=str(agent.user.id if agent.user else ""),
-                    **params,
                 )
 
                 msg = response.choices[0].message

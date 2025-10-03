@@ -1535,12 +1535,13 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         'message_count', 'created_at'
     )
     list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'execution_environment', 'schedule', 'created_at')
-    search_fields = ('name', 'user__email', 'organization__name', 'charter')
+    search_fields = ('name', 'user__email', 'organization__name', 'charter', 'short_description')
     raw_id_fields = ('user', 'browser_use_agent')
     readonly_fields = (
         'id', 'ownership_scope', 'created_at', 'updated_at',
         'browser_use_agent_link', 'agent_actions', 'messages_summary_link',
         'last_expired_at', 'sleep_email_sent_at',
+        'short_description', 'short_description_charter_hash', 'short_description_requested_hash',
     )
     inlines = [PersistentAgentCommsEndpointInline, CommsAllowlistEntryInline, AgentMessageInline]
 
@@ -1553,7 +1554,11 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('id', 'name', 'user', 'organization', 'ownership_scope', 'charter', 'created_at', 'updated_at')
+            'fields': (
+                'id', 'name', 'user', 'organization', 'ownership_scope',
+                'charter', 'short_description', 'short_description_charter_hash',
+                'short_description_requested_hash', 'created_at', 'updated_at',
+            )
         }),
         ('Configuration', {
             'fields': ('browser_use_agent', 'browser_use_agent_link', 'schedule', 'is_active', 'execution_environment')

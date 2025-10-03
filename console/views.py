@@ -27,6 +27,7 @@ from functools import cached_property
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
+from api.agent.short_description import build_listing_description
 
 from api.models import (
     ApiKey,
@@ -1485,9 +1486,16 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 organization__isnull=True  # Only personal agents
             ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
+        persistent_agents = list(persistent_agents)
+        for agent in persistent_agents:
+            description, source = build_listing_description(agent, max_length=200)
+            agent.listing_description = description
+            agent.listing_description_source = source
+            agent.is_initializing = source == "placeholder"
+
         context['persistent_agents'] = persistent_agents
 
-        context['has_agents'] = persistent_agents.exists()
+        context['has_agents'] = bool(persistent_agents)
 
         return context
 

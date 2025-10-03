@@ -18,6 +18,7 @@ from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from api.models import PaidPlanIntent, PersistentAgent
+from api.agent.short_description import build_listing_description
 from agents.services import AIEmployeeTemplateService
 from waffle import flag_is_active
 from api.models import OrganizationMembership
@@ -160,10 +161,10 @@ class HomePage(TemplateView):
                         schedule_text = agent.schedule
                 agent.display_schedule = schedule_text
 
-                charter_text = (agent.charter or "").strip()
-                if charter_text and len(charter_text) > 140:
-                    charter_text = charter_text[:140].rstrip() + "…"
-                agent.charter_preview = charter_text
+                description, source = build_listing_description(agent, max_length=140)
+                agent.listing_description = description
+                agent.listing_description_source = source
+                agent.is_initializing = source == "placeholder"
 
                 if getattr(agent, "life_state", "active") == PersistentAgent.LifeState.EXPIRED:
                     agent.status_label = "Expired"
