@@ -234,7 +234,8 @@ class AgentChatAPITests(TestCase):
         )
         self.assertEqual(end_response.status_code, 200)
 
-        event_names = [record.kwargs.get("event") for record in mock_track_event.call_args_list]
+        self.assertEqual(mock_track_event.call_count, 2)
+        event_names = {record.kwargs.get("event") for record in mock_track_event.call_args_list}
         self.assertIn(AnalyticsEvent.WEB_CHAT_SESSION_STARTED, event_names)
         self.assertIn(AnalyticsEvent.WEB_CHAT_SESSION_ENDED, event_names)
 
@@ -262,8 +263,8 @@ class AgentChatAPITests(TestCase):
 
         mock_delay.assert_called()
 
-        event_names = [record.kwargs.get("event") for record in mock_track_event.call_args_list]
-        self.assertIn(AnalyticsEvent.WEB_CHAT_MESSAGE_SENT, event_names)
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(mock_track_event.call_args.kwargs.get("event"), AnalyticsEvent.WEB_CHAT_MESSAGE_SENT)
 
         message_call = next(
             record for record in mock_track_event.call_args_list if record.kwargs.get("event") == AnalyticsEvent.WEB_CHAT_MESSAGE_SENT
