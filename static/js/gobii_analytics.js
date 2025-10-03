@@ -22,7 +22,7 @@ function deriveCookieDomain(hostname) {
   const isIPv6 = lowerHost.includes(':');
 
   if (lowerHost === 'localhost' || isIPv4 || isIPv6) {
-    return hostname;
+    return lowerHost;
   }
 
   const parts = lowerHost.split('.');
