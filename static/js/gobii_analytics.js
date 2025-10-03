@@ -27,7 +27,7 @@ function deriveCookieDomain(hostname) {
 
   const parts = lowerHost.split('.');
   if (parts.length < 2) {
-    return hostname;
+    return lowerHost;
   }
 
   const lastTwo = parts.slice(-2).join('.');
