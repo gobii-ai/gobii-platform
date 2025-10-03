@@ -18,12 +18,15 @@ def run_completion(
     """Invoke ``litellm.completion`` with shared parameter handling.
 
     - Removes internal hints (``supports_tool_choice`` and ``use_parallel_tool_calls``).
-    - Only adds ``tool_choice`` / ``parallel_tool_calls`` when tools are provided.
+    - Adds ``tool_choice`` when tools are provided and supported.
+    - Propagates ``parallel_tool_calls`` when tools are provided *or* the endpoint
+      supplied an explicit hint.
     - Allows callers to control ``drop_params`` while keeping consistent defaults.
     """
     params = dict(params or {})
 
     tool_choice_supported = params.pop("supports_tool_choice", True)
+    parallel_hint_provided = "use_parallel_tool_calls" in params
     use_parallel_tool_calls = params.pop("use_parallel_tool_calls", True)
 
     kwargs: dict[str, Any] = {
@@ -40,11 +43,15 @@ def run_completion(
         kwargs["tools"] = tools
         if tool_choice_supported:
             kwargs.setdefault("tool_choice", "auto")
-        if use_parallel_tool_calls is not None:
-            kwargs["parallel_tool_calls"] = bool(use_parallel_tool_calls)
     else:
-        # Ensure we don't pass tool-related kwargs when tools are absent
+        # Ensure we don't pass tool-choice hints when tools are absent
         kwargs.pop("tool_choice", None)
+
+    if use_parallel_tool_calls is not None and (tools or parallel_hint_provided):
+        # Respect explicit hints even when no tools are provided; some providers
+        # validate the flag independently of tool availability.
+        kwargs["parallel_tool_calls"] = bool(use_parallel_tool_calls)
+    else:
         kwargs.pop("parallel_tool_calls", None)
 
     return litellm.completion(**kwargs)
