@@ -35,7 +35,7 @@ function deriveCookieDomain(hostname) {
     if (parts.length >= 3) {
       return '.' + parts.slice(-3).join('.');
     }
-    return hostname;
+    return lowerHost;
   }
 
   if (parts.length === 2) {
