@@ -20,8 +20,8 @@
       <nav class="hidden md:flex items-center gap-x-6 text-sm font-medium">
         <a href="{% url 'pages:home' %}" class="text-slate-700 hover:text-blue-600">Home</a>
         <a href="/docs/" class="text-slate-700 hover:text-blue-600">API</a>
-        <a href="{% url 'proprietary:blog_index' %}" class="text-slate-700 hover:text-blue-600">Blog</a>
         {% if settings.GOBII_PROPRIETARY_MODE %}
+          <a href="{% url 'proprietary:blog_index' %}" class="text-slate-700 hover:text-blue-600">Blog</a>
           <a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a>
           <a href="{% url 'proprietary:support' %}" class="text-slate-700 hover:text-blue-600">Support</a>
         {% endif %}
@@ -188,8 +188,8 @@
       <div class="px-4 space-y-3 text-sm font-medium">
         <a href="{% url 'pages:home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Home</a>
         <a href="/docs/" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">API</a>
-        <a href="{% url 'proprietary:blog_index' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Blog</a>
         {% if settings.GOBII_PROPRIETARY_MODE %}
+          <a href="{% url 'proprietary:blog_index' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Blog</a>
           <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
           <a href="{% url 'proprietary:support' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Support</a>
         {% endif %}
