@@ -22,6 +22,7 @@ from api.models import (
 )
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.services.web_sessions import start_web_session
+from util.analytics import AnalyticsEvent
 
 CHANNEL_LAYER_SETTINGS = {
     "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
@@ -206,6 +207,72 @@ class AgentChatAPITests(TestCase):
             repeat_payload.get("ended") or repeat_payload.get("ended_at"),
             repeat_payload,
         )
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.Analytics.track_event")
+    def test_session_analytics_emitted(self, mock_track_event):
+        start_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/start/",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+        self.assertEqual(start_response.status_code, 200)
+        start_payload = start_response.json()
+        session_key = start_payload["session_key"]
+
+        heartbeat_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/heartbeat/",
+            data=json.dumps({"session_key": session_key}),
+            content_type="application/json",
+        )
+        self.assertEqual(heartbeat_response.status_code, 200)
+
+        end_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/end/",
+            data=json.dumps({"session_key": session_key}),
+            content_type="application/json",
+        )
+        self.assertEqual(end_response.status_code, 200)
+
+        self.assertEqual(mock_track_event.call_count, 2)
+        event_names = {record.kwargs.get("event") for record in mock_track_event.call_args_list}
+        self.assertIn(AnalyticsEvent.WEB_CHAT_SESSION_STARTED, event_names)
+        self.assertIn(AnalyticsEvent.WEB_CHAT_SESSION_ENDED, event_names)
+
+        start_call_record = next(
+            record for record in mock_track_event.call_args_list if record.kwargs.get("event") == AnalyticsEvent.WEB_CHAT_SESSION_STARTED
+        )
+        end_call_record = next(
+            record for record in mock_track_event.call_args_list if record.kwargs.get("event") == AnalyticsEvent.WEB_CHAT_SESSION_ENDED
+        )
+
+        self.assertEqual(start_call_record.kwargs["properties"].get("agent_id"), str(self.agent.id))
+        self.assertEqual(end_call_record.kwargs["properties"].get("agent_id"), str(self.agent.id))
+        self.assertEqual(end_call_record.kwargs["properties"].get("session_key"), session_key)
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.Analytics.track_event")
+    def test_message_post_records_analytics(self, mock_track_event):
+        with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/messages/",
+                data=json.dumps({"body": "Hello agent"}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 201)
+
+        mock_delay.assert_called()
+
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(mock_track_event.call_args.kwargs.get("event"), AnalyticsEvent.WEB_CHAT_MESSAGE_SENT)
+
+        message_call = next(
+            record for record in mock_track_event.call_args_list if record.kwargs.get("event") == AnalyticsEvent.WEB_CHAT_MESSAGE_SENT
+        )
+        props = message_call.kwargs["properties"]
+        self.assertEqual(props.get("agent_id"), str(self.agent.id))
+        self.assertIn("message_id", props)
+        self.assertEqual(props.get("message_length"), len("Hello agent"))
 
     @tag("batch_agent_chat")
     def test_processing_status_endpoint_includes_active_web_tasks(self):

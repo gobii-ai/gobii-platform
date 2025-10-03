@@ -51,6 +51,11 @@ class AnalyticsEvent(StrEnum):
     WEB_TASK_RESULT_DOWNLOADED = 'Task Result Downloaded'
     WEB_TASK_CANCELLED = 'Task Cancelled'
 
+    # Web Chat Events
+    WEB_CHAT_SESSION_STARTED = 'Web Chat Session Started'
+    WEB_CHAT_SESSION_ENDED = 'Web Chat Session Ended'
+    WEB_CHAT_MESSAGE_SENT = 'Web Chat Message Sent'
+
     # Persistent Agent Events
     PERSISTENT_AGENT_CREATED = 'Persistent Agent Created'
     PERSISTENT_AGENT_UPDATED = 'Persistent Agent Updated'
