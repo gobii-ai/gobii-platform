@@ -39,16 +39,6 @@ services:
     volumes:
       - minio-data:/data
 
-  precheck-llm-keys:
-    image: busybox:1.36
-    environment:
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-    command: >-
-      sh -c 'if [ -n "$GOOGLE_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ] || [ -n "$OPENROUTER_API_KEY" ]; then echo "LLM key(s) detected. Continuing."; else echo "Error: No LLM provider key set. Set one of GOOGLE_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY and rerun." >&2; exit 1; fi'
-
   web:
     platform: linux/amd64
     build:
@@ -75,8 +65,6 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      precheck-llm-keys:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       db:
@@ -133,8 +121,6 @@ services:
       XDG_CONFIG_HOME: /tmp/.chrome
       XDG_CACHE_HOME: /tmp/.chrome
     depends_on:
-      precheck-llm-keys:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       db:
@@ -175,8 +161,6 @@ services:
       XDG_CONFIG_HOME: /tmp/.chrome
       XDG_CACHE_HOME: /tmp/.chrome
     depends_on:
-      precheck-llm-keys:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       db:
@@ -218,8 +202,6 @@ services:
       XDG_CONFIG_HOME: /tmp/.chrome
       XDG_CACHE_HOME: /tmp/.chrome
     depends_on:
-      precheck-llm-keys:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       db:

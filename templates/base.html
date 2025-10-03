@@ -477,6 +477,14 @@
   {% htmx_script %}
 </head>
 <body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+  {% if llm_bootstrap_required %}
+    <div class="bg-amber-100 text-amber-900 border-b border-amber-300">
+      <div class="max-w-7xl mx-auto px-4 py-3 text-sm">
+        <strong class="font-semibold">Setup required:</strong>
+        No LLM providers are configured yet. Complete the initial setup to enable agents and tool discovery.
+      </div>
+    </div>
+  {% endif %}
   {% include "includes/_unified_header_nav.html" %}
   <div>
     {% if messages %}

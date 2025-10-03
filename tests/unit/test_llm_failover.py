@@ -7,12 +7,18 @@ from api.agent.core.llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
     PROVIDER_CONFIG,
+    LLMNotConfiguredError,
+    invalidate_llm_bootstrap_cache,
 )
 from tests.utils.llm_seed import seed_persistent_basic, clear_llm_db
 
 
 @tag("batch_event_llm")
 class TestLLMFailover(TestCase):
+    def setUp(self):  # noqa: D401
+        super().setUp()
+        invalidate_llm_bootstrap_cache()
+
     def test_simple_config_anthropic_primary(self):
         seed_persistent_basic(include_openrouter=False)
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}, clear=True):
@@ -34,7 +40,7 @@ class TestLLMFailover(TestCase):
     def test_simple_config_no_providers(self):
         seed_persistent_basic(include_openrouter=False)
         with mock.patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(LLMNotConfiguredError):
                 get_llm_config()
 
     def test_failover_config_includes_all_tier_endpoints(self):
@@ -78,6 +84,10 @@ class TestLLMFailover(TestCase):
 @tag("batch_event_llm")
 class TestTokenBasedTierSelection(TestCase):
     """DB-only selection scenarios that formerly used token-based tiers."""
+
+    def setUp(self):  # noqa: D401
+        super().setUp()
+        invalidate_llm_bootstrap_cache()
 
     def test_db_seeded_range_small_has_endpoints(self):
         seed_persistent_basic(include_openrouter=True)
@@ -153,7 +163,7 @@ class TestTokenBasedTierSelection(TestCase):
     def test_no_providers_raises(self):
         seed_persistent_basic(include_openrouter=False)
         with mock.patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(LLMNotConfiguredError):
                 get_llm_config_with_failover(token_count=2000)
 
     # provider_tiers override is no longer supported in DB-only selection; removed.

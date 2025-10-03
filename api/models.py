@@ -4292,6 +4292,7 @@ class PersistentAgentSystemStep(models.Model):
         SNAPSHOT = "SNAPSHOT", "Snapshot"
         CREDENTIALS_PROVIDED = "CREDENTIALS_PROVIDED", "Credentials Provided"
         CONTACTS_APPROVED = "CONTACTS_APPROVED", "Contacts Approved"
+        LLM_CONFIGURATION_REQUIRED = "LLM_CONFIGURATION_REQUIRED", "LLM Configuration Required"
         # Add more system-generated step codes here as needed.
 
     step = models.OneToOneField(

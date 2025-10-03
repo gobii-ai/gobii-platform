@@ -46,7 +46,13 @@ from tasks.services import TaskCreditService
 from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
 from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps
-from .llm_config import get_llm_config, get_llm_config_with_failover, REFERENCE_TOKENIZER_MODEL
+from .llm_config import (
+    get_llm_config,
+    get_llm_config_with_failover,
+    REFERENCE_TOKENIZER_MODEL,
+    LLMNotConfiguredError,
+    is_llm_bootstrap_required,
+)
 from .promptree import Prompt
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
 
@@ -727,6 +733,31 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     try:
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
 
+        if is_llm_bootstrap_required():
+            msg = "Agent execution paused: LLM configuration required."
+            logger.warning(
+                "Persistent agent %s skipped – platform setup requires LLM credentials.",
+                persistent_agent_id,
+            )
+            span.add_event("Agent processing skipped - llm bootstrap pending")
+            span.set_attribute("llm.bootstrap_required", True)
+
+            if not PersistentAgentSystemStep.objects.filter(
+                step__agent=agent,
+                code=PersistentAgentSystemStep.Code.LLM_CONFIGURATION_REQUIRED,
+            ).exists():
+                step = PersistentAgentStep.objects.create(
+                    agent=agent,
+                    description=msg,
+                )
+                PersistentAgentSystemStep.objects.create(
+                    step=step,
+                    code=PersistentAgentSystemStep.Code.LLM_CONFIGURATION_REQUIRED,
+                    notes="llm_configuration_missing",
+                )
+
+            return
+
         try:
             maybe_schedule_short_description(agent)
         except Exception:
@@ -940,10 +971,18 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
             )
             
             # Select provider tiers based on the fitted token count
-            failover_configs = get_llm_config_with_failover(
-                agent_id=str(agent.id),
-                token_count=fitted_token_count
-            )
+            try:
+                failover_configs = get_llm_config_with_failover(
+                    agent_id=str(agent.id),
+                    token_count=fitted_token_count
+                )
+            except LLMNotConfiguredError:
+                logger.warning(
+                    "Agent %s loop aborted – LLM configuration missing mid-run.",
+                    agent.id,
+                )
+                span.add_event("Agent loop aborted - llm bootstrap required")
+                break
 
             try:
                 response, token_usage = _completion_with_failover(
@@ -1403,8 +1442,11 @@ def _build_prompt_context(
     try:
         failover_configs = get_llm_config_with_failover(
             agent_id=str(agent.id),
-            token_count=0
+            token_count=0,
+            allow_unconfigured=True,
         )
+    except LLMNotConfiguredError:
+        failover_configs = None
     except Exception:
         failover_configs = None
     model = failover_configs[0][1] if failover_configs else _AGENT_MODEL

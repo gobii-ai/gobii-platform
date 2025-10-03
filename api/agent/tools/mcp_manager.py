@@ -30,7 +30,7 @@ from opentelemetry import trace
 from django.conf import settings
 
 from ...models import PersistentAgent, PersistentAgentEnabledTool
-from ..core.llm_config import get_llm_config_with_failover
+from ..core.llm_config import get_llm_config_with_failover, LLMNotConfiguredError
 from ..core.llm_utils import run_completion
 
 logger = logging.getLogger(__name__)
@@ -769,7 +769,7 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
     try:
         # Get LLM configuration with failover
         failover_configs = get_llm_config_with_failover()
-        
+
         # Try each provider in order
         last_exc = None
         for i, (provider, model, params) in enumerate(failover_configs):
@@ -891,6 +891,13 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
             "message": "Failed to search tools",
         }
         
+    except LLMNotConfiguredError:
+        logger.warning("search_tools: skipped because LLM configuration is missing")
+        return {
+            "status": "error",
+            "message": "Tool search is unavailable until the initial LLM setup is complete.",
+            "reason": "llm_not_configured",
+        }
     except Exception as e:
         logger.error(f"Failed to search tools: {e}")
         return {

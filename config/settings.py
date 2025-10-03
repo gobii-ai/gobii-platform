@@ -259,7 +259,8 @@ TEMPLATES = [
                 "pages.context_processors.account_info",
                 "pages.context_processors.environment_info",
                 "pages.context_processors.show_signup_tracking",
-                "pages.context_processors.analytics"
+                "pages.context_processors.analytics",
+                "pages.context_processors.llm_bootstrap",
             ],
             # Manually register project-local template tag libraries
             "libraries": {

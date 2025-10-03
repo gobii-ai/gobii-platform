@@ -9,13 +9,23 @@ The configuration uses a similar pattern to browser use tasks for consistency.
 """
 import os
 import logging
-from typing import Dict, List, Tuple, Any
 import random
+from typing import Dict, List, Tuple, Any
+
 from django.apps import apps
+from django.core.cache import cache
 from django.db import connection
 from django.db.models import Q
 
 logger = logging.getLogger(__name__)
+
+
+class LLMNotConfiguredError(RuntimeError):
+    """Raised when no LLM providers/endpoints are available for use."""
+
+
+_LLM_BOOTSTRAP_CACHE_KEY = "llm_bootstrap_required:v1"
+_LLM_BOOTSTRAP_CACHE_TTL = 30  # seconds
 
 # MODEL TESTING NOTES FOR PERSISTENT AGENTS:
 # - GLM-4.5 (OpenRouter): PASSED manual testing - works well with persistent agents
@@ -134,11 +144,8 @@ def get_llm_config() -> Tuple[str, dict]:
 
     Uses the same DB-backed tier selection as get_llm_config_with_failover
     with token_count=0 and returns the first (primary) config.
-    Raises ValueError if no DB tiers/endpoints are configured.
     """
     configs = get_llm_config_with_failover(token_count=0)
-    if not configs:
-        raise ValueError("No DB-configured LLM providers/endpoints available")
     _provider_key, model, params = configs[0]
     # Remove any internal-only hints that shouldn't be passed to litellm
     params = {k: v for k, v in params.items() if k not in ("supports_tool_choice", "use_parallel_tool_calls")}
@@ -213,7 +220,9 @@ def get_available_providers(provider_tiers: List[List[Tuple[str, float]]] = None
 def get_llm_config_with_failover(
     provider_tiers: List[List[Tuple[str, float]]] = None,
     agent_id: str = None,
-    token_count: int = 0
+    token_count: int = 0,
+    *,
+    allow_unconfigured: bool = False,
 ) -> List[Tuple[str, str, dict]]:
     """
     Get LLM configurations for tiered failover with token-based tier selection.
@@ -227,9 +236,9 @@ def get_llm_config_with_failover(
         
     Returns:
         List of (provider_name, model_name, litellm_params) tuples in failover order
-        
+
     Raises:
-        ValueError: If no providers are available with valid API keys
+        LLMNotConfiguredError: If no providers are available with valid API keys (unless allow_unconfigured=True)
     """
     # Always attempt DB-backed configuration first; fallback to legacy when empty
     try:
@@ -339,9 +348,17 @@ def get_llm_config_with_failover(
                 failover_configs.append((endpoint.key, endpoint.litellm_model, params_with_hints))
 
         if failover_configs:
+            _cache_bootstrap_status(False)
             return failover_configs
 
-    raise ValueError("No DB-configured LLM providers/endpoints available for the given token count")
+    if allow_unconfigured:
+        _cache_bootstrap_status(True)
+        return []
+
+    _cache_bootstrap_status(True)
+    raise LLMNotConfiguredError(
+        "No LLM providers are currently configured. Complete the setup wizard before running agents."
+    )
 
 
 def get_summarization_llm_config() -> Tuple[str, dict]:
@@ -356,8 +373,6 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
     """
     # DB-only: pick primary config and adjust temperature for summarisation
     configs = get_llm_config_with_failover(token_count=0)
-    if not configs:
-        raise ValueError("No DB-configured LLM providers/endpoints available for summarization")
     _provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm
     params = {
@@ -374,3 +389,47 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
         params["temperature"] = 1
 
     return model, params
+
+
+def _cache_bootstrap_status(is_required: bool) -> None:
+    """Cache bootstrap status so repeated UI checks avoid heavy DB queries."""
+    try:
+        cache.set(_LLM_BOOTSTRAP_CACHE_KEY, bool(is_required), _LLM_BOOTSTRAP_CACHE_TTL)
+    except Exception:
+        logger.debug("Unable to cache LLM bootstrap status", exc_info=True)
+
+
+def invalidate_llm_bootstrap_cache() -> None:
+    """Invalidate cached bootstrap status after config changes."""
+    try:
+        cache.delete(_LLM_BOOTSTRAP_CACHE_KEY)
+    except Exception:
+        logger.debug("Unable to invalidate LLM bootstrap cache", exc_info=True)
+
+
+def is_llm_bootstrap_required(*, force_refresh: bool = False) -> bool:
+    """Return True when the platform lacks any usable LLM configuration."""
+    if not force_refresh:
+        cached = cache.get(_LLM_BOOTSTRAP_CACHE_KEY)
+        if cached is not None:
+            return bool(cached)
+
+    try:
+        configs = get_llm_config_with_failover(token_count=0, allow_unconfigured=True)
+        required = not bool(configs)
+    except Exception:
+        required = True
+
+    _cache_bootstrap_status(required)
+    return required
+
+
+__all__ = [
+    "get_llm_config",
+    "get_llm_config_with_failover",
+    "REFERENCE_TOKENIZER_MODEL",
+    "get_summarization_llm_config",
+    "LLMNotConfiguredError",
+    "invalidate_llm_bootstrap_cache",
+    "is_llm_bootstrap_required",
+]
