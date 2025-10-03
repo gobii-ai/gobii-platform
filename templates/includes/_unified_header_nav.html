@@ -20,7 +20,7 @@
       <nav class="hidden md:flex items-center gap-x-6 text-sm font-medium">
         <a href="{% url 'pages:home' %}" class="text-slate-700 hover:text-blue-600">Home</a>
         <a href="/docs/" class="text-slate-700 hover:text-blue-600">API</a>
-        <a href="/blog/" class="text-slate-700 hover:text-blue-600">Blog</a>
+        <a href="{% url 'pages:blog_index' %}" class="text-slate-700 hover:text-blue-600">Blog</a>
         {% if settings.GOBII_PROPRIETARY_MODE %}
           <a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a>
           <a href="{% url 'proprietary:support' %}" class="text-slate-700 hover:text-blue-600">Support</a>
