@@ -2659,7 +2659,16 @@ class PersistentAgent(models.Model):
             }))
         except Exception:
             logger.exception("Failed to schedule agent HARD_DELETE cleanup for %s", self.id)
-        return super().delete(*args, **kwargs)
+
+        try:
+            return super().delete(*args, **kwargs)
+        except BrowserUseAgent.DoesNotExist:
+            logger.warning(
+                "PersistentAgent %s triggered BrowserUseAgent.DoesNotExist during delete; retrying with queryset delete",
+                self.id,
+                exc_info=True,
+            )
+            return self.__class__.objects.filter(pk=self.pk).delete()
 
 
 class PersistentAgentEnabledTool(models.Model):
@@ -4264,6 +4273,7 @@ class PersistentAgentSystemStep(models.Model):
 
     class Code(models.TextChoices):
         PROCESS_EVENTS = "PROCESS_EVENTS", "Process Events"
+        PEER_LINK_CREATED = "PEER_LINK_CREATED", "Peer Link Created"
         SNAPSHOT = "SNAPSHOT", "Snapshot"
         CREDENTIALS_PROVIDED = "CREDENTIALS_PROVIDED", "Credentials Provided"
         CONTACTS_APPROVED = "CONTACTS_APPROVED", "Contacts Approved"

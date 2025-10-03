@@ -146,6 +146,8 @@ jobs:
             tag: batch_agent_chat
           - batch: peer_dm
             tag: batch_peer_dm
+          - batch: peer_intro
+            tag: batch_peer_intro
           - batch: allowlist_direction
             tag: batch_allowlist_direction
           - batch: console_context

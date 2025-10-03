@@ -2577,11 +2577,26 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             messages.error(request, "Agent assignment cannot be empty.")
             return redirect('agent_detail', pk=agent.pk)
 
-        # Check for uniqueness, excluding the current agent's BrowserUseAgent
-        if BrowserUseAgent.objects.filter(
-            user=request.user, 
+        # Fetch the browser agent defensively; it may be missing due to historical corruption.
+        browser_agent: BrowserUseAgent | None = None
+        if agent.browser_use_agent_id:
+            browser_agent = BrowserUseAgent.objects.filter(pk=agent.browser_use_agent_id).first()
+            if browser_agent is None:
+                logger.warning(
+                    "BrowserUseAgent %s not found while updating PersistentAgent %s",
+                    agent.browser_use_agent_id,
+                    agent.id,
+                )
+
+        # Check for uniqueness, excluding the current agent's BrowserUseAgent (if present)
+        exclude_pk = browser_agent.id if browser_agent else agent.browser_use_agent_id
+        browser_name_conflict = BrowserUseAgent.objects.filter(
+            user=request.user,
             name=new_name
-        ).exclude(pk=agent.browser_use_agent.pk).exists():
+        )
+        if exclude_pk:
+            browser_name_conflict = browser_name_conflict.exclude(pk=exclude_pk)
+        if browser_name_conflict.exists():
             messages.error(request, f"You already have an agent named '{new_name}'.")
             return redirect('agent_detail', pk=agent.pk)
 
@@ -2594,9 +2609,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 # Update names if they changed
                 if agent.name != new_name:
                     agent.name = new_name
-                    agent.browser_use_agent.name = new_name
+                    if browser_agent is not None:
+                        browser_agent.name = new_name
                     agent_fields_to_update.append('name')
-                    browser_agent_fields_to_update.append('name')
+                    if browser_agent is not None:
+                        browser_agent_fields_to_update.append('name')
 
                 # Update charter if it changed
                 if agent.charter != new_charter:
@@ -2622,8 +2639,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 # Persist changes if needed
                 if agent_fields_to_update:
                     agent.save(update_fields=agent_fields_to_update)
-                if browser_agent_fields_to_update:
-                    agent.browser_use_agent.save(update_fields=browser_agent_fields_to_update)
+                if browser_agent is not None and browser_agent_fields_to_update:
+                    browser_agent.save(update_fields=browser_agent_fields_to_update)
 
                 # If agent was soft-expired, restore schedule (from snapshot if missing) and mark active
                 if agent.life_state == PersistentAgent.LifeState.EXPIRED and agent.is_active:

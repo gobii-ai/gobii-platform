@@ -13,6 +13,8 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentMessage,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
 )
 
 
@@ -154,3 +156,77 @@ class PeerMessagingServiceTests(TestCase):
         response = execute_send_agent_message(self.agent_a, {"peer_agent_id": str(self.agent_a.id), "message": "hi"})
         self.assertEqual(response["status"], "error")
         self.assertIn("Cannot send", response["message"])
+
+
+@tag("batch_peer_intro")
+class AgentPeerLinkSignalTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_user(
+            username="peer-owner-signal",
+            email="owner-signal@example.com",
+            password="testpass123",
+        )
+
+        cls.browser_agent_a = BrowserUseAgent.objects.create(
+            user=cls.user,
+            name="Browser Signal A",
+        )
+        cls.browser_agent_b = BrowserUseAgent.objects.create(
+            user=cls.user,
+            name="Browser Signal B",
+        )
+
+        cls.agent_a = PersistentAgent.objects.create(
+            user=cls.user,
+            name="Signal Alpha",
+            charter="Coordinate launch readiness",
+            browser_use_agent=cls.browser_agent_a,
+        )
+        cls.agent_b = PersistentAgent.objects.create(
+            user=cls.user,
+            name="Signal Beta",
+            charter="Own vendor negotiations",
+            browser_use_agent=cls.browser_agent_b,
+        )
+
+    def test_peer_link_creation_creates_intro_steps_and_triggers_processing(self):
+        def immediate_on_commit(func, using=None):
+            func()
+
+        with patch('django.db.transaction.on_commit', immediate_on_commit), patch(
+            'api.agent.tasks.process_agent_events_task.delay'
+        ) as delay_mock:
+            link = AgentPeerLink.objects.create(
+                agent_a=self.agent_a,
+                agent_b=self.agent_b,
+                messages_per_window=2,
+                window_hours=6,
+                created_by=self.user,
+            )
+
+        steps_a = list(PersistentAgentStep.objects.filter(agent=self.agent_a))
+        self.assertEqual(len(steps_a), 1)
+        step_a = steps_a[0]
+        self.assertIn(self.agent_b.name, step_a.description)
+        self.assertIn("short introduction", step_a.description)
+        self.assertIn(self.agent_b.charter, step_a.description)
+        self.assertIsNotNone(step_a.system_step)
+        self.assertEqual(step_a.system_step.code, PersistentAgentSystemStep.Code.PEER_LINK_CREATED)
+
+        steps_b = list(PersistentAgentStep.objects.filter(agent=self.agent_b))
+        self.assertEqual(len(steps_b), 1)
+        step_b = steps_b[0]
+        self.assertIn(self.agent_a.name, step_b.description)
+        self.assertIn("short introduction", step_b.description)
+        self.assertIn(self.agent_a.charter, step_b.description)
+        self.assertIsNotNone(step_b.system_step)
+        self.assertEqual(step_b.system_step.code, PersistentAgentSystemStep.Code.PEER_LINK_CREATED)
+
+        delay_calls = {call.args[0] for call in delay_mock.call_args_list}
+        self.assertEqual(delay_calls, {str(self.agent_a.id), str(self.agent_b.id)})
+        self.assertEqual(delay_mock.call_count, 2)
+
+        self.assertIn(str(link.id), step_a.description)
+        self.assertIn(str(link.id), step_b.description)
