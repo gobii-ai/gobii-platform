@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+from django.core.exceptions import ValidationError
+from django.db import transaction
+
+from agent_namer import AgentNameGenerator
+from agents.services import AIEmployeeTemplateService, AgentService
+
+from api.models import BrowserUseAgent, PersistentAgent
+from config import settings
+from constants.plans import PlanNamesChoices
+
+
+class PersistentAgentProvisioningError(Exception):
+    """Raised when a persistent agent cannot be provisioned."""
+
+
+@dataclass(slots=True)
+class ProvisioningResult:
+    agent: PersistentAgent
+    browser_agent: BrowserUseAgent
+    applied_template_code: Optional[str] = None
+    applied_schedule: Optional[str] = None
+
+
+class PersistentAgentProvisioningService:
+    """Utilities for creating persistent agents from API or console flows."""
+
+    DEFAULT_MAX_NAME_ATTEMPTS = 10
+
+    @classmethod
+    def generate_unique_name(cls, user, *, max_attempts: int | None = None) -> str:
+        """Return a unique agent name for the given user."""
+        attempts = int(max_attempts or cls.DEFAULT_MAX_NAME_ATTEMPTS)
+        for _ in range(attempts):
+            candidate = AgentNameGenerator.generate()
+            if not BrowserUseAgent.objects.filter(user=user, name=candidate).exists():
+                return candidate
+
+        base_candidate = AgentNameGenerator.generate()
+        suffix = 1
+        while BrowserUseAgent.objects.filter(user=user, name=f"{base_candidate} {suffix}").exists():
+            suffix += 1
+            if suffix > 100:
+                raise PersistentAgentProvisioningError("Unable to generate a unique agent name after extensive attempts.")
+        return f"{base_candidate} {suffix}"
+
+    @classmethod
+    def provision(
+        cls,
+        *,
+        user,
+        organization=None,
+        name: Optional[str] = None,
+        charter: str | None = "",
+        schedule: str | None = None,
+        is_active: bool = True,
+        life_state: str | None = None,
+        whitelist_policy: str | None = None,
+        preferred_contact_endpoint=None,
+        template_code: str | None = None,
+    ) -> ProvisioningResult:
+        """Create a new persistent agent and its backing browser agent."""
+        agent_name = name or cls.generate_unique_name(user)
+
+        # Ensure the user has capacity before we hit database constraints — the
+        # BrowserUseAgent clean() method enforces this but we prefer an early,
+        # explicit error for API consumers.
+        if not AgentService.has_agents_available(user):
+            raise PersistentAgentProvisioningError("Agent limit reached for this user.")
+
+        applied_template_code: Optional[str] = None
+        applied_schedule: Optional[str] = None
+
+        with transaction.atomic():
+            browser_agent = BrowserUseAgent(user=user, name=agent_name)
+            browser_agent.full_clean()
+            browser_agent.save()
+
+            persistent_agent = PersistentAgent(
+                user=user,
+                organization=organization,
+                name=agent_name,
+                charter=charter or "",
+                schedule=schedule,
+                browser_use_agent=browser_agent,
+                is_active=is_active,
+                preferred_contact_endpoint=preferred_contact_endpoint,
+            )
+
+            if life_state:
+                persistent_agent.life_state = life_state
+            if whitelist_policy:
+                persistent_agent.whitelist_policy = whitelist_policy
+
+            try:
+                persistent_agent.full_clean()
+            except ValidationError as exc:
+                # Roll back browser agent if persistent agent validation fails.
+                raise PersistentAgentProvisioningError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages) from exc
+
+            persistent_agent.save()
+
+            # Default daily credit limit for free plans
+            if settings.GOBII_PROPRIETARY_MODE:
+                owner = organization or user
+                plan_value = getattr(getattr(owner, "billing", None), "subscription", PlanNamesChoices.FREE)
+
+                try:
+                    plan_choice = PlanNamesChoices(plan_value)
+                except ValueError:
+                    plan_choice = PlanNamesChoices.FREE
+
+                if plan_choice == PlanNamesChoices.FREE:
+                    persistent_agent.daily_credit_limit = settings.DEFAULT_AGENT_DAILY_CREDIT_LIMIT
+                    persistent_agent.save(update_fields=["daily_credit_limit"])
+
+            if template_code:
+                template = AIEmployeeTemplateService.get_template_by_code(template_code)
+                if template:
+                    applied_template_code = template.code
+                    updates: list[str] = []
+
+                    if not charter and template.charter:
+                        persistent_agent.charter = template.charter
+                        updates.append("charter")
+
+                    computed = AIEmployeeTemplateService.compute_schedule_with_jitter(
+                        template.base_schedule,
+                        template.schedule_jitter_minutes,
+                    )
+                    if computed:
+                        persistent_agent.schedule = computed
+                        persistent_agent.schedule_snapshot = template.base_schedule
+                        applied_schedule = computed
+                        updates.extend(["schedule", "schedule_snapshot"])
+
+                    if updates:
+                        try:
+                            persistent_agent.full_clean()
+                        except ValidationError as exc:
+                            raise PersistentAgentProvisioningError(
+                                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+                            ) from exc
+                        persistent_agent.save(update_fields=updates)
+
+            return ProvisioningResult(
+                agent=persistent_agent,
+                browser_agent=browser_agent,
+                applied_template_code=applied_template_code,
+                applied_schedule=applied_schedule,
+            )

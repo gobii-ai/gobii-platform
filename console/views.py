@@ -91,10 +91,13 @@ from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
-from agent_namer import AgentNameGenerator
 from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import enable_mcp_tool
 from api.agent.tasks import process_agent_events_task
+from api.services.persistent_agents import (
+    PersistentAgentProvisioningError,
+    PersistentAgentProvisioningService,
+)
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
@@ -1742,59 +1745,20 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                                 form.add_error(None, message_text)
                                 return self.render_to_response(self.get_context_data(form=form))
 
-                    # Generate a unique agent name after confirming permissions
-                    agent_name = self._generate_unique_agent_name(request.user)
-
-                    # Create the BrowserUseAgent first
-                    browser_agent = BrowserUseAgent.objects.create(
-                        user=request.user,
-                        name=agent_name
-                    )
-
-                    # Then create the PersistentAgent with no initial charter
-                    # The agent will set its own charter based on the user's message
-                    persistent_agent = PersistentAgent.objects.create(
-                        user=request.user,
-                        organization=organization,  # Set organization if in org context
-                        name=agent_name,
-                        charter="",  # Empty charter - agent will set this itself
-                        schedule=None,
-                        browser_use_agent=browser_agent,
-                        preferred_contact_endpoint=None  # Temporary until we set it below
-                    )
-
-                    # Default daily credit limit for free plans
-                    if settings.GOBII_PROPRIETARY_MODE:
-                        owner = organization or request.user
-                        plan_value = getattr(getattr(owner, "billing", None), "subscription", PlanNamesChoices.FREE)
-
-                        try:
-                            plan_choice = PlanNamesChoices(plan_value)
-                        except ValueError:
-                            plan_choice = PlanNamesChoices.FREE
-
-                        if plan_choice == PlanNamesChoices.FREE:
-                            persistent_agent.daily_credit_limit = settings.DEFAULT_AGENT_DAILY_CREDIT_LIMIT
-                            persistent_agent.save(update_fields=["daily_credit_limit"])
-
-                    if selected_template:
-                        fields_to_update = []
-                        if selected_template.charter:
-                            persistent_agent.charter = selected_template.charter
-                            fields_to_update.append("charter")
-
-                        applied_schedule = AIEmployeeTemplateService.compute_schedule_with_jitter(
-                            selected_template.base_schedule,
-                            selected_template.schedule_jitter_minutes,
+                    template_code = selected_template.code if selected_template else None
+                    try:
+                        provisioning = PersistentAgentProvisioningService.provision(
+                            user=request.user,
+                            organization=organization,
+                            template_code=template_code,
                         )
+                    except PersistentAgentProvisioningError as exc:
+                        raise ValidationError({"__all__": exc.args[0] if exc.args else "Unable to create agent."}) from exc
 
-                        if applied_schedule:
-                            persistent_agent.schedule = applied_schedule
-                            persistent_agent.schedule_snapshot = selected_template.base_schedule
-                            fields_to_update.extend(["schedule", "schedule_snapshot"])
-
-                        if fields_to_update:
-                            persistent_agent.save(update_fields=fields_to_update)
+                    persistent_agent = provisioning.agent
+                    browser_agent = provisioning.browser_agent
+                    agent_name = persistent_agent.name
+                    applied_schedule = provisioning.applied_schedule or applied_schedule
                     
                     # Generate a unique email for the agent itself
                     user_contact = None
@@ -1985,26 +1949,6 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
         context = self.get_context_data(form=form)
         context['form'] = form
         return self.render_to_response(context)
-
-    @tracer.start_as_current_span("CONSOLE Agent Create Contact - Generate Unique Name")
-    def _generate_unique_agent_name(self, user, max_attempts=10):
-        """Generate a unique agent name for the given user."""
-        for attempt in range(max_attempts):
-            name = AgentNameGenerator.generate()
-            
-            # Check if this name is already taken by this user's agents
-            if not BrowserUseAgent.objects.filter(user=user, name=name).exists():
-                return name
-                
-        # Fallback: append a number to ensure uniqueness
-        base_name = AgentNameGenerator.generate()
-        counter = 1
-        while BrowserUseAgent.objects.filter(user=user, name=f"{base_name} {counter}").exists():
-            counter += 1
-            if counter > 100:  # Safety valve
-                raise ValueError("Unable to generate unique agent name after extensive attempts")
-        
-        return f"{base_name} {counter}"
 
     @tracer.start_as_current_span("CONSOLE Agent Create Contact - Generate Unique Email")
     def _generate_unique_agent_email(self, agent_name: str, max_attempts=100) -> str:

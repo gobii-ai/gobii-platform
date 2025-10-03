@@ -1,7 +1,14 @@
 # gobii_platform/api/serializers.py
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from api.agent.short_description import build_listing_description
-from .models import ApiKey, BrowserUseAgent, BrowserUseAgentTask
+from .models import (
+    ApiKey,
+    BrowserUseAgent,
+    BrowserUseAgentTask,
+    PersistentAgent,
+    PersistentAgentCommsEndpoint,
+)
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
 
 # Serializer for Listing Agents (id, name, created_at)
@@ -182,3 +189,170 @@ class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):
         fields = ['id', 'agent_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at', 'credits_cost']
         read_only_fields = fields
         ref_name = "TaskList" # Optional: for explicit component naming
+
+
+class PersistentAgentListSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(read_only=True, format='hex_verbose')
+    user_id = serializers.UUIDField(source='user.id', read_only=True, format='hex_verbose')
+    organization_id = serializers.UUIDField(read_only=True, allow_null=True, format='hex_verbose')
+    browser_use_agent_id = serializers.UUIDField(source='browser_use_agent.id', read_only=True, format='hex_verbose')
+    preferred_contact_endpoint_id = serializers.UUIDField(
+        source='preferred_contact_endpoint.id',
+        read_only=True,
+        allow_null=True,
+        format='hex_verbose',
+    )
+
+    class Meta:
+        model = PersistentAgent
+        fields = [
+            'id',
+            'name',
+            'charter',
+            'schedule',
+            'is_active',
+            'life_state',
+            'whitelist_policy',
+            'last_interaction_at',
+            'created_at',
+            'updated_at',
+            'user_id',
+            'organization_id',
+            'browser_use_agent_id',
+            'preferred_contact_endpoint_id',
+        ]
+        read_only_fields = fields
+        ref_name = "PersistentAgentList"
+
+
+class PersistentAgentSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(read_only=True, format='hex_verbose')
+    user_id = serializers.UUIDField(source='user.id', read_only=True, format='hex_verbose')
+    organization_id = serializers.UUIDField(read_only=True, allow_null=True, format='hex_verbose')
+    browser_use_agent_id = serializers.UUIDField(source='browser_use_agent.id', read_only=True, format='hex_verbose')
+    preferred_contact_endpoint_id = serializers.UUIDField(
+        source='preferred_contact_endpoint.id',
+        read_only=True,
+        allow_null=True,
+        format='hex_verbose',
+    )
+    preferred_contact_endpoint = serializers.PrimaryKeyRelatedField(
+        queryset=PersistentAgentCommsEndpoint.objects.all(),
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
+    template_code = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
+
+    class Meta:
+        model = PersistentAgent
+        fields = [
+            'id',
+            'name',
+            'charter',
+            'short_description',
+            'schedule',
+            'schedule_snapshot',
+            'is_active',
+            'life_state',
+            'whitelist_policy',
+            'last_interaction_at',
+            'created_at',
+            'updated_at',
+            'user_id',
+            'organization_id',
+            'browser_use_agent_id',
+            'preferred_contact_endpoint_id',
+            'preferred_contact_endpoint',
+            'template_code',
+        ]
+        read_only_fields = (
+            'id',
+            'short_description',
+            'last_interaction_at',
+            'created_at',
+            'updated_at',
+            'user_id',
+            'organization_id',
+            'browser_use_agent_id',
+            'preferred_contact_endpoint_id',
+        )
+        ref_name = "PersistentAgentDetail"
+
+    def validate_preferred_contact_endpoint(self, value):
+        if value is None:
+            return None
+
+        instance = getattr(self, 'instance', None)
+        if value.owner_agent_id and (instance is None or value.owner_agent_id != instance.id):
+            raise serializers.ValidationError("Contact endpoint belongs to a different agent.")
+        return value
+
+    def create(self, validated_data):
+        from api.services.persistent_agents import (
+            PersistentAgentProvisioningError,
+            PersistentAgentProvisioningService,
+        )
+
+        request = self.context['request']
+        organization = self.context.get('organization')
+        template_code = validated_data.pop('template_code', None)
+        preferred_endpoint = validated_data.pop('preferred_contact_endpoint', None)
+
+        provision_kwargs = {
+            'user': request.user,
+            'organization': organization,
+            'name': validated_data.get('name'),
+            'charter': validated_data.get('charter'),
+            'schedule': validated_data.get('schedule'),
+            'is_active': validated_data.get('is_active', True),
+            'life_state': validated_data.get('life_state'),
+            'whitelist_policy': validated_data.get('whitelist_policy'),
+            'preferred_contact_endpoint': preferred_endpoint,
+            'template_code': template_code or None,
+        }
+
+        try:
+            result = PersistentAgentProvisioningService.provision(**provision_kwargs)
+        except PersistentAgentProvisioningError as exc:
+            raise serializers.ValidationError({'non_field_errors': [str(exc)]}) from exc
+
+        agent = result.agent
+
+        # If incoming payload explicitly provided fields that differ from defaults,
+        # ensure they are persisted after provisioning.
+        post_create_updates = {}
+        for field in ('charter', 'schedule', 'is_active', 'life_state', 'whitelist_policy'):
+            if field in validated_data and getattr(agent, field) != validated_data[field]:
+                setattr(agent, field, validated_data[field])
+                post_create_updates[field] = validated_data[field]
+        if post_create_updates:
+            try:
+                agent.full_clean()
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages) from exc
+            agent.save(update_fields=list(post_create_updates.keys()))
+
+        return agent
+
+    def update(self, instance, validated_data):
+        preferred_endpoint = validated_data.pop('preferred_contact_endpoint', serializers.empty)
+        validated_data.pop('template_code', None)
+
+        dirty_fields = set()
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+            dirty_fields.add(field)
+
+        if preferred_endpoint is not serializers.empty:
+            instance.preferred_contact_endpoint = preferred_endpoint
+            dirty_fields.add('preferred_contact_endpoint')
+
+        try:
+            instance.full_clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages) from exc
+
+        update_fields = list(dirty_fields)
+        instance.save(update_fields=update_fields or None)
+        return instance
