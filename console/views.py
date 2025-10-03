@@ -117,6 +117,11 @@ BILLING_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.BILLING,
 }
 
+MEMBER_MANAGE_ROLES = {
+    OrganizationMembership.OrgRole.OWNER,
+    OrganizationMembership.OrgRole.ADMIN,
+}
+
 API_KEY_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.ADMIN,
@@ -4564,6 +4569,21 @@ class OrganizationCreateView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         return render(request, self.template_name, {"form": form})
 
 
+def get_org_and_active_membership(request, org_id):
+    """Return organization and the requesting user's active membership."""
+    org = get_object_or_404(Organization, id=org_id)
+    membership = (
+        OrganizationMembership.objects.filter(
+            org=org,
+            user=request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        .select_related("user")
+        .first()
+    )
+    return org, membership
+
+
 class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     """Display organization details and members."""
 
@@ -4571,11 +4591,18 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     template_name = "console/organization_detail.html"
 
     def dispatch(self, request, *args, **kwargs):
-        self.org = get_object_or_404(Organization, id=kwargs["org_id"])
-        if not OrganizationMembership.objects.filter(
-            org=self.org, user=request.user, status=OrganizationMembership.OrgStatus.ACTIVE
-        ).exists():
+        self.org, self.membership = get_org_and_active_membership(
+            request,
+            kwargs["org_id"],
+        )
+
+        if not self.membership:
             return HttpResponseForbidden()
+
+        self.can_manage_members = self.membership.role in MEMBER_MANAGE_ROLES
+        self.can_manage_billing = self.membership.role in BILLING_MANAGE_ROLES
+        self.is_org_owner = self.membership.role == OrganizationMembership.OrgRole.OWNER
+        self.is_org_admin = self.membership.role == OrganizationMembership.OrgRole.ADMIN
         # Set console context to this organization when visiting its page directly
         request.session['context_type'] = 'organization'
         request.session['context_id'] = str(self.org.id)
@@ -4602,41 +4629,27 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         )
         billing = getattr(self.org, "billing", None)
 
-        # Determine viewer's membership and allowed role choices for UI
-        my_membership = OrganizationMembership.objects.filter(
-            org=self.org,
-            user=self.request.user,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-        ).first()
-        can_manage_members = my_membership and my_membership.role in (
-            OrganizationMembership.OrgRole.OWNER,
-            OrganizationMembership.OrgRole.ADMIN,
-        )
-        can_manage_billing = my_membership and my_membership.role in (
-            OrganizationMembership.OrgRole.OWNER,
-            OrganizationMembership.OrgRole.ADMIN,
-            OrganizationMembership.OrgRole.BILLING,
-        )
         all_role_choices = list(OrganizationMembership.OrgRole.choices)
-        if my_membership and my_membership.role == OrganizationMembership.OrgRole.OWNER:
+        if self.is_org_owner:
             allowed_role_choices = all_role_choices
-        elif my_membership and my_membership.role == OrganizationMembership.OrgRole.ADMIN:
+        elif self.is_org_admin:
             allowed_role_choices = [c for c in all_role_choices if c[0] != OrganizationMembership.OrgRole.OWNER]
         else:
             allowed_role_choices = []
+
+        invite_form = context.get("invite_form") or OrganizationInviteForm(org=self.org)
 
         context.update(
             {
                 "org": self.org,
                 "members": members,
-                # Pass org to invite form so server-side validation context is explicit
-                "invite_form": OrganizationInviteForm(org=self.org),
+                "invite_form": invite_form,
                 "pending_invites": org_pending_invites,
-                "can_manage_members": bool(can_manage_members),
-                "can_manage_billing": bool(can_manage_billing),
+                "can_manage_members": self.can_manage_members,
+                "can_manage_billing": self.can_manage_billing,
                 "allowed_role_choices": allowed_role_choices,
-                "is_org_owner": bool(my_membership and my_membership.role == OrganizationMembership.OrgRole.OWNER),
-                "is_org_admin": bool(my_membership and my_membership.role == OrganizationMembership.OrgRole.ADMIN),
+                "is_org_owner": self.is_org_owner,
+                "is_org_admin": self.is_org_admin,
                 "org_billing": billing,
             }
         )
@@ -4645,6 +4658,9 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     @tracer.start_as_current_span("CONSOLE Organization Invite")
     @transaction.atomic
     def post(self, request, *args, **kwargs):
+        if not self.can_manage_members:
+            return HttpResponseForbidden()
+
         form = OrganizationInviteForm(request.POST, org=self.org)
         # Defensive check: block when no seats available, even if submitted concurrently
         billing = getattr(self.org, "billing", None)
@@ -4704,48 +4720,53 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
             except Exception as e:
                 logger.warning("Failed sending org invite email: %s", e)
             messages.success(request, "Invite sent.")
+            if request.htmx:
+                response = HttpResponse(status=204)
+                response["HX-Redirect"] = reverse("organization_detail", kwargs={"org_id": self.org.id})
+                return response
             return redirect("organization_detail", org_id=self.org.id)
-        members = OrganizationMembership.objects.filter(
-            org=self.org, status=OrganizationMembership.OrgStatus.ACTIVE
-        ).select_related("user")
-        now = timezone.now()
-        org_pending_invites = (
-            OrganizationInvite.objects.filter(
-                org=self.org,
-                accepted_at__isnull=True,
-                revoked_at__isnull=True,
-                expires_at__gte=now,
-            ).select_related("invited_by")
-        )
-        my_membership = OrganizationMembership.objects.filter(
-            org=self.org,
-            user=request.user,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-        ).first()
-        can_manage_members = my_membership and my_membership.role in (
-            OrganizationMembership.OrgRole.OWNER,
-            OrganizationMembership.OrgRole.ADMIN,
-        )
-        can_manage_billing = my_membership and my_membership.role in (
-            OrganizationMembership.OrgRole.OWNER,
-            OrganizationMembership.OrgRole.ADMIN,
-            OrganizationMembership.OrgRole.BILLING,
-        )
-        return render(
-            request,
-            self.template_name,
-            {
+
+        if request.htmx:
+            context = {
+                "form": form,
                 "org": self.org,
-                "members": members,
-                "invite_form": form,
-                "pending_invites": org_pending_invites,
-                "org_billing": getattr(self.org, "billing", None),
-                "seat_purchase_required": bool(getattr(self.org.billing, "purchased_seats", 0) <= 0),
-                "seat_purchase_form": OrganizationSeatPurchaseForm(org=self.org),
-                "can_manage_members": bool(can_manage_members),
-                "can_manage_billing": bool(can_manage_billing),
-            },
+                "org_billing": billing,
+                "can_manage_billing": self.can_manage_billing,
+            }
+            return render(
+                request,
+                "partials/_org_invite_modal.html",
+                context,
+                status=400,
+            )
+
+        context = self.get_context_data(invite_form=form)
+        return self.render_to_response(context)
+
+
+class OrganizationInviteModalView(WaffleFlagMixin, LoginRequiredMixin, View):
+    waffle_flag = ORGANIZATIONS
+
+    def dispatch(self, request, *args, **kwargs):
+        self.org, self.membership = get_org_and_active_membership(
+            request,
+            kwargs["org_id"],
         )
+
+        if not self.membership or self.membership.role not in MEMBER_MANAGE_ROLES:
+            return HttpResponseForbidden()
+
+        self.can_manage_billing = self.membership.role in BILLING_MANAGE_ROLES
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        context = {
+            "form": OrganizationInviteForm(org=self.org),
+            "org": self.org,
+            "org_billing": getattr(self.org, "billing", None),
+            "can_manage_billing": self.can_manage_billing,
+        }
+        return render(request, "partials/_org_invite_modal.html", context)
 
 
 class OrganizationInviteValidationMixin:

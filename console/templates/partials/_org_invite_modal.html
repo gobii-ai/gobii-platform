@@ -1,0 +1,104 @@
+{% extends "partials/_generic_modal.html" %}
+
+{% block modal_id %}org-invite-modal{% endblock %}
+{% block modal_event_id %}org-invite-modal{% endblock %}
+{% block modal_event_id_close %}org-invite-modal{% endblock %}
+
+{% block modal_header %}{% endblock %}
+
+{% block modal_icon_bg %}bg-blue-100{% endblock %}
+{% block modal_icon_color %}text-blue-600{% endblock %}
+{% block modal_icon %}
+<svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666a11.944 11.944 0 01-7.162 2.572 11.944 11.944 0 01-7.164-2.572 6.049 6.049 0 01-.037-.665l.001-.031a3 3 0 014.682-2.72 3.001 3.001 0 005.998 0 3 3 0 014.698 2.72z" />
+  <path stroke-linecap="round" stroke-linejoin="round" d="M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+  <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 7.5h-2m-1 0h-2M6 6v-2m0 6v2m12-6h2m1 0h2M18 6V4m0 6v2" />
+</svg>
+{% endblock %}
+
+{% block modal_body_title %}
+<h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title-body">
+  Invite a Member
+</h3>
+{% endblock %}
+
+{% block modal_body %}
+<div class="space-y-4 text-left">
+  <p class="text-sm text-gray-600">
+    Send an invitation for a teammate to join <span class="font-medium">{{ org.name }}</span>.
+  </p>
+
+  {% if form.non_field_errors %}
+    <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      {% for error in form.non_field_errors %}
+        <p>{{ error|striptags }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if org_billing and org_billing.seats_available <= 0 %}
+    <div class="flex gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+      <svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-yellow-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+      </svg>
+      <div>
+        <span class="font-medium">No seats available.</span> Purchase additional seats before inviting new members.
+        {% if can_manage_billing %}
+          <a href="{% url 'billing' %}" class="font-medium underline">Manage seats</a>.
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
+  <form
+    id="org-invite-form"
+    method="post"
+    hx-post="{% url 'organization_detail' org_id=org.id %}"
+    hx-target="#modal-container"
+    hx-swap="innerHTML"
+    class="space-y-4"
+  >
+    {% csrf_token %}
+    <fieldset class="space-y-4" {% if org_billing and org_billing.seats_available <= 0 %}disabled aria-disabled="true"{% endif %}>
+      <div class="space-y-1">
+        {{ form.email.label_tag }}
+        {{ form.email }}
+        {% if form.email.errors %}
+          <p class="text-sm text-red-600">{{ form.email.errors|join:", "|striptags }}</p>
+        {% endif %}
+      </div>
+      <div class="space-y-1">
+        {{ form.role.label_tag }}
+        {{ form.role }}
+        {% if form.role.errors %}
+          <p class="text-sm text-red-600">{{ form.role.errors|join:", "|striptags }}</p>
+        {% endif %}
+      </div>
+    </fieldset>
+  </form>
+
+  <div x-init="$nextTick(() => { $dispatch('open-modal', { id: 'org-invite-modal' }); $el.remove(); })"></div>
+</div>
+{% endblock %}
+
+{% block modal_footer %}
+{% if org_billing and org_billing.seats_available <= 0 %}
+  <button type="submit"
+          form="org-invite-form"
+          class="inline-flex w-full justify-center rounded-md border border-transparent bg-gray-400 px-4 py-2 text-base font-medium text-white shadow-sm opacity-70 cursor-not-allowed sm:ml-3 sm:w-auto sm:text-sm"
+          disabled aria-disabled="true">
+    Send Invite
+  </button>
+{% else %}
+  <button type="submit"
+          form="org-invite-form"
+          class="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm">
+    Send Invite
+  </button>
+{% endif %}
+<button type="button"
+        class="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+        x-on:click="$dispatch('close-modal', { id: 'org-invite-modal' })">
+  Cancel
+</button>
+{% endblock %}

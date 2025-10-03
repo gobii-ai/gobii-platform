@@ -1,158 +1,202 @@
 {% extends "console_page.html" %}
 
 {% block console_content %}
-<div class="max-w-3xl space-y-8" x-data="{}">
-  <div class="flex items-center justify-between">
-    <h1 class="text-2xl font-semibold text-gray-800">{{ org.name }}</h1>
-  </div>
+<div class="space-y-6 pb-6" x-data="{}">
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+    <div class="px-6 py-5 border-b border-gray-200/70 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div class="space-y-2">
+        <h1 class="text-2xl font-semibold text-gray-800">{{ org.name }}</h1>
+        <p class="text-sm text-gray-500">
+          Manage members, invitations, and seat usage for this organization.
+        </p>
+      </div>
+      {% if org_billing and can_manage_billing %}
+        <a href="{% url 'billing' %}"
+           class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+          Manage Seats
+        </a>
+      {% endif %}
+    </div>
 
-  {% if org_billing %}
-  <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
-    <p class="text-sm text-gray-700">
-      <span class="font-medium">Seats purchased:</span> {{ org_billing.purchased_seats }} ·
-      <span class="font-medium">In Use:</span> {{ org_billing.seats_reserved }} ·
-      <span class="font-medium">Available:</span> {{ org_billing.seats_available }}
-    </p>
-    {% if can_manage_billing %}
-    <a href="{% url 'billing' %}"
-       class="inline-flex items-center px-3 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700">
-      Manage seats
-    </a>
-    {% endif %}
-  </div>
-  {% endif %}
-
-  <div>
-    <h2 class="text-lg font-medium text-gray-800 mb-2">Members</h2>
-    <ul class="bg-white shadow rounded-lg divide-y divide-gray-200">
-      {% for member in members %}
-      <li class="px-4 py-3 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <span>{{ member.user.email }}</span>
-          <span class="text-xs text-gray-500 capitalize">{{ member.get_role_display }}</span>
-        </div>
-        <div class="flex items-center gap-2">
-          {% if can_manage_members %}
-          <form method="post" action="{% url 'org_member_role_update_org' org.id member.user.id %}" class="flex items-center gap-2">
-            {% csrf_token %}
-            <div class="flex rounded-md shadow-sm">
-              <select name="role" class="text-sm border-gray-300 rounded-l-md rounded-r-none focus:z-10"
-              {% if is_org_admin and member.role == 'owner' %}disabled{% endif %}>
-              {% for value,label in allowed_role_choices %}
-                <option value="{{ value }}" {% if member.role == value %}selected{% endif %}
-                  {% if is_org_admin and value == 'owner' %}disabled{% endif %}>{{ label }}</option>
-              {% endfor %}
-              </select>
-              <button type="submit"
-                      class="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-l-0 border-gray-300 rounded-r-md hover:bg-gray-50 focus:z-10">
-                Update
-              </button>
-            </div>
-          </form>
-          {% endif %}
-          {% if can_manage_members and member.user.id != request.user.id %}
-          <button
-            type="button"
-            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 w-24"
-            @click="$dispatch('open-modal', { id: 'org-member-remove-modal', url: '{% url 'org_member_remove_org' org.id member.user.id %}' })"
-          >
-            Remove
-          </button>
-          {% endif %}
-          {% if member.user.id == request.user.id %}
-          <button
-            type="button"
-            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 w-24"
-            @click="$dispatch('open-modal', { id: 'org-leave-modal', url: '{% url 'org_leave_org' org.id %}' })"
-          >
-            Leave
-          </button>
-          {% endif %}
-        </div>
-      </li>
-      {% endfor %}
-    </ul>
-  </div>
-
-  <div>
-    <h2 class="text-lg font-medium text-gray-800 mb-2">Invite Member</h2>
-    {% if org_billing and org_billing.seats_available <= 0 %}
-      <div class="mb-3 rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 flex gap-2">
-        <svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-yellow-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-        </svg>
-        <div>
-          <span class="font-medium">No seats available.</span> Purchase additional seats to invite new members.
-          {% if can_manage_billing %}
-            <a href="{% url 'billing' %}" class="underline font-medium">Manage seats</a>.
-          {% endif %}
-        </div>
+    {% if org_billing %}
+      <div class="px-6 py-5 bg-gray-50/70">
+        <dl class="grid gap-4 sm:grid-cols-3">
+          <div class="rounded-xl border border-gray-200/80 bg-white px-4 py-3 shadow-sm">
+            <dt class="text-xs font-semibold tracking-wide text-gray-500 uppercase">Seats Purchased</dt>
+            <dd class="mt-1 text-lg font-semibold text-gray-900">{{ org_billing.purchased_seats }}</dd>
+          </div>
+          <div class="rounded-xl border border-gray-200/80 bg-white px-4 py-3 shadow-sm">
+            <dt class="text-xs font-semibold tracking-wide text-gray-500 uppercase">In Use</dt>
+            <dd class="mt-1 text-lg font-semibold text-gray-900">{{ org_billing.seats_reserved }}</dd>
+          </div>
+          <div class="rounded-xl border border-gray-200/80 bg-white px-4 py-3 shadow-sm">
+            <dt class="text-xs font-semibold tracking-wide text-gray-500 uppercase">Available</dt>
+            <dd class="mt-1 text-lg font-semibold text-gray-900">
+              {{ org_billing.seats_available }}
+            </dd>
+          </div>
+        </dl>
       </div>
     {% endif %}
-    <form method="post" class="space-y-4">
-      {% csrf_token %}
-      <fieldset {% if org_billing and org_billing.seats_available <= 0 %}disabled aria-disabled="true"{% endif %}>
-        <div>
-          {{ invite_form.email.label_tag }}
-          {{ invite_form.email }}
-          {{ invite_form.email.errors }}
-        </div>
-        <div>
-          {{ invite_form.role.label_tag }}
-          {{ invite_form.role }}
-          {{ invite_form.role.errors }}
-        </div>
-      </fieldset>
-      {% if org_billing and org_billing.seats_available <= 0 %}
-        <button type="submit"
-                class="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed bg-gray-400"
-                disabled aria-disabled="true" title="No seats available">
-          Send Invite
-        </button>
-        <p class="text-xs text-gray-600 mt-1">Purchase more seats to invite members.</p>
-      {% else %}
-        <button type="submit"
-                class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
-          Send Invite
-        </button>
-      {% endif %}
-    </form>
+  </div>
+
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-200/70 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-800">Members</h2>
+        <p class="text-sm text-gray-500">{{ members|length }} member{{ members|length|pluralize }} in this organization.</p>
+      </div>
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
+        {% if can_manage_members %}
+          {% if org_billing and org_billing.seats_available <= 0 %}
+            <span class="inline-flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-1.5 text-xs font-medium text-yellow-800">
+              <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 4h.01M10.29 3.86l-7.4 12.84A2 2 0 004.53 20h14.94a2 2 0 001.64-3.2L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+              <span>No seats available</span>
+            </span>
+          {% endif %}
+          <button type="button"
+                  class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                  hx-get="{% url 'org_invite_modal' org_id=org.id %}"
+                  hx-target="#modal-container"
+                  hx-swap="innerHTML">
+            Invite Member
+          </button>
+        {% else %}
+          <div class="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
+            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 4h.01M10.29 3.86l-7.4 12.84A2 2 0 004.53 20h14.94a2 2 0 001.64-3.2L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span>Read-only access</span>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200/70">
+        <thead class="bg-gray-50/70">
+          <tr>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-semibold tracking-wide text-gray-500 uppercase">Member</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-semibold tracking-wide text-gray-500 uppercase">Role</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-right text-xs font-semibold tracking-wide text-gray-500 uppercase">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200/70">
+          {% for member in members %}
+            <tr class="hover:bg-gray-50 transition-colors">
+              <td class="px-3 md:px-6 py-4">
+                <div class="flex flex-col">
+                  <span class="text-sm font-medium text-gray-900">{{ member.user.email }}</span>
+                  <span class="text-xs text-gray-500 capitalize">{{ member.get_role_display }}</span>
+                </div>
+              </td>
+              <td class="px-3 md:px-6 py-4">
+                {% if can_manage_members %}
+                  <form method="post" action="{% url 'org_member_role_update_org' org.id member.user.id %}" class="flex flex-wrap items-center">
+                    {% csrf_token %}
+                    <select name="role"
+                            class="rounded-lg border border-gray-300 bg-white py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            {% if is_org_admin and member.role == 'owner' %}disabled{% else %}onchange="this.form.submit()"{% endif %}>
+                      {% for value,label in allowed_role_choices %}
+                        <option value="{{ value }}" {% if member.role == value %}selected{% endif %}
+                                {% if is_org_admin and value == 'owner' %}disabled{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </form>
+                {% else %}
+                  <span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 capitalize">
+                    {{ member.get_role_display }}
+                  </span>
+                {% endif %}
+              </td>
+              <td class="px-3 md:px-6 py-4">
+                <div class="flex justify-end gap-2">
+                  {% if can_manage_members and member.user.id != request.user.id %}
+                    <button type="button"
+                            class="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-200 focus:ring-offset-1"
+                            @click="$dispatch('open-modal', { id: 'org-member-remove-modal', url: '{% url 'org_member_remove_org' org.id member.user.id %}' })">
+                      Remove
+                    </button>
+                  {% endif %}
+                  {% if member.user.id == request.user.id %}
+                    <button type="button"
+                            class="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200 focus:ring-offset-1"
+                            @click="$dispatch('open-modal', { id: 'org-leave-modal', url: '{% url 'org_leave_org' org.id %}' })">
+                      Leave
+                    </button>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="3" class="px-3 md:px-6 py-6 text-center text-sm text-gray-500">
+                No members found for this organization.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   {% if pending_invites %}
-  <div>
-    <h2 class="text-lg font-medium text-gray-800 mb-2">Pending Invitations</h2>
-    <ul class="bg-white shadow rounded-lg divide-y divide-gray-200">
-      {% for invite in pending_invites %}
-      <li class="px-4 py-3 flex items-center justify-between">
+    <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-200/70 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div class="text-gray-900 font-medium">{{ invite.email }}</div>
-          <div class="text-sm text-gray-500">Role: {{ invite.get_role_display }} · Invited by {{ invite.invited_by.email }} · Expires {{ invite.expires_at|date:"M j, Y" }}</div>
+          <h2 class="text-lg font-semibold text-gray-800">Pending Invitations</h2>
+          <p class="text-sm text-gray-500">{{ pending_invites|length }} invitation{{ pending_invites|length|pluralize }} awaiting acceptance.</p>
         </div>
-        <div class="flex items-center gap-2">
-          <form method="post" action="{% url 'org_invite_resend_org' org.id invite.token %}">
-            {% csrf_token %}
-            <button type="submit" class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100">Resend</button>
-          </form>
-          <button
-            type="button"
-            class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100"
-            @click="$dispatch('open-modal', { id: 'org-invite-revoke-modal', url: '{% url 'org_invite_revoke_org' org.id invite.token %}' })"
-          >
-            Revoke
-          </button>
-        </div>
-      </li>
-      {% endfor %}
-    </ul>
-  </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200/70">
+          <thead class="bg-gray-50/70">
+            <tr>
+              <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-semibold tracking-wide text-gray-500 uppercase">Email</th>
+              <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-semibold tracking-wide text-gray-500 uppercase">Details</th>
+              <th scope="col" class="px-3 md:px-6 py-3 text-right text-xs font-semibold tracking-wide text-gray-500 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200/70">
+            {% for invite in pending_invites %}
+              <tr class="hover:bg-gray-50 transition-colors">
+                <td class="px-3 md:px-6 py-4 text-sm font-medium text-gray-900">{{ invite.email }}</td>
+                <td class="px-3 md:px-6 py-4 text-sm text-gray-600">
+                  <span class="capitalize">{{ invite.get_role_display }}</span>
+                  <span class="text-gray-400">·</span>
+                  Invited by {{ invite.invited_by.email }}
+                  <span class="text-gray-400">·</span>
+                  Expires {{ invite.expires_at|date:"M j, Y" }}
+                </td>
+                <td class="px-3 md:px-6 py-4">
+                  <div class="flex justify-end gap-2">
+                    <form method="post" action="{% url 'org_invite_resend_org' org.id invite.token %}">
+                      {% csrf_token %}
+                      <button type="submit"
+                              class="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-1">
+                        Resend
+                      </button>
+                    </form>
+                    <button type="button"
+                            class="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-200 focus:ring-offset-1"
+                            @click="$dispatch('open-modal', { id: 'org-invite-revoke-modal', url: '{% url 'org_invite_revoke_org' org.id invite.token %}' })">
+                      Revoke
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
   {% endif %}
 
-  {# Include revoke confirm modal for invites #}
   {% include "partials/_org_invite_revoke_modal.html" %}
-  {# Include remove confirm modal for members #}
   {% include "partials/_org_member_remove_modal.html" %}
-  {# Include leave confirm modal for self #}
   {% include "partials/_org_leave_modal.html" %}
 </div>
 {% endblock %}
