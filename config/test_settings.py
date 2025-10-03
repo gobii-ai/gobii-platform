@@ -18,8 +18,16 @@ os.environ.setdefault("SEGMENT_WRITE_KEY", "")
 os.environ.setdefault("GOBII_ENABLE_COMMUNITY_UNLIMITED", "0")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("GOBII_ENABLE_TRACING", "0")
+os.environ["STRIPE_ENABLED"] = "1"
+os.environ["STRIPE_TEST_SECRET_KEY"] = os.environ.get("STRIPE_TEST_SECRET_KEY") or "sk_test_dummy"
 
 from .settings import *
+
+# Ensure Stripe integration appears enabled during tests when patched/mocked.
+STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY", "sk_test_dummy")
+STRIPE_KEYS_PRESENT = True
+STRIPE_ENABLED = True
+STRIPE_DISABLED_REASON = ""
 
 # Override database to use SQLite for testing
 DATABASES = {
