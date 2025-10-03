@@ -26,6 +26,8 @@ from api.services.web_sessions import (
     touch_web_session,
 )
 
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+
 from console.agent_chat.access import resolve_agent
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
@@ -71,6 +73,19 @@ def _ensure_console_endpoints(agent: PersistentAgent, user) -> tuple[str, str]:
         defaults={"owner_agent": None, "is_primary": False},
     )
     return sender_address, recipient_address
+
+
+def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return analytics properties annotated with agent + organization context."""
+
+    payload: dict[str, Any] = {
+        "agent_id": str(agent.id),
+        "agent_name": agent.name,
+    }
+    if extra:
+        payload.update(extra)
+
+    return Analytics.with_org_properties(payload, organization=getattr(agent, "organization", None))
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -128,7 +143,7 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         sender_address, recipient_address = _ensure_console_endpoints(agent, request.user)
 
         # Keep the web session alive whenever the user sends a message from the console UI.
-        touch_web_session(
+        session_result = touch_web_session(
             agent,
             request.user,
             source="message",
@@ -150,6 +165,22 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
         info = ingest_inbound_message(CommsChannel.WEB, parsed)
         event = serialize_message_event(info.message)
+
+        props = {
+            "message_id": str(info.message.id),
+            "message_length": len(message_text),
+        }
+        if session_result:
+            props["session_key"] = str(session_result.session.session_key)
+            props["session_ttl_seconds"] = session_result.ttl_seconds
+
+        Analytics.track_event(
+            user_id=str(request.user.id),
+            event=AnalyticsEvent.WEB_CHAT_MESSAGE_SENT,
+            source=AnalyticsSource.WEB,
+            properties=_web_chat_properties(agent, props),
+        )
+
         return JsonResponse({"event": event}, status=201)
 
 
@@ -219,6 +250,19 @@ class AgentWebSessionStartAPIView(LoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
+        Analytics.track_event(
+            user_id=str(request.user.id),
+            event=AnalyticsEvent.WEB_CHAT_SESSION_STARTED,
+            source=AnalyticsSource.WEB,
+            properties=_web_chat_properties(
+                agent,
+                {
+                    "session_key": str(result.session.session_key),
+                    "session_ttl_seconds": result.ttl_seconds,
+                },
+            ),
+        )
+
         return _session_response(result)
 
 
@@ -266,5 +310,20 @@ class AgentWebSessionEndAPIView(LoginRequiredMixin, View):
             if str(exc) == "Unknown web session.":
                 return JsonResponse({"session_key": session_key, "ended": True})
             return HttpResponseBadRequest(str(exc))
+
+        session = result.session
+        props = {
+            "session_key": str(session.session_key),
+            "session_ttl_seconds": result.ttl_seconds,
+        }
+        if session.ended_at:
+            props["session_ended_at"] = session.ended_at.isoformat()
+
+        Analytics.track_event(
+            user_id=str(request.user.id),
+            event=AnalyticsEvent.WEB_CHAT_SESSION_ENDED,
+            source=AnalyticsSource.WEB,
+            properties=_web_chat_properties(agent, props),
+        )
 
         return _session_response(result)
