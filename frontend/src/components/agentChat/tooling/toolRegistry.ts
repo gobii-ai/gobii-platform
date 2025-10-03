@@ -1,5 +1,6 @@
 import { resolveDetailComponent } from '../toolDetails'
 import { summarizeSchedule } from '../../../util/schedule'
+import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
 import type { ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
 import type {
   ToolClusterTransform,
@@ -27,10 +28,6 @@ type ToolDescriptorConfig = Omit<ToolDescriptor, 'detailComponent'> & {
 
 type ToolDescriptorMap = Map<string, ToolDescriptor>
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function truncate(value: string, max = 60): string {
   if (value.length <= max) return value
   return `${value.slice(0, max - 1)}…`
@@ -38,22 +35,6 @@ function truncate(value: string, max = 60): string {
 
 function coerceString(value: unknown): string | null {
   if (typeof value === 'string' && value.trim().length > 0) {
-    return value
-  }
-  return null
-}
-
-function parseResultObject(value: unknown): Record<string, unknown> | null {
-  if (!value) return null
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value)
-      return isPlainObject(parsed) ? parsed : null
-    } catch {
-      return null
-    }
-  }
-  if (isPlainObject(value)) {
     return value
   }
   return null

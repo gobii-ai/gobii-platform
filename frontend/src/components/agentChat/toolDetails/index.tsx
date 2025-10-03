@@ -7,6 +7,7 @@ import { describeSchedule } from '../../../util/schedule'
 import type { ScheduleDescription } from '../../../util/schedule'
 import type { ToolDetailComponent, ToolDetailProps } from '../tooling/types'
 import { parseToolSearchResult } from '../tooling/searchUtils'
+import { isRecord, parseResultObject } from '../../../util/objectUtils'
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
@@ -21,26 +22,6 @@ function stringify(value: unknown): string {
   } catch {
     return String(value)
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function parseResultObject(value: unknown): Record<string, unknown> | null {
-  if (!value) return null
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value)
-      return isRecord(parsed) ? parsed : null
-    } catch {
-      return null
-    }
-  }
-  if (isRecord(value)) {
-    return value
-  }
-  return null
 }
 
 type ContactDetail = {
