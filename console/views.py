@@ -12,7 +12,8 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
 from django.urls import reverse, reverse_lazy
 from django.contrib import messages
-from django.db import transaction, models
+from django.db import transaction, models, IntegrityError
+from django.db.models import Q
 from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.views.decorators.http import require_POST
@@ -36,6 +37,8 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
     PersistentAgentMessage,
+    AgentPeerLink,
+    AgentCommPeerState,
     PersistentAgentConversationParticipant,
     PersistentAgentSmsEndpoint,
     CommsChannel,
@@ -2163,6 +2166,55 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['reassignable_orgs'] = reassignable_orgs
         context['can_reassign'] = True
 
+        peer_links_qs = (
+            AgentPeerLink.objects.filter(Q(agent_a=agent) | Q(agent_b=agent))
+            .select_related("agent_a", "agent_b")
+            .prefetch_related("communication_states")
+            .order_by("created_at")
+        )
+
+        peer_links: list[dict] = []
+        linked_agent_ids: set = set()
+        for link in peer_links_qs:
+            counterpart = link.get_other_agent(agent)
+            linked_agent_ids.add(link.agent_a_id)
+            linked_agent_ids.add(link.agent_b_id)
+
+            state = next(
+                (s for s in link.communication_states.all() if s.channel == CommsChannel.OTHER),
+                None,
+            )
+
+            peer_links.append(
+                {
+                    "link": link,
+                    "counterpart": counterpart,
+                    "state": state,
+                }
+            )
+
+        context['peer_links'] = peer_links
+
+        linked_agent_ids.discard(agent.id)
+        if agent.organization_id:
+            candidate_qs = PersistentAgent.objects.filter(
+                organization_id=agent.organization_id
+            )
+        else:
+            candidate_qs = PersistentAgent.objects.filter(
+                user=agent.user,
+                organization__isnull=True,
+            )
+
+        candidate_qs = candidate_qs.exclude(id=agent.id)
+        if linked_agent_ids:
+            candidate_qs = candidate_qs.exclude(id__in=linked_agent_ids)
+        context['peer_link_candidates'] = candidate_qs.order_by('name')
+        context['peer_link_defaults'] = {
+            'messages_per_window': 30,
+            'window_hours': 6,
+        }
+
         return context
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - Post")
@@ -2170,6 +2222,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         """Handle agent configuration updates and allowlist management."""
         agent = self.get_object()
         
+        peer_action = request.POST.get('peer_link_action')
+        if peer_action:
+            return self._handle_peer_link_action(request, agent, peer_action)
+
         # Handle AJAX allowlist operations
         # Check both modern header and legacy header for AJAX detection
         is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.META.get('HTTP_X_REQUESTED_WITH') == 'XMLHttpRequest'
@@ -2600,6 +2656,132 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             messages.error(request, f"Error updating agent: {e}")
 
         return redirect('agent_detail', pk=agent.pk)
+
+    def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str):
+        redirect_response = redirect('agent_detail', pk=agent.pk)
+
+        try:
+            if action == 'create':
+                peer_agent_id = request.POST.get('peer_agent_id')
+                if not peer_agent_id:
+                    messages.error(request, 'Select an agent to link.')
+                    return redirect_response
+
+                try:
+                    messages_per_window = int(request.POST.get('messages_per_window', 30))
+                    window_hours = int(request.POST.get('window_hours', 6))
+                except ValueError:
+                    messages.error(request, 'Quotas must be positive integers.')
+                    return redirect_response
+
+                try:
+                    peer_agent = PersistentAgent.objects.get(id=peer_agent_id)
+                except PersistentAgent.DoesNotExist:
+                    messages.error(request, 'Selected agent no longer exists.')
+                    return redirect_response
+
+                new_link = AgentPeerLink(
+                    agent_a=agent,
+                    agent_b=peer_agent,
+                    messages_per_window=messages_per_window,
+                    window_hours=window_hours,
+                    created_by=request.user,
+                )
+
+                try:
+                    with transaction.atomic():
+                        new_link.save()
+                except IntegrityError:
+                    messages.error(request, 'A peer link already exists for these agents.')
+                    return redirect_response
+
+                messages.success(request, 'Peer agent link created.')
+                return redirect_response
+
+            if action == 'update':
+                link_id = request.POST.get('link_id')
+                if not link_id:
+                    messages.error(request, 'Missing peer link identifier.')
+                    return redirect_response
+
+                try:
+                    with transaction.atomic():
+                        link = AgentPeerLink.objects.select_for_update().prefetch_related('communication_states').get(id=link_id)
+                        if agent.id not in {link.agent_a_id, link.agent_b_id}:
+                            messages.error(request, 'You do not have permission to update this link.')
+                            return redirect_response
+
+                        if 'messages_per_window' in request.POST:
+                            link.messages_per_window = int(request.POST.get('messages_per_window', link.messages_per_window))
+                        if 'window_hours' in request.POST:
+                            link.window_hours = int(request.POST.get('window_hours', link.window_hours))
+                        if link.messages_per_window < 1 or link.window_hours < 1:
+                            raise ValueError
+                        if 'feature_flag' in request.POST:
+                            link.feature_flag = (request.POST.get('feature_flag') or '').strip()
+                        link.is_enabled = 'is_enabled' in request.POST
+                        link.save()
+
+                        for state in link.communication_states.all():
+                            updates = []
+                            if state.messages_per_window != link.messages_per_window:
+                                state.messages_per_window = link.messages_per_window
+                                updates.append('messages_per_window')
+                            if state.window_hours != link.window_hours:
+                                state.window_hours = link.window_hours
+                                updates.append('window_hours')
+                            if state.credits_remaining > link.messages_per_window:
+                                state.credits_remaining = link.messages_per_window
+                                updates.append('credits_remaining')
+                            if updates:
+                                updates.append('updated_at')
+                                state.save(update_fields=updates)
+
+                except AgentPeerLink.DoesNotExist:
+                    messages.error(request, 'Peer link not found.')
+                    return redirect_response
+
+                messages.success(request, 'Peer link updated.')
+                return redirect_response
+
+            if action == 'delete':
+                link_id = request.POST.get('link_id')
+                if not link_id:
+                    messages.error(request, 'Missing peer link identifier.')
+                    return redirect_response
+
+                with transaction.atomic():
+                    link = AgentPeerLink.objects.select_related('conversation').get(id=link_id)
+                    if agent.id not in {link.agent_a_id, link.agent_b_id}:
+                        messages.error(request, 'You do not have permission to remove this link.')
+                        return redirect_response
+
+                    AgentCommPeerState.objects.filter(link=link).delete()
+                    if link.conversation_id:
+                        conversation = link.conversation
+                        conversation.peer_link = None
+                        conversation.is_peer_dm = False
+                        conversation.save(update_fields=['peer_link', 'is_peer_dm'])
+
+                    link.delete()
+
+                messages.success(request, 'Peer link removed.')
+                return redirect_response
+
+            messages.error(request, 'Unsupported peer link action.')
+            return redirect_response
+
+        except AgentPeerLink.DoesNotExist:
+            messages.error(request, 'Peer link not found.')
+        except ValueError:
+            messages.error(request, 'Invalid values supplied for peer link settings.')
+        except ValidationError as exc:
+            messages.error(request, '; '.join(exc.messages))
+        except Exception as exc:
+            logger.exception('Peer link operation failed for agent %s', agent.id, exc_info=True)
+            messages.error(request, f'Peer link operation failed: {exc}')
+
+        return redirect_response
 
 
 class ConsoleDiagnosticsView(ConsoleViewMixin, TemplateView):

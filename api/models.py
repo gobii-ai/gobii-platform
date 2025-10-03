@@ -3514,15 +3514,250 @@ class PersistentAgentConversation(models.Model):
         blank=True,
         related_name="owned_conversations",
     )
+    is_peer_dm = models.BooleanField(
+        default=False,
+        help_text="Whether this conversation stores direct messages between agents.",
+    )
+    peer_link = models.OneToOneField(
+        "AgentPeerLink",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversation",
+        help_text="Peer link associated with this direct message thread, when applicable.",
+    )
 
     class Meta:
         indexes = [
             models.Index(fields=["channel", "address"], name="pa_conv_channel_addr_idx"),
+            models.Index(fields=["is_peer_dm"], name="pa_conv_peer_dm_idx"),
         ]
         ordering = ["-id"]
 
     def __str__(self):
         return f"Conversation<{self.channel}:{self.address}>"
+
+    def clean(self):
+        super().clean()
+        if self.is_peer_dm and not self.peer_link_id:
+            raise ValidationError({
+                "peer_link": "Peer DM conversations must reference a peer link."
+            })
+        if self.peer_link_id and not self.is_peer_dm:
+            # Automatically mark DM conversations when linked.
+            self.is_peer_dm = True
+
+    def save(self, *args, **kwargs):
+        if not kwargs.get("raw"):
+            self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class AgentPeerLink(models.Model):
+    """Symmetric link allowing direct messaging between two agents."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent_a = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="peer_links_initiated",
+    )
+    agent_b = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="peer_links_received",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_agent_peer_links",
+    )
+    messages_per_window = models.PositiveIntegerField(
+        default=30,
+        validators=[MinValueValidator(1), MaxValueValidator(500)],
+        help_text="Number of peer messages allowed per rolling window.",
+    )
+    window_hours = models.PositiveIntegerField(
+        default=6,
+        validators=[MinValueValidator(1), MaxValueValidator(168)],
+        help_text="Length of the quota window in hours.",
+    )
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text="Feature-flag style toggle to enable peer messaging for this link.",
+    )
+    feature_flag = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Optional rollout flag label controlling this peer link.",
+    )
+    agent_a_endpoint = models.ForeignKey(
+        "PersistentAgentCommsEndpoint",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="peer_link_agent_a_endpoints",
+        help_text="Preferred endpoint for agent A when initiating peer DMs.",
+    )
+    agent_b_endpoint = models.ForeignKey(
+        "PersistentAgentCommsEndpoint",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="peer_link_agent_b_endpoints",
+        help_text="Preferred endpoint for agent B when initiating peer DMs.",
+    )
+    pair_key = models.CharField(
+        max_length=96,
+        unique=True,
+        editable=False,
+        help_text="Deterministic key built from the sorted agent IDs for uniqueness.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["pair_key"], name="agent_peer_pair_key"),
+            models.Index(fields=["is_enabled"], name="agent_peer_enabled_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"PeerLink<{self.agent_a_id}->{self.agent_b_id}>"
+
+    @staticmethod
+    def build_pair_key(agent_a_id: uuid.UUID | str, agent_b_id: uuid.UUID | str) -> str:
+        """Return stable pair key for two agent IDs."""
+        return "::".join(sorted([str(agent_a_id), str(agent_b_id)]))
+
+    def get_other_agent(self, agent: "PersistentAgent") -> PersistentAgent | None:
+        """Return the counterpart agent for the provided agent instance."""
+        if not agent:
+            return None
+        if agent.id == self.agent_a_id:
+            return self.agent_b
+        if agent.id == self.agent_b_id:
+            return self.agent_a
+        return None
+
+    def clean(self):
+        super().clean()
+
+        if not self.agent_a_id or not self.agent_b_id:
+            raise ValidationError("Both agents are required for a peer link.")
+        if self.agent_a_id == self.agent_b_id:
+            raise ValidationError("Cannot create a peer link between the same agent.")
+
+        agent_a = self.agent_a
+        agent_b = self.agent_b
+
+        if not agent_a or not agent_b:
+            raise ValidationError("Agents must exist to create a peer link.")
+
+        same_owner = agent_a.user_id and agent_a.user_id == agent_b.user_id
+        same_org = (
+            agent_a.organization_id
+            and agent_b.organization_id
+            and agent_a.organization_id == agent_b.organization_id
+        )
+        if not same_owner and not same_org:
+            raise ValidationError(
+                "Agents must share the same owner or organization to link."
+            )
+
+        if self.agent_a_endpoint and self.agent_a_endpoint.owner_agent_id != agent_a.id:
+            raise ValidationError(
+                {"agent_a_endpoint": "Preferred endpoint must belong to agent A."}
+            )
+        if self.agent_b_endpoint and self.agent_b_endpoint.owner_agent_id != agent_b.id:
+            raise ValidationError(
+                {"agent_b_endpoint": "Preferred endpoint must belong to agent B."}
+            )
+
+    def save(self, *args, **kwargs):
+        if kwargs.get("raw"):
+            return super().save(*args, **kwargs)
+
+        if not self.agent_a_id or not self.agent_b_id:
+            raise ValidationError("Both agents are required for a peer link.")
+
+        self.pair_key = self.build_pair_key(self.agent_a_id, self.agent_b_id)
+
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            update_fields.add("pair_key")
+            kwargs["update_fields"] = list(update_fields)
+
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class AgentCommPeerState(models.Model):
+    """Rolling credit bucket tracking peer DM quotas per channel."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    link = models.ForeignKey(
+        AgentPeerLink,
+        on_delete=models.CASCADE,
+        related_name="communication_states",
+    )
+    channel = models.CharField(max_length=32, choices=CommsChannel.choices)
+    messages_per_window = models.PositiveIntegerField(
+        default=30,
+        validators=[MinValueValidator(1), MaxValueValidator(500)],
+    )
+    window_hours = models.PositiveIntegerField(
+        default=6,
+        validators=[MinValueValidator(1), MaxValueValidator(168)],
+    )
+    credits_remaining = models.PositiveIntegerField(default=0)
+    window_reset_at = models.DateTimeField()
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    debounce_seconds = models.PositiveIntegerField(default=5)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("link", "channel")
+        indexes = [
+            models.Index(fields=["link", "channel"], name="agent_peer_state_idx"),
+            models.Index(fields=["window_reset_at"], name="agent_peer_reset_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"PeerState<link={self.link_id}, channel={self.channel}>"
+
+    def clean(self):
+        super().clean()
+        if self.messages_per_window < 1:
+            raise ValidationError("messages_per_window must be positive.")
+        if self.window_hours < 1:
+            raise ValidationError("window_hours must be positive.")
+        if self.debounce_seconds < 0:
+            raise ValidationError("debounce_seconds cannot be negative.")
+
+    def reset_window(self) -> None:
+        """Reset the rolling quota window."""
+        now = timezone.now()
+        self.window_reset_at = now + timedelta(hours=self.window_hours)
+        self.credits_remaining = self.messages_per_window
+        self.save(update_fields=["window_reset_at", "credits_remaining", "updated_at"])
+
+    def save(self, *args, **kwargs):
+        if kwargs.get("raw"):
+            return super().save(*args, **kwargs)
+
+        now = timezone.now()
+        if not self.window_reset_at:
+            self.window_reset_at = now + timedelta(hours=self.window_hours)
+        if self._state.adding and not self.credits_remaining:
+            self.credits_remaining = self.messages_per_window
+
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 class PersistentAgentConversationParticipant(models.Model):
@@ -3614,6 +3849,14 @@ class PersistentAgentMessage(models.Model):
         related_name="agent_messages",
         help_text="The persistent agent this message ultimately belongs to (derived from conversation or endpoint)",
     )
+    peer_agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="peer_agent_messages",
+        help_text="The other agent participating in a peer DM, when applicable.",
+    )
 
     body = models.TextField()
     raw_payload = models.JSONField(default=dict, blank=True)
@@ -3638,6 +3881,7 @@ class PersistentAgentMessage(models.Model):
             models.Index(fields=["from_endpoint", "-timestamp"], name="pa_msg_from_ts_idx"),
             models.Index(fields=["owner_agent", "-timestamp"], name="pa_msg_agent_ts_idx"),
             models.Index(fields=["latest_status"], name="pa_msg_latest_status_idx"),
+            models.Index(fields=["peer_agent", "-timestamp"], name="pa_msg_peer_agent_idx"),
         ]
         ordering = ["-seq"]
 
