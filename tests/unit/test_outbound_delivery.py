@@ -19,6 +19,7 @@ from api.models import (
     BrowserUseAgent,
 )
 from api.agent.comms.outbound_delivery import deliver_agent_email, _convert_sms_body_to_plaintext
+from config import settings
 from inscriptis import get_text
 
 User = get_user_model()
@@ -129,10 +130,11 @@ class EmailDeliveryTests(TestCase):
             charter="Test charter",
             browser_use_agent=self.browser_agent
         )
+        self.default_domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
         self.from_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.EMAIL,
-            address="agent@my.gobii.ai",
+            address=f"agent@{self.default_domain}",
             is_primary=True
         )
         self.to_endpoint = PersistentAgentCommsEndpoint.objects.create(

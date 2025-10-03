@@ -34,10 +34,11 @@ class PostmarkEmailWebhookTest(TestCase):
         self.agent = PersistentAgent.objects.create(
             user=self.owner, name="Test Agent", charter="Test charter", browser_use_agent=self.browser_agent
         )
+        self.default_domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
         self.agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.EMAIL,
-            address="agent@my.gobii.ai",
+            address=f"agent@{self.default_domain}",
         )
 
     def _create_postmark_request(self, from_email, to_email, subject="Test Subject", body="Test Body"):
@@ -115,7 +116,7 @@ class PostmarkEmailWebhookTest(TestCase):
     def test_email_to_unroutable_address_is_discarded(self, mock_logger, mock_ingest):
         """Verify that an email to a non-existent agent address is discarded."""
         request = self._create_postmark_request(
-            from_email=self.owner.email, to_email="nonexistent@my.gobii.ai"
+            from_email=self.owner.email, to_email=f"nonexistent@{self.default_domain}"
         )
         response: HttpResponse = email_webhook_postmark(request)
 
@@ -140,10 +141,11 @@ class MailgunEmailWebhookTest(TestCase):
         self.agent = PersistentAgent.objects.create(
             user=self.owner, name="Mailgun Agent", charter="Mailgun charter", browser_use_agent=self.browser_agent
         )
+        self.default_domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
         self.agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.EMAIL,
-            address="mg-agent@my.gobii.ai",
+            address=f"mg-agent@{self.default_domain}",
         )
 
     def _create_mailgun_request(self, from_email, to_email, subject="Mailgun Subject", body="Mailgun Body"):

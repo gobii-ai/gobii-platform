@@ -1913,7 +1913,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
     def _generate_unique_agent_email(self, agent_name: str, max_attempts=100) -> str:
         """
         Generate a unique, user-friendly email address from the agent's name.
-        e.g., "Atlas Core" -> "atlas.core@my.gobii.ai"
+        e.g., "Atlas Core" -> "atlas.core@<default-domain>"
         """
         import re
         from django.utils.crypto import get_random_string
@@ -1923,7 +1923,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
         base_username = re.sub(r'\s+', '.', base_username)  # Replace spaces with dots
         base_username = re.sub(r'[^\w.]', '', base_username)  # Remove non-alphanumeric chars except dots
         from django.conf import settings as dj_settings
-        domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'my.gobii.ai')
+        domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'agents.localhost')
 
         # First attempt
         email_address = f"{base_username}@{domain}"
@@ -3316,7 +3316,7 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
         endpoint = self._get_email_endpoint(agent)
         account = getattr(endpoint, 'agentemailaccount', None) if endpoint else None
         from django.conf import settings as dj_settings
-        default_domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'my.gobii.ai')
+        default_domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'agents.localhost')
         is_default_endpoint = False
         if endpoint and endpoint.address and default_domain:
             try:

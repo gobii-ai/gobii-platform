@@ -95,7 +95,7 @@ After regenerating, rebuild the client with `npm run build`.
 *   The TypeScript client provides full type safety and autocompletion.
 *   All methods return Promises and should be used with async/await or .then().
 *   Error handling should be implemented for production use.
-*   The client uses the default base URL `https://gobii.ai/api/v1` which can be overridden if needed.
+*   The client resolves a base URL from `API_BASE_URL`, `GOBII_API_BASE_URL`, or `PUBLIC_SITE_URL`. If none are set it falls back to `https://gobii.ai/api/v1` when `GOBII_PROPRIETARY_MODE=true`, otherwise `http://localhost:8000/api/v1`.
 
 ## API Structure
 

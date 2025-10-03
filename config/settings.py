@@ -71,21 +71,66 @@ GOBII_ENABLE_COMMUNITY_UNLIMITED = env.bool("GOBII_ENABLE_COMMUNITY_UNLIMITED", 
 DEBUG = env.bool("DEBUG", default=False)
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 ALLOWED_HOSTS = ["*"]  # tighten in prod
-CSRF_TRUSTED_ORIGINS = [
-    'https://gobii.ai',
-    'https://gobii.ai:443',
-    'https://www.gobii.ai',
-    'https://www.gobii.ai:443',
-    'https://getgobii.com',
-    'https://getgobii.com:443',
-    'https://www.getgobii.com',
-    'https://www.getgobii.com:443',
+
+# Default origins differ between OSS/community mode and proprietary deployments.
+_COMMUNITY_DEFAULT_TRUSTED_ORIGINS = [
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "https://localhost",
+    "https://127.0.0.1",
 ]
+_PROPRIETARY_DEFAULT_TRUSTED_ORIGINS = [
+    "https://gobii.ai",
+    "https://gobii.ai:443",
+    "https://www.gobii.ai",
+    "https://www.gobii.ai:443",
+    "https://getgobii.com",
+    "https://getgobii.com:443",
+    "https://www.getgobii.com",
+    "https://www.getgobii.com:443",
+]
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=_PROPRIETARY_DEFAULT_TRUSTED_ORIGINS
+    if GOBII_PROPRIETARY_MODE
+    else _COMMUNITY_DEFAULT_TRUSTED_ORIGINS,
+)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 USE_X_FORWARDED_HOST = True
 SITE_ID = 1
+
+PUBLIC_BRAND_NAME = env(
+    "PUBLIC_BRAND_NAME",
+    default="Gobii" if GOBII_PROPRIETARY_MODE else "Agent Platform",
+)
+PUBLIC_SITE_URL = env(
+    "PUBLIC_SITE_URL",
+    default="https://gobii.ai" if GOBII_PROPRIETARY_MODE else "http://localhost:8000",
+)
+PUBLIC_CONTACT_EMAIL = env(
+    "PUBLIC_CONTACT_EMAIL",
+    default="hello@gobii.ai" if GOBII_PROPRIETARY_MODE else "",
+)
+PUBLIC_SUPPORT_EMAIL = env(
+    "PUBLIC_SUPPORT_EMAIL",
+    default="support@gobii.ai" if GOBII_PROPRIETARY_MODE else "",
+)
+PUBLIC_GITHUB_URL = env(
+    "PUBLIC_GITHUB_URL",
+    default="https://github.com/gobii-ai" if GOBII_PROPRIETARY_MODE else "",
+)
+PUBLIC_DISCORD_URL = env(
+    "PUBLIC_DISCORD_URL",
+    default="https://discord.gg/yyDB8GwxtE" if GOBII_PROPRIETARY_MODE else "",
+)
+PUBLIC_X_URL = env(
+    "PUBLIC_X_URL",
+    default="https://x.com/gobii_ai" if GOBII_PROPRIETARY_MODE else "",
+)
 
 INSTALLED_APPS = [
     # Django
@@ -721,7 +766,10 @@ ALLOW_FILE_UPLOAD = env.bool("ALLOW_FILE_UPLOAD", default=True)
 MANUAL_WHITELIST_MAX_PER_AGENT = env.int("MANUAL_WHITELIST_MAX_PER_AGENT", default=100)
 # Default domain used for auto-generated agent email endpoints in Gobii proprietary mode.
 # Community/OSS deployments typically leave this unused.
-DEFAULT_AGENT_EMAIL_DOMAIN = env("DEFAULT_AGENT_EMAIL_DOMAIN", default="my.gobii.ai")
+DEFAULT_AGENT_EMAIL_DOMAIN = env(
+    "DEFAULT_AGENT_EMAIL_DOMAIN",
+    default="my.gobii.ai" if GOBII_PROPRIETARY_MODE else "agents.localhost",
+)
 
 # Whether to auto-create agent-owned email endpoints during agent creation.
 # Defaults follow Gobii proprietary mode: enabled when proprietary, disabled in OSS.

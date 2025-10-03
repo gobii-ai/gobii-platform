@@ -1,7 +1,7 @@
 # OSS Readiness Plan
 
 ## Priority 1 – Neutral Community Defaults, Proprietary Opt-In
-- [ ] Replace hard-coded Gobii domains/URLs with environment-driven values and neutral community defaults, preserving proprietary overrides (`config/settings.py:73`, `config/settings.py:724`, `templates/includes/_footer.html:19`, `misc/ts-example-client/src/index.ts:275`).
+- [x] Replace hard-coded Gobii domains/URLs with environment-driven values and neutral community defaults, preserving proprietary overrides (`config/settings.py:73`, `config/settings.py:724`, `templates/includes/_footer.html:19`, `misc/ts-example-client/src/index.ts:275`).
 - [ ] Externalise analytics/support contact defaults so community deployments don’t emit Gobii-specific IDs or addresses (`config/settings.py:600`, `config/settings.py:613`).
 
 ## Priority 2 – Optional Integrations by Default

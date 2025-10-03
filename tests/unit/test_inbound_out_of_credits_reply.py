@@ -12,6 +12,7 @@ from api.models import (
 )
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
+from config import settings
 
 
 User = get_user_model()
@@ -34,10 +35,11 @@ class InboundOutOfCreditsReplyTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
         # Primary email endpoint for the agent (recipient address)
+        default_domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
         self.agent_email = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.EMAIL,
-            address="agent@my.gobii.ai",
+            address=f"agent@{default_domain}",
             is_primary=True,
         )
 
