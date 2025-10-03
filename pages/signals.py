@@ -29,6 +29,7 @@ import stripe
 
 from api.models import UserBilling, OrganizationBilling
 from util.payments_helper import PaymentsHelper
+from util.integrations import stripe_status
 from util.subscription_helper import (
     mark_owner_billing_with_plan,
     mark_user_billing_with_plan,
@@ -241,9 +242,22 @@ def handle_subscription_event(event, **kwargs):
             logger.warning("Unexpected Stripe object in webhook: %s", payload.get("object"))
             return
 
+        status = stripe_status()
+        if not status.enabled:
+            span.add_event('Stripe disabled; ignoring webhook')
+            logger.info("Stripe disabled; ignoring subscription webhook %s", payload.get("id"))
+            return
+
+        stripe_key = PaymentsHelper.get_stripe_key()
+        if not stripe_key:
+            span.add_event('Stripe key missing; ignoring webhook')
+            logger.warning("Stripe key unavailable; ignoring subscription webhook %s", payload.get("id"))
+            return
+
+        stripe.api_key = stripe_key
+
         # Note: do not early-return on hard-deleted payloads; we still need to
         # downgrade the user to the free plan when a subscription is deleted.
-        stripe.api_key = PaymentsHelper.get_stripe_key()
         stripe_sub = None
 
         # 3. Normal create/update flow

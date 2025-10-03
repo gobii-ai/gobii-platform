@@ -18,6 +18,7 @@ from django.conf import settings
 from observability import traced, trace
 from util.constants.task_constants import TASKS_UNLIMITED
 from util.payments_helper import PaymentsHelper
+from util.integrations import stripe_status, IntegrationDisabledError
 from djstripe.enums import SubscriptionStatus
 from django.apps import apps
 from dateutil.relativedelta import relativedelta
@@ -36,6 +37,19 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 BillingOwnerType = Literal["user", "organization"]
+
+
+def _ensure_stripe_ready() -> None:
+    """Verify that the Stripe integration is usable and configure the API key."""
+    status = stripe_status()
+    if not status.enabled:
+        raise IntegrationDisabledError(status.reason or "Stripe integration disabled")
+    if stripe is None:  # type: ignore[truthy-function]
+        raise IntegrationDisabledError("Stripe SDK not installed")
+    key = PaymentsHelper.get_stripe_key()
+    if not key:
+        raise IntegrationDisabledError("Stripe secret key missing for current environment")
+    stripe.api_key = key
 
 
 def _resolve_owner_type(owner: Any) -> BillingOwnerType:
@@ -216,8 +230,7 @@ def get_user_task_credit_limit(user) -> int:
 def get_or_create_stripe_customer(owner) -> Customer:
     """Return an existing Stripe customer for the owner or create a new one."""
     with traced("SUBSCRIPTION Get or Create Stripe Customer"):
-        stripe_key = PaymentsHelper.get_stripe_key()
-        stripe.api_key = stripe_key
+        _ensure_stripe_ready()
 
         owner_type = _resolve_owner_type(owner)
 
@@ -252,7 +265,7 @@ def get_or_create_stripe_customer(owner) -> Customer:
                 email=email,
                 name=name,
                 metadata={k: v for k, v in metadata.items() if v is not None},
-                api_key=stripe_key,
+                api_key=stripe.api_key,
             )
 
         customer = Customer.sync_from_stripe_data(stripe_customer)
@@ -363,11 +376,11 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id: str | None = 
 
         # Create the usage record in Stripe
         try:
+            _ensure_stripe_ready()
             logger.debug(
                 f"report_usage_to_stripe: Reporting {quantity} usage for user {user.id} on meter {meter_id}"
             )
 
-            stripe.api_key = PaymentsHelper.get_stripe_key()
             # Only pass idempotency_key when present to keep backward-compat with tests
             if idempotency_key is not None:
                 return report_task_usage(subscription, quantity=quantity, idempotency_key=idempotency_key)
@@ -385,7 +398,9 @@ def report_task_usage_to_stripe(user, quantity: int = 1, meter_id: str | None = 
             #     action="increment",
             # )
             # return usage_record
-
+        except IntegrationDisabledError as exc:
+            logger.info("Stripe disabled; skipping user usage report: %s", exc)
+            return None
         except Exception as e:
             logger.error(f"report_usage_to_stripe: Error reporting usage for user {user.id}: {str(e)}")
             raise
@@ -412,13 +427,16 @@ def report_organization_task_usage_to_stripe(organization, quantity: int = 1,
             meter_id = stripe_settings.org_task_meter_id or stripe_settings.task_meter_id
 
         try:
-            stripe.api_key = PaymentsHelper.get_stripe_key()
+            _ensure_stripe_ready()
             meter_event = stripe.billing.MeterEvent.create(
                 event_name=stripe_settings.task_meter_event_name,
                 payload={"value": quantity, "stripe_customer_id": billing.stripe_customer_id},
                 idempotency_key=idempotency_key,
             )
             return meter_event
+        except IntegrationDisabledError as exc:
+            logger.info("Stripe disabled; skipping organization usage report: %s", exc)
+            return None
         except Exception as e:
             logger.error(
                 "report_org_usage_to_stripe: Error reporting usage for organization %s: %s",
@@ -443,7 +461,7 @@ def report_task_usage(subscription: Subscription, quantity: int = 1, idempotency
         if not DJSTRIPE_AVAILABLE or not subscription:
             return
         try:
-            stripe.api_key = PaymentsHelper.get_stripe_key()
+            _ensure_stripe_ready()
             stripe_settings = get_stripe_settings()
 
             with traced("STRIPE Create Meter Event"):
@@ -453,7 +471,9 @@ def report_task_usage(subscription: Subscription, quantity: int = 1, idempotency
                     idempotency_key=idempotency_key,
                 )
                 return meter_event
-
+        except IntegrationDisabledError as exc:
+            logger.info("Stripe disabled; skipping meter event creation: %s", exc)
+            return None
         except Exception as e:
             logger.error(f"report_task_usage: Error reporting task usage: {str(e)}")
             raise

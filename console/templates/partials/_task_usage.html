@@ -117,7 +117,7 @@
                 }
                 </script>
               {% endif %}
-              {% if account.paid is True and settings.GOBII_PROPRIETARY_MODE %}
+              {% if account.paid is True and stripe_enabled %}
                 <a href="{% url 'billing' %}"
                    title="Billing and Billing Settings"
                    class="inline-flex items-center px-4 py-2 text-sm font-medium text-white {% if account.usage.tasks_used_pct >= 100 %}bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700{% else %}bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700{% endif %} rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 {% if account.usage.tasks_used_pct >= 100 %}focus:ring-red-500{% else %}focus:ring-yellow-500{% endif %}">

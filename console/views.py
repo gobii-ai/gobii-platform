@@ -15,7 +15,7 @@ from django.contrib import messages
 from django.db import transaction, models, IntegrityError
 from django.db.models import Q
 from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404
-from django.core.exceptions import ValidationError, PermissionDenied
+from django.core.exceptions import ValidationError, PermissionDenied, ImproperlyConfigured
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
@@ -49,7 +49,7 @@ from api.models import (
     OrganizationInvite,
     TaskCredit,
 )
-from console.mixins import ConsoleViewMixin
+from console.mixins import ConsoleViewMixin, StripeFeatureRequiredMixin
 from observability import traced
 from pages.mixins import PhoneNumberMixin
 
@@ -58,6 +58,7 @@ from .org_billing_helpers import build_org_billing_overview
 from tasks.services import TaskCreditService
 from util import sms
 from util.payments_helper import PaymentsHelper
+from util.integrations import stripe_status
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import get_user_plan, get_active_subscription, allow_user_extra_tasks, \
     calculate_extra_tasks_used_during_subscription_period, get_user_extra_task_limit, get_or_create_stripe_customer
@@ -105,6 +106,15 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 
 tracer = trace.get_tracer("gobii.utils")
+
+
+def _assign_stripe_api_key() -> str:
+    """Ensure Stripe secret key is configured before making API calls."""
+    key = PaymentsHelper.get_stripe_key()
+    if not key:
+        raise ImproperlyConfigured("Stripe secret key missing while billing is enabled.")
+    stripe.api_key = key
+    return key
 
 # Whether to skip the phone number setup screen when the user already has a
 # verified phone number on their account. Toggle this to force showing the
@@ -885,7 +895,7 @@ class ApiKeyCreateModalView(ApiKeyOwnerMixin, LoginRequiredMixin, View):
             form = ApiKeyForm(user=request.user)
         return render(request, "partials/_api_key_modal.html", {"form": form})
 
-class BillingView(ConsoleViewMixin, TemplateView):
+class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
     """View for billing information."""
     template_name = "billing.html"
 
@@ -908,7 +918,7 @@ class BillingView(ConsoleViewMixin, TemplateView):
 
             if org_id_for_reattach:
                 try:
-                    stripe.api_key = PaymentsHelper.get_stripe_key()
+                    _assign_stripe_api_key()
                     if not _reattach_overage_from_session(request, org_id_for_reattach):
                         logger.debug(
                             "No pending overage SKU detach found for org %s on success redirect.",
@@ -931,7 +941,7 @@ class BillingView(ConsoleViewMixin, TemplateView):
 
             if org_id_for_reattach:
                 try:
-                    stripe.api_key = PaymentsHelper.get_stripe_key()
+                    _assign_stripe_api_key()
                     if not _reattach_overage_from_session(request, org_id_for_reattach):
                         logger.debug(
                             "No pending overage SKU detach found for org %s on cancel redirect.",
@@ -1231,10 +1241,16 @@ def get_billing_settings(request):
 @tracer.start_as_current_span("BILLING Cancel Subscription")
 def cancel_subscription(request):
     """Endpoint to cancel the user's subscription."""
+    if not stripe_status().enabled:
+        return JsonResponse({
+            'success': False,
+            'error': 'Stripe billing is not available in this deployment.'
+        }, status=404)
+
     sub = get_active_subscription(request.user)
     if sub:
         try:
-            stripe.api_key = PaymentsHelper.get_stripe_key()
+            _assign_stripe_api_key()
             stripe.Subscription.modify(sub.id, cancel_at_period_end=True)
 
             Analytics.track_event(
@@ -5003,7 +5019,7 @@ class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlag
         return self._reject(request, token)
 
 
-class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
+class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
     """Kick off Stripe Checkout to purchase seats for an organization."""
 
     waffle_flag = ORGANIZATIONS
@@ -5046,7 +5062,7 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
             # Organization already has an active subscription; push the user through
             # Stripe Checkout so they explicitly confirm the updated quantity.
             try:
-                stripe.api_key = PaymentsHelper.get_stripe_key()
+                _assign_stripe_api_key()
                 subscription = stripe.Subscription.retrieve(
                     billing.stripe_subscription_id,
                     expand=["items.data.price"],
@@ -5242,7 +5258,7 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
             return redirect("billing")
 
         try:
-            stripe.api_key = PaymentsHelper.get_stripe_key()
+            _assign_stripe_api_key()
             customer = get_or_create_stripe_customer(org)
 
             success_url = request.build_absolute_uri(
@@ -5303,7 +5319,7 @@ class OrganizationSeatCheckoutView(WaffleFlagMixin, LoginRequiredMixin, View):
             return redirect("billing")
 
 
-class OrganizationSeatScheduleView(WaffleFlagMixin, LoginRequiredMixin, View):
+class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
     """Schedule a reduction in organization seats effective next billing cycle."""
 
     waffle_flag = ORGANIZATIONS
@@ -5348,7 +5364,7 @@ class OrganizationSeatScheduleView(WaffleFlagMixin, LoginRequiredMixin, View):
             return redirect("billing")
 
         try:
-            stripe.api_key = PaymentsHelper.get_stripe_key()
+            _assign_stripe_api_key()
             subscription = stripe.Subscription.retrieve(
                 billing.stripe_subscription_id,
                 expand=["items.data.price"],
@@ -5544,7 +5560,7 @@ class OrganizationSeatScheduleView(WaffleFlagMixin, LoginRequiredMixin, View):
         return redirect("billing")
 
 
-class OrganizationSeatScheduleCancelView(WaffleFlagMixin, LoginRequiredMixin, View):
+class OrganizationSeatScheduleCancelView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
     """Cancel any pending seat reductions for an organization."""
 
     waffle_flag = ORGANIZATIONS
@@ -5576,7 +5592,7 @@ class OrganizationSeatScheduleCancelView(WaffleFlagMixin, LoginRequiredMixin, Vi
             return redirect("billing")
 
         try:
-            stripe.api_key = PaymentsHelper.get_stripe_key()
+            _assign_stripe_api_key()
             stripe.SubscriptionSchedule.release(schedule_id)
         except Exception as exc:  # pragma: no cover - unexpected Stripe error
             logger.exception(
@@ -5615,7 +5631,7 @@ class OrganizationSeatScheduleCancelView(WaffleFlagMixin, LoginRequiredMixin, Vi
         return redirect("billing")
 
 
-class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
+class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
     """Open the Stripe billing portal to manage existing organization seats."""
 
     waffle_flag = ORGANIZATIONS
@@ -5645,7 +5661,7 @@ class OrganizationSeatPortalView(WaffleFlagMixin, LoginRequiredMixin, View):
             return redirect("billing")
 
         try:
-            stripe.api_key = PaymentsHelper.get_stripe_key()
+            _assign_stripe_api_key()
 
             return_url = request.build_absolute_uri(reverse("billing"))
 

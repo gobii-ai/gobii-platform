@@ -1,8 +1,10 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import Http404
 
 from api.models import OrganizationMembership
 
 from .context_helpers import build_console_context
+from util.integrations import stripe_status
 
 
 class ConsoleContextMixin:
@@ -29,10 +31,22 @@ class ConsoleContextMixin:
                 context['current_membership'] = resolved.current_membership
 
             context['can_manage_org_agents'] = resolved.can_manage_org_agents
-        
+
+        context['stripe_enabled'] = stripe_status().enabled
+
         return context
 
 
 class ConsoleViewMixin(LoginRequiredMixin, ConsoleContextMixin):
     """Base mixin for all console views."""
     pass
+
+
+class StripeFeatureRequiredMixin:
+    """Mixin to gate views when Stripe billing is disabled."""
+
+    def dispatch(self, request, *args, **kwargs):
+        status = stripe_status()
+        if not status.enabled:
+            raise Http404("Billing features are not available in this deployment.")
+        return super().dispatch(request, *args, **kwargs)

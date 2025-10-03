@@ -18,6 +18,7 @@ from ...models import (
 from django.conf import settings
 import os
 from ..comms.outbound_delivery import deliver_agent_email
+from util.integrations import postmark_status
 from util.text_sanitizer import strip_control_chars
 
 logger = logging.getLogger(__name__)
@@ -90,8 +91,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             # auto-provision a temporary agent-owned email endpoint so we can simulate
             # delivery and persist the outbound message for history/UX.
             simulation_flag = getattr(settings, "SIMULATE_EMAIL_DELIVERY", False)
-            postmark_token = os.getenv("POSTMARK_SERVER_TOKEN")
-            if simulation_flag and not postmark_token:
+            postmark_state = postmark_status()
+            if simulation_flag and not postmark_state.enabled:
                 try:
                     # Create a simple local-from address for simulation purposes
                     sim_address = f"agent-{agent.id}@localhost"

@@ -5,6 +5,7 @@ Gobii settings – dev profile
 from pathlib import Path
 import environ, os
 from decimal import Decimal
+from typing import Any
 from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 
@@ -440,7 +441,12 @@ SIGNUP_BLOCKED_EMAIL_DOMAINS = [
 # Mailgun credentials only exist in hosted/prod environments; local proprietary
 # runs typically omit them. Use that to decide whether to enforce email
 # verification, while still allowing an explicit override via ENV.
-MAILGUN_API_KEY = env("MAILGUN_API_KEY", default=None)
+MAILGUN_API_KEY = env("MAILGUN_API_KEY", default="")
+MAILGUN_HAS_API_KEY = bool(MAILGUN_API_KEY)
+MAILGUN_ENABLED = env.bool(
+    "MAILGUN_ENABLED",
+    default=GOBII_PROPRIETARY_MODE and MAILGUN_HAS_API_KEY,
+)
 
 # Community Edition disables email verification by default to avoid external email providers
 ACCOUNT_EMAIL_VERIFICATION = env(
@@ -559,7 +565,7 @@ CELERY_BEAT_SCHEDULE = {
 
 # Conditionally enable Twilio sync task only when explicitly enabled
 TWILIO_ENABLED = env.bool("TWILIO_ENABLED", default=False)
-if TWILIO_ENABLED and env("TWILIO_MESSAGING_SERVICE_SID", default=""):
+if TWILIO_ENABLED:
     CELERY_BEAT_SCHEDULE["twilio-sync-numbers"] = {
         "task": "api.tasks.sms_tasks.sync_twilio_numbers",
         "schedule": crontab(minute="*/60"),   # hourly
@@ -647,7 +653,7 @@ SOCIALACCOUNT_LOGIN_ON_GET = True
 # login/signup flows do not hard-error while still exercising the email code.
 EMAIL_BACKEND = (
     "anymail.backends.mailgun.EmailBackend"
-    if GOBII_PROPRIETARY_MODE and MAILGUN_API_KEY
+    if MAILGUN_ENABLED
     else "django.core.mail.backends.console.EmailBackend"
 )
 
@@ -656,15 +662,23 @@ MAILGUN_SENDER_DOMAIN = env(
     default=_proprietary_default("support", "MAILGUN_SENDER_DOMAIN"),
 )
 
-ANYMAIL = {
-    "MAILGUN_API_KEY": MAILGUN_API_KEY,
+POSTMARK_SERVER_TOKEN = env("POSTMARK_SERVER_TOKEN", default="")
+POSTMARK_ENABLED = env.bool(
+    "POSTMARK_ENABLED",
+    default=GOBII_PROPRIETARY_MODE and bool(POSTMARK_SERVER_TOKEN),
+)
+
+ANYMAIL: dict[str, Any] = {}
+
+if MAILGUN_ENABLED:
+    ANYMAIL["MAILGUN_API_KEY"] = MAILGUN_API_KEY
     # If you chose the EU region add:
     # "MAILGUN_API_URL": "https://api.eu.mailgun.net/v3",
-    "POSTMARK_SERVER_TOKEN": env("POSTMARK_SERVER_TOKEN", default=None),
-}
+    if MAILGUN_SENDER_DOMAIN:
+        ANYMAIL["MAILGUN_SENDER_DOMAIN"] = MAILGUN_SENDER_DOMAIN  # type: ignore[index]
 
-if MAILGUN_SENDER_DOMAIN:
-    ANYMAIL["MAILGUN_SENDER_DOMAIN"] = MAILGUN_SENDER_DOMAIN  # type: ignore[index]
+if POSTMARK_ENABLED:
+    ANYMAIL["POSTMARK_SERVER_TOKEN"] = POSTMARK_SERVER_TOKEN
 
 DEFAULT_FROM_EMAIL = env(
     "DEFAULT_FROM_EMAIL",
@@ -682,9 +696,22 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = env(
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"
 
 # dj-stripe / Stripe configuration
-STRIPE_LIVE_SECRET_KEY = os.environ.get("STRIPE_LIVE_SECRET_KEY")
-STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY")
+STRIPE_LIVE_SECRET_KEY = env("STRIPE_LIVE_SECRET_KEY", default="")
+STRIPE_TEST_SECRET_KEY = env("STRIPE_TEST_SECRET_KEY", default="")
 STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", default=False)  # Set to True in production
+STRIPE_KEYS_PRESENT = bool(STRIPE_LIVE_SECRET_KEY or STRIPE_TEST_SECRET_KEY)
+STRIPE_ENABLED = env.bool(
+    "STRIPE_ENABLED",
+    default=GOBII_PROPRIETARY_MODE and STRIPE_KEYS_PRESENT,
+)
+if not STRIPE_ENABLED:
+    STRIPE_DISABLED_REASON = (
+        "Stripe keys not configured"
+        if not STRIPE_KEYS_PRESENT
+        else "Stripe disabled by configuration"
+    )
+else:
+    STRIPE_DISABLED_REASON = ""
 
 DJSTRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="whsec_dummy")
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = "id"
@@ -782,6 +809,20 @@ TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID", default="")
 TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN", default="")
 TWILIO_VERIFY_SERVICE_SID = env("TWILIO_VERIFY_SERVICE_SID", default="")
 TWILIO_MESSAGING_SERVICE_SID = env("TWILIO_MESSAGING_SERVICE_SID", default="")
+_TWILIO_FEATURE_FLAG = env.bool("TWILIO_ENABLED", default=GOBII_PROPRIETARY_MODE)
+TWILIO_VERIFY_CONFIGURED = bool(TWILIO_VERIFY_SERVICE_SID)
+TWILIO_CREDENTIALS_PRESENT = bool(
+    TWILIO_ACCOUNT_SID
+    and TWILIO_AUTH_TOKEN
+    and TWILIO_MESSAGING_SERVICE_SID
+)
+TWILIO_ENABLED = _TWILIO_FEATURE_FLAG and TWILIO_CREDENTIALS_PRESENT
+TWILIO_DISABLED_REASON = ""
+if not TWILIO_ENABLED:
+    if not _TWILIO_FEATURE_FLAG:
+        TWILIO_DISABLED_REASON = "Twilio disabled by configuration"
+    elif not TWILIO_CREDENTIALS_PRESENT:
+        TWILIO_DISABLED_REASON = "Twilio credentials missing"
 
 # Mixpanel
 MIXPANEL_PROJECT_TOKEN = env(
