@@ -4569,6 +4569,21 @@ class OrganizationCreateView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         return render(request, self.template_name, {"form": form})
 
 
+def get_org_and_active_membership(request, org_id):
+    """Return organization and the requesting user's active membership."""
+    org = get_object_or_404(Organization, id=org_id)
+    membership = (
+        OrganizationMembership.objects.filter(
+            org=org,
+            user=request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        .select_related("user")
+        .first()
+    )
+    return org, membership
+
+
 class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     """Display organization details and members."""
 
@@ -4576,12 +4591,10 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     template_name = "console/organization_detail.html"
 
     def dispatch(self, request, *args, **kwargs):
-        self.org = get_object_or_404(Organization, id=kwargs["org_id"])
-        self.membership = OrganizationMembership.objects.filter(
-            org=self.org,
-            user=request.user,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-        ).select_related("user").first()
+        self.org, self.membership = get_org_and_active_membership(
+            request,
+            kwargs["org_id"],
+        )
 
         if not self.membership:
             return HttpResponseForbidden()
@@ -4735,12 +4748,10 @@ class OrganizationInviteModalView(WaffleFlagMixin, LoginRequiredMixin, View):
     waffle_flag = ORGANIZATIONS
 
     def dispatch(self, request, *args, **kwargs):
-        self.org = get_object_or_404(Organization, id=kwargs["org_id"])
-        self.membership = OrganizationMembership.objects.filter(
-            org=self.org,
-            user=request.user,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-        ).select_related("user").first()
+        self.org, self.membership = get_org_and_active_membership(
+            request,
+            kwargs["org_id"],
+        )
 
         if not self.membership or self.membership.role not in MEMBER_MANAGE_ROLES:
             return HttpResponseForbidden()
