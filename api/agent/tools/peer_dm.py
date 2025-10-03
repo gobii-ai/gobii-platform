@@ -105,4 +105,6 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
     }
     if result.window_reset_at:
         payload["window_reset_at_iso"] = result.window_reset_at.isoformat()
+    if result.status.lower() == "ok":
+        payload["auto_sleep_ok"] = True
     return payload

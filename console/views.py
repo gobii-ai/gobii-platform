@@ -2924,25 +2924,30 @@ class AgentDeleteView(LoginRequiredMixin, View):
             agent_id = str(agent.pk)
             agent_org = agent.organization
 
-            # Persist the referenced BrowserUseAgent before deleting the PersistentAgent.
-            browser_agent = None
-            if agent.browser_use_agent_id:
-                browser_agent = BrowserUseAgent.objects.filter(
-                    pk=agent.browser_use_agent_id
-                ).first()
-                if browser_agent is None:
-                    logger.warning(
-                        "BrowserUseAgent %s not found while deleting PersistentAgent %s",
-                        agent.browser_use_agent_id,
-                        agent_id,
-                    )
+            # Persist the referenced BrowserUseAgent ID before deleting the PersistentAgent.
+            browser_agent_id = agent.browser_use_agent_id
+            if browser_agent_id and not BrowserUseAgent.objects.filter(pk=browser_agent_id).exists():
+                logger.warning(
+                    "BrowserUseAgent %s not found while deleting PersistentAgent %s",
+                    browser_agent_id,
+                    agent_id,
+                )
+                browser_agent_id = None
 
             # Delete the persistent agent first (this removes the foreign key constraint)
-            agent.delete()
+            try:
+                agent.delete()
+            except BrowserUseAgent.DoesNotExist:
+                logger.warning(
+                    "BrowserUseAgent missing during delete of PersistentAgent %s; retrying via queryset delete",
+                    agent_id,
+                    exc_info=True,
+                )
+                PersistentAgent.objects.filter(pk=agent.pk, user=request.user).delete()
 
             # Now delete the browser use agent if it still exists
-            if browser_agent is not None:
-                browser_agent.delete()
+            if browser_agent_id:
+                BrowserUseAgent.objects.filter(pk=browser_agent_id).delete()
             
             messages.success(request, f"Agent '{agent_name}' has been deleted.")
 

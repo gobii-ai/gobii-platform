@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
 
-from api.agent.peer_comm import PeerMessagingError, PeerMessagingService
+from api.agent.peer_comm import PeerMessagingError, PeerMessagingService, PeerSendResult
 from api.models import (
     AgentCommPeerState,
     AgentPeerLink,
@@ -156,6 +156,25 @@ class PeerMessagingServiceTests(TestCase):
         response = execute_send_agent_message(self.agent_a, {"peer_agent_id": str(self.agent_a.id), "message": "hi"})
         self.assertEqual(response["status"], "error")
         self.assertIn("Cannot send", response["message"])
+
+    def test_execute_tool_success_sets_auto_sleep_flag(self):
+        from api.agent.tools.peer_dm import execute_send_agent_message
+
+        with patch("api.agent.tools.peer_dm.PeerMessagingService") as service_cls:
+            service_cls.return_value.send_message.return_value = PeerSendResult(
+                status="ok",
+                message="delivered",
+                remaining_credits=1,
+                window_reset_at=timezone.now(),
+            )
+
+            response = execute_send_agent_message(
+                self.agent_a,
+                {"peer_agent_id": str(self.agent_b.id), "message": "handoff"},
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertTrue(response.get("auto_sleep_ok"))
 
 
 @tag("batch_peer_intro")
