@@ -17,7 +17,7 @@
 - [x] Rework `compose.yaml` into the hardened self-host stack (persistent volumes, `DEBUG=0`, optional worker/beat toggles) so `docker compose up` yields a production-style deployment (`compose.yaml`, `docker-compose.dev.yaml`).
 - [x] Add an automated secrets bootstrap step so the first `docker compose up` generates credentials without manual edits (`compose.yaml:1`, `docker/bootstrap/runtime_env.py`, `.env.oss.example`).
 - [x] Add `docker-compose.dev.yaml` (or equivalent) with developer conveniences for `docker compose -f docker-compose.dev.yaml up`.
-- [ ] Implement a first-run setup flow that captures admin credentials, primary LLM keys, and optional integrations before unlocking the app; allow proprietary mode to extend the wizard.
+- [x] Implement a first-run setup flow that captures admin credentials, primary LLM keys, and optional integrations before unlocking the app; allow proprietary mode to extend the wizard (`setup/`, `config/settings.py:183`, `config/urls.py:80`).
 
 ## Priority 5 – Documentation Refresh
 - [ ] Publish a new README/quickstart describing the self-host default workflow, first-run wizard, config storage, and proprietary opt-ins (replace outdated guidance referencing `infra/local` assets).

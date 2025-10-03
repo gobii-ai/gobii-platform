@@ -142,10 +142,20 @@ def get_tier_config_for_tokens(token_count: int) -> List[List[Tuple[str, float]]
 def get_llm_config() -> Tuple[str, dict]:
     """DB-only: Return the first configured LiteLLM model+params.
 
-    Uses the same DB-backed tier selection as get_llm_config_with_failover
-    with token_count=0 and returns the first (primary) config.
+    Uses the DB-backed tier selection. When no configuration exists yet,
+    this raises :class:`LLMNotConfiguredError` so callers can handle the
+    bootstrap flow (e.g., the setup wizard) without crashing the app.
     """
-    configs = get_llm_config_with_failover(token_count=0)
+    try:
+        configs = get_llm_config_with_failover(token_count=0, allow_unconfigured=True)
+    except Exception as exc:
+        raise LLMNotConfiguredError("LLM configuration unavailable") from exc
+
+    if not configs:
+        raise LLMNotConfiguredError(
+            "No LLM provider available. Complete the setup wizard or supply credentials first."
+        )
+
     _provider_key, model, params = configs[0]
     # Remove any internal-only hints that shouldn't be passed to litellm
     params = {k: v for k, v in params.items() if k not in ("supports_tool_choice", "use_parallel_tool_calls")}

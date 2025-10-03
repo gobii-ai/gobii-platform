@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gobii – First Run Setup</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--page-bg, #0f172a);
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #f8fafc;
+    }
+    .wrapper {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border-radius: 18px;
+      width: min(900px, 92vw);
+      padding: 36px 42px;
+      box-shadow: 0 25px 55px rgba(15, 23, 42, 0.45);
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.03rem;
+    }
+    p.lead {
+      margin-top: 0.5rem;
+      margin-bottom: 2rem;
+      color: rgba(241, 245, 249, 0.75);
+    }
+    .section {
+      margin-bottom: 2.4rem;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    .section:last-of-type {
+      border-bottom: none;
+      padding-bottom: 0;
+      margin-bottom: 0;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 1rem;
+    }
+    label {
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+    input, select {
+      border-radius: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(15, 23, 42, 0.65);
+      color: #f8fafc;
+      padding: 10px 12px;
+      font-size: 1rem;
+    }
+    input[type="checkbox"] {
+      width: auto;
+      margin-right: 8px;
+    }
+    .helptext {
+      font-size: 0.85rem;
+      color: rgba(241, 245, 249, 0.65);
+      margin-top: 0.25rem;
+    }
+    .errors {
+      margin: 0.4rem 0 0.6rem;
+      color: #f87171;
+      font-size: 0.9rem;
+    }
+    button[type="submit"] {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border: none;
+      color: white;
+      padding: 0.9rem 1.8rem;
+      border-radius: 999px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    button[type="submit"]:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 30px rgba(99, 102, 241, 0.35);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.2rem 1.6rem;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-top: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <h1>Welcome to Gobii</h1>
+    <p class="lead">Let’s get your self-hosted instance ready. Complete the admin login and choose an LLM provider for orchestrator and browser agents.</p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      <div class="section">
+        <h2>Admin Account</h2>
+        <div class="grid">
+          <div class="field">
+            {{ superuser_form.email.label_tag }}
+            {{ superuser_form.email }}
+            {% if superuser_form.email.help_text %}<div class="helptext">{{ superuser_form.email.help_text }}</div>{% endif %}
+            {% if superuser_form.email.errors %}<div class="errors">{{ superuser_form.email.errors|join:', ' }}</div>{% endif %}
+          </div>
+          <div class="field">
+            {{ superuser_form.password1.label_tag }}
+            {{ superuser_form.password1 }}
+            {% if superuser_form.password1.errors %}<div class="errors">{{ superuser_form.password1.errors|join:', ' }}</div>{% endif %}
+          </div>
+          <div class="field">
+            {{ superuser_form.password2.label_tag }}
+            {{ superuser_form.password2 }}
+            {% if superuser_form.password2.errors %}<div class="errors">{{ superuser_form.password2.errors|join:', ' }}</div>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Primary Agents LLM</h2>
+        <div class="grid">
+          <div class="field">
+            {{ llm_form.orchestrator_provider.label_tag }}
+            {{ llm_form.orchestrator_provider }}
+            {% if llm_form.orchestrator_provider.errors %}<div class="errors">{{ llm_form.orchestrator_provider.errors|join:', ' }}</div>{% endif %}
+          </div>
+          <div class="field">
+            {{ llm_form.orchestrator_api_key.label_tag }}
+            {{ llm_form.orchestrator_api_key }}
+            <div class="helptext">{{ llm_form.orchestrator_api_key.help_text }}</div>
+            {% if llm_form.orchestrator_api_key.errors %}<div class="errors">{{ llm_form.orchestrator_api_key.errors|join:', ' }}</div>{% endif %}
+          </div>
+          <div class="field">
+            {{ llm_form.orchestrator_model.label_tag }}
+            {{ llm_form.orchestrator_model }}
+            {% if llm_form.orchestrator_model.errors %}<div class="errors">{{ llm_form.orchestrator_model.errors|join:', ' }}</div>{% endif %}
+          </div>
+          <div class="field">
+            {{ llm_form.orchestrator_api_base.label_tag }}
+            {{ llm_form.orchestrator_api_base }}
+            <div class="helptext">{{ llm_form.orchestrator_api_base.help_text }}</div>
+            {% if llm_form.orchestrator_api_base.errors %}<div class="errors">{{ llm_form.orchestrator_api_base.errors|join:', ' }}</div>{% endif %}
+          </div>
+          <div class="field">
+            {{ llm_form.orchestrator_custom_name.label_tag }}
+            {{ llm_form.orchestrator_custom_name }}
+            {% if llm_form.orchestrator_custom_name.errors %}<div class="errors">{{ llm_form.orchestrator_custom_name.errors|join:', ' }}</div>{% endif %}
+          </div>
+          <div class="field">
+            <div class="checkbox-row">
+              {{ llm_form.orchestrator_supports_tool_choice }}
+              {{ llm_form.orchestrator_supports_tool_choice.label_tag }}
+            </div>
+            {% if llm_form.orchestrator_supports_tool_choice.errors %}<div class="errors">{{ llm_form.orchestrator_supports_tool_choice.errors|join:', ' }}</div>{% endif %}
+            <div class="checkbox-row" style="margin-top:0.6rem;">
+              {{ llm_form.orchestrator_use_parallel_tools }}
+              {{ llm_form.orchestrator_use_parallel_tools.label_tag }}
+            </div>
+            {% if llm_form.orchestrator_use_parallel_tools.errors %}<div class="errors">{{ llm_form.orchestrator_use_parallel_tools.errors|join:', ' }}</div>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Browser Automations</h2>
+        <div class="field">
+          <div class="checkbox-row">
+            {{ llm_form.browser_same_as_orchestrator }}
+            {{ llm_form.browser_same_as_orchestrator.label_tag }}
+          </div>
+          {% if llm_form.browser_same_as_orchestrator.errors %}<div class="errors">{{ llm_form.browser_same_as_orchestrator.errors|join:', ' }}</div>{% endif %}
+        </div>
+
+        <div id="browser-extra" style="display:none;">
+          <div class="grid">
+            <div class="field">
+              {{ llm_form.browser_provider.label_tag }}
+              {{ llm_form.browser_provider }}
+              {% if llm_form.browser_provider.errors %}<div class="errors">{{ llm_form.browser_provider.errors|join:', ' }}</div>{% endif %}
+            </div>
+            <div class="field">
+              {{ llm_form.browser_api_key.label_tag }}
+              {{ llm_form.browser_api_key }}
+              {% if llm_form.browser_api_key.errors %}<div class="errors">{{ llm_form.browser_api_key.errors|join:', ' }}</div>{% endif %}
+            </div>
+            <div class="field">
+              {{ llm_form.browser_model.label_tag }}
+              {{ llm_form.browser_model }}
+              {% if llm_form.browser_model.errors %}<div class="errors">{{ llm_form.browser_model.errors|join:', ' }}</div>{% endif %}
+            </div>
+            <div class="field">
+              {{ llm_form.browser_api_base.label_tag }}
+              {{ llm_form.browser_api_base }}
+              {% if llm_form.browser_api_base.errors %}<div class="errors">{{ llm_form.browser_api_base.errors|join:', ' }}</div>{% endif %}
+            </div>
+            <div class="field">
+              {{ llm_form.browser_custom_name.label_tag }}
+              {{ llm_form.browser_custom_name }}
+              {% if llm_form.browser_custom_name.errors %}<div class="errors">{{ llm_form.browser_custom_name.errors|join:', ' }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; margin-top:2.5rem;">
+        <button type="submit">Save &amp; Launch Gobii</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const browserToggle = document.getElementById("id_browser_same_as_orchestrator");
+    const browserExtra = document.getElementById("browser-extra");
+
+    function updateBrowserVisibility() {
+      if (!browserToggle) return;
+      browserExtra.style.display = browserToggle.checked ? "none" : "block";
+    }
+
+    if (browserToggle) {
+      browserToggle.addEventListener("change", updateBrowserVisibility);
+      updateBrowserVisibility();
+    }
+  </script>
+</body>
+</html>
