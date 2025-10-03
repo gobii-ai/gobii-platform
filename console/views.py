@@ -2934,16 +2934,19 @@ class AgentDeleteView(LoginRequiredMixin, View):
                 )
                 browser_agent_id = None
 
-            # Delete the persistent agent first (this removes the foreign key constraint)
-            try:
-                agent.delete()
-            except BrowserUseAgent.DoesNotExist:
+            # Delete the persistent agent using a queryset delete to avoid triggering
+            # BrowserUseAgent lookups that can explode when historical data is missing.
+            deleted_count, _ = PersistentAgent.objects.filter(
+                pk=agent.pk,
+                user=request.user,
+            ).delete()
+
+            if deleted_count == 0:
                 logger.warning(
-                    "BrowserUseAgent missing during delete of PersistentAgent %s; retrying via queryset delete",
+                    "PersistentAgent %s not deleted via queryset path; returning 404",
                     agent_id,
-                    exc_info=True,
                 )
-                PersistentAgent.objects.filter(pk=agent.pk, user=request.user).delete()
+                return HttpResponse("Agent not found or you don't have permission.", status=404)
 
             # Now delete the browser use agent if it still exists
             if browser_agent_id:

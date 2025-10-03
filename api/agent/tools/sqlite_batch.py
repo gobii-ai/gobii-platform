@@ -17,15 +17,9 @@ from ...models import PersistentAgent
 
 # Reuse the context variable set by agent_sqlite_db
 from .sqlite_state import _sqlite_db_path_var  # type: ignore
+from .sqlite_helpers import is_write_statement
 
 logger = logging.getLogger(__name__)
-
-INSERT_PATTERN = re.compile(r"^\s*(?:WITH\b.*?\bINSERT\b|INSERT\b)", re.IGNORECASE | re.DOTALL)
-
-
-def _is_insert_statement(sql: str) -> bool:
-    return bool(INSERT_PATTERN.match(sql))
-
 
 def _classify_sqlite_error(exc: Exception) -> str:
     msg = str(exc).lower()
@@ -128,7 +122,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     succeeded = 0
     failed = 0
     warnings: List[str] = []
-    only_inserts = True
+    only_write_ops = True
 
     # Log a preview of the batch for observability (truncate SQL text)
     try:
@@ -238,7 +232,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     "error": {"code": "invalid_input", "message": "Operation must be a non-empty SQL string", "at_index": idx},
                 })
                 failed += 1
-                only_inserts = False
+                only_write_ops = False
                 if mode == "atomic":
                     error_occurred = True
                     break
@@ -249,9 +243,9 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             try:
                 # Preflight checks and best-effort sanitisation
                 sql_sanitized = _sanitize_sql(sql)
-                only_inserts = only_inserts and _is_insert_statement(sql_sanitized)
+                only_write_ops = only_write_ops and is_write_statement(sql_sanitized)
                 if _is_transaction_control(sql_sanitized):
-                    only_inserts = False
+                    only_write_ops = False
                     should_break = _handle_preflight_error(
                         "transaction_control_disallowed",
                         "Remove explicit BEGIN/COMMIT/ROLLBACK. The tool manages transactions automatically in atomic mode.",
@@ -264,7 +258,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                         continue
 
                 if _has_multiple_statements(sql_sanitized):
-                    only_inserts = False
+                    only_write_ops = False
                     should_break = _handle_preflight_error(
                         "multiple_statements",
                         "Provide exactly one SQL statement per operation. Split statements into separate items in the operations array.",
@@ -296,6 +290,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     }
                     results.append(res)
                     succeeded += 1
+                    only_write_ops = False
                 else:
                     # for inserts/updates/deletes
                     affected = cur.rowcount if cur.rowcount is not None else 0
@@ -329,7 +324,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     "time_ms": elapsed,
                 })
                 failed += 1
-                only_inserts = False
+                only_write_ops = False
 
                 # Rollback strategy
                 if mode == "atomic":
@@ -367,7 +362,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             "truncated_rows": any_truncated,
             "row_limit": row_limit,
         }
-        if status == "ok" and succeeded > 0 and only_inserts:
+        if status == "ok" and succeeded > 0 and only_write_ops:
             response["auto_sleep_ok"] = True
         return response
     except Exception as outer:
