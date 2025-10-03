@@ -311,7 +311,7 @@ def load_blog_post(slug: str):
         "published_at": published_at,
     }
 
-
+@lru_cache(maxsize=1)
 def get_all_blog_posts():
     posts = []
     if not BLOGS_ROOT.exists():
