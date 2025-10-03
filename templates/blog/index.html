@@ -48,11 +48,12 @@
               {% if post.published_at %}
                 <time datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"F j, Y" }}</time>
               {% endif %}
-              <span class="inline-flex items-center text-blue-600">Read more
+              <a href="{{ post.url }}" class="inline-flex items-center text-blue-600 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white">
+                Read more
                 <svg class="ml-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7" />
                 </svg>
-              </span>
+              </a>
             </div>
           </article>
         {% endfor %}
