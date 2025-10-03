@@ -188,8 +188,8 @@ urlpatterns = [
 
 # Proprietary-only routes
 if settings.GOBII_PROPRIETARY_MODE:
-    # Include proprietary URLs at root so names remain 'pages:*' as defined in proprietary/urls.py
-    urlpatterns.insert(1, path("", include("proprietary.urls")))
+    # Include proprietary URLs at root with namespace so `{% url 'proprietary:...' %}` keeps working
+    urlpatterns.insert(1, path("", include(("proprietary.urls", "proprietary"), namespace="proprietary")))
 
 # Serve static files in development
 if settings.DEBUG:
