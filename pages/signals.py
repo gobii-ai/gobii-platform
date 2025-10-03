@@ -125,19 +125,34 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             'date_joined': user.date_joined.isoformat(),
         }
 
-        # first-touch UTMs (if you stored them in a cookie)
-        first_touch = {k: request.COOKIES.get(k, '') for k in UTM_MAPPING.values()}
-        traits.update({f'{k}_first': v for k, v in first_touch.items() if v})
-
+        utm_first_payload: dict[str, str] = {}
         utm_first_cookie = request.COOKIES.get('__utm_first')
         if utm_first_cookie:
             try:
-                utm_first = json.loads(utm_first_cookie)
-                for k, v in utm_first.items():
-                    if k in UTM_MAPPING.values() and not first_touch.get(k) and v:
-                        traits[f'{k}_first'] = v
+                utm_first_payload = json.loads(utm_first_cookie)
             except json.JSONDecodeError:
                 logger.exception("Failed to parse __utm_first cookie; Content: %s", utm_first_cookie)
+                utm_first_payload = {}
+
+        current_touch = {
+            utm_key: request.COOKIES.get(utm_key, '')
+            for utm_key in UTM_MAPPING.values()
+        }
+
+        first_touch = {}
+        for utm_key in UTM_MAPPING.values():
+            preserved_value = utm_first_payload.get(utm_key)
+            current_value = current_touch.get(utm_key)
+            if preserved_value:
+                first_touch[utm_key] = preserved_value
+            elif current_value:
+                first_touch[utm_key] = current_value
+
+        last_touch = {k: v for k, v in current_touch.items() if v}
+
+        traits.update({f'{k}_first': v for k, v in first_touch.items()})
+        if last_touch:
+            traits.update({f'{k}_last': v for k, v in last_touch.items()})
 
         Analytics.identify(
             user_id=str(user.id),
@@ -145,27 +160,27 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         )
 
         # ── 2. event-specific properties & last-touch UTMs ──────
-        last_touch = {}
-
-
-        for key, utm_param in UTM_MAPPING.items():
-            value = request.COOKIES.get(utm_param, '') or traits.get(f'{utm_param}_first', '')
-            last_touch[key] = value
-
         event_id = f'reg-{uuid.uuid4()}'
 
         event_properties = {
             'plan': 'free',
             'date_joined': user.date_joined.isoformat(),
-            **{k: v for k, v in last_touch.items() if v},
+            **{f'{k}_first': v for k, v in first_touch.items()},
+            **{f'{k}_last': v for k, v in last_touch.items()},
         }
+
+        campaign_context = {}
+        for key, utm_param in UTM_MAPPING.items():
+            value = last_touch.get(utm_param) or first_touch.get(utm_param, '')
+            if value:
+                campaign_context[key] = value
 
         Analytics.track(
             user_id=str(user.id),
             event=AnalyticsEvent.SIGNUP,
             properties=event_properties,
             context={
-                'campaign': last_touch,
+                'campaign': campaign_context,
                 'userAgent': request.META.get('HTTP_USER_AGENT', ''),
             },
             ip=None,
