@@ -1,16 +1,14 @@
 ---
-title: "Introducing the Gobii Blog"
+title: "How a Home Renovation Project Became the Perfect Test Case for AI Employees"
 date: 2025-10-03
-description: "Why we are launching the Gobii blog and what to expect from future posts."
+description: "AI Project Management in Action: Lessons from a Home Renovation."
 author: "The Gobii Team"
-seo_title: "Introducing the Gobii Blog"
-seo_description: "Learn why we launched the Gobii blog and what we plan to share about automation, AI employees, and product updates."
+seo_title: "How AI Employees Simplified a Complex Home Renovation Project"
+seo_description: "AI project management in action: Discover how Gobii’s AI employee turned a stressful home renovation into a smooth, organized process."
 tags:
   - case study
   - project management
 ---
-
-# How a Home Renovation Project Became the Perfect Test Case for AI Employees
 
 When Grace Ha received an email from someone named "Horace" offering to help manage her home renovation project, her first thought was skepticism. "My first impression was, who is this person and why do they want to be so helpful?" she recalls. "Who wants to be helpful is definitely up to something in my experience."
 
