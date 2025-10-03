@@ -1,19 +1,12 @@
-import json
-import uuid
 from datetime import timezone, datetime
 
-from django.core.mail import send_mail
 from django.http.response import JsonResponse
-from django.template.loader import render_to_string
-from django.templatetags.static import static
-from django.utils.html import strip_tags
 from django.utils.http import urlencode
 from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
 from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect
-from django.urls import reverse
 from django.http import HttpResponseRedirect
 from django.db.models import F, Q
 from .models import LandingPage
@@ -22,7 +15,6 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from api.models import PaidPlanIntent, PersistentAgent
 from api.agent.short_description import build_listing_description
 from agents.services import AIEmployeeTemplateService
-from waffle import flag_is_active
 from api.models import OrganizationMembership
 from config.stripe_config import get_stripe_settings
 
@@ -600,21 +592,6 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
 class PricingView(TemplateView):
     pass
-
-
-class BlogSitemap(sitemaps.Sitemap):
-    priority = 0.6
-    changefreq = 'weekly'
-
-    def items(self):
-        return get_all_blog_posts()
-
-    def location(self, item):
-        return item["url"]
-
-    def lastmod(self, item):
-        return item.get("published_at")
-
 
 class StaticViewSitemap(sitemaps.Sitemap):
     priority = 0.5

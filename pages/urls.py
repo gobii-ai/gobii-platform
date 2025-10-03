@@ -1,4 +1,7 @@
 from django.urls import path, include
+
+from config.settings import GOBII_PROPRIETARY_MODE
+from proprietary.views import BlogSitemap
 from .views import (
     MarkdownPageView,
     DocsIndexRedirectView,
@@ -27,6 +30,9 @@ app_name = "pages"
 sitemaps = {
     'static': StaticViewSitemap,
 }
+
+if GOBII_PROPRIETARY_MODE:
+    sitemaps['blog'] = BlogSitemap
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),

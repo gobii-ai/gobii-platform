@@ -2,6 +2,7 @@ import logging
 import json
 
 from django.conf import settings
+from django.contrib import sitemaps
 from django.http import HttpResponse, Http404
 from django.template.loader import render_to_string
 from django.templatetags.static import static
@@ -23,7 +24,6 @@ class ProprietaryModeRequiredMixin:
         if not settings.GOBII_PROPRIETARY_MODE:
             raise Http404()
         return super().dispatch(request, *args, **kwargs)
-
 
 class PricingView(ProprietaryModeRequiredMixin, TemplateView):
     template_name = "pricing.html"
@@ -143,7 +143,6 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         ]
 
         return context
-
 
 class SupportView(ProprietaryModeRequiredMixin, TemplateView):
     """Static support page."""
@@ -266,7 +265,6 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
 
         return context
 
-
 class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
     template_name = "blog/detail.html"
 
@@ -351,3 +349,17 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         )
 
         return context
+
+class BlogSitemap(sitemaps.Sitemap):
+    priority = 0.6
+    changefreq = 'weekly'
+
+    def items(self):
+        return get_all_blog_posts()
+
+    def location(self, item):
+        return item["url"]
+
+    def lastmod(self, item):
+        return item.get("published_at")
+
