@@ -9,9 +9,9 @@
 - [x] Register Bright Data and Pipedream MCP servers only when credentials exist; surface clear availability in logs/UI (`api/agent/tools/mcp_manager.py:82`).
 - [x] Disable Segment/telemetry features unless keys are supplied, with proprietary mode able to opt in (`config/settings.py:600`).
 
-## Priority 3 – Keyless LLM Community Mode
-- [ ] Relax the `precheck-llm-keys` gate so the stack boots without vendor keys and enters a documented community/demo mode (`compose.yaml:42`).
-- [ ] Update LLM selection logic to handle missing keys gracefully while keeping strict behaviour for proprietary deployments (`api/agent/core/llm_config.py:168`).
+## Priority 3 – LLM Bootstrap Safety Net
+- [ ] Remove the `precheck-llm-keys` barrier so compose boots into an "unconfigured" state while blocking agent execution until setup completes (`compose.yaml:42`).
+- [ ] Teach LLM selection paths to detect missing credentials, surface a clear maintenance banner, and short-circuit scheduling/API usage until configuration is saved (`api/agent/core/llm_config.py:168`, `api/agent/core/event_processing.py:942`).
 
 ## Priority 4 – Self-Host by Default, Dev Overlay, First-Run Wizard
 - [ ] Rework `compose.yaml` into the hardened self-host stack (persistent volumes, `DEBUG=0`, secrets from `.env`/wizard, optional worker/beat toggles) so `docker compose up` yields a production-style deployment (`compose.yaml:52`, `docker/Dockerfile:71`).
