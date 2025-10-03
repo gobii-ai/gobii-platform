@@ -604,19 +604,34 @@ EMAIL_BACKEND = (
     else "django.core.mail.backends.console.EmailBackend"
 )
 
+MAILGUN_SENDER_DOMAIN = env(
+    "MAILGUN_SENDER_DOMAIN",
+    default="mg.getgobii.com" if GOBII_PROPRIETARY_MODE else "",
+)
+
 ANYMAIL = {
     "MAILGUN_API_KEY": MAILGUN_API_KEY,
-    "MAILGUN_SENDER_DOMAIN": os.getenv(
-        "MAILGUN_SENDER_DOMAIN", "mg.getgobii.com"
-    ),  # Changed from MAILGUN_DOMAIN to MAILGUN_SENDER_DOMAIN as per Anymail's common setting.
     # If you chose the EU region add:
     # "MAILGUN_API_URL": "https://api.eu.mailgun.net/v3",
     "POSTMARK_SERVER_TOKEN": env("POSTMARK_SERVER_TOKEN", default=None),
 }
 
-DEFAULT_FROM_EMAIL = "Gobii <noreply@mg.getgobii.com>"
-SERVER_EMAIL = DEFAULT_FROM_EMAIL
-ACCOUNT_EMAIL_SUBJECT_PREFIX = "[Gobii] "
+if MAILGUN_SENDER_DOMAIN:
+    ANYMAIL["MAILGUN_SENDER_DOMAIN"] = MAILGUN_SENDER_DOMAIN  # type: ignore[index]
+
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL",
+    default=(
+        "Gobii <noreply@mg.getgobii.com>"
+        if GOBII_PROPRIETARY_MODE
+        else f"{PUBLIC_BRAND_NAME} <no-reply@example.invalid>"
+    ),
+)
+SERVER_EMAIL = env("SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
+ACCOUNT_EMAIL_SUBJECT_PREFIX = env(
+    "ACCOUNT_EMAIL_SUBJECT_PREFIX",
+    default=f"[{PUBLIC_BRAND_NAME}] " if PUBLIC_BRAND_NAME else "",
+)
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"
 
 # dj-stripe / Stripe configuration
@@ -655,7 +670,9 @@ META_PIXEL_ID = env("META_PIXEL_ID", default="")
 INITIAL_TASK_CREDIT_EXPIRATION_DAYS=env("INITIAL_TASK_CREDIT_EXPIRATION_DAYS", default=30, cast=int)
 
 # Support
-SUPPORT_EMAIL = env("SUPPORT_EMAIL", default="support@gobii.ai")
+SUPPORT_EMAIL = env(
+    "SUPPORT_EMAIL", default="support@gobii.ai" if GOBII_PROPRIETARY_MODE else ""
+)
 
 # OpenTelemetry Tracing
 OTEL_EXPORTER_OTLP_PROTOCOL = env("OTEL_EXPORTER_OTLP_PROTOCOL", default="http/protobuf")
