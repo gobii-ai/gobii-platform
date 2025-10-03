@@ -31,7 +31,7 @@
       Back to blog
     </a>
 
-    <h1 class="mt-6 text-4xl font-semibold text-slate-900">{{ post.meta.title }}</h1>
+    <h1 class="mt-6 text-4xl text-slate-900">{{ post.meta.title }}</h1>
 
     <div class="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-500">
       {% if post.published_at %}
@@ -47,7 +47,7 @@
       <p class="mt-6 text-lg leading-relaxed text-slate-600">{{ post.summary }}</p>
     {% endif %}
 
-    <div class="prose prose-slate mt-10 max-w-none lg:prose-lg">
+    <div class="prose prose-slate prose-headings:font-normal mt-10 max-w-none lg:prose-lg">
       {{ post.html|safe }}
     </div>
   </div>
@@ -56,11 +56,11 @@
 {% if recent_posts %}
 <section class="bg-slate-50 py-16">
   <div class="mx-auto max-w-5xl px-6">
-    <h2 class="text-xl font-semibold text-slate-900">More from the Gobii blog</h2>
+    <h2 class="text-xl text-slate-900">More from the Gobii blog</h2>
     <div class="mt-6 grid gap-6 md:grid-cols-3">
       {% for recent in recent_posts %}
         <article class="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-md">
-          <h3 class="text-lg font-semibold text-slate-900">
+          <h3 class="text-lg text-slate-900">
             <a href="{{ recent.url }}" class="hover:text-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white">{{ recent.title }}</a>
           </h3>
           {% if recent.summary %}
