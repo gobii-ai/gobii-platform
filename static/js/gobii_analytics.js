@@ -1,12 +1,57 @@
-const COOKIE_DOMAIN = (() => {
-  const hostname = window.location.hostname;
-  // Do not attempt to derive a domain for IP addresses.
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+const MULTI_LABEL_PUBLIC_SUFFIXES = new Set([
+  'ac.uk', 'co.uk', 'gov.uk', 'ltd.uk', 'net.uk', 'org.uk', 'plc.uk', 'sch.uk',
+  'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au',
+  'com.br', 'net.br', 'org.br',
+  'com.cn', 'net.cn', 'org.cn',
+  'com.tw', 'net.tw', 'org.tw',
+  'com.sg', 'net.sg', 'org.sg',
+  'co.nz', 'net.nz', 'org.nz', 'gov.nz',
+  'co.jp', 'ne.jp', 'or.jp', 'go.jp',
+  'co.kr', 'ne.kr', 'or.kr', 'go.kr',
+  'co.in', 'firm.in', 'gen.in', 'ind.in', 'net.in', 'org.in',
+  'com.mx', 'net.mx', 'org.mx',
+  'co.za', 'net.za', 'org.za',
+  'com.tr', 'net.tr', 'org.tr'
+]);
+
+function deriveCookieDomain(hostname) {
+  if (!hostname) return hostname;
+
+  const lowerHost = hostname.toLowerCase();
+  const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(lowerHost);
+  const isIPv6 = lowerHost.includes(':');
+
+  if (lowerHost === 'localhost' || isIPv4 || isIPv6) {
     return hostname;
   }
-  const parts = hostname.split('.');
-  return parts.length > 1 ? '.' + parts.slice(-2).join('.') : hostname;
-})();
+
+  const parts = lowerHost.split('.');
+  if (parts.length < 2) {
+    return hostname;
+  }
+
+  const lastTwo = parts.slice(-2).join('.');
+  if (MULTI_LABEL_PUBLIC_SUFFIXES.has(lastTwo)) {
+    if (parts.length >= 3) {
+      return '.' + parts.slice(-3).join('.');
+    }
+    return hostname;
+  }
+
+  if (parts.length === 2) {
+    return '.' + parts.join('.');
+  }
+
+  return '.' + parts.slice(-2).join('.');
+}
+
+const COOKIE_DOMAIN = deriveCookieDomain(window.location.hostname);
+
+// Smoke check helper (manual): run `window.__gobiiAnalyticsCookieDomainFor('app.example.co.uk')`
+// in the browser console to verify how we derive the cookie scope for a hostname.
+if (typeof window !== 'undefined') {
+  window.__gobiiAnalyticsCookieDomainFor = deriveCookieDomain;
+}
 
 const UTM_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
 
