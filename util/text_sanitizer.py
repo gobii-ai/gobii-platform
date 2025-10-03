@@ -20,6 +20,10 @@ _CONTROL_CHAR_SUBSTITUTIONS = {
 _CONTROL_HEX_SEQUENCE_RE = re.compile(r"([\u0000-\u0001])([0-9a-fA-F]{2})")
 _TRANSLATION_TABLE = str.maketrans(_CONTROL_CHAR_SUBSTITUTIONS)
 
+def _decode_control_hex(match: re.Match[str]) -> str:
+    high = ord(match.group(1))
+    low = int(match.group(2), 16)
+    return chr((high << 8) | low)
 
 def strip_control_chars(value: str | None) -> str:
     """Remove disallowed control characters from outbound message bodies."""
@@ -28,11 +32,6 @@ def strip_control_chars(value: str | None) -> str:
     text = value
     for needle, replacement in _SEQUENCE_SUBSTITUTIONS:
         text = text.replace(needle, replacement)
-
-    def _decode_control_hex(match: re.Match[str]) -> str:
-        high = ord(match.group(1))
-        low = int(match.group(2), 16)
-        return chr((high << 8) | low)
 
     text = _CONTROL_HEX_SEQUENCE_RE.sub(_decode_control_hex, text)
     text = text.translate(_TRANSLATION_TABLE)
