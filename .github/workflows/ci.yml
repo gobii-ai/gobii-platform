@@ -166,6 +166,8 @@ jobs:
             tag: batch_pa_shutdown_triggers
           - batch: agent_lifecycle
             tag: batch_agent_lifecycle
+          - batch: agent_short_description
+            tag: batch_agent_short_description
           - batch: schedule
             tag: batch_schedule
           - batch: owner_billing

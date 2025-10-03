@@ -14,7 +14,6 @@ from api.models import (
     PersistentAgent,
     PersistentAgentMessage,
     PersistentAgentStep,
-    PersistentAgentSystemStep,
 )
 
 
@@ -210,7 +209,7 @@ class AgentPeerLinkSignalTests(TestCase):
             browser_use_agent=cls.browser_agent_b,
         )
 
-    def test_peer_link_creation_creates_intro_steps_and_triggers_processing(self):
+    def test_peer_link_creation_skips_intro_steps_and_processing(self):
         def immediate_on_commit(func, using=None):
             func()
 
@@ -225,27 +224,11 @@ class AgentPeerLinkSignalTests(TestCase):
                 created_by=self.user,
             )
 
-        steps_a = list(PersistentAgentStep.objects.filter(agent=self.agent_a))
-        self.assertEqual(len(steps_a), 1)
-        step_a = steps_a[0]
-        self.assertIn(self.agent_b.name, step_a.description)
-        self.assertIn("short introduction", step_a.description)
-        self.assertIn(self.agent_b.charter, step_a.description)
-        self.assertIsNotNone(step_a.system_step)
-        self.assertEqual(step_a.system_step.code, PersistentAgentSystemStep.Code.PEER_LINK_CREATED)
+        self.assertTrue(AgentPeerLink.objects.filter(id=link.id).exists())
 
-        steps_b = list(PersistentAgentStep.objects.filter(agent=self.agent_b))
-        self.assertEqual(len(steps_b), 1)
-        step_b = steps_b[0]
-        self.assertIn(self.agent_a.name, step_b.description)
-        self.assertIn("short introduction", step_b.description)
-        self.assertIn(self.agent_a.charter, step_b.description)
-        self.assertIsNotNone(step_b.system_step)
-        self.assertEqual(step_b.system_step.code, PersistentAgentSystemStep.Code.PEER_LINK_CREATED)
+        steps_a = PersistentAgentStep.objects.filter(agent=self.agent_a)
+        steps_b = PersistentAgentStep.objects.filter(agent=self.agent_b)
 
-        delay_calls = {call.args[0] for call in delay_mock.call_args_list}
-        self.assertEqual(delay_calls, {str(self.agent_a.id), str(self.agent_b.id)})
-        self.assertEqual(delay_mock.call_count, 2)
-
-        self.assertIn(str(link.id), step_a.description)
-        self.assertIn(str(link.id), step_b.description)
+        self.assertEqual(steps_a.count(), 0)
+        self.assertEqual(steps_b.count(), 0)
+        delay_mock.assert_not_called()

@@ -1729,10 +1729,14 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
                 if state and state.window_reset_at
                 else "pending"
             )
+            desc_part = ""
+            if counterpart.short_description:
+                desc_part = f" - {counterpart.short_description}"
             peer_lines.append(
-                "- {} (id: {}) | quota {} msgs / {} h | remaining: {} | next reset: {}".format(
+                "- {} (id: {}){}| quota {} msgs / {} h | remaining: {} | next reset: {}".format(
                     counterpart.name,
                     counterpart.id,
+                    f"{desc_part} " if desc_part else "",
                     link.messages_per_window,
                     link.window_hours,
                     remaining,

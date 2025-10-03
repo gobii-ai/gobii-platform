@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, tag
 from unittest.mock import patch
 
 from api.agent.short_description import (
@@ -12,6 +12,7 @@ from api.agent.tasks.short_description import generate_agent_short_description_t
 from api.models import BrowserUseAgent, PersistentAgent
 
 
+@tag("batch_agent_short_description")
 class AgentShortDescriptionTests(TestCase):
     def setUp(self) -> None:
         User = get_user_model()
