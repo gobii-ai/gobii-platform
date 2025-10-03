@@ -5,9 +5,9 @@
 - [x] Externalise analytics/support contact defaults so community deployments don’t emit Gobii-specific IDs or addresses (`config/settings.py:600`, `config/settings.py:613`).
 
 ## Priority 2 – Optional Integrations by Default
-- [ ] Guard Stripe, Mailgun/Postmark, and Twilio integrations so absent keys fall back to safe no-op behaviour while proprietary mode can re-enable them (`config/settings.py:562`, `billing/services.py:1`).
-- [ ] Register Bright Data and Pipedream MCP servers only when credentials exist; surface clear availability in logs/UI (`api/agent/tools/mcp_manager.py:82`).
-- [ ] Disable Segment/telemetry features unless keys are supplied, with proprietary mode able to opt in (`config/settings.py:600`).
+- [x] Guard Stripe, Mailgun/Postmark, and Twilio integrations so absent keys fall back to safe no-op behaviour while proprietary mode can re-enable them (`config/settings.py:562`, `billing/services.py:1`).
+- [x] Register Bright Data and Pipedream MCP servers only when credentials exist; surface clear availability in logs/UI (`api/agent/tools/mcp_manager.py:82`).
+- [x] Disable Segment/telemetry features unless keys are supplied, with proprietary mode able to opt in (`config/settings.py:600`).
 
 ## Priority 3 – Keyless LLM Community Mode
 - [ ] Relax the `precheck-llm-keys` gate so the stack boots without vendor keys and enters a documented community/demo mode (`compose.yaml:42`).
