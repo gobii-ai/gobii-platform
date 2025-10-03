@@ -7,6 +7,8 @@ services:
     volumes:
       - .:/app:ro
       - runtime-config:/config
+      - static-data:/static
+      - media-data:/media
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gobii}
       POSTGRES_DB: ${POSTGRES_DB:-gobii}
@@ -16,6 +18,8 @@ services:
       MINIO_ROOT_USER_PREFIX: ${MINIO_ROOT_USER_PREFIX:-gobii}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
+      APP_UID: ${APP_UID:-101}
+      APP_GID: ${APP_GID:-102}
     restart: "no"
 
   db:

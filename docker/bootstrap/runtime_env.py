@@ -15,20 +15,31 @@ from typing import Dict
 CONFIG_DIR = Path(os.environ.get("BOOTSTRAP_CONFIG_DIR", "/config"))
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
+STATIC_DIR = Path(os.environ.get("BOOTSTRAP_STATIC_DIR", "/static"))
+MEDIA_DIR = Path(os.environ.get("BOOTSTRAP_MEDIA_DIR", "/media"))
+
 POSTGRES_USER = os.environ.get("POSTGRES_USER", "gobii")
 POSTGRES_DB = os.environ.get("POSTGRES_DB", "gobii")
-POSTGRES_PASSWORD_ENV = os.environ.get("POSTGRES_PASSWORD")
-DJANGO_SECRET_KEY_ENV = os.environ.get("DJANGO_SECRET_KEY")
-GOBII_ENCRYPTION_KEY_ENV = os.environ.get("GOBII_ENCRYPTION_KEY")
+POSTGRES_PASSWORD_ENV = os.environ.get("POSTGRES_PASSWORD") or None
+DJANGO_SECRET_KEY_ENV = os.environ.get("DJANGO_SECRET_KEY") or None
+GOBII_ENCRYPTION_KEY_ENV = os.environ.get("GOBII_ENCRYPTION_KEY") or None
 MINIO_PREFIX = os.environ.get("MINIO_ROOT_USER_PREFIX", "gobii")
+MINIO_USER_ENV = os.environ.get("MINIO_ROOT_USER") or None
+MINIO_PASSWORD_ENV = os.environ.get("MINIO_ROOT_PASSWORD") or None
+APP_UID = int(os.environ.get("APP_UID", "101"))
+APP_GID = int(os.environ.get("APP_GID", "102"))
 
 
-def _ensure_file(path: Path, value: str) -> str:
+def _ensure_file(path: Path, value: str, *, uid: int | None = None, gid: int | None = None) -> str:
     if path.exists():
-        return path.read_text().strip()
-    path.write_text(value + "\n")
+        contents = path.read_text().strip()
+    else:
+        path.write_text(value + "\n")
+        contents = value
     os.chmod(path, 0o600)
-    return value
+    if uid is not None and gid is not None:
+        os.chown(path, uid, gid)
+    return contents
 
 
 def _load_env(path: Path) -> Dict[str, str]:
@@ -53,6 +64,7 @@ def _write_env(path: Path, data: Dict[str, str]) -> None:
         lines.append(f"{key}={val}")
     path.write_text("\n".join(lines) + "\n")
     os.chmod(path, 0o600)
+    os.chown(path, APP_UID, APP_GID)
 
 
 def _random_token(length: int = 48) -> str:
@@ -60,13 +72,27 @@ def _random_token(length: int = 48) -> str:
     return secrets.token_urlsafe(length)[:length]
 
 
+def _ensure_dir_permissions(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    os.chown(path, APP_UID, APP_GID)
+    os.chmod(path, 0o770)
+    for root, dirs, files in os.walk(path):
+        root_path = Path(root)
+        os.chown(root_path, APP_UID, APP_GID)
+        os.chmod(root_path, 0o770)
+        for name in files:
+            file_path = root_path / name
+            os.chown(file_path, APP_UID, APP_GID)
+            os.chmod(file_path, 0o660)
+
+
 # ---- Database secrets ----
 postgres_password = _ensure_file(CONFIG_DIR / "postgres-password", POSTGRES_PASSWORD_ENV or _random_token(48))
 
 # ---- MinIO secrets ----
 minio_user_default = f"{MINIO_PREFIX}-{secrets.token_hex(4)}"
-minio_user = _ensure_file(CONFIG_DIR / "minio-root-user", os.environ.get("MINIO_ROOT_USER", minio_user_default))
-minio_password = _ensure_file(CONFIG_DIR / "minio-root-password", os.environ.get("MINIO_ROOT_PASSWORD", _random_token(48)))
+minio_user = _ensure_file(CONFIG_DIR / "minio-root-user", MINIO_USER_ENV or minio_user_default)
+minio_password = _ensure_file(CONFIG_DIR / "minio-root-password", MINIO_PASSWORD_ENV or _random_token(48))
 
 # ---- Django/application env ----
 django_env_path = CONFIG_DIR / "django.env"
@@ -76,8 +102,13 @@ defaults = {
     "DJANGO_SETTINGS_MODULE": "config.settings",
     "GOBII_RELEASE_ENV": "oss",
     "DEBUG": "0",
+    "GOBII_ENABLE_TRACING": current_env.get("GOBII_ENABLE_TRACING", "0"),
     "DJANGO_SECRET_KEY": current_env.get("DJANGO_SECRET_KEY", DJANGO_SECRET_KEY_ENV or _random_token(64)),
     "GOBII_ENCRYPTION_KEY": current_env.get("GOBII_ENCRYPTION_KEY", GOBII_ENCRYPTION_KEY_ENV or _random_token(64)),
+    "HOME": current_env.get("HOME", "/tmp"),
+    "XDG_DATA_HOME": current_env.get("XDG_DATA_HOME", "/tmp/.chrome"),
+    "XDG_CONFIG_HOME": current_env.get("XDG_CONFIG_HOME", "/tmp/.chrome"),
+    "XDG_CACHE_HOME": current_env.get("XDG_CACHE_HOME", "/tmp/.chrome"),
     "POSTGRES_HOST": current_env.get("POSTGRES_HOST", "db"),
     "POSTGRES_PORT": current_env.get("POSTGRES_PORT", "5432"),
     "POSTGRES_DB": current_env.get("POSTGRES_DB", POSTGRES_DB),
@@ -97,5 +128,9 @@ if current_env != defaults:
 else:
     # Ensure perms even if untouched
     os.chmod(django_env_path, 0o600)
+    os.chown(django_env_path, APP_UID, APP_GID)
 
 print("Runtime configuration available at", CONFIG_DIR)
+
+for path in (STATIC_DIR, MEDIA_DIR):
+    _ensure_dir_permissions(path)
