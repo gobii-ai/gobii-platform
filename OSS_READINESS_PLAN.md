@@ -2,7 +2,7 @@
 
 ## Priority 1 – Neutral Community Defaults, Proprietary Opt-In
 - [x] Replace hard-coded Gobii domains/URLs with environment-driven values and neutral community defaults, preserving proprietary overrides (`config/settings.py:73`, `config/settings.py:724`, `templates/includes/_footer.html:19`, `misc/ts-example-client/src/index.ts:275`).
-- [ ] Externalise analytics/support contact defaults so community deployments don’t emit Gobii-specific IDs or addresses (`config/settings.py:600`, `config/settings.py:613`).
+- [x] Externalise analytics/support contact defaults so community deployments don’t emit Gobii-specific IDs or addresses (`config/settings.py:600`, `config/settings.py:613`).
 
 ## Priority 2 – Optional Integrations by Default
 - [ ] Guard Stripe, Mailgun/Postmark, and Twilio integrations so absent keys fall back to safe no-op behaviour while proprietary mode can re-enable them (`config/settings.py:562`, `billing/services.py:1`).

@@ -67,6 +67,41 @@ GOBII_PROPRIETARY_MODE = env.bool("GOBII_PROPRIETARY_MODE", default=False)
 # for agents/tasks. Can be disabled (e.g., in tests) via env.
 GOBII_ENABLE_COMMUNITY_UNLIMITED = env.bool("GOBII_ENABLE_COMMUNITY_UNLIMITED", default=True)
 
+try:
+    from proprietary import defaults as _proprietary_defaults_module
+except ImportError:  # Community builds may not package proprietary defaults
+    _proprietary_defaults_module = None
+
+
+_COMMUNITY_DEFAULTS = {
+    "brand": {
+        "PUBLIC_DISCORD_URL": "https://discord.gg/yyDB8GwxtE",
+        "PUBLIC_X_URL": "https://x.com/gobii_ai",
+        "PUBLIC_GITHUB_URL": "https://github.com/gobii-ai",
+    }
+}
+
+
+def _proprietary_default(section: str, key: str, *, fallback: str = "") -> str:
+    """Fetch a proprietary default without leaking values into community builds."""
+
+    if not GOBII_PROPRIETARY_MODE or _proprietary_defaults_module is None:
+        return fallback
+
+    defaults_map = getattr(_proprietary_defaults_module, "DEFAULTS", {})
+    section_defaults = defaults_map.get(section, {})
+    return section_defaults.get(key, fallback)
+
+
+def _community_default(section: str, key: str, *, fallback: str = "") -> str:
+    """Provide OSS-friendly defaults for select public links."""
+
+    if GOBII_PROPRIETARY_MODE:
+        return fallback
+
+    section_defaults = _COMMUNITY_DEFAULTS.get(section, {})
+    return section_defaults.get(key, fallback)
+
 # ────────── Core ──────────
 DEBUG = env.bool("DEBUG", default=False)
 SECRET_KEY = env("DJANGO_SECRET_KEY")
@@ -105,31 +140,43 @@ SITE_ID = 1
 
 PUBLIC_BRAND_NAME = env(
     "PUBLIC_BRAND_NAME",
-    default="Gobii" if GOBII_PROPRIETARY_MODE else "Agent Platform",
+    default=_proprietary_default("brand", "PUBLIC_BRAND_NAME", fallback="Agent Platform"),
 )
 PUBLIC_SITE_URL = env(
     "PUBLIC_SITE_URL",
-    default="https://gobii.ai" if GOBII_PROPRIETARY_MODE else "http://localhost:8000",
+    default=_proprietary_default("brand", "PUBLIC_SITE_URL", fallback="http://localhost:8000"),
 )
 PUBLIC_CONTACT_EMAIL = env(
     "PUBLIC_CONTACT_EMAIL",
-    default="hello@gobii.ai" if GOBII_PROPRIETARY_MODE else "",
+    default=_proprietary_default("brand", "PUBLIC_CONTACT_EMAIL"),
 )
 PUBLIC_SUPPORT_EMAIL = env(
     "PUBLIC_SUPPORT_EMAIL",
-    default="support@gobii.ai" if GOBII_PROPRIETARY_MODE else "",
+    default=_proprietary_default("brand", "PUBLIC_SUPPORT_EMAIL"),
 )
 PUBLIC_GITHUB_URL = env(
     "PUBLIC_GITHUB_URL",
-    default="https://github.com/gobii-ai" if GOBII_PROPRIETARY_MODE else "",
+    default=_proprietary_default(
+        "brand",
+        "PUBLIC_GITHUB_URL",
+        fallback=_community_default("brand", "PUBLIC_GITHUB_URL"),
+    ),
 )
 PUBLIC_DISCORD_URL = env(
     "PUBLIC_DISCORD_URL",
-    default="https://discord.gg/yyDB8GwxtE" if GOBII_PROPRIETARY_MODE else "",
+    default=_proprietary_default(
+        "brand",
+        "PUBLIC_DISCORD_URL",
+        fallback=_community_default("brand", "PUBLIC_DISCORD_URL"),
+    ),
 )
 PUBLIC_X_URL = env(
     "PUBLIC_X_URL",
-    default="https://x.com/gobii_ai" if GOBII_PROPRIETARY_MODE else "",
+    default=_proprietary_default(
+        "brand",
+        "PUBLIC_X_URL",
+        fallback=_community_default("brand", "PUBLIC_X_URL"),
+    ),
 )
 
 INSTALLED_APPS = [
@@ -606,7 +653,7 @@ EMAIL_BACKEND = (
 
 MAILGUN_SENDER_DOMAIN = env(
     "MAILGUN_SENDER_DOMAIN",
-    default="mg.getgobii.com" if GOBII_PROPRIETARY_MODE else "",
+    default=_proprietary_default("support", "MAILGUN_SENDER_DOMAIN"),
 )
 
 ANYMAIL = {
@@ -621,10 +668,10 @@ if MAILGUN_SENDER_DOMAIN:
 
 DEFAULT_FROM_EMAIL = env(
     "DEFAULT_FROM_EMAIL",
-    default=(
-        "Gobii <noreply@mg.getgobii.com>"
-        if GOBII_PROPRIETARY_MODE
-        else f"{PUBLIC_BRAND_NAME} <no-reply@example.invalid>"
+    default=_proprietary_default(
+        "support",
+        "DEFAULT_FROM_EMAIL",
+        fallback=f"{PUBLIC_BRAND_NAME} <no-reply@example.invalid>",
     ),
 )
 SERVER_EMAIL = env("SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
@@ -658,12 +705,28 @@ TOOL_CREDIT_COSTS = {
 }
 
 # Analytics
-SEGMENT_WRITE_KEY = env("SEGMENT_WRITE_KEY", default="")
-SEGMENT_WEB_WRITE_KEY = env("SEGMENT_WEB_WRITE_KEY", default=SEGMENT_WRITE_KEY)
+SEGMENT_WRITE_KEY = env(
+    "SEGMENT_WRITE_KEY",
+    default=_proprietary_default("analytics", "SEGMENT_WRITE_KEY"),
+)
+SEGMENT_WEB_WRITE_KEY = env(
+    "SEGMENT_WEB_WRITE_KEY",
+    default=_proprietary_default(
+        "analytics",
+        "SEGMENT_WEB_WRITE_KEY",
+        fallback=SEGMENT_WRITE_KEY,
+    ),
+)
 
 # Ad/Pixel IDs (empty disables)
-REDDIT_PIXEL_ID = env("REDDIT_PIXEL_ID", default="")
-META_PIXEL_ID = env("META_PIXEL_ID", default="")
+REDDIT_PIXEL_ID = env(
+    "REDDIT_PIXEL_ID",
+    default=_proprietary_default("analytics", "REDDIT_PIXEL_ID"),
+)
+META_PIXEL_ID = env(
+    "META_PIXEL_ID",
+    default=_proprietary_default("analytics", "META_PIXEL_ID"),
+)
 
 
 # Task Credit Settings
@@ -671,7 +734,8 @@ INITIAL_TASK_CREDIT_EXPIRATION_DAYS=env("INITIAL_TASK_CREDIT_EXPIRATION_DAYS", d
 
 # Support
 SUPPORT_EMAIL = env(
-    "SUPPORT_EMAIL", default="support@gobii.ai" if GOBII_PROPRIETARY_MODE else ""
+    "SUPPORT_EMAIL",
+    default=_proprietary_default("support", "SUPPORT_EMAIL"),
 )
 
 # OpenTelemetry Tracing
@@ -720,7 +784,10 @@ TWILIO_VERIFY_SERVICE_SID = env("TWILIO_VERIFY_SERVICE_SID", default="")
 TWILIO_MESSAGING_SERVICE_SID = env("TWILIO_MESSAGING_SERVICE_SID", default="")
 
 # Mixpanel
-MIXPANEL_PROJECT_TOKEN = env("MIXPANEL_PROJECT_TOKEN", default="")
+MIXPANEL_PROJECT_TOKEN = env(
+    "MIXPANEL_PROJECT_TOKEN",
+    default=_proprietary_default("analytics", "MIXPANEL_PROJECT_TOKEN"),
+)
 
 TWILIO_INCOMING_WEBHOOK_TOKEN = env("TWILIO_INCOMING_WEBHOOK_TOKEN", default="dummy-twilio-incoming-webhook-token")
 
