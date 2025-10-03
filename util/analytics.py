@@ -573,6 +573,8 @@ PAGE_META = {
     "/docs/guides/synchronous-tasks/":  ("Docs",       "Synchronous Tasks"),
     "/spawn-agent/":                    ("App",        "Spawn Agent"),
     "/":                                ("Marketing",  "Home"),
+    "/blog/":                           ("Marketing",  "Blog"),
+    r"^/blog/.*/$":                      ("Marketing",  "Blog Post"),
 }
 
 

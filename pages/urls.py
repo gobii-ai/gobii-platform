@@ -9,8 +9,16 @@ from .views import (
     health_check,
     AboutView,
     CareersView,
-    StartupCheckoutView, StaticViewSitemap, LandingRedirectView, ClearSignupTrackingView,
-    AIEmployeeDirectoryView, AIEmployeeDetailView, AIEmployeeHireView,
+    StartupCheckoutView,
+    StaticViewSitemap,
+    LandingRedirectView,
+    ClearSignupTrackingView,
+    AIEmployeeDirectoryView,
+    AIEmployeeDetailView,
+    AIEmployeeHireView,
+    BlogIndexView,
+    BlogPostView,
+    BlogSitemap,
 )
 
 from djstripe import views as djstripe_views
@@ -21,6 +29,7 @@ app_name = "pages"
 
 sitemaps = {
     'static': StaticViewSitemap,
+    'blog': BlogSitemap,
 }
 
 urlpatterns = [
@@ -30,8 +39,13 @@ urlpatterns = [
     path("ai-employees/<slug:slug>/", AIEmployeeDetailView.as_view(), name="ai_employee_detail"),
     path("ai-employees/<slug:slug>/hire/", AIEmployeeHireView.as_view(), name="ai_employee_hire"),
     path("health/", health_check, name="health_check"),
-    path("healthz/", health_check, name="health_check_k8s"),  # Kubernetes health check endpoint - matches /healthz/ in BackendConfig
-    
+    # Kubernetes health check endpoint - matches /healthz/ in BackendConfig
+    path("healthz/", health_check, name="health_check_k8s"),
+
+    # Blog URLs
+    path("blog/", BlogIndexView.as_view(), name="blog_index"),
+    path("blog/<slug:slug>/", BlogPostView.as_view(), name="blog_post"),
+
     # Documentation URLs
     path("docs/", DocsIndexRedirectView.as_view(), name="docs_index"),
     path("docs/<path:slug>/", MarkdownPageView.as_view(), name="markdown_page"),

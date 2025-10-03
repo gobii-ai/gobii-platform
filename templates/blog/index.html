@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}{{ seo_title }} - Gobii{% endblock %}
+
+{% block head_extras %}
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta name="description" content="{{ seo_description }}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ seo_title }}">
+  <meta property="og:description" content="{{ seo_description }}">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta property="og:site_name" content="Gobii">
+  <meta property="og:image" content="{{ og_image_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ seo_title }}">
+  <meta name="twitter:description" content="{{ seo_description }}">
+  <meta name="twitter:image" content="{{ og_image_url }}">
+  <script type="application/ld+json">{{ structured_data_json|safe }}</script>
+{% endblock %}
+
+{% block content %}
+<section class="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+  <div class="absolute -top-24 -left-16 h-56 w-56 rounded-full bg-blue-500/40 blur-3xl"></div>
+  <div class="absolute bottom-0 right-0 h-64 w-64 rounded-full bg-indigo-400/30 blur-3xl"></div>
+  <div class="relative mx-auto max-w-4xl px-6 py-20">
+    <p class="text-sm uppercase tracking-[0.3em] text-blue-200">Insights</p>
+    <h1 class="mt-4 text-4xl font-semibold sm:text-5xl">Gobii Blog</h1>
+    <p class="mt-6 max-w-3xl text-lg text-slate-100/80">
+      {{ seo_description }}
+    </p>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto max-w-5xl px-6">
+    {% if posts %}
+      <div class="grid gap-8 md:grid-cols-2">
+        {% for post in posts %}
+          <article class="flex h-full flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+            <div class="text-xs font-medium uppercase tracking-wider text-blue-500">Blog</div>
+            <h2 class="mt-3 text-2xl font-semibold text-slate-900">
+              <a href="{{ post.url }}" class="hover:text-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white">{{ post.title }}</a>
+            </h2>
+            {% if post.summary %}
+              <p class="mt-4 flex-1 text-base leading-relaxed text-slate-600">{{ post.summary }}</p>
+            {% endif %}
+            <div class="mt-6 flex items-center justify-between text-sm text-slate-500">
+              {% if post.published_at %}
+                <time datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"F j, Y" }}</time>
+              {% endif %}
+              <span class="inline-flex items-center text-blue-600">Read more
+                <svg class="ml-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7" />
+                </svg>
+              </span>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
+        <p class="text-lg font-medium text-slate-700">We are writing the first post. Check back soon!</p>
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
