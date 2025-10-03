@@ -128,3 +128,45 @@ class TestBatchToolCallsWithSleep(TestCase):
 
         self.assertIn('total_tokens', result_usage)
         self.assertGreaterEqual(result_usage['total_tokens'], 15)
+
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing.execute_spawn_web_task', return_value={"status": "pending", "auto_sleep_ok": True})
+    @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "sent", "auto_sleep_ok": True})
+    @patch('api.agent.core.event_processing._build_prompt_context')
+    @patch('api.agent.core.event_processing._completion_with_failover')
+    def test_auto_sleep_waits_for_all_tool_calls(self, mock_completion, mock_build_prompt, mock_send_email, mock_spawn_task, *_mocks):
+        """Ensure we execute every actionable tool call before honoring auto-sleep."""
+
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
+
+        def mk_tc(name, args):
+            tc = MagicMock()
+            tc.function = MagicMock()
+            tc.function.name = name
+            tc.function.arguments = args
+            return tc
+
+        tc_email = mk_tc('send_email', '{"to": "a@example.com", "subject": "hi", "mobile_first_html": "<p>Hi</p>"}')
+        tc_spawn = mk_tc('spawn_web_task', '{"url": "https://example.com", "charter": "do something"}')
+
+        msg = MagicMock()
+        msg.tool_calls = [tc_email, tc_spawn]
+        msg.content = None
+        choice = MagicMock(); choice.message = msg
+        resp = MagicMock(); resp.choices = [choice]
+        resp.model_extra = {"usage": MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15, prompt_tokens_details=MagicMock(cached_tokens=0))}
+        mock_completion.return_value = (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"})
+
+        from api.agent.core import event_processing as ep
+        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        mock_send_email.assert_called_once()
+        mock_spawn_task.assert_called_once()
+
+        calls = list(PersistentAgentToolCall.objects.all().order_by('step__created_at'))
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([c.tool_name for c in calls], ['send_email', 'spawn_web_task'])
+
+        sleep_steps = PersistentAgentStep.objects.filter(description__icontains='sleep until next trigger')
+        self.assertFalse(sleep_steps.exists())
