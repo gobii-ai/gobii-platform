@@ -264,7 +264,7 @@ class EmailDeliveryTests(TestCase):
         self.assertIn("Task 1", table_result)
         self.assertIn("Complete", table_result)
 
-    @override_settings(GOBII_RELEASE_ENV="prod")
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
     @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
     @patch('api.agent.comms.outbound_delivery.AnymailMessage')
     @patch('api.agent.comms.email_content.get_text')
