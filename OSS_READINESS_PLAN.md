@@ -14,8 +14,9 @@
 - [x] Teach LLM selection paths to detect missing credentials, surface a clear maintenance banner, and short-circuit scheduling/API usage until configuration is saved (`api/agent/core/llm_config.py:168`, `api/agent/core/event_processing.py:942`).
 
 ## Priority 4 – Self-Host by Default, Dev Overlay, First-Run Wizard
-- [ ] Rework `compose.yaml` into the hardened self-host stack (persistent volumes, `DEBUG=0`, secrets from `.env`/wizard, optional worker/beat toggles) so `docker compose up` yields a production-style deployment (`compose.yaml:52`, `docker/Dockerfile:71`).
-- [ ] Add `docker-compose.dev.yaml` (or equivalent) with developer conveniences for `docker compose -f docker-compose.dev.yaml up`.
+- [x] Rework `compose.yaml` into the hardened self-host stack (persistent volumes, `DEBUG=0`, optional worker/beat toggles) so `docker compose up` yields a production-style deployment (`compose.yaml`, `docker-compose.dev.yaml`).
+- [x] Add an automated secrets bootstrap step so the first `docker compose up` generates credentials without manual edits (`compose.yaml:1`, `docker/bootstrap/runtime_env.py`, `.env.oss.example`).
+- [x] Add `docker-compose.dev.yaml` (or equivalent) with developer conveniences for `docker compose -f docker-compose.dev.yaml up`.
 - [ ] Implement a first-run setup flow that captures admin credentials, primary LLM keys, and optional integrations before unlocking the app; allow proprietary mode to extend the wizard.
 
 ## Priority 5 – Documentation Refresh

@@ -1,261 +1,252 @@
+# OSS-friendly docker compose: generates secrets automatically, then brings up services.
+
 services:
+  bootstrap-env:
+    image: python:3.13-slim
+    command: python /app/docker/bootstrap/runtime_env.py
+    volumes:
+      - .:/app:ro
+      - runtime-config:/config
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gobii}
+      POSTGRES_DB: ${POSTGRES_DB:-gobii}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
+      GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-}
+      MINIO_ROOT_USER_PREFIX: ${MINIO_ROOT_USER_PREFIX:-gobii}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
+    restart: "no"
+
   db:
     image: postgres:16
+    depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-gobii}
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-gobii}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
     volumes:
       - db-data:/var/lib/postgresql/data
+      - runtime-config:/run/secrets:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gobii}"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 3s
-
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9090"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports:
-      - "9000:9000"
-      - "9090:9090"
-    volumes:
-      - minio-data:/data
+    restart: unless-stopped
 
   web:
     platform: linux/amd64
     build:
       context: .
       dockerfile: ./docker/Dockerfile
-    environment:
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
-      GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_DB: ${POSTGRES_DB:-gobii}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
-      BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
-      REDIS_URL: redis://redis:6379/0
-      XDG_DATA_HOME: /tmp/.chrome
-      XDG_CONFIG_HOME: /tmp/.chrome
-      XDG_CACHE_HOME: /tmp/.chrome
-    ports:
-      - "8000:8000"
     depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
       migrate:
+        condition: service_completed_successfully
+      collectstatic:
         condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_started
-    restart: unless-stopped
     command: >-
-      bash -lc "gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers ${GUNICORN_WORKERS:-4} --bind 0.0.0.0:8000 --graceful-timeout 30 --timeout 0"
-
-  flower:
-    image: mher/flower:2.0
-    command: celery flower --broker=redis://redis:6379/0 --port=${FLOWER_PORT:-5555}
+      bash -lc "set -a && source /config/django.env && exec gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers ${GUNICORN_WORKERS:-4} --bind 0.0.0.0:8000 --graceful-timeout 30 --timeout 0"
+    volumes:
+      - media-data:/app/mediafiles
+      - static-data:/app/staticfiles
+      - runtime-config:/config:ro
     ports:
-      - "${FLOWER_PORT:-5555}:5555"
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - FLOWER_BASIC_AUTH=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
-    depends_on:
-      - redis
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
-    profiles: ["obs"]
 
-# --------------------------------------------------------------------- #
-#  Optional Celery worker (disabled unless profile "worker" is enabled)
-# --------------------------------------------------------------------- #
   worker:
     platform: linux/amd64
     build:
       context: .
-      dockerfile: ./docker/Dockerfile  # relative to platform directory
-    command: celery -A config worker -l info
-    environment:
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
-      GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_DB: ${POSTGRES_DB:-gobii}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
-      BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      REDIS_URL: redis://redis:6379/0
-      XDG_DATA_HOME: /tmp/.chrome
-      XDG_CONFIG_HOME: /tmp/.chrome
-      XDG_CACHE_HOME: /tmp/.chrome
+      dockerfile: ./docker/Dockerfile
     depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
+    command: >-
+      bash -lc "set -a && source /config/django.env && exec celery -A config worker -l info"
+    volumes:
+      - runtime-config:/config:ro
+      - media-data:/app/mediafiles
+      - static-data:/app/staticfiles
     shm_size: 2gb
+    restart: unless-stopped
+    profiles: ["worker"]
 
-  # --------------------------------------------------------------------- #
-  #  Optional Celery beat scheduler (disabled unless profile "beat" is enabled)
-  # --------------------------------------------------------------------- #
   beat:
     platform: linux/amd64
     build:
       context: .
       dockerfile: ./docker/Dockerfile
-    command: >-
-      bash -lc "python manage.py sync_schedules && celery -A config beat --loglevel=info --scheduler=redbeat.RedBeatScheduler"
-    environment:
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
-      GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_DB: ${POSTGRES_DB:-gobii}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
-      BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      REDIS_URL: redis://redis:6379/0
-      XDG_DATA_HOME: /tmp/.chrome
-      XDG_CONFIG_HOME: /tmp/.chrome
-      XDG_CACHE_HOME: /tmp/.chrome
     depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
+    command: >-
+      bash -lc "set -a && source /config/django.env && python manage.py sync_schedules && exec celery -A config beat --loglevel=info --scheduler=redbeat.RedBeatScheduler"
+    volumes:
+      - runtime-config:/config:ro
+      - media-data:/app/mediafiles
+      - static-data:/app/staticfiles
     shm_size: 2gb
+    restart: unless-stopped
+    profiles: ["beat"]
 
-  # --------------------------------------------------------------------- #
-  #  IMAP IDLE watchers (keeps IMAP IDLE connections and enqueues polls)
-  # --------------------------------------------------------------------- #
   imap-idlers:
     platform: linux/amd64
     build:
       context: .
       dockerfile: ./docker/Dockerfile
-    command: >-
-      bash -lc "python manage.py run_imap_idlers"
-    environment:
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
-      GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_DB: ${POSTGRES_DB:-gobii}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
-      BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      REDIS_URL: redis://redis:6379/0
-      IMAP_IDLE_ENABLED: "true"
-      XDG_DATA_HOME: /tmp/.chrome
-      XDG_CONFIG_HOME: /tmp/.chrome
-      XDG_CACHE_HOME: /tmp/.chrome
     depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    command: >-
+      bash -lc "set -a && source /config/django.env && export IMAP_IDLE_ENABLED=true && exec python manage.py run_imap_idlers"
+    volumes:
+      - runtime-config:/config:ro
+      - media-data:/app/mediafiles
+      - static-data:/app/staticfiles
     restart: unless-stopped
+    profiles: ["email"]
 
-  # Run DB migrations once, then exit. Other services wait on this.
+  flower:
+    image: mher/flower:2.0
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery flower --broker=redis://redis:6379/0 --port=${FLOWER_PORT:-5555}
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - FLOWER_BASIC_AUTH=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
+    ports:
+      - "127.0.0.1:${FLOWER_PORT:-5555}:5555"
+    restart: unless-stopped
+    profiles: ["obs"]
+
   migrate:
     platform: linux/amd64
     build:
       context: .
       dockerfile: ./docker/Dockerfile
-    command: bash -lc "python manage.py migrate --noinput"
-    environment:
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
-      GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_DB: ${POSTGRES_DB:-gobii}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      REDIS_URL: redis://redis:6379/0
-      XDG_DATA_HOME: /tmp/.chrome
-      XDG_CONFIG_HOME: /tmp/.chrome
-      XDG_CACHE_HOME: /tmp/.chrome
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
-      BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
-      HOME: /tmp
     depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
+    command: >-
+      bash -lc "set -a && source /config/django.env && exec python manage.py migrate --noinput"
+    volumes:
+      - runtime-config:/config:ro
+      - media-data:/app/mediafiles
+      - static-data:/app/staticfiles
     restart: "no"
+
+  collectstatic:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    command: >-
+      bash -lc "set -a && source /config/django.env && exec python manage.py collectstatic --noinput"
+    volumes:
+      - runtime-config:/config:ro
+      - media-data:/app/mediafiles
+      - static-data:/app/staticfiles
+    restart: "no"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9090"
+    depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio-root-user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio-root-password
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - minio-data:/data
+      - runtime-config:/run/secrets:ro
+    restart: unless-stopped
+    profiles: ["object-storage"]
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.128.0
+    depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
     command: [ "--config=/etc/otel/config.yaml" ]
     volumes:
       - ./docker/otel-collector-config.yaml:/etc/otel/config.yaml
+      - runtime-config:/run/secrets:ro
     ports:
-      - "4317:4317"    # gRPC OTLP
-      - "4318:4318"    # HTTP OTLP
-      - "55679:55679"  # tracer
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:55679:55679"
     environment:
       GRAFANA_CLOUD_OTLP_ENDPOINT: ${GRAFANA_CLOUD_OTLP_ENDPOINT:-}
       GRAFANA_CLOUD_INSTANCE_ID: ${GRAFANA_CLOUD_INSTANCE_ID:-}
       GRAFANA_CLOUD_API_KEY: ${GRAFANA_CLOUD_API_KEY:-}
+    restart: unless-stopped
     profiles: ["obs"]
 
 volumes:
   db-data:
+  media-data:
+  static-data:
   minio-data:
+  runtime-config:
