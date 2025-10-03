@@ -2057,6 +2057,11 @@ def _get_system_instruction(
                 f" Limit: {link.messages_per_window} messages / {link.window_hours} hours."
             )
 
+        base_prompt += (
+            " Only loop in a human when the other agent requests human input, when you need additional context or approval,"
+            " or when there is a materially important development that the human must know. Otherwise, keep the exchange between agents."
+        )
+
     if is_first_run:
         try:
             already_contacted = PersistentAgentMessage.objects.filter(

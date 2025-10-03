@@ -80,6 +80,46 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
 
+    @tag("batch_console_agents")
+    def test_delete_persistent_agent_missing_browser_row(self):
+        """Actual missing BrowserUseAgent row should not cause deletion to fail."""
+        from django.db import connection
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Missing Browser Agent Row'
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Agent With Missing Browser Row',
+            charter='Charter',
+            browser_use_agent=browser_agent
+        )
+
+        with connection.cursor() as cursor:
+            if connection.vendor == "postgresql":
+                cursor.execute("SET session_replication_role = replica;")
+                delete_sql = "DELETE FROM api_browseruseagent WHERE id = %s"
+                try:
+                    cursor.execute(delete_sql, [str(browser_agent.id)])
+                finally:
+                    cursor.execute("SET session_replication_role = DEFAULT;")
+            else:
+                cursor.execute("PRAGMA foreign_keys = OFF;")
+                placeholder = "?"
+                delete_sql = f"DELETE FROM api_browseruseagent WHERE id = {placeholder}"
+                try:
+                    cursor.execute(delete_sql, [str(browser_agent.id)])
+                finally:
+                    cursor.execute("PRAGMA foreign_keys = ON;")
+
+        url = reverse('agent_delete', kwargs={'pk': persistent_agent.id})
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
+
     @patch("console.views.AgentService.has_agents_available", return_value=True)
     @tag("batch_console_agents")
     def test_org_agent_creation_blocked_without_seat(self, _mock_agents_available):
