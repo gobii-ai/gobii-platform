@@ -1,14 +1,16 @@
+import json
 from datetime import datetime, timezone as dt_timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import RequestFactory, TestCase, tag
 from django.utils import timezone
+from django.contrib.sessions.middleware import SessionMiddleware
 
 from api.models import UserBilling, Organization
 from constants.plans import PlanNamesChoices
-from pages.signals import handle_subscription_event
+from pages.signals import handle_subscription_event, handle_user_signed_up
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
@@ -17,6 +19,53 @@ from constants.stripe import (
 
 
 User = get_user_model()
+
+
+@tag("batch_pages")
+class UserSignedUpSignalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="signup-user",
+            email="signup@example.com",
+            password="pw",
+        )
+        self.factory = RequestFactory()
+
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_first_touch_traits_preserved_across_visits(self, mock_identify, mock_track):
+        request = self.factory.get("/signup")
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+
+        first_touch_payload = {
+            "utm_source": "first-source",
+            "utm_medium": "first-medium",
+        }
+        request.COOKIES = {
+            "__utm_first": json.dumps(first_touch_payload),
+            "utm_source": "last-source",
+            "utm_medium": "last-medium",
+        }
+
+        handle_user_signed_up(sender=None, request=request, user=self.user)
+
+        identify_call = mock_identify.call_args.kwargs
+        traits = identify_call["traits"]
+        self.assertEqual(traits["utm_source_first"], "first-source")
+        self.assertEqual(traits["utm_medium_first"], "first-medium")
+        self.assertEqual(traits["utm_source_last"], "last-source")
+        self.assertEqual(traits["utm_medium_last"], "last-medium")
+
+        track_call = mock_track.call_args.kwargs
+        properties = track_call["properties"]
+        context_campaign = track_call["context"]["campaign"]
+
+        self.assertEqual(properties["utm_source_first"], "first-source")
+        self.assertEqual(properties["utm_source_last"], "last-source")
+        self.assertEqual(context_campaign["source"], "last-source")
+        self.assertEqual(context_campaign["medium"], "last-medium")
 
 
 def _build_event_payload(
