@@ -2632,6 +2632,20 @@ class PersistentAgent(models.Model):
             transaction.on_commit(_enqueue_cleanup)
 
     def delete(self, *args, **kwargs):
+        browser_agent_id = getattr(self, "browser_use_agent_id", None)
+        if browser_agent_id:
+            browser_agent_exists = BrowserUseAgent.objects.filter(pk=browser_agent_id).exists()
+            if not browser_agent_exists:
+                logger.warning(
+                    "PersistentAgent %s is missing BrowserUseAgent %s; proceeding with orphan cleanup during delete",
+                    self.id,
+                    browser_agent_id,
+                )
+                # Clear any cached relation so Django's collector doesn't try to load it.
+                self.browser_use_agent_id = None
+                if hasattr(self, "_prefetched_objects_cache"):
+                    self._prefetched_objects_cache.pop("browser_use_agent", None)
+                self.__dict__.pop("browser_use_agent", None)
         # Schedule the removal of the Celery Beat task to happen only after
         # the database transaction that deletes this instance successfully commits.
         transaction.on_commit(self._remove_celery_beat_task)
