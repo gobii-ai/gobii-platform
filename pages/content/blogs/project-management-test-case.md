@@ -10,7 +10,7 @@ tags:
   - project management
 ---
 
-<img src="/static/images/blog/horus-intro@0.5x.png" style="display: inline-block; float: right; text-align: right; width: 350px; margin-left: 5px; margin-bottom: 5px;  box-shadow: 3px 3px 5px rgba(0, 0, 0, 0.5);"  alt="Horus's Intro Email for AI Project Management"/>
+<img src="/static/images/blog/horus-intro@0.5x.png" style="display: inline-block; float: right; text-align: right; width: 350px; margin-left: 5px; margin-bottom: 5px;  box-shadow: 0 0 5px 2px rgba(0, 0, 0, 0.05);"  alt="Horus's Intro Email for AI Project Management"/>
 
 When Grace Ha received an email from someone named "Horus" offering to help manage her home renovation project, her first thought was skepticism. "My first impression was, who is this person and why do they want to be so helpful?" she recalls. "Who wants to be helpful is definitely up to something in my experience."
 
