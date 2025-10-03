@@ -1,25 +1,59 @@
 # gobii_platform/api/serializers.py
 from rest_framework import serializers
+from api.agent.short_description import build_listing_description
 from .models import ApiKey, BrowserUseAgent, BrowserUseAgentTask
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
 
 # Serializer for Listing Agents (id, name, created_at)
 class BrowserUseAgentListSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
+    listing_description = serializers.SerializerMethodField()
+    listing_description_source = serializers.SerializerMethodField()
+
     class Meta:
         model = BrowserUseAgent
-        fields = ['id', 'name', 'created_at']
+        fields = ['id', 'name', 'created_at', 'listing_description', 'listing_description_source']
         ref_name = "AgentList" # Optional: for explicit component naming
+
+    def _get_listing_tuple(self, obj):
+        persistent = getattr(obj, 'persistent_agent', None)
+        if not persistent:
+            return "Agent is initializing…", "placeholder"
+        return build_listing_description(persistent, max_length=200)
+
+    def get_listing_description(self, obj):
+        description, _ = self._get_listing_tuple(obj)
+        return description
+
+    def get_listing_description_source(self, obj):
+        _, source = self._get_listing_tuple(obj)
+        return source
 
 class BrowserUseAgentSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
     user_email = serializers.ReadOnlyField(source='user.email')
+    listing_description = serializers.SerializerMethodField()
+    listing_description_source = serializers.SerializerMethodField()
 
     class Meta:
         model = BrowserUseAgent
-        fields = ['id', 'user_email', 'name', 'created_at', 'updated_at']
+        fields = ['id', 'user_email', 'name', 'created_at', 'updated_at', 'listing_description', 'listing_description_source']
         read_only_fields = ('id', 'user_email', 'created_at', 'updated_at') # 'name' is now writable
         ref_name = "AgentDetail" # Optional: for explicit component naming
+
+    def _get_listing_tuple(self, obj):
+        persistent = getattr(obj, 'persistent_agent', None)
+        if not persistent:
+            return "Agent is initializing…", "placeholder"
+        return build_listing_description(persistent, max_length=200)
+
+    def get_listing_description(self, obj):
+        description, _ = self._get_listing_tuple(obj)
+        return description
+
+    def get_listing_description_source(self, obj):
+        _, source = self._get_listing_tuple(obj)
+        return source
 
 class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')

@@ -371,6 +371,118 @@
     </div>
   </div>
 
+  <!-- Agent Contacts (Peer Links) -->
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+    <div class="p-6 sm:p-8 space-y-6">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-800">Agent Contacts (Peer Links)</h2>
+        <p class="text-sm text-gray-500">Create direct channels between this agent and other agents you control.</p>
+      </div>
+
+      <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+        <form method="post" class="space-y-3">
+          {% csrf_token %}
+          <input type="hidden" name="peer_link_action" value="create">
+          <div class="grid md:grid-cols-4 gap-3">
+            <div class="md:col-span-2">
+              <label class="block text-xs font-medium text-gray-600 mb-1">Agent</label>
+              <select name="peer_agent_id" class="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+                <option value="">Select an agent…</option>
+                {% for candidate in peer_link_candidates %}
+                  <option value="{{ candidate.id }}">{{ candidate.name }}</option>
+                {% endfor %}
+              </select>
+              {% if not peer_link_candidates %}
+              <p class="mt-2 text-xs text-gray-500">No additional eligible agents available.</p>
+              {% endif %}
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Messages / Window</label>
+              <input type="number" min="1" name="messages_per_window" value="{{ peer_link_defaults.messages_per_window }}" class="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Window Hours</label>
+              <input type="number" min="1" name="window_hours" value="{{ peer_link_defaults.window_hours }}" class="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+            </div>
+          </div>
+          <div>
+            <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors" {% if not peer_link_candidates %}disabled{% endif %}>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+              </svg>
+              Create Link
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="space-y-3">
+        {% if peer_links %}
+        <div class="overflow-hidden border border-gray-200 rounded-xl">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Agent</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Quota</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Remaining</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Next Reset</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Feature Flag</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              {% for entry in peer_links %}
+              <tr class="align-top">
+                <td class="px-4 py-3 text-sm text-gray-800">
+                  {% if entry.counterpart %}
+                    <div class="font-medium">{{ entry.counterpart.name }}</div>
+                  {% else %}
+                    <div class="font-medium text-gray-500">(Agent unavailable)</div>
+                  {% endif %}
+                  <div class="text-xs text-gray-500 mt-1">Linked {{ entry.link.created_at|date:"M j, Y" }}</div>
+                  <div class="text-xs mt-1">Status: <span class="{% if entry.link.is_enabled %}text-green-600{% else %}text-gray-500{% endif %}">{% if entry.link.is_enabled %}Enabled{% else %}Disabled{% endif %}</span></div>
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-700">{{ entry.link.messages_per_window }} / {{ entry.link.window_hours }} h</td>
+                <td class="px-4 py-3 text-sm text-gray-700">{% if entry.state %}{{ entry.state.credits_remaining }}{% else %}—{% endif %}</td>
+                <td class="px-4 py-3 text-sm text-gray-700">{% if entry.state and entry.state.window_reset_at %}{{ entry.state.window_reset_at|date:"M j, Y H:i" }}{% else %}—{% endif %}</td>
+                <td class="px-4 py-3 text-sm text-gray-700">{{ entry.link.feature_flag|default:"—" }}</td>
+                <td class="px-4 py-3 text-sm text-gray-700 space-y-2">
+                  <form method="post" class="space-y-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="peer_link_action" value="update">
+                    <input type="hidden" name="link_id" value="{{ entry.link.id }}">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+                      <input type="number" min="1" name="messages_per_window" value="{{ entry.link.messages_per_window }}" class="w-full sm:w-24 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500">
+                      <input type="number" min="1" name="window_hours" value="{{ entry.link.window_hours }}" class="w-full sm:w-20 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500">
+                      <input type="text" name="feature_flag" value="{{ entry.link.feature_flag }}" placeholder="Flag (optional)" class="w-full sm:w-28 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500">
+                    </div>
+                    <label class="inline-flex items-center gap-2 text-xs text-gray-600">
+                      <input type="checkbox" name="is_enabled" value="true" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if entry.link.is_enabled %}checked{% endif %}>
+                      <span>Enabled</span>
+                    </label>
+                    <button type="submit" class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">Save</button>
+                  </form>
+                  <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="peer_link_action" value="delete">
+                    <input type="hidden" name="link_id" value="{{ entry.link.id }}">
+                    <button type="submit" class="px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors">Remove</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
+          No peer links yet. Use the form above to connect this agent with another agent you control.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
   <!-- Danger Zone -->
   <div class="bg-white/80 backdrop-blur-sm border border-red-200/60 shadow-xl rounded-xl overflow-hidden">
     <div class="p-6 sm:p-8">

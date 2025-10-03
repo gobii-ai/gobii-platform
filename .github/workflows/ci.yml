@@ -144,6 +144,10 @@ jobs:
             tag: batch_websocket
           - batch: agent_chat
             tag: batch_agent_chat
+          - batch: peer_dm
+            tag: batch_peer_dm
+          - batch: peer_intro
+            tag: batch_peer_intro
           - batch: allowlist_direction
             tag: batch_allowlist_direction
           - batch: console_context
@@ -162,6 +166,8 @@ jobs:
             tag: batch_pa_shutdown_triggers
           - batch: agent_lifecycle
             tag: batch_agent_lifecycle
+          - batch: agent_short_description
+            tag: batch_agent_short_description
           - batch: schedule
             tag: batch_schedule
           - batch: owner_billing
@@ -176,6 +182,8 @@ jobs:
             tag: batch_api_org_keys
           - batch: console_api_keys
             tag: batch_console_api_keys
+          - batch: charter_tools
+            tag: batch_charter_tools
           - batch: text_sanitization
             tag: batch_text_sanitization
     env:

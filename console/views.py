@@ -12,7 +12,8 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
 from django.urls import reverse, reverse_lazy
 from django.contrib import messages
-from django.db import transaction, models
+from django.db import transaction, models, IntegrityError
+from django.db.models import Q
 from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.views.decorators.http import require_POST
@@ -26,6 +27,7 @@ from functools import cached_property
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
+from api.agent.short_description import build_listing_description
 
 from api.models import (
     ApiKey,
@@ -36,6 +38,8 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
     PersistentAgentMessage,
+    AgentPeerLink,
+    AgentCommPeerState,
     PersistentAgentConversationParticipant,
     PersistentAgentSmsEndpoint,
     CommsChannel,
@@ -1482,9 +1486,16 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 organization__isnull=True  # Only personal agents
             ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
+        persistent_agents = list(persistent_agents)
+        for agent in persistent_agents:
+            description, source = build_listing_description(agent, max_length=200)
+            agent.listing_description = description
+            agent.listing_description_source = source
+            agent.is_initializing = source == "placeholder"
+
         context['persistent_agents'] = persistent_agents
 
-        context['has_agents'] = persistent_agents.exists()
+        context['has_agents'] = bool(persistent_agents)
 
         return context
 
@@ -2163,6 +2174,55 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['reassignable_orgs'] = reassignable_orgs
         context['can_reassign'] = True
 
+        peer_links_qs = (
+            AgentPeerLink.objects.filter(Q(agent_a=agent) | Q(agent_b=agent))
+            .select_related("agent_a", "agent_b")
+            .prefetch_related("communication_states")
+            .order_by("created_at")
+        )
+
+        peer_links: list[dict] = []
+        linked_agent_ids: set = set()
+        for link in peer_links_qs:
+            counterpart = link.get_other_agent(agent)
+            linked_agent_ids.add(link.agent_a_id)
+            linked_agent_ids.add(link.agent_b_id)
+
+            state = next(
+                (s for s in link.communication_states.all() if s.channel == CommsChannel.OTHER),
+                None,
+            )
+
+            peer_links.append(
+                {
+                    "link": link,
+                    "counterpart": counterpart,
+                    "state": state,
+                }
+            )
+
+        context['peer_links'] = peer_links
+
+        linked_agent_ids.discard(agent.id)
+        if agent.organization_id:
+            candidate_qs = PersistentAgent.objects.filter(
+                organization_id=agent.organization_id
+            )
+        else:
+            candidate_qs = PersistentAgent.objects.filter(
+                user=agent.user,
+                organization__isnull=True,
+            )
+
+        candidate_qs = candidate_qs.exclude(id=agent.id)
+        if linked_agent_ids:
+            candidate_qs = candidate_qs.exclude(id__in=linked_agent_ids)
+        context['peer_link_candidates'] = candidate_qs.order_by('name')
+        context['peer_link_defaults'] = {
+            'messages_per_window': 30,
+            'window_hours': 6,
+        }
+
         return context
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - Post")
@@ -2170,6 +2230,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         """Handle agent configuration updates and allowlist management."""
         agent = self.get_object()
         
+        peer_action = request.POST.get('peer_link_action')
+        if peer_action:
+            return self._handle_peer_link_action(request, agent, peer_action)
+
         # Handle AJAX allowlist operations
         # Check both modern header and legacy header for AJAX detection
         is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.META.get('HTTP_X_REQUESTED_WITH') == 'XMLHttpRequest'
@@ -2521,11 +2585,26 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             messages.error(request, "Agent assignment cannot be empty.")
             return redirect('agent_detail', pk=agent.pk)
 
-        # Check for uniqueness, excluding the current agent's BrowserUseAgent
-        if BrowserUseAgent.objects.filter(
-            user=request.user, 
+        # Fetch the browser agent defensively; it may be missing due to historical corruption.
+        browser_agent: BrowserUseAgent | None = None
+        if agent.browser_use_agent_id:
+            browser_agent = BrowserUseAgent.objects.filter(pk=agent.browser_use_agent_id).first()
+            if browser_agent is None:
+                logger.warning(
+                    "BrowserUseAgent %s not found while updating PersistentAgent %s",
+                    agent.browser_use_agent_id,
+                    agent.id,
+                )
+
+        # Check for uniqueness, excluding the current agent's BrowserUseAgent (if present)
+        exclude_pk = browser_agent.id if browser_agent else agent.browser_use_agent_id
+        browser_name_conflict = BrowserUseAgent.objects.filter(
+            user=request.user,
             name=new_name
-        ).exclude(pk=agent.browser_use_agent.pk).exists():
+        )
+        if exclude_pk:
+            browser_name_conflict = browser_name_conflict.exclude(pk=exclude_pk)
+        if browser_name_conflict.exists():
             messages.error(request, f"You already have an agent named '{new_name}'.")
             return redirect('agent_detail', pk=agent.pk)
 
@@ -2538,9 +2617,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 # Update names if they changed
                 if agent.name != new_name:
                     agent.name = new_name
-                    agent.browser_use_agent.name = new_name
+                    if browser_agent is not None:
+                        browser_agent.name = new_name
                     agent_fields_to_update.append('name')
-                    browser_agent_fields_to_update.append('name')
+                    if browser_agent is not None:
+                        browser_agent_fields_to_update.append('name')
 
                 # Update charter if it changed
                 if agent.charter != new_charter:
@@ -2566,8 +2647,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 # Persist changes if needed
                 if agent_fields_to_update:
                     agent.save(update_fields=agent_fields_to_update)
-                if browser_agent_fields_to_update:
-                    agent.browser_use_agent.save(update_fields=browser_agent_fields_to_update)
+                if browser_agent is not None and browser_agent_fields_to_update:
+                    browser_agent.save(update_fields=browser_agent_fields_to_update)
 
                 # If agent was soft-expired, restore schedule (from snapshot if missing) and mark active
                 if agent.life_state == PersistentAgent.LifeState.EXPIRED and agent.is_active:
@@ -2600,6 +2681,132 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             messages.error(request, f"Error updating agent: {e}")
 
         return redirect('agent_detail', pk=agent.pk)
+
+    def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str):
+        redirect_response = redirect('agent_detail', pk=agent.pk)
+
+        try:
+            if action == 'create':
+                peer_agent_id = request.POST.get('peer_agent_id')
+                if not peer_agent_id:
+                    messages.error(request, 'Select an agent to link.')
+                    return redirect_response
+
+                try:
+                    messages_per_window = int(request.POST.get('messages_per_window', 30))
+                    window_hours = int(request.POST.get('window_hours', 6))
+                except ValueError:
+                    messages.error(request, 'Quotas must be positive integers.')
+                    return redirect_response
+
+                try:
+                    peer_agent = PersistentAgent.objects.get(id=peer_agent_id)
+                except PersistentAgent.DoesNotExist:
+                    messages.error(request, 'Selected agent no longer exists.')
+                    return redirect_response
+
+                new_link = AgentPeerLink(
+                    agent_a=agent,
+                    agent_b=peer_agent,
+                    messages_per_window=messages_per_window,
+                    window_hours=window_hours,
+                    created_by=request.user,
+                )
+
+                try:
+                    with transaction.atomic():
+                        new_link.save()
+                except IntegrityError:
+                    messages.error(request, 'A peer link already exists for these agents.')
+                    return redirect_response
+
+                messages.success(request, 'Peer agent link created.')
+                return redirect_response
+
+            if action == 'update':
+                link_id = request.POST.get('link_id')
+                if not link_id:
+                    messages.error(request, 'Missing peer link identifier.')
+                    return redirect_response
+
+                try:
+                    with transaction.atomic():
+                        link = AgentPeerLink.objects.select_for_update().prefetch_related('communication_states').get(id=link_id)
+                        if agent.id not in {link.agent_a_id, link.agent_b_id}:
+                            messages.error(request, 'You do not have permission to update this link.')
+                            return redirect_response
+
+                        if 'messages_per_window' in request.POST:
+                            link.messages_per_window = int(request.POST.get('messages_per_window', link.messages_per_window))
+                        if 'window_hours' in request.POST:
+                            link.window_hours = int(request.POST.get('window_hours', link.window_hours))
+                        if link.messages_per_window < 1 or link.window_hours < 1:
+                            raise ValueError
+                        if 'feature_flag' in request.POST:
+                            link.feature_flag = (request.POST.get('feature_flag') or '').strip()
+                        link.is_enabled = 'is_enabled' in request.POST
+                        link.save()
+
+                        for state in link.communication_states.all():
+                            updates = []
+                            if state.messages_per_window != link.messages_per_window:
+                                state.messages_per_window = link.messages_per_window
+                                updates.append('messages_per_window')
+                            if state.window_hours != link.window_hours:
+                                state.window_hours = link.window_hours
+                                updates.append('window_hours')
+                            if state.credits_remaining > link.messages_per_window:
+                                state.credits_remaining = link.messages_per_window
+                                updates.append('credits_remaining')
+                            if updates:
+                                updates.append('updated_at')
+                                state.save(update_fields=updates)
+
+                except AgentPeerLink.DoesNotExist:
+                    messages.error(request, 'Peer link not found.')
+                    return redirect_response
+
+                messages.success(request, 'Peer link updated.')
+                return redirect_response
+
+            if action == 'delete':
+                link_id = request.POST.get('link_id')
+                if not link_id:
+                    messages.error(request, 'Missing peer link identifier.')
+                    return redirect_response
+
+                with transaction.atomic():
+                    link = AgentPeerLink.objects.select_related('conversation').get(id=link_id)
+                    if agent.id not in {link.agent_a_id, link.agent_b_id}:
+                        messages.error(request, 'You do not have permission to remove this link.')
+                        return redirect_response
+
+                    AgentCommPeerState.objects.filter(link=link).delete()
+                    if link.conversation_id:
+                        conversation = link.conversation
+                        conversation.peer_link = None
+                        conversation.is_peer_dm = False
+                        conversation.save(update_fields=['peer_link', 'is_peer_dm'])
+
+                    link.delete()
+
+                messages.success(request, 'Peer link removed.')
+                return redirect_response
+
+            messages.error(request, 'Unsupported peer link action.')
+            return redirect_response
+
+        except AgentPeerLink.DoesNotExist:
+            messages.error(request, 'Peer link not found.')
+        except ValueError:
+            messages.error(request, 'Invalid values supplied for peer link settings.')
+        except ValidationError as exc:
+            messages.error(request, '; '.join(exc.messages))
+        except Exception as exc:
+            logger.exception('Peer link operation failed for agent %s', agent.id, exc_info=True)
+            messages.error(request, f'Peer link operation failed: {exc}')
+
+        return redirect_response
 
 
 class ConsoleDiagnosticsView(ConsoleViewMixin, TemplateView):
@@ -2725,25 +2932,33 @@ class AgentDeleteView(LoginRequiredMixin, View):
             agent_id = str(agent.pk)
             agent_org = agent.organization
 
-            # Persist the referenced BrowserUseAgent before deleting the PersistentAgent.
-            browser_agent = None
-            if agent.browser_use_agent_id:
-                browser_agent = BrowserUseAgent.objects.filter(
-                    pk=agent.browser_use_agent_id
-                ).first()
-                if browser_agent is None:
-                    logger.warning(
-                        "BrowserUseAgent %s not found while deleting PersistentAgent %s",
-                        agent.browser_use_agent_id,
-                        agent_id,
-                    )
+            # Persist the referenced BrowserUseAgent ID before deleting the PersistentAgent.
+            browser_agent_id = agent.browser_use_agent_id
+            if browser_agent_id and not BrowserUseAgent.objects.filter(pk=browser_agent_id).exists():
+                logger.warning(
+                    "BrowserUseAgent %s not found while deleting PersistentAgent %s",
+                    browser_agent_id,
+                    agent_id,
+                )
+                browser_agent_id = None
 
-            # Delete the persistent agent first (this removes the foreign key constraint)
-            agent.delete()
+            # Delete the persistent agent using a queryset delete to avoid triggering
+            # BrowserUseAgent lookups that can explode when historical data is missing.
+            deleted_count, _ = PersistentAgent.objects.filter(
+                pk=agent.pk,
+                user=request.user,
+            ).delete()
+
+            if deleted_count == 0:
+                logger.warning(
+                    "PersistentAgent %s not deleted via queryset path; returning 404",
+                    agent_id,
+                )
+                return HttpResponse("Agent not found or you don't have permission.", status=404)
 
             # Now delete the browser use agent if it still exists
-            if browser_agent is not None:
-                browser_agent.delete()
+            if browser_agent_id:
+                BrowserUseAgent.objects.filter(pk=browser_agent_id).delete()
             
             messages.success(request, f"Agent '{agent_name}' has been deleted.")
 

@@ -62,7 +62,7 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing BrowserUseAgents.
     """
-    queryset = BrowserUseAgent.objects.all()
+    queryset = BrowserUseAgent.objects.select_related('persistent_agent')
     serializer_class = BrowserUseAgentSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination

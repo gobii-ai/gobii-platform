@@ -15,6 +15,7 @@ from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
+    AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ToolCreditCost,
@@ -1441,6 +1442,7 @@ class CommsAllowlistEntryInline(admin.TabularInline):
 class AgentMessageInline(admin.TabularInline):
     """Inline for viewing agent conversation history."""
     model = PersistentAgentMessage
+    fk_name = 'owner_agent'
     extra = 0
     fields = ('timestamp', 'direction_display', 'from_to_display', 'body_preview', 'status_display', 'message_link')
     readonly_fields = ('timestamp', 'direction_display', 'from_to_display', 'body_preview', 'status_display', 'message_link')
@@ -1533,12 +1535,13 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         'message_count', 'created_at'
     )
     list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'execution_environment', 'schedule', 'created_at')
-    search_fields = ('name', 'user__email', 'organization__name', 'charter')
+    search_fields = ('name', 'user__email', 'organization__name', 'charter', 'short_description')
     raw_id_fields = ('user', 'browser_use_agent')
     readonly_fields = (
         'id', 'ownership_scope', 'created_at', 'updated_at',
         'browser_use_agent_link', 'agent_actions', 'messages_summary_link',
         'last_expired_at', 'sleep_email_sent_at',
+        'short_description', 'short_description_charter_hash', 'short_description_requested_hash',
     )
     inlines = [PersistentAgentCommsEndpointInline, CommsAllowlistEntryInline, AgentMessageInline]
 
@@ -1551,7 +1554,11 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('id', 'name', 'user', 'organization', 'ownership_scope', 'charter', 'created_at', 'updated_at')
+            'fields': (
+                'id', 'name', 'user', 'organization', 'ownership_scope',
+                'charter', 'short_description', 'short_description_charter_hash',
+                'short_description_requested_hash', 'created_at', 'updated_at',
+            )
         }),
         ('Configuration', {
             'fields': ('browser_use_agent', 'browser_use_agent_link', 'schedule', 'is_active', 'execution_environment')
@@ -2186,7 +2193,7 @@ class PersistentAgentMessageAdmin(admin.ModelAdmin):
     list_display = ('timestamp', 'owner_agent_link', 'direction_icon', 'from_address', 'to_address', 'body_summary', 'latest_status', 'conversation_link')
     list_filter = ('is_outbound', 'latest_status', 'timestamp', 'owner_agent', 'from_endpoint__channel')
     search_fields = ('body', 'from_endpoint__address', 'to_endpoint__address', 'owner_agent__name')
-    readonly_fields = ('id', 'seq', 'timestamp', 'owner_agent', 'latest_sent_at')
+    readonly_fields = ('id', 'seq', 'timestamp', 'owner_agent', 'peer_agent', 'latest_sent_at')
     raw_id_fields = ('from_endpoint', 'to_endpoint', 'conversation', 'parent')
     date_hierarchy = 'timestamp'
     ordering = ('-timestamp',)
@@ -2194,14 +2201,14 @@ class PersistentAgentMessageAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Optimize with select_related to prevent N+1 queries."""
         qs = super().get_queryset(request)
-        return qs.select_related("owner_agent", "from_endpoint", "to_endpoint")
+        return qs.select_related("owner_agent", "from_endpoint", "to_endpoint", "peer_agent")
 
     fieldsets = (
         ('Message Information', {
             'fields': ('id', 'seq', 'timestamp', 'is_outbound', 'body')
         }),
         ('Routing', {
-            'fields': ('from_endpoint', 'to_endpoint', 'conversation', 'parent', 'owner_agent')
+            'fields': ('from_endpoint', 'to_endpoint', 'conversation', 'parent', 'owner_agent', 'peer_agent')
         }),
         ('Delivery Status', {
             'fields': ('latest_status', 'latest_sent_at', 'latest_error_message'),
@@ -2250,6 +2257,105 @@ class PersistentAgentMessageAdmin(admin.ModelAdmin):
             return format_html('<a href="{}">View</a>', url)
         return "-"
     conversation_link.short_description = "Thread"
+
+
+@admin.register(AgentPeerLink)
+class AgentPeerLinkAdmin(admin.ModelAdmin):
+    list_display = (
+        'agents_display',
+        'is_enabled',
+        'quota_display',
+        'feature_flag',
+        'created_at',
+        'updated_at',
+    )
+    list_filter = ('is_enabled',)
+    search_fields = (
+        'agent_a__name',
+        'agent_a__user__email',
+        'agent_b__name',
+        'agent_b__user__email',
+        'pair_key',
+    )
+    autocomplete_fields = (
+        'agent_a',
+        'agent_b',
+        'agent_a_endpoint',
+        'agent_b_endpoint',
+        'created_by',
+    )
+    readonly_fields = (
+        'pair_key',
+        'created_at',
+        'updated_at',
+        'conversation_link',
+    )
+    fieldsets = (
+        ('Agents', {
+            'fields': ('agent_a', 'agent_b', 'created_by', 'pair_key', 'conversation_link')
+        }),
+        ('Quota', {
+            'fields': ('messages_per_window', 'window_hours', 'is_enabled', 'feature_flag')
+        }),
+        ('Preferred Endpoints', {
+            'fields': ('agent_a_endpoint', 'agent_b_endpoint')
+        }),
+    )
+
+    @admin.display(description='Agents')
+    def agents_display(self, obj):
+        agent_a_name = getattr(obj.agent_a, 'name', '—')
+        agent_b_name = getattr(obj.agent_b, 'name', '—')
+        return format_html('{} &harr; {}', agent_a_name, agent_b_name)
+
+    @admin.display(description='Quota')
+    def quota_display(self, obj):
+        return f"{obj.messages_per_window} / {obj.window_hours}h"
+
+    @admin.display(description='Conversation')
+    def conversation_link(self, obj):
+        conversation = getattr(obj, 'conversation', None)
+        if conversation:
+            url = reverse("admin:api_persistentagentconversation_change", args=[conversation.pk])
+            return format_html('<a href="{}">Open thread</a>', url)
+        return "—"
+
+
+@admin.register(AgentCommPeerState)
+class AgentCommPeerStateAdmin(admin.ModelAdmin):
+    list_display = (
+        'link',
+        'channel',
+        'messages_per_window',
+        'window_hours',
+        'credits_remaining',
+        'window_reset_at',
+        'last_message_at',
+    )
+    list_filter = ('channel',)
+    search_fields = (
+        'link__agent_a__name',
+        'link__agent_b__name',
+        'link__pair_key',
+    )
+    autocomplete_fields = ('link',)
+    readonly_fields = ('created_at', 'updated_at')
+    fieldsets = (
+        (None, {
+            'fields': (
+                'link',
+                'channel',
+                'messages_per_window',
+                'window_hours',
+                'credits_remaining',
+                'window_reset_at',
+                'last_message_at',
+                'debounce_seconds',
+                'created_at',
+                'updated_at',
+            )
+        }),
+    )
 
 
 @admin.register(PersistentAgentConversation)

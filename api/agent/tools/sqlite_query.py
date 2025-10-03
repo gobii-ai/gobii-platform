@@ -21,6 +21,7 @@ from django.core.files import File
 from django.core.files.storage import default_storage
 
 from ...models import PersistentAgent
+from .sqlite_helpers import is_write_statement
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def execute_sqlite_query(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     if len(query_preview) > 500:
         query_preview = query_preview[:500] + f"... [TRUNCATED, total {len(query)} chars]"
 
-    is_insert = query.lstrip().upper().startswith("INSERT")
+    should_auto_sleep = is_write_statement(query)
 
     logger.info(
         "Agent %s executing SQL query: %s",
@@ -69,6 +70,7 @@ def execute_sqlite_query(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
         # Determine if query returned rows (i.e., SELECT)
         if cursor.description is not None:
+            should_auto_sleep = False
             columns = [col[0] for col in cursor.description]
             rows = cursor.fetchall()
             # Convert to list of dicts for readability
@@ -87,8 +89,7 @@ def execute_sqlite_query(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 "db_size_mb": round(db_size_mb, 2),
                 "message": f"Query returned {len(results)} rows. Database size: {db_size_mb:.2f} MB.{size_warning}"
             }
-            if is_insert:
-                response["auto_sleep_ok"] = True
+            # Any result set requires inspection, so auto_sleep_ok stays unset
             return response
         else:
             affected = cursor.rowcount
@@ -105,7 +106,7 @@ def execute_sqlite_query(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 "message": f"{affected} rows affected. Database size: {db_size_mb:.2f} MB.{size_warning}",
                 "db_size_mb": round(db_size_mb, 2)
             }
-            if is_insert:
+            if should_auto_sleep:
                 response["auto_sleep_ok"] = True
             return response
     except Exception as e:

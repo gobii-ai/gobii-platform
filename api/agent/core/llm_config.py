@@ -354,12 +354,23 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
     Returns:
         Tuple of (model_name, litellm_params)
     """
-    # DB-only: pick primary config and force temperature=0
+    # DB-only: pick primary config and adjust temperature for summarisation
     configs = get_llm_config_with_failover(token_count=0)
     if not configs:
         raise ValueError("No DB-configured LLM providers/endpoints available for summarization")
-    _provider_key, model, params = configs[0]
+    _provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm
-    params = {k: v for k, v in params.items() if k not in ("supports_tool_choice", "use_parallel_tool_calls")}
-    params["temperature"] = 0
+    params = {
+        k: v for k, v in params_with_hints.items()
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls")
+    }
+
+    # Default to deterministic temperature unless the endpoint already
+    # specifies a requirement (e.g., GPT-5 must run at temperature=1).
+    if "temperature" not in params or params["temperature"] is None:
+        params["temperature"] = 0
+
+    if model.startswith("openai/gpt-5") and params.get("temperature") != 1:
+        params["temperature"] = 1
+
     return model, params

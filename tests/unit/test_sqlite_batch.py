@@ -210,6 +210,32 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(out.get("status"), "ok")
             self.assertTrue(out.get("auto_sleep_ok"))
 
+    def test_create_only_batch_sets_auto_sleep_flag(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            out = execute_sqlite_batch(
+                self.agent,
+                {"operations": ["CREATE TABLE t(a INTEGER)"]},
+            )
+            self.assertEqual(out.get("status"), "ok")
+            self.assertTrue(out.get("auto_sleep_ok"))
+
+    def test_update_only_batch_sets_auto_sleep_flag(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            execute_sqlite_batch(
+                self.agent,
+                {"operations": [
+                    "CREATE TABLE t(a INTEGER)",
+                    "INSERT INTO t(a) VALUES (1)",
+                ]},
+            )
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {"operations": ["UPDATE t SET a = a + 1"]},
+            )
+            self.assertEqual(out.get("status"), "ok")
+            self.assertTrue(out.get("auto_sleep_ok"))
+
     def test_batch_with_select_does_not_auto_sleep(self):
         with self._with_temp_db() as (db_path, token, tmp):
             ops = [
@@ -218,6 +244,19 @@ class SqliteBatchToolTests(TestCase):
                 "SELECT a FROM t",
             ]
             out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
+            self.assertIsNone(out.get("auto_sleep_ok"))
+
+    def test_batch_with_returning_does_not_auto_sleep(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            execute_sqlite_batch(
+                self.agent,
+                {"operations": ["CREATE TABLE t(a INTEGER)"]},
+            )
+            out = execute_sqlite_batch(
+                self.agent,
+                {"operations": ["INSERT INTO t(a) VALUES (5)", "UPDATE t SET a = a + 1 RETURNING a"]},
+            )
+            self.assertEqual(out.get("status"), "ok")
             self.assertIsNone(out.get("auto_sleep_ok"))
 
     def test_sqlite_query_insert_sets_auto_sleep(self):
@@ -230,3 +269,29 @@ class SqliteBatchToolTests(TestCase):
             select_out = execute_sqlite_query(self.agent, {"query": "SELECT a FROM t"})
             self.assertEqual(select_out.get("status"), "ok")
             self.assertIsNone(select_out.get("auto_sleep_ok"))
+
+    def test_sqlite_query_create_sets_auto_sleep(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            out = execute_sqlite_query(self.agent, {"query": "CREATE TABLE t(a INTEGER)"})
+            self.assertEqual(out.get("status"), "ok")
+            self.assertTrue(out.get("auto_sleep_ok"))
+
+    def test_sqlite_query_update_sets_auto_sleep(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            execute_sqlite_batch(self.agent, {"operations": [
+                "CREATE TABLE t(a INTEGER)",
+                "INSERT INTO t(a) VALUES (1)",
+            ]})
+            out = execute_sqlite_query(self.agent, {"query": "UPDATE t SET a = a + 10"})
+            self.assertEqual(out.get("status"), "ok")
+            self.assertTrue(out.get("auto_sleep_ok"))
+
+    def test_sqlite_query_returning_does_not_auto_sleep(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            execute_sqlite_batch(self.agent, {"operations": [
+                "CREATE TABLE t(a INTEGER)",
+                "INSERT INTO t(a) VALUES (1)",
+            ]})
+            out = execute_sqlite_query(self.agent, {"query": "UPDATE t SET a = a + 1 RETURNING a"})
+            self.assertEqual(out.get("status"), "ok")
+            self.assertIsNone(out.get("auto_sleep_ok"))

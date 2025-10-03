@@ -27,9 +27,8 @@ import logging
 
 from opentelemetry import trace
 
-import litellm
-
 from .llm_config import get_summarization_llm_config
+from .llm_utils import run_completion
 
 # --------------------------------------------------------------------------- #
 #  Tunables – can be overridden via Django settings for easy experimentation  #
@@ -250,7 +249,7 @@ def llm_summarise_comms(
             if safety_identifier:
                 params["safety_identifier"] = safety_identifier
 
-        response = litellm.completion(model=model, messages=prompt, **params)
+        response = run_completion(model=model, messages=prompt, params=params)
         return response.choices[0].message.content.strip()
     except Exception:
         # Log and fall back to deterministic fallback so callers are not

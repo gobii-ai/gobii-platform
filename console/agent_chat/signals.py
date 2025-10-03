@@ -9,7 +9,9 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from api.models import (
+    BrowserUseAgent,
     BrowserUseAgentTask,
+    PersistentAgent,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentToolCall,
@@ -104,7 +106,23 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
 @receiver(post_save, sender=BrowserUseAgentTask)
 @receiver(post_delete, sender=BrowserUseAgentTask)
 def broadcast_processing_state(sender, instance: BrowserUseAgentTask, **kwargs):
-    agent = getattr(getattr(instance, "agent", None), "persistent_agent", None)
+    agent = None
+
+    browser_agent_id = getattr(instance, "agent_id", None)
+    if browser_agent_id:
+        try:
+            browser_agent = instance.agent
+        except BrowserUseAgent.DoesNotExist:
+            browser_agent = None
+        else:
+            try:
+                agent = browser_agent.persistent_agent
+            except PersistentAgent.DoesNotExist:
+                agent = None
+
+        if agent is None:
+            agent = PersistentAgent.objects.filter(browser_use_agent_id=browser_agent_id).first()
+
     if agent is None:
         return
     _broadcast_processing(agent)

@@ -188,8 +188,10 @@
                   <p class="mt-2 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-400">Cadence</p>
                   <p class="text-sm text-slate-500">{{ agent.display_schedule }}</p>
                   {% endif %}
-                  {% if agent.charter_preview %}
-                  <p class="mt-3 text-sm text-slate-500">{{ agent.charter_preview }}</p>
+                  {% if agent.listing_description_source == "placeholder" %}
+                  <p class="mt-3 text-sm text-slate-400 italic">{{ agent.listing_description }}</p>
+                  {% else %}
+                  <p class="mt-3 text-sm text-slate-500">{{ agent.listing_description }}</p>
                   {% endif %}
                 </a>
                 {% endfor %}

@@ -25,26 +25,60 @@ type MessageEventCardProps = {
 
 export function MessageEventCard({ eventCursor, message, agentFirstName }: MessageEventCardProps) {
   const isAgent = Boolean(message.isOutbound)
-  const bubbleTheme = isAgent ? 'chat-bubble--agent' : 'chat-bubble--user'
-  const authorTheme = isAgent ? 'chat-author--agent' : 'chat-author--user'
-  const metaTheme = isAgent ? 'chat-meta' : 'chat-meta is-user'
-  const authorLabel = isAgent ? agentFirstName || 'Agent' : 'You'
-  const channel = message.channel || 'web'
-  const channelLabel = getChannelLabel(channel)
-  const showChannelTag = channel.toLowerCase() !== 'web'
+  const channel = (message.channel || 'web').toLowerCase()
+  const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
+  const isPeer = Boolean(message.isPeer || hasPeerMetadata || channel === 'other')
+
+  const selfName = message.selfAgentName || agentFirstName || 'Agent'
+  const peerName = message.peerAgent?.name || 'Linked agent'
+  const peerDirectionLabel = message.isOutbound ? `${selfName} → ${peerName}` : `${peerName} → ${selfName}`
+
+  const bubbleTheme = isPeer
+    ? message.isOutbound
+      ? 'chat-bubble--peer-out'
+      : 'chat-bubble--peer-in'
+    : isAgent
+      ? 'chat-bubble--agent'
+      : 'chat-bubble--user'
+
+  const authorTheme = isPeer
+    ? 'chat-author--peer'
+    : isAgent
+      ? 'chat-author--agent'
+      : 'chat-author--user'
+
+  let authorLabel = isAgent ? agentFirstName || 'Agent' : 'You'
+  if (isPeer) {
+    authorLabel = peerDirectionLabel
+  }
+
+  const metaTheme = isPeer ? 'chat-meta chat-meta--peer' : isAgent ? 'chat-meta' : 'chat-meta is-user'
+
+  let channelLabel = getChannelLabel(channel)
+  let showChannelTag = channel !== 'web'
+  if (isPeer) {
+    channelLabel = 'Peer DM'
+    showChannelTag = true
+  }
+
   const relativeLabel = message.relativeTimestamp || formatRelativeTimestamp(message.timestamp) || ''
+  const contentTone = isPeer ? 'text-slate-800' : isAgent ? 'text-slate-800' : 'prose-invert text-white'
+
+  const alignmentClass = isPeer ? 'is-agent' : isAgent ? 'is-agent' : 'is-user'
 
   return (
-    <article className={`timeline-event chat-event ${isAgent ? 'is-agent' : 'is-user'}`} data-cursor={eventCursor}>
+    <article className={`timeline-event chat-event ${alignmentClass} ${isPeer ? 'is-peer' : ''}`} data-cursor={eventCursor}>
       <div className={`chat-bubble ${bubbleTheme}`}>
         <div className={`chat-author ${authorTheme}`}>
           {authorLabel}
           {showChannelTag ? (
             <span
               className={`ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                isAgent
-                  ? 'border border-indigo-100 bg-indigo-50 text-indigo-600'
-                  : 'border border-white/40 bg-white/10 text-white/80'
+                isPeer
+                  ? 'border border-indigo-200 bg-indigo-50 text-indigo-600'
+                  : isAgent
+                    ? 'border border-indigo-100 bg-indigo-50 text-indigo-600'
+                    : 'border border-white/40 bg-white/10 text-white/80'
               }`}
             >
               {channelLabel}
@@ -53,7 +87,7 @@ export function MessageEventCard({ eventCursor, message, agentFirstName }: Messa
         </div>
         <div
           className={`chat-content prose prose-sm max-w-none leading-relaxed ${
-            isAgent ? 'text-slate-800' : 'prose-invert text-white'
+            contentTone
           }`}
         >
           <MessageContent bodyHtml={message.bodyHtml} bodyText={message.bodyText} />

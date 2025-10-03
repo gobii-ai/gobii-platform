@@ -5,6 +5,11 @@ export type Attachment = {
   fileSizeLabel?: string | null
 }
 
+export type PeerAgentRef = {
+  id: string
+  name?: string | null
+}
+
 export type AgentMessage = {
   id: string
   cursor?: string
@@ -15,6 +20,10 @@ export type AgentMessage = {
   attachments?: Attachment[]
   timestamp?: string | null
   relativeTimestamp?: string | null
+  isPeer?: boolean
+  peerAgent?: PeerAgentRef | null
+  peerLinkId?: string | null
+  selfAgentName?: string | null
 }
 
 export type ToolMeta = {
