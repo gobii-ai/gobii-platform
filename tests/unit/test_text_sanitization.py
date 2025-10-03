@@ -28,3 +28,12 @@ class TextSanitizationTests(TestCase):
         cleaned = strip_control_chars(dirty)
 
         self.assertEqual(cleaned, "We're seeing 50-90% and DCSEU's letter - final draft.")
+
+    def test_strip_control_chars_decodes_control_hex_sequences(self):
+        dirty = (
+            "Zbyn\u00011bk Roubal\u0000edk I\u00019ll and It\u00019s ready"
+        )
+
+        cleaned = strip_control_chars(dirty)
+
+        self.assertEqual(cleaned, "Zbyněk Roubalík I'll and It's ready")
