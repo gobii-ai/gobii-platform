@@ -16,7 +16,16 @@ from util.subscription_helper import get_user_plan
 logger = logging.getLogger(__name__)
 
 
-class PricingView(TemplateView):
+class ProprietaryModeRequiredMixin:
+    """Raise 404 when proprietary mode is disabled."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            raise Http404()
+        return super().dispatch(request, *args, **kwargs)
+
+
+class PricingView(ProprietaryModeRequiredMixin, TemplateView):
     template_name = "pricing.html"
 
     def get_context_data(self, **kwargs):
@@ -136,7 +145,7 @@ class PricingView(TemplateView):
         return context
 
 
-class SupportView(TemplateView):
+class SupportView(ProprietaryModeRequiredMixin, TemplateView):
     """Static support page."""
 
     template_name = "support.html"
@@ -198,7 +207,7 @@ class SupportView(TemplateView):
                 status=500
             )
 
-class BlogIndexView(TemplateView):
+class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
     template_name = "blog/index.html"
 
     def get_context_data(self, **kwargs):
@@ -258,7 +267,7 @@ class BlogIndexView(TemplateView):
         return context
 
 
-class BlogPostView(TemplateView):
+class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
     template_name = "blog/detail.html"
 
     def get_context_data(self, **kwargs):
