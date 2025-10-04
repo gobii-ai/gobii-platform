@@ -281,8 +281,32 @@ def get_llm_config_with_failover(
                 # Effective key present?
                 has_admin_key = bool(provider.api_key_encrypted)
                 has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
+                # Determine the effective model name, auto-prefixing OpenAI-compatible endpoints when needed
+                raw_model = endpoint.litellm_model or ""
+                has_api_base = bool(getattr(endpoint, 'api_base', None))
+                provider_backend = getattr(provider, 'browser_backend', '')
+                is_openai_backend = provider_backend in ("OPENAI", "OPENAI_COMPAT")
+                should_auto_prefix = (
+                    is_openai_backend
+                    and has_api_base
+                    and raw_model
+                    and '/' not in raw_model
+                )
+                if should_auto_prefix:
+                    effective_model = f"openai/{raw_model}"
+                    logger.info(
+                        "Auto-prefixed OpenAI-compatible model: endpoint=%s provider=%s original_model=%s prefixed_model=%s api_base=%s",
+                        endpoint.key,
+                        provider.key,
+                        raw_model,
+                        effective_model,
+                        endpoint.api_base,
+                    )
+                else:
+                    effective_model = raw_model
+
                 # Allow OpenAI-compatible endpoints with no key (api_base + openai/ prefix)
-                is_openai_compat = endpoint.litellm_model.startswith('openai/') and bool(getattr(endpoint, 'api_base', None))
+                is_openai_compat = effective_model.startswith('openai/') and has_api_base
                 if not (has_admin_key or has_env_key or is_openai_compat):
                     # Skip endpoints that truly require a key but none is configured
                     logger.info(
@@ -291,11 +315,11 @@ def get_llm_config_with_failover(
                         tier.order,
                         endpoint.key,
                         provider.key,
-                        endpoint.litellm_model,
+                        effective_model,
                         getattr(endpoint, 'api_base', '') or ''
                     )
                     continue
-                endpoints_with_weights.append((endpoint, provider, te.weight))
+                endpoints_with_weights.append((endpoint, provider, te.weight, effective_model))
 
             if not endpoints_with_weights:
                 continue
@@ -304,7 +328,7 @@ def get_llm_config_with_failover(
             while remaining:
                 weights = [r[2] for r in remaining]
                 selected_idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
-                endpoint, provider, _w = remaining.pop(selected_idx)
+                endpoint, provider, _w, effective_model = remaining.pop(selected_idx)
 
                 params: Dict[str, Any] = {"temperature": 0.1}
                 # Inject API key directly into LiteLLM params (DB-only routing).
@@ -336,13 +360,13 @@ def get_llm_config_with_failover(
                 # Support OpenAI-compatible endpoints for persistent agents via LiteLLM
                 # When using an OpenAI-compatible proxy, set litellm_model to 'openai/<your-model>'
                 # and configure api_base on the endpoint (e.g., http://vllm-host:port/v1)
-                if endpoint.litellm_model.startswith('openai/') and getattr(endpoint, 'api_base', None):
+                if effective_model.startswith('openai/') and getattr(endpoint, 'api_base', None):
                     params["api_base"] = endpoint.api_base
                     logger.info(
                         "DB LLM endpoint configured with api_base: endpoint=%s provider=%s model=%s api_base=%s has_key=%s",
                         endpoint.key,
                         provider.key,
-                        endpoint.litellm_model,
+                        effective_model,
                         endpoint.api_base,
                         bool(params.get('api_key')),
                     )
@@ -355,7 +379,7 @@ def get_llm_config_with_failover(
                     params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
                 except Exception:
                     params_with_hints["use_parallel_tool_calls"] = True
-                failover_configs.append((endpoint.key, endpoint.litellm_model, params_with_hints))
+                failover_configs.append((endpoint.key, effective_model, params_with_hints))
 
         if failover_configs:
             _cache_bootstrap_status(False)
