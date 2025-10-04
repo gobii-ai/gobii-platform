@@ -147,6 +147,12 @@ class LLMConfigForm(forms.Form):
         initial=True,
         widget=forms.CheckboxInput(attrs={"class": CHECKBOX_CLASSES}),
     )
+    orchestrator_supports_vision = forms.BooleanField(
+        label=_("Supports vision inputs"),
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={"class": CHECKBOX_CLASSES}),
+    )
 
     browser_same_as_orchestrator = forms.BooleanField(
         label=_("Use the same provider for browser automations"),
@@ -202,6 +208,12 @@ class LLMConfigForm(forms.Form):
                 "placeholder": _("Internal name"),
             }
         ),
+    )
+    browser_supports_vision = forms.BooleanField(
+        label=_("Supports vision inputs"),
+        required=False,
+        initial=False,
+        widget=forms.CheckboxInput(attrs={"class": CHECKBOX_CLASSES}),
     )
 
     def clean(self):

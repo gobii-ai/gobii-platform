@@ -176,6 +176,15 @@
                 <div class="space-y-4 rounded-3xl border border-slate-200/70 p-6">
                   <p class="text-sm font-medium text-slate-700/90">Advanced options</p>
                   <div class="space-y-4">
+                    <label for="{{ llm_form.orchestrator_supports_vision.id_for_label }}" class="flex items-center gap-3 text-sm font-medium text-slate-700/90">
+                      {{ llm_form.orchestrator_supports_vision }}
+                      <span>{{ llm_form.orchestrator_supports_vision.label }}</span>
+                    </label>
+                    {% if llm_form.orchestrator_supports_vision.errors %}
+                      {% for error in llm_form.orchestrator_supports_vision.errors %}
+                        <p class="text-sm text-rose-600">{{ error }}</p>
+                      {% endfor %}
+                    {% endif %}
                     <label for="{{ llm_form.orchestrator_supports_tool_choice.id_for_label }}" class="flex items-center gap-3 text-sm font-medium text-slate-700/90">
                       {{ llm_form.orchestrator_supports_tool_choice }}
                       <span>{{ llm_form.orchestrator_supports_tool_choice.label }}</span>
@@ -272,6 +281,20 @@
                   </div>
                 </div>
               </div>
+              <div class="space-y-4 rounded-3xl border border-slate-200/70 p-6">
+                <p class="text-sm font-medium text-slate-700/90">Browser advanced options</p>
+                <div class="space-y-4">
+                  <label for="{{ llm_form.browser_supports_vision.id_for_label }}" class="flex items-center gap-3 text-sm font-medium text-slate-700/90">
+                    {{ llm_form.browser_supports_vision }}
+                    <span>{{ llm_form.browser_supports_vision.label }}</span>
+                  </label>
+                  {% if llm_form.browser_supports_vision.errors %}
+                    {% for error in llm_form.browser_supports_vision.errors %}
+                      <p class="text-sm text-rose-600">{{ error }}</p>
+                    {% endfor %}
+                  {% endif %}
+                </div>
+              </div>
             </section>
           </form>
 
@@ -311,19 +334,74 @@
   <script>
     const browserToggle = document.getElementById('id_browser_same_as_orchestrator');
     const browserExtra = document.getElementById('browser-extra');
+    const orchestratorProvider = document.getElementById('id_orchestrator_provider');
+    const orchestratorVision = document.getElementById('id_orchestrator_supports_vision');
+    const browserProvider = document.getElementById('id_browser_provider');
+    const browserVision = document.getElementById('id_browser_supports_vision');
+
+    const VISION_DEFAULT_PROVIDERS = ['openai', 'anthropic', 'google'];
 
     function updateBrowserVisibility() {
       if (!browserToggle || !browserExtra) return;
-      if (browserToggle.checked) {
-        browserExtra.classList.add('hidden');
-      } else {
-        browserExtra.classList.remove('hidden');
+      browserExtra.classList.toggle('hidden', browserToggle.checked);
+    }
+
+    function maybeSyncBrowserVision() {
+      if (!browserToggle || !browserVision) return;
+      if (!browserToggle.checked) return;
+      if (browserVision.dataset.userEdited === 'true') return;
+      if (orchestratorVision) {
+        browserVision.checked = orchestratorVision.checked;
       }
     }
 
+    function attachVisionDefaults(providerSelect, checkbox) {
+      if (!providerSelect || !checkbox) return;
+
+      const applyDefault = () => {
+        const value = providerSelect.value;
+        if (!value || checkbox.dataset.userEdited === 'true') {
+          return;
+        }
+        const shouldEnable = VISION_DEFAULT_PROVIDERS.includes(value);
+        checkbox.checked = shouldEnable;
+      };
+
+      providerSelect.addEventListener('change', () => {
+        checkbox.dataset.userEdited = '';
+        applyDefault();
+        maybeSyncBrowserVision();
+      });
+
+      checkbox.addEventListener('change', () => {
+        checkbox.dataset.userEdited = 'true';
+      });
+
+      applyDefault();
+    }
+
+    attachVisionDefaults(orchestratorProvider, orchestratorVision);
+    attachVisionDefaults(browserProvider, browserVision);
+    maybeSyncBrowserVision();
+
     if (browserToggle) {
       updateBrowserVisibility();
-      browserToggle.addEventListener('change', updateBrowserVisibility);
+      browserToggle.addEventListener('change', () => {
+        updateBrowserVisibility();
+        maybeSyncBrowserVision();
+      });
+    }
+
+    if (orchestratorVision) {
+      orchestratorVision.addEventListener('change', () => {
+        maybeSyncBrowserVision();
+      });
+    }
+
+    if (orchestratorProvider) {
+      orchestratorProvider.addEventListener('change', () => {
+        maybeSyncBrowserVision();
+      });
     }
   </script>
 </body>

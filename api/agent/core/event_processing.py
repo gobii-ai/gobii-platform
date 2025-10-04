@@ -1083,6 +1083,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
 
             all_calls_sleep = True
             sleep_requested = False  # set only when all calls are sleep
+            sleep_tool_requested = False
             executed_calls = 0
             followup_required = False
             try:
@@ -1093,12 +1094,14 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                     )
                     for c in (tool_calls or [])
                 ]
+                sleep_tool_requested = any(name == "sleep_until_next_trigger" for name in tool_names)
                 has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
                 actionable_calls_total = sum(
                     1 for name in tool_names if name != "sleep_until_next_trigger"
                 )
             except Exception:
                 # Defensive fallback: assume we have actionable work so the agent keeps processing
+                sleep_tool_requested = False
                 has_non_sleep_calls = True
                 actionable_calls_total = len(tool_calls or []) if tool_calls else 0
 
@@ -1339,6 +1342,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                 not followup_required
                 and executed_calls > 0
                 and executed_calls >= actionable_calls_total
+                and sleep_tool_requested
             ):
                 logger.info(
                     "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",

@@ -152,8 +152,10 @@ class SetupWizardView(View):
         return {
             "orchestrator_provider": LLMConfigForm.PROVIDER_OPENAI,
             "orchestrator_model": DEFAULT_ORCHESTRATOR_MODELS.get(LLMConfigForm.PROVIDER_OPENAI, ""),
+            "orchestrator_supports_vision": True,
             "browser_same_as_orchestrator": True,
             "browser_model": DEFAULT_BROWSER_MODELS.get(LLMConfigForm.PROVIDER_OPENAI, ""),
+            "browser_supports_vision": True,
         }
 
     def _ensure_database_ready(self) -> None:
@@ -222,6 +224,7 @@ class SetupWizardView(View):
         api_base: str = data.get("orchestrator_api_base", "").strip()
         supports_tool_choice: bool = bool(data.get("orchestrator_supports_tool_choice"))
         use_parallel_tools: bool = bool(data.get("orchestrator_use_parallel_tools"))
+        supports_vision: bool = bool(data.get("orchestrator_supports_vision"))
 
         if provider_choice == LLMConfigForm.PROVIDER_CUSTOM:
             provider = self._create_custom_provider(
@@ -237,6 +240,7 @@ class SetupWizardView(View):
                 api_base=api_base,
                 supports_tool_choice=supports_tool_choice,
                 use_parallel_tools=use_parallel_tools,
+                supports_vision=supports_vision,
             )
         else:
             provider_key = PROVIDER_KEY_MAP[provider_choice]
@@ -252,6 +256,7 @@ class SetupWizardView(View):
                 endpoint.litellm_model = model
             endpoint.supports_tool_choice = supports_tool_choice
             endpoint.use_parallel_tool_calls = use_parallel_tools
+            endpoint.supports_vision = supports_vision
             endpoint.enabled = True
             if api_base:
                 endpoint.api_base = api_base
@@ -272,6 +277,13 @@ class SetupWizardView(View):
         orchestrator_endpoint: PersistentModelEndpoint,
     ) -> BrowserModelEndpoint:
         same = data.get("browser_same_as_orchestrator")
+        orchestrator_supports_vision = bool(data.get("orchestrator_supports_vision"))
+        browser_supports_vision_raw = data.get("browser_supports_vision")
+        browser_supports_vision = (
+            bool(browser_supports_vision_raw)
+            if browser_supports_vision_raw is not None
+            else orchestrator_supports_vision
+        )
 
         if same:
             provider = orchestrator_provider
@@ -286,6 +298,7 @@ class SetupWizardView(View):
                 key_hint=endpoint_key_hint or f"{provider.key}-browser",
                 model=model,
                 api_base=api_base or DEFAULT_BROWSER_BASE_URLS.get(provider_choice, ""),
+                supports_vision=browser_supports_vision,
             )
         else:
             provider_choice = data.get("browser_provider")
@@ -305,6 +318,7 @@ class SetupWizardView(View):
                     key_hint=f"{provider.key}-browser",
                     model=model,
                     api_base=api_base,
+                    supports_vision=browser_supports_vision,
                 )
             else:
                 provider_key = PROVIDER_KEY_MAP[provider_choice]
@@ -320,6 +334,7 @@ class SetupWizardView(View):
                     key_hint=endpoint_key,
                     model=model,
                     api_base=api_base or DEFAULT_BROWSER_BASE_URLS.get(provider_choice, ""),
+                    supports_vision=browser_supports_vision,
                 )
 
         self._reset_browser_policy(endpoint)
@@ -366,6 +381,7 @@ class SetupWizardView(View):
         api_base: str,
         supports_tool_choice: bool,
         use_parallel_tools: bool,
+        supports_vision: bool,
     ) -> PersistentModelEndpoint:
         endpoint, _ = PersistentModelEndpoint.objects.get_or_create(
             key=slugify(key_slug)[:96],
@@ -379,6 +395,7 @@ class SetupWizardView(View):
         endpoint.api_base = api_base
         endpoint.supports_tool_choice = supports_tool_choice
         endpoint.use_parallel_tool_calls = use_parallel_tools
+        endpoint.supports_vision = supports_vision
         endpoint.enabled = True
         endpoint.save()
         return endpoint
@@ -404,6 +421,7 @@ class SetupWizardView(View):
         key_hint: str,
         model: str,
         api_base: str,
+        supports_vision: bool,
     ) -> BrowserModelEndpoint:
         key = slugify(key_hint)[:96]
         endpoint, _ = BrowserModelEndpoint.objects.get_or_create(
@@ -417,6 +435,7 @@ class SetupWizardView(View):
         endpoint.provider = provider
         endpoint.browser_model = model
         endpoint.browser_base_url = api_base
+        endpoint.supports_vision = supports_vision
         endpoint.enabled = True
         endpoint.save()
         BrowserModelEndpoint.objects.exclude(pk=endpoint.pk).update(enabled=False)

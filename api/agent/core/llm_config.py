@@ -158,7 +158,11 @@ def get_llm_config() -> Tuple[str, dict]:
 
     _provider_key, model, params = configs[0]
     # Remove any internal-only hints that shouldn't be passed to litellm
-    params = {k: v for k, v in params.items() if k not in ("supports_tool_choice", "use_parallel_tool_calls")}
+    params = {
+        k: v
+        for k, v in params.items()
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision")
+    }
     return model, params
 
 
@@ -374,6 +378,7 @@ def get_llm_config_with_failover(
                 # Add tool-choice capability hint for callers (not passed to litellm)
                 params_with_hints = dict(params)
                 params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
+                params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
                 # Expose whether the endpoint prefers parallel tool-calling. This is a caller hint.
                 try:
                     params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
@@ -411,7 +416,7 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
     # Remove internal-only hints that shouldn't be passed to litellm
     params = {
         k: v for k, v in params_with_hints.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls")
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision")
     }
 
     # Default to deterministic temperature unless the endpoint already
