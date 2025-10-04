@@ -1,247 +1,331 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Gobii – First Run Setup</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,container-queries"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              200: '#c7d2fe',
+              300: '#a5b4fc',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            },
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+          },
+          boxShadow: {
+            panel: '0 48px 96px -48px rgba(79, 70, 229, 0.55)',
+            subtle: '0 14px 32px -20px rgba(15, 23, 42, 0.35)',
+            badge: '0 14px 32px rgba(99, 102, 241, 0.25)',
+          },
+        },
+      },
+    };
+  </script>
   <style>
-    :root {
-      color-scheme: light dark;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
     body {
-      margin: 0;
-      padding: 0;
-      background: var(--page-bg, #0f172a);
-      background: linear-gradient(135deg, #0f172a, #1e293b);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #f8fafc;
-    }
-    .wrapper {
-      background: rgba(15, 23, 42, 0.85);
-      backdrop-filter: blur(12px);
-      border-radius: 18px;
-      width: min(900px, 92vw);
-      padding: 36px 42px;
-      box-shadow: 0 25px 55px rgba(15, 23, 42, 0.45);
-    }
-    h1 {
-      margin-top: 0;
-      font-size: 2.2rem;
-      font-weight: 700;
-      letter-spacing: -0.03rem;
-    }
-    p.lead {
-      margin-top: 0.5rem;
-      margin-bottom: 2rem;
-      color: rgba(241, 245, 249, 0.75);
-    }
-    .section {
-      margin-bottom: 2.4rem;
-      padding-bottom: 2rem;
-      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
-    }
-    .section:last-of-type {
-      border-bottom: none;
-      padding-bottom: 0;
-      margin-bottom: 0;
-    }
-    .field {
-      display: flex;
-      flex-direction: column;
-      margin-bottom: 1rem;
-    }
-    label {
-      font-weight: 600;
-      margin-bottom: 0.35rem;
-    }
-    input, select {
-      border-radius: 10px;
-      border: 1px solid rgba(148, 163, 184, 0.35);
-      background: rgba(15, 23, 42, 0.65);
-      color: #f8fafc;
-      padding: 10px 12px;
-      font-size: 1rem;
-    }
-    input[type="checkbox"] {
-      width: auto;
-      margin-right: 8px;
-    }
-    .helptext {
-      font-size: 0.85rem;
-      color: rgba(241, 245, 249, 0.65);
-      margin-top: 0.25rem;
-    }
-    .errors {
-      margin: 0.4rem 0 0.6rem;
-      color: #f87171;
-      font-size: 0.9rem;
-    }
-    button[type="submit"] {
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
-      border: none;
-      color: white;
-      padding: 0.9rem 1.8rem;
-      border-radius: 999px;
-      font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-    button[type="submit"]:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 16px 30px rgba(99, 102, 241, 0.35);
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 1.2rem 1.6rem;
-    }
-    .checkbox-row {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      margin-top: 0.8rem;
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     }
   </style>
 </head>
-<body>
-  <div class="wrapper">
-    <h1>Welcome to Gobii</h1>
-    <p class="lead">Let’s get your self-hosted instance ready. Complete the admin login and choose an LLM provider for orchestrator and browser agents.</p>
+<body class="min-h-screen bg-gradient-to-br from-[#f6f8ff] via-white to-[#e6f2ff] text-slate-800">
+  <div class="relative overflow-hidden">
+    <div class="pointer-events-none absolute inset-0 -z-10">
+      <div class="absolute -top-24 left-[8%] h-72 w-72 rounded-full bg-brand-200/45 blur-3xl"></div>
+      <div class="absolute bottom-[-8%] right-[12%] h-[26rem] w-[26rem] rounded-full bg-sky-200/45 blur-3xl"></div>
+    </div>
 
-    <form method="post" novalidate>
-      {% csrf_token %}
+    <main class="relative mx-auto max-w-6xl px-4 py-12 sm:px-8 sm:py-16 lg:px-12 lg:py-20">
+      <div class="rounded-[2.75rem] border border-white/60 bg-white/95 p-6 shadow-panel ring-1 ring-brand-50/60 backdrop-blur-xl sm:p-10 lg:p-12">
+        <div class="flex flex-col gap-12 lg:grid lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div class="flex flex-col gap-10 lg:pr-10">
+            <header class="flex flex-col gap-6">
+              <img src="{% static 'images/noBgBlue.png' %}" alt="Gobii" class="h-10 w-auto">
+              <div class="space-y-2">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.32em] text-brand-400">First-run setup</p>
+                <h1 class="text-3xl font-semibold tracking-tight text-slate-900 sm:text-[2.75rem]">Welcome to Gobii</h1>
+                <p class="max-w-2xl text-[15px] leading-relaxed text-slate-600">Let’s get your self-hosted instance ready. Complete the admin login and choose an LLM provider for orchestrator and browser agents.</p>
+              </div>
+            </header>
 
-      <div class="section">
-        <h2>Admin Account</h2>
-        <div class="grid">
-          <div class="field">
-            {{ superuser_form.email.label_tag }}
-            {{ superuser_form.email }}
-            {% if superuser_form.email.help_text %}<div class="helptext">{{ superuser_form.email.help_text }}</div>{% endif %}
-            {% if superuser_form.email.errors %}<div class="errors">{{ superuser_form.email.errors|join:', ' }}</div>{% endif %}
+            <form method="post" novalidate class="space-y-16">
+              {% csrf_token %}
+
+              <section class="space-y-6">
+                <div class="flex items-center gap-3">
+                  <span class="flex h-10 w-10 items-center justify-center rounded-2xl border border-brand-100/70 bg-brand-50/70 text-sm font-medium text-brand-600">1</span>
+                  <div>
+                    <h2 class="text-xl font-medium text-slate-900">Admin Account</h2>
+                    <p class="text-sm text-slate-500">Create the Django superuser credentials for your instance.</p>
+                  </div>
+                </div>
+
+                <div class="grid gap-6 sm:grid-cols-2">
+                  <div class="space-y-2 sm:col-span-2">
+                    <label for="{{ superuser_form.email.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ superuser_form.email.label }}</label>
+                    {{ superuser_form.email }}
+                    {% if superuser_form.email.help_text %}
+                      <p class="text-sm text-slate-500">{{ superuser_form.email.help_text }}</p>
+                    {% endif %}
+                    {% if superuser_form.email.errors %}
+                      {% for error in superuser_form.email.errors %}
+                        <p class="text-sm text-rose-600">{{ error }}</p>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                  <div class="space-y-2">
+                    <label for="{{ superuser_form.password1.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ superuser_form.password1.label }}</label>
+                    {{ superuser_form.password1 }}
+                    {% if superuser_form.password1.errors %}
+                      {% for error in superuser_form.password1.errors %}
+                        <p class="text-sm text-rose-600">{{ error }}</p>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                  <div class="space-y-2">
+                    <label for="{{ superuser_form.password2.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ superuser_form.password2.label }}</label>
+                    {{ superuser_form.password2 }}
+                    {% if superuser_form.password2.errors %}
+                      {% for error in superuser_form.password2.errors %}
+                        <p class="text-sm text-rose-600">{{ error }}</p>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                </div>
+              </section>
+
+              <section class="space-y-6">
+                <div class="flex items-center gap-3">
+                  <span class="flex h-10 w-10 items-center justify-center rounded-2xl border border-brand-100/70 bg-brand-50/70 text-sm font-medium text-brand-600">2</span>
+                  <div>
+                    <h2 class="text-xl font-medium text-slate-900">Primary Agents LLM</h2>
+                    <p class="text-sm text-slate-500">Configure the orchestrator provider and model that powers your agents.</p>
+                  </div>
+                </div>
+
+                <div class="grid gap-6 sm:grid-cols-2">
+                  <div class="space-y-2">
+                    <label for="{{ llm_form.orchestrator_provider.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.orchestrator_provider.label }}</label>
+                    {{ llm_form.orchestrator_provider }}
+                    {% if llm_form.orchestrator_provider.errors %}
+                      {% for error in llm_form.orchestrator_provider.errors %}
+                        <p class="text-sm text-rose-600">{{ error }}</p>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                  <div class="space-y-2">
+                    <label for="{{ llm_form.orchestrator_api_key.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.orchestrator_api_key.label }}</label>
+                    {{ llm_form.orchestrator_api_key }}
+                    <p class="text-sm text-slate-500">{{ llm_form.orchestrator_api_key.help_text }}</p>
+                    {% if llm_form.orchestrator_api_key.errors %}
+                      {% for error in llm_form.orchestrator_api_key.errors %}
+                        <p class="text-sm text-rose-600">{{ error }}</p>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                  <div class="space-y-2">
+                    <label for="{{ llm_form.orchestrator_model.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.orchestrator_model.label }}</label>
+                    {{ llm_form.orchestrator_model }}
+                    {% if llm_form.orchestrator_model.help_text %}
+                      <p class="text-sm text-slate-500">{{ llm_form.orchestrator_model.help_text }}</p>
+                    {% endif %}
+                    {% if llm_form.orchestrator_model.errors %}
+                      {% for error in llm_form.orchestrator_model.errors %}
+                        <p class="text-sm text-rose-600">{{ error }}</p>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                  <div class="space-y-2">
+                    <label for="{{ llm_form.orchestrator_api_base.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.orchestrator_api_base.label }}</label>
+                    {{ llm_form.orchestrator_api_base }}
+                    {% if llm_form.orchestrator_api_base.help_text %}
+                      <p class="text-sm text-slate-500">{{ llm_form.orchestrator_api_base.help_text }}</p>
+                    {% endif %}
+                    {% if llm_form.orchestrator_api_base.errors %}
+                      {% for error in llm_form.orchestrator_api_base.errors %}
+                        <p class="text-sm text-rose-600">{{ error }}</p>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                  <div class="space-y-2">
+                    <label for="{{ llm_form.orchestrator_custom_name.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.orchestrator_custom_name.label }}</label>
+                    {{ llm_form.orchestrator_custom_name }}
+                    {% if llm_form.orchestrator_custom_name.help_text %}
+                      <p class="text-sm text-slate-500">{{ llm_form.orchestrator_custom_name.help_text }}</p>
+                    {% endif %}
+                    {% if llm_form.orchestrator_custom_name.errors %}
+                      {% for error in llm_form.orchestrator_custom_name.errors %}
+                        <p class="text-sm text-rose-600">{{ error }}</p>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                  <div class="space-y-4 rounded-3xl border border-slate-200/70 bg-slate-50/60 p-6">
+                    <p class="text-sm font-semibold text-slate-700">Advanced options</p>
+                    <div class="space-y-4">
+                      <label for="{{ llm_form.orchestrator_supports_tool_choice.id_for_label }}" class="flex items-center gap-3 text-sm font-medium text-slate-700">
+                        {{ llm_form.orchestrator_supports_tool_choice }}
+                        <span>{{ llm_form.orchestrator_supports_tool_choice.label }}</span>
+                      </label>
+                      {% if llm_form.orchestrator_supports_tool_choice.errors %}
+                        {% for error in llm_form.orchestrator_supports_tool_choice.errors %}
+                          <p class="text-sm text-rose-600">{{ error }}</p>
+                        {% endfor %}
+                      {% endif %}
+                      <label for="{{ llm_form.orchestrator_use_parallel_tools.id_for_label }}" class="flex items-center gap-3 text-sm font-medium text-slate-700">
+                        {{ llm_form.orchestrator_use_parallel_tools }}
+                        <span>{{ llm_form.orchestrator_use_parallel_tools.label }}</span>
+                      </label>
+                      {% if llm_form.orchestrator_use_parallel_tools.errors %}
+                        {% for error in llm_form.orchestrator_use_parallel_tools.errors %}
+                          <p class="text-sm text-rose-600">{{ error }}</p>
+                        {% endfor %}
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="space-y-6">
+                <div class="flex items-center gap-3">
+                  <span class="flex h-10 w-10 items-center justify-center rounded-2xl border border-brand-100/70 bg-brand-50/70 text-sm font-medium text-brand-600">3</span>
+                  <div>
+                    <h2 class="text-xl font-medium text-slate-900">Browser Automations</h2>
+                    <p class="text-sm text-slate-500">Reuse the orchestrator provider or specify a dedicated model for browser agents.</p>
+                  </div>
+                </div>
+
+                <div class="space-y-3">
+                  <label for="{{ llm_form.browser_same_as_orchestrator.id_for_label }}" class="flex items-center gap-3 rounded-3xl border border-slate-200/70 bg-slate-50/60 px-5 py-4 text-sm font-medium text-slate-700">
+                    {{ llm_form.browser_same_as_orchestrator }}
+                    <span>{{ llm_form.browser_same_as_orchestrator.label }}</span>
+                  </label>
+                  {% if llm_form.browser_same_as_orchestrator.errors %}
+                    {% for error in llm_form.browser_same_as_orchestrator.errors %}
+                      <p class="text-sm text-rose-600">{{ error }}</p>
+                    {% endfor %}
+                  {% endif %}
+                </div>
+
+                <div id="browser-extra" class="space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 hidden">
+                  <div class="grid gap-6 sm:grid-cols-2">
+                    <div class="space-y-2">
+                      <label for="{{ llm_form.browser_provider.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.browser_provider.label }}</label>
+                      {{ llm_form.browser_provider }}
+                      {% if llm_form.browser_provider.errors %}
+                        {% for error in llm_form.browser_provider.errors %}
+                          <p class="text-sm text-rose-600">{{ error }}</p>
+                        {% endfor %}
+                      {% endif %}
+                    </div>
+                    <div class="space-y-2">
+                      <label for="{{ llm_form.browser_api_key.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.browser_api_key.label }}</label>
+                      {{ llm_form.browser_api_key }}
+                      {% if llm_form.browser_api_key.errors %}
+                        {% for error in llm_form.browser_api_key.errors %}
+                          <p class="text-sm text-rose-600">{{ error }}</p>
+                        {% endfor %}
+                      {% endif %}
+                    </div>
+                    <div class="space-y-2">
+                      <label for="{{ llm_form.browser_model.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.browser_model.label }}</label>
+                      {{ llm_form.browser_model }}
+                      {% if llm_form.browser_model.help_text %}
+                        <p class="text-sm text-slate-500">{{ llm_form.browser_model.help_text }}</p>
+                      {% endif %}
+                      {% if llm_form.browser_model.errors %}
+                        {% for error in llm_form.browser_model.errors %}
+                          <p class="text-sm text-rose-600">{{ error }}</p>
+                        {% endfor %}
+                      {% endif %}
+                    </div>
+                    <div class="space-y-2">
+                      <label for="{{ llm_form.browser_api_base.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.browser_api_base.label }}</label>
+                      {{ llm_form.browser_api_base }}
+                      {% if llm_form.browser_api_base.errors %}
+                        {% for error in llm_form.browser_api_base.errors %}
+                          <p class="text-sm text-rose-600">{{ error }}</p>
+                        {% endfor %}
+                      {% endif %}
+                    </div>
+                    <div class="space-y-2">
+                      <label for="{{ llm_form.browser_custom_name.id_for_label }}" class="text-sm font-semibold text-slate-700">{{ llm_form.browser_custom_name.label }}</label>
+                      {{ llm_form.browser_custom_name }}
+                      {% if llm_form.browser_custom_name.errors %}
+                        {% for error in llm_form.browser_custom_name.errors %}
+                          <p class="text-sm text-rose-600">{{ error }}</p>
+                        {% endfor %}
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <p class="text-sm text-slate-500">You can adjust any of these settings later from the admin console.</p>
+                <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-sky-500 px-7 py-3 text-base font-semibold text-white shadow-[0_24px_48px_-24px_rgba(99,102,241,0.65)] transition hover:from-brand-600 hover:via-brand-500 hover:to-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-200 focus:ring-offset-1">
+                  Save &amp; Launch Gobii
+                </button>
+              </div>
+            </form>
           </div>
-          <div class="field">
-            {{ superuser_form.password1.label_tag }}
-            {{ superuser_form.password1 }}
-            {% if superuser_form.password1.errors %}<div class="errors">{{ superuser_form.password1.errors|join:', ' }}</div>{% endif %}
-          </div>
-          <div class="field">
-            {{ superuser_form.password2.label_tag }}
-            {{ superuser_form.password2 }}
-            {% if superuser_form.password2.errors %}<div class="errors">{{ superuser_form.password2.errors|join:', ' }}</div>{% endif %}
-          </div>
+
+          <aside class="lg:pl-8 lg:border-l lg:border-white/60 lg:self-start">
+            <h3 class="text-base font-medium text-slate-900">What happens next?</h3>
+            <ul class="mt-5 space-y-5 text-sm text-slate-600">
+              <li class="flex gap-3">
+                <span class="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-xl border border-brand-100/70 bg-brand-50/70 text-xs font-medium text-brand-600">1</span>
+                <span><strong class="block font-medium text-slate-800">Secure admin access</strong> The email and password become your Django superuser credentials.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-xl border border-brand-100/70 bg-brand-50/70 text-xs font-medium text-brand-600">2</span>
+                <span><strong class="block font-medium text-slate-800">Provision LLM providers</strong> Keys are stored encrypted and defaults match your selection.</span>
+              </li>
+              <li class="flex gap-3">
+                <span class="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-xl border border-brand-100/70 bg-brand-50/70 text-xs font-medium text-brand-600">3</span>
+                <span><strong class="block font-medium text-slate-800">Launch agents</strong> Orchestrator and browser agents are ready for workflows right after saving.</span>
+              </li>
+            </ul>
+            <div class="mt-6 rounded-2xl border border-dashed border-brand-200/70 bg-brand-50/50 p-4 text-xs text-brand-700">
+              <p class="font-semibold">Need to use environment variables instead?</p>
+              <p class="mt-1 leading-relaxed">Skip keys here and set <code class="rounded bg-white/80 px-1 py-0.5 text-[11px] text-slate-700 shadow-sm">GOBII_LLM_* </code> values before restarting the app. <a href="https://docs.gobii.ai" target="_blank" rel="noreferrer" class="text-brand-600 underline decoration-brand-200 underline-offset-4 hover:text-brand-700">See docs</a></p>
+            </div>
+          </aside>
         </div>
       </div>
-
-      <div class="section">
-        <h2>Primary Agents LLM</h2>
-        <div class="grid">
-          <div class="field">
-            {{ llm_form.orchestrator_provider.label_tag }}
-            {{ llm_form.orchestrator_provider }}
-            {% if llm_form.orchestrator_provider.errors %}<div class="errors">{{ llm_form.orchestrator_provider.errors|join:', ' }}</div>{% endif %}
-          </div>
-          <div class="field">
-            {{ llm_form.orchestrator_api_key.label_tag }}
-            {{ llm_form.orchestrator_api_key }}
-            <div class="helptext">{{ llm_form.orchestrator_api_key.help_text }}</div>
-            {% if llm_form.orchestrator_api_key.errors %}<div class="errors">{{ llm_form.orchestrator_api_key.errors|join:', ' }}</div>{% endif %}
-          </div>
-          <div class="field">
-            {{ llm_form.orchestrator_model.label_tag }}
-            {{ llm_form.orchestrator_model }}
-            {% if llm_form.orchestrator_model.errors %}<div class="errors">{{ llm_form.orchestrator_model.errors|join:', ' }}</div>{% endif %}
-          </div>
-          <div class="field">
-            {{ llm_form.orchestrator_api_base.label_tag }}
-            {{ llm_form.orchestrator_api_base }}
-            <div class="helptext">{{ llm_form.orchestrator_api_base.help_text }}</div>
-            {% if llm_form.orchestrator_api_base.errors %}<div class="errors">{{ llm_form.orchestrator_api_base.errors|join:', ' }}</div>{% endif %}
-          </div>
-          <div class="field">
-            {{ llm_form.orchestrator_custom_name.label_tag }}
-            {{ llm_form.orchestrator_custom_name }}
-            {% if llm_form.orchestrator_custom_name.errors %}<div class="errors">{{ llm_form.orchestrator_custom_name.errors|join:', ' }}</div>{% endif %}
-          </div>
-          <div class="field">
-            <div class="checkbox-row">
-              {{ llm_form.orchestrator_supports_tool_choice }}
-              {{ llm_form.orchestrator_supports_tool_choice.label_tag }}
-            </div>
-            {% if llm_form.orchestrator_supports_tool_choice.errors %}<div class="errors">{{ llm_form.orchestrator_supports_tool_choice.errors|join:', ' }}</div>{% endif %}
-            <div class="checkbox-row" style="margin-top:0.6rem;">
-              {{ llm_form.orchestrator_use_parallel_tools }}
-              {{ llm_form.orchestrator_use_parallel_tools.label_tag }}
-            </div>
-            {% if llm_form.orchestrator_use_parallel_tools.errors %}<div class="errors">{{ llm_form.orchestrator_use_parallel_tools.errors|join:', ' }}</div>{% endif %}
-          </div>
-        </div>
-      </div>
-
-      <div class="section">
-        <h2>Browser Automations</h2>
-        <div class="field">
-          <div class="checkbox-row">
-            {{ llm_form.browser_same_as_orchestrator }}
-            {{ llm_form.browser_same_as_orchestrator.label_tag }}
-          </div>
-          {% if llm_form.browser_same_as_orchestrator.errors %}<div class="errors">{{ llm_form.browser_same_as_orchestrator.errors|join:', ' }}</div>{% endif %}
-        </div>
-
-        <div id="browser-extra" style="display:none;">
-          <div class="grid">
-            <div class="field">
-              {{ llm_form.browser_provider.label_tag }}
-              {{ llm_form.browser_provider }}
-              {% if llm_form.browser_provider.errors %}<div class="errors">{{ llm_form.browser_provider.errors|join:', ' }}</div>{% endif %}
-            </div>
-            <div class="field">
-              {{ llm_form.browser_api_key.label_tag }}
-              {{ llm_form.browser_api_key }}
-              {% if llm_form.browser_api_key.errors %}<div class="errors">{{ llm_form.browser_api_key.errors|join:', ' }}</div>{% endif %}
-            </div>
-            <div class="field">
-              {{ llm_form.browser_model.label_tag }}
-              {{ llm_form.browser_model }}
-              {% if llm_form.browser_model.errors %}<div class="errors">{{ llm_form.browser_model.errors|join:', ' }}</div>{% endif %}
-            </div>
-            <div class="field">
-              {{ llm_form.browser_api_base.label_tag }}
-              {{ llm_form.browser_api_base }}
-              {% if llm_form.browser_api_base.errors %}<div class="errors">{{ llm_form.browser_api_base.errors|join:', ' }}</div>{% endif %}
-            </div>
-            <div class="field">
-              {{ llm_form.browser_custom_name.label_tag }}
-              {{ llm_form.browser_custom_name }}
-              {% if llm_form.browser_custom_name.errors %}<div class="errors">{{ llm_form.browser_custom_name.errors|join:', ' }}</div>{% endif %}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style="display:flex; justify-content:flex-end; margin-top:2.5rem;">
-        <button type="submit">Save &amp; Launch Gobii</button>
-      </div>
-    </form>
+    </main>
   </div>
 
   <script>
-    const browserToggle = document.getElementById("id_browser_same_as_orchestrator");
-    const browserExtra = document.getElementById("browser-extra");
+    const browserToggle = document.getElementById('id_browser_same_as_orchestrator');
+    const browserExtra = document.getElementById('browser-extra');
 
     function updateBrowserVisibility() {
-      if (!browserToggle) return;
-      browserExtra.style.display = browserToggle.checked ? "none" : "block";
+      if (!browserToggle || !browserExtra) return;
+      if (browserToggle.checked) {
+        browserExtra.classList.add('hidden');
+      } else {
+        browserExtra.classList.remove('hidden');
+      }
     }
 
     if (browserToggle) {
-      browserToggle.addEventListener("change", updateBrowserVisibility);
       updateBrowserVisibility();
+      browserToggle.addEventListener('change', updateBrowserVisibility);
     }
   </script>
 </body>

@@ -4,20 +4,58 @@ from django import forms
 from django.utils.translation import gettext_lazy as _
 
 
+INPUT_CLASSES = (
+    "block w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base "
+    "text-slate-900 shadow-[0_1px_0_rgba(15,23,42,0.04)] transition focus:border-brand-400 "
+    "focus:outline-none focus:ring-4 focus:ring-brand-100 placeholder:text-slate-400"
+)
+
+PASSWORD_CLASSES = INPUT_CLASSES + " pr-12"
+
+SELECT_CLASSES = (
+    "block w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base "
+    "text-slate-900 shadow-[0_1px_0_rgba(15,23,42,0.04)] transition focus:border-brand-400 "
+    "focus:outline-none focus:ring-4 focus:ring-brand-100"
+)
+
+CHECKBOX_CLASSES = (
+    "h-5 w-5 rounded-lg border-slate-300 text-brand-500 focus:ring-brand-400 focus:ring-offset-0"
+)
+
+
 class SuperuserSetupForm(forms.Form):
     email = forms.EmailField(
         label=_("Admin Email"),
         help_text=_("Used as the Django superuser login."),
+        widget=forms.EmailInput(
+            attrs={
+                "class": INPUT_CLASSES,
+                "autocomplete": "username",
+                "placeholder": "you@example.com",
+            }
+        ),
     )
     password1 = forms.CharField(
         label=_("Password"),
-        widget=forms.PasswordInput,
+        widget=forms.PasswordInput(
+            attrs={
+                "class": PASSWORD_CLASSES,
+                "autocomplete": "new-password",
+                "placeholder": _("Create a secure password"),
+            }
+        ),
         strip=False,
         min_length=8,
     )
     password2 = forms.CharField(
         label=_("Confirm Password"),
-        widget=forms.PasswordInput,
+        widget=forms.PasswordInput(
+            attrs={
+                "class": PASSWORD_CLASSES,
+                "autocomplete": "new-password",
+                "placeholder": _("Repeat password"),
+            }
+        ),
         strip=False,
         min_length=8,
     )
@@ -49,10 +87,18 @@ class LLMConfigForm(forms.Form):
     orchestrator_provider = forms.ChoiceField(
         label=_("Primary agents LLM"),
         choices=PROVIDER_CHOICES,
+        widget=forms.Select(attrs={"class": SELECT_CLASSES}),
     )
     orchestrator_api_key = forms.CharField(
         label=_("API Key"),
-        widget=forms.PasswordInput(render_value=True),
+        widget=forms.PasswordInput(
+            render_value=True,
+            attrs={
+                "class": PASSWORD_CLASSES,
+                "placeholder": _("Paste the API key"),
+                "autocomplete": "off",
+            },
+        ),
         help_text=_("Stored encrypted. Required unless you rely on environment variables."),
         required=False,
     )
@@ -60,55 +106,102 @@ class LLMConfigForm(forms.Form):
         label=_("Model Identifier"),
         required=False,
         help_text=_("LiteLLM model string, e.g. openai/gpt-4.1 or openai/gpt-4o."),
+        widget=forms.TextInput(
+            attrs={
+                "class": INPUT_CLASSES,
+                "placeholder": "openai/gpt-4.1",
+            }
+        ),
     )
     orchestrator_api_base = forms.CharField(
         label=_("API Base URL"),
         required=False,
         help_text=_("Required for custom OpenAI-compatible endpoints (e.g. http://localhost:8001/v1)."),
+        widget=forms.URLInput(
+            attrs={
+                "class": INPUT_CLASSES,
+                "placeholder": "https://api.openai.com/v1",
+            }
+        ),
     )
     orchestrator_custom_name = forms.CharField(
         label=_("Custom Provider Name"),
         required=False,
         help_text=_("Displayed in the admin when using a custom endpoint."),
+        widget=forms.TextInput(
+            attrs={
+                "class": INPUT_CLASSES,
+                "placeholder": _("Internal name"),
+            }
+        ),
     )
     orchestrator_supports_tool_choice = forms.BooleanField(
         label=_("Supports tool choice"),
         required=False,
         initial=True,
+        widget=forms.CheckboxInput(attrs={"class": CHECKBOX_CLASSES}),
     )
     orchestrator_use_parallel_tools = forms.BooleanField(
         label=_("Allow parallel tool calls"),
         required=False,
         initial=True,
+        widget=forms.CheckboxInput(attrs={"class": CHECKBOX_CLASSES}),
     )
 
     browser_same_as_orchestrator = forms.BooleanField(
         label=_("Use the same provider for browser automations"),
         required=False,
         initial=True,
+        widget=forms.CheckboxInput(attrs={"class": CHECKBOX_CLASSES}),
     )
     browser_provider = forms.ChoiceField(
         label=_("Browser automations LLM"),
         choices=PROVIDER_CHOICES,
         required=False,
+        widget=forms.Select(attrs={"class": SELECT_CLASSES}),
     )
     browser_api_key = forms.CharField(
         label=_("Browser API Key"),
-        widget=forms.PasswordInput(render_value=True),
+        widget=forms.PasswordInput(
+            render_value=True,
+            attrs={
+                "class": PASSWORD_CLASSES,
+                "placeholder": _("Paste the API key"),
+                "autocomplete": "off",
+            },
+        ),
         required=False,
     )
     browser_model = forms.CharField(
         label=_("Browser model identifier"),
         required=False,
         help_text=_("e.g. gpt-4o-mini or anthropic/claude-sonnet-4-20250514"),
+        widget=forms.TextInput(
+            attrs={
+                "class": INPUT_CLASSES,
+                "placeholder": "gpt-4o-mini",
+            }
+        ),
     )
     browser_api_base = forms.CharField(
         label=_("Browser API base URL"),
         required=False,
+        widget=forms.URLInput(
+            attrs={
+                "class": INPUT_CLASSES,
+                "placeholder": "https://api.example.com/v1",
+            }
+        ),
     )
     browser_custom_name = forms.CharField(
         label=_("Browser custom provider name"),
         required=False,
+        widget=forms.TextInput(
+            attrs={
+                "class": INPUT_CLASSES,
+                "placeholder": _("Internal name"),
+            }
+        ),
     )
 
     def clean(self):
