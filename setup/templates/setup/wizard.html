@@ -62,7 +62,7 @@
         </header>
 
         <div class="flex flex-col gap-16 lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start lg:gap-20">
-          <form method="post" novalidate class="space-y-16 lg:-mt-1">
+          <form id="setup-form" method="post" novalidate class="space-y-16 lg:-mt-1">
             {% csrf_token %}
 
             <section class="space-y-6 lg:!mt-0">
@@ -273,13 +273,6 @@
                 </div>
               </div>
             </section>
-
-            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <p class="text-sm text-slate-500">You can adjust any of these settings later from the admin console.</p>
-              <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand-500 px-7 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-200/70 focus:ring-offset-1">
-                Save &amp; Launch Gobii
-              </button>
-            </div>
           </form>
 
           <aside class="lg:pl-12 lg:self-start">
@@ -303,6 +296,13 @@
               <p class="mt-1 leading-relaxed">Skip keys here and set <code class="rounded bg-white/80 px-1 py-0.5 text-[11px] text-slate-700 shadow-sm">GOBII_LLM_* </code> values before restarting the app. <a href="https://docs.gobii.ai" target="_blank" rel="noreferrer" class="text-brand-600 underline decoration-brand-200 underline-offset-4 hover:text-brand-700">See docs</a></p>
             </div>
           </aside>
+        </div>
+
+        <div class="mt-12 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <p class="text-sm text-slate-500">You can adjust any of these settings later from the admin console.</p>
+          <button type="submit" form="setup-form" class="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand-500 px-7 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-200/70 focus:ring-offset-1">
+            Save &amp; Launch Gobii
+          </button>
         </div>
       </div>
     </main>
