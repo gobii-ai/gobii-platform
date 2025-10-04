@@ -16,6 +16,7 @@ from django.apps import apps
 from django.core.cache import cache
 from django.db import connection
 from django.db.models import Q
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -448,6 +449,8 @@ def invalidate_llm_bootstrap_cache() -> None:
 
 def is_llm_bootstrap_required(*, force_refresh: bool = False) -> bool:
     """Return True when the platform lacks any usable LLM configuration."""
+    if getattr(settings, "LLM_BOOTSTRAP_OPTIONAL", False):
+        return False
     if not force_refresh:
         cached = cache.get(_LLM_BOOTSTRAP_CACHE_KEY)
         if cached is not None:

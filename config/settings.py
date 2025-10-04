@@ -69,6 +69,8 @@ GOBII_PROPRIETARY_MODE = env.bool("GOBII_PROPRIETARY_MODE", default=False)
 GOBII_ENABLE_COMMUNITY_UNLIMITED = env.bool("GOBII_ENABLE_COMMUNITY_UNLIMITED", default=True)
 # Allow disabling the first-run setup redirect (e.g., in automated tests)
 FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
+# Permit skipping LLM bootstrap enforcement (useful for non-interactive tests)
+LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
 
 try:
     from proprietary import defaults as _proprietary_defaults_module
