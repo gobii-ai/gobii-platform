@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
@@ -44,6 +45,10 @@ class FirstRunSetupMiddleware:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
+        if not getattr(settings, "FIRST_RUN_SETUP_ENABLED", True):
+            request.is_first_run = False
+            return self.get_response(request)
+
         request.is_first_run = not is_initial_setup_complete()
 
         if request.is_first_run and self._should_redirect(request):

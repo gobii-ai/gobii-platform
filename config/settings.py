@@ -67,6 +67,8 @@ GOBII_PROPRIETARY_MODE = env.bool("GOBII_PROPRIETARY_MODE", default=False)
 # In Community Edition, we optionally override limits to be effectively unlimited
 # for agents/tasks. Can be disabled (e.g., in tests) via env.
 GOBII_ENABLE_COMMUNITY_UNLIMITED = env.bool("GOBII_ENABLE_COMMUNITY_UNLIMITED", default=True)
+# Allow disabling the first-run setup redirect (e.g., in automated tests)
+FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
 
 try:
     from proprietary import defaults as _proprietary_defaults_module

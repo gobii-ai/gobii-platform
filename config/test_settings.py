@@ -71,6 +71,9 @@ CHANNEL_LAYERS = {
 # Ensure email delivery is simulated in tests (no network calls)
 SIMULATE_EMAIL_DELIVERY = True
 
+# Bypass the first-run setup wizard during tests to keep API responses predictable.
+FIRST_RUN_SETUP_ENABLED = False
+
 # -----------------------------------------------------------------------------
 #  Silence Django's noisy "Adding permission ..." output at high verbosity
 # -----------------------------------------------------------------------------
