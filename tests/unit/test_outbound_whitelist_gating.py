@@ -14,6 +14,7 @@ from api.models import (
 )
 from api.agent.tools.email_sender import execute_send_email
 from api.agent.tools.sms_sender import execute_send_sms
+from config import settings
 
 
 User = get_user_model()
@@ -40,8 +41,12 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
         )
         # Provide from endpoints for tools
         from api.models import PersistentAgentCommsEndpoint
+        default_domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
         self.email_from = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent, channel=CommsChannel.EMAIL, address="agent@my.gobii.ai", is_primary=True
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=f"agent@{default_domain}",
+            is_primary=True,
         )
         self.sms_from = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent, channel=CommsChannel.SMS, address="+15550007777", is_primary=True

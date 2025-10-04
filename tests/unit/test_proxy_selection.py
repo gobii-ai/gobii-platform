@@ -5,7 +5,7 @@ import uuid
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -159,9 +159,12 @@ class ProxySelectionTests(TestCase):
         self.assertIsNone(result)
     
     @patch('api.models.BrowserUseAgent.select_random_proxy')
-    @patch.object(settings, 'DEBUG', False)
+    @override_settings(GOBII_PROPRIETARY_MODE=True, DEBUG=False)
     @tag("batch_proxy_selection")
-    def test_select_proxy_no_proxy_production_mode(self, mock_select_random):
+    def test_select_proxy_no_proxy_production_mode(
+        self,
+        mock_select_random,
+    ):
         """Test proxy selection raises error in production mode when no proxy available."""
         mock_select_random.return_value = None
         
@@ -169,10 +172,23 @@ class ProxySelectionTests(TestCase):
             select_proxy(allow_no_proxy_in_debug=False)
         
         self.assertIn("No proxy available", str(context.exception))
-        self.assertIn("DEBUG=False", str(context.exception))
+        self.assertIn("proprietary mode", str(context.exception))
+
+    @patch('api.models.BrowserUseAgent.select_random_proxy')
+    @override_settings(GOBII_PROPRIETARY_MODE=False, DEBUG=False)
+    def test_select_proxy_no_proxy_community_mode(
+        self,
+        mock_select_random,
+    ):
+        """Test proxy selection returns None in community mode without proxies."""
+        mock_select_random.return_value = None
+
+        result = select_proxy(allow_no_proxy_in_debug=False)
+
+        self.assertIsNone(result)
     
     @patch('api.models.BrowserUseAgent.select_random_proxy')
-    @patch.object(settings, 'DEBUG', True)
+    @override_settings(DEBUG=True, GOBII_PROPRIETARY_MODE=True)
     def test_select_proxy_no_proxy_debug_mode_disabled(self, mock_select_random):
         """Test proxy selection raises error even in debug mode when allow_no_proxy_in_debug=False."""
         mock_select_random.return_value = None

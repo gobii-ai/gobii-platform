@@ -17,7 +17,7 @@ def run_completion(
 ):
     """Invoke ``litellm.completion`` with shared parameter handling.
 
-    - Removes internal hints (``supports_tool_choice`` and ``use_parallel_tool_calls``).
+    - Removes internal hints (``supports_tool_choice``, ``use_parallel_tool_calls``, and ``supports_vision``).
     - Adds ``tool_choice`` when tools are provided and supported.
     - Propagates ``parallel_tool_calls`` when tools are provided *or* the endpoint
       supplied an explicit hint.
@@ -28,6 +28,7 @@ def run_completion(
     tool_choice_supported = params.pop("supports_tool_choice", True)
     parallel_hint_provided = "use_parallel_tool_calls" in params
     use_parallel_tool_calls = params.pop("use_parallel_tool_calls", True)
+    params.pop("supports_vision", None)
 
     kwargs: dict[str, Any] = {
         "model": model,

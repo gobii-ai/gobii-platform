@@ -36,6 +36,15 @@ from util import EphemeralXvfb, should_use_ephemeral_xvfb
 
 tracer = trace.get_tracer('gobii.utils')
 
+# Providers that should default to vision support when DB metadata is unavailable
+DEFAULT_PROVIDER_VISION_SUPPORT: dict[str, bool] = {
+    "openai": True,
+    "anthropic": True,
+    "google": True,
+    "openrouter": False,
+    "fireworks": False,
+}
+
 # --------------------------------------------------------------------------- #
 #  Optional libs – in the worker container these are installed; in migrations
 #  or other management contexts they may be missing.
@@ -345,6 +354,7 @@ def _resolve_browser_provider_priority_from_db():
                     'browser_model': endpoint.browser_model,
                     'base_url': endpoint.browser_base_url or '',
                     'backend': provider.browser_backend,
+                    'supports_vision': bool(getattr(endpoint, 'supports_vision', False)),
                     'api_key': api_key,
                     'has_key': True,
                 })
@@ -544,6 +554,7 @@ async def _run_agent(
     override_model: Optional[str] = None,
     override_base_url: Optional[str] = None,
     provider_backend_override: Optional[str] = None,
+    supports_vision: bool = True,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """Execute the Browser‑Use agent for a single provider."""
     if baggage:
@@ -551,6 +562,7 @@ async def _run_agent(
     with traced("RUN BUAgent") as agent_span:
         agent_span.set_attribute("task.id", task_id)
         agent_span.set_attribute("provider", provider)
+        agent_span.set_attribute("browser_use.supports_vision", bool(supports_vision))
 
         if browser_use_agent_id:
             agent_span.set_attribute("browser_use_agent.id", browser_use_agent_id)
@@ -822,6 +834,7 @@ async def _run_agent(
                 "llm": llm,
                 "browser": browser_session,
                 "enable_memory": False,
+                "use_vision": bool(supports_vision),
             }
 
             if controller:
@@ -1097,7 +1110,18 @@ def _execute_agent_with_failover(
     for tier_idx, tier in enumerate(provider_priority, start=1):
         # Two paths: DB-endpoint dicts or legacy provider strings
         if tier and isinstance(tier[0], dict):
-            entries = [(e['endpoint_key'], e['provider_key'], e['weight'], e['browser_model'], e.get('base_url') or '', e.get('backend')) for e in tier]  # type: ignore[index]
+            entries = [
+                (
+                    e['endpoint_key'],
+                    e['provider_key'],
+                    e['weight'],
+                    e['browser_model'],
+                    e.get('base_url') or '',
+                    e.get('backend'),
+                    e.get('supports_vision'),
+                )
+                for e in tier
+            ]  # type: ignore[index]
             if not entries:
                 continue
             remaining = entries.copy()
@@ -1140,11 +1164,19 @@ def _execute_agent_with_failover(
                 providers = [p[0] for p in remaining_providers]
                 weights = [p[1] for p in remaining_providers]
                 selected_provider = random.choices(providers, weights=weights, k=1)[0]
-                # shape: (endpoint_key, provider_key, weight, model, base_url, backend)
-                attempts.append((selected_provider, selected_provider, 0.0, None, None, None))
+                # shape: (endpoint_key, provider_key, weight, model, base_url, backend, supports_vision)
+                attempts.append((
+                    selected_provider,
+                    selected_provider,
+                    0.0,
+                    None,
+                    None,
+                    None,
+                    DEFAULT_PROVIDER_VISION_SUPPORT.get(selected_provider, True),
+                ))
                 remaining_providers = [p for p in remaining_providers if p[0] != selected_provider]
 
-        for (endpoint_key, provider_key, _w, browser_model, base_url, backend) in attempts:
+        for (endpoint_key, provider_key, _w, browser_model, base_url, backend, supports_vision) in attempts:
             # Resolve API key
             llm_api_key = None
             if isinstance(tier[0], dict):
@@ -1165,6 +1197,12 @@ def _execute_agent_with_failover(
                 tier_idx,
                 task_id,
             )
+            vision_enabled = (
+                bool(supports_vision)
+                if supports_vision is not None
+                else DEFAULT_PROVIDER_VISION_SUPPORT.get(provider_key, False)
+            )
+
             try:
                 result, token_usage = asyncio.run(
                     _run_agent(
@@ -1181,6 +1219,7 @@ def _execute_agent_with_failover(
                         override_model=browser_model,
                         override_base_url=base_url,
                         provider_backend_override=backend,
+                        supports_vision=vision_enabled,
                     )
                 )
 

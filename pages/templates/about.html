@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
-{% block title %}About • Gobii{% endblock %}
+{% block title %}About • {{ settings.PUBLIC_BRAND_NAME }}{% endblock %}
 
 {% block content %}
 <section class="py-20 bg-white text-slate-900">
@@ -21,9 +21,11 @@
     <p class="text-lg leading-relaxed mb-4">
       If you believe the browser should be as programmable as an API, we'd love to hear from you.
     </p>
-    <p class="text-lg leading-relaxed">
-      <a href="mailto:hello@gobii.ai" class="text-blue-600 hover:underline">Say hello ↗</a>
-    </p>
+    {% if settings.PUBLIC_CONTACT_EMAIL %}
+      <p class="text-lg leading-relaxed">
+        <a href="mailto:{{ settings.PUBLIC_CONTACT_EMAIL }}" class="text-blue-600 hover:underline">Say hello ↗</a>
+      </p>
+    {% endif %}
   </div>
 </section>
 

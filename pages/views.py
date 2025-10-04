@@ -23,6 +23,7 @@ from djstripe.models import Customer, Subscription, Price
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.payments_helper import PaymentsHelper
 from util.subscription_helper import get_or_create_stripe_customer, get_user_plan
+from util.integrations import stripe_status, IntegrationDisabledError
 from .utils_markdown import (
     load_page,
     get_prev_next,
@@ -36,6 +37,16 @@ from opentelemetry import trace
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+
+
+def _prepare_stripe_or_404() -> None:
+    status = stripe_status()
+    if not status.enabled:
+        raise Http404("Stripe billing is not available.")
+    key = PaymentsHelper.get_stripe_key()
+    if not key:
+        raise Http404("Stripe billing is not configured.")
+    stripe.api_key = key
 
 class HomePage(TemplateView):
     template_name = "home.html"
@@ -546,7 +557,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
     """Initiate Stripe Checkout for the Startup subscription plan."""
 
     def get(self, request, *args, **kwargs):
-        stripe.api_key = PaymentsHelper.get_stripe_key()
+        _prepare_stripe_or_404()
         stripe_settings = get_stripe_settings()
 
         user = request.user

@@ -108,7 +108,7 @@
             Organizations
           </a>
           {% endflag %}
-          {% if settings.GOBII_PROPRIETARY_MODE %}
+          {% if stripe_enabled %}
           <a href="{% url 'billing' %}"
               x-show="showBilling"
               class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
@@ -186,10 +186,15 @@
 <script>
 function navigationMenu() {
   return {
-    showBilling: false,
+    showBilling: {{ stripe_enabled|yesno:'true,false' }},
+    hasStripe: {{ stripe_enabled|yesno:'true,false' }},
     userRole: null,
     
     init() {
+      if (!this.hasStripe) {
+        this.showBilling = false;
+        return;
+      }
       // Get current context from localStorage
       const contextType = localStorage.getItem('contextType') || 'personal';
       const contextId = localStorage.getItem('contextId') || '{{ user.id }}';

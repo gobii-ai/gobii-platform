@@ -406,9 +406,18 @@ class MCPToolFunctionsTests(TestCase):
             MCPToolInfo("mcp_brightdata_scrape", "brightdata", "scrape", "Scrape pages", {}),
         ]
         # Return a single config with both hints present
-        mock_get_config.return_value = [(
-            "openai", "openai/gpt-4o", {"temperature": 0.1, "supports_tool_choice": True, "use_parallel_tool_calls": True}
-        )]
+        mock_get_config.return_value = [
+            (
+                "openai",
+                "openai/gpt-4o",
+                {
+                    "temperature": 0.1,
+                    "supports_tool_choice": True,
+                    "use_parallel_tool_calls": True,
+                    "supports_vision": True,
+                },
+            )
+        ]
 
         # Make litellm.completion return a minimal response
         from unittest.mock import MagicMock
@@ -427,6 +436,7 @@ class MCPToolFunctionsTests(TestCase):
         # Assert the forwarded kwargs do not contain the internal hint
         kwargs = mock_completion.call_args.kwargs
         self.assertNotIn('use_parallel_tool_calls', kwargs)
+        self.assertNotIn('supports_vision', kwargs)
 
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')

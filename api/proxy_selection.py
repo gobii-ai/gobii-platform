@@ -105,11 +105,23 @@ def select_proxy(
         return proxy_server
     
     # No proxy available
-    if allow_no_proxy_in_debug and getattr(settings, "DEBUG", False):
+    debug_mode = getattr(settings, "DEBUG", False)
+    community_mode = not getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+
+    if allow_no_proxy_in_debug and debug_mode:
         logger.warning("No proxy available%s. Continuing without proxy in debug mode.", context_desc)
         return None
-    
-    error_msg = f"No proxy available{context_desc} and DEBUG=False."
+
+    if community_mode:
+        logger.warning(
+            "No proxy available%s. Continuing without proxy in community mode.",
+            context_desc,
+        )
+        return None
+
+    error_msg = (
+        f"No proxy available{context_desc} and proxies are required in proprietary mode."
+    )
     logger.error(error_msg)
     raise RuntimeError(error_msg)
 

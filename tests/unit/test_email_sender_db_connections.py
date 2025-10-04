@@ -15,6 +15,7 @@ from api.models import (
     DeliveryStatus,
 )
 from api.agent.tools.email_sender import execute_send_email
+from config import settings
 
 
 User = get_user_model()
@@ -41,11 +42,12 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             charter="send emails",
             browser_use_agent=self.browser_agent,
         )
+        self.default_domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
         # Primary from endpoint for the agent
         self.from_ep = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel="email",
-            address="ricardo.kingsley@my.gobii.ai",
+            address=f"ricardo.kingsley@{self.default_domain}",
             is_primary=True,
         )
 

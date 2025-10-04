@@ -25,9 +25,11 @@
               <p class="text-gray-600">Join our Discord community where you'll find Gobii staff ready to help.</p>
             </div>
           </div>
-          <a href="https://discord.gg/yyDB8GwxtE" class="mt-4 inline-flex items-center justify-center w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
-            Join Discord
-          </a>
+          {% if settings.PUBLIC_DISCORD_URL %}
+            <a href="{{ settings.PUBLIC_DISCORD_URL }}" class="mt-4 inline-flex items-center justify-center w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
+              Join Discord
+            </a>
+          {% endif %}
         </div>
       </div>
 
@@ -43,7 +45,9 @@
               </div>
               <div class="ml-4">
                 <p class="text-lg font-medium text-gray-900">Email Support</p>
-                <p class="text-gray-600">Send us an email at <a href="mailto:support@gobii.ai" class="text-blue-600 hover:text-blue-800 font-medium">support@gobii.ai</a></p>
+                {% if settings.SUPPORT_EMAIL %}
+                  <p class="text-gray-600">Send us an email at <a href="mailto:{{ settings.SUPPORT_EMAIL }}" class="text-blue-600 hover:text-blue-800 font-medium">{{ settings.SUPPORT_EMAIL }}</a></p>
+                {% endif %}
               </div>
             </div>
           {% else %}

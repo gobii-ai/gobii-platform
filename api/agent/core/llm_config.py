@@ -9,13 +9,24 @@ The configuration uses a similar pattern to browser use tasks for consistency.
 """
 import os
 import logging
-from typing import Dict, List, Tuple, Any
 import random
+from typing import Dict, List, Tuple, Any
+
 from django.apps import apps
+from django.core.cache import cache
 from django.db import connection
 from django.db.models import Q
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+
+class LLMNotConfiguredError(RuntimeError):
+    """Raised when no LLM providers/endpoints are available for use."""
+
+
+_LLM_BOOTSTRAP_CACHE_KEY = "llm_bootstrap_required:v1"
+_LLM_BOOTSTRAP_CACHE_TTL = 30  # seconds
 
 # MODEL TESTING NOTES FOR PERSISTENT AGENTS:
 # - GLM-4.5 (OpenRouter): PASSED manual testing - works well with persistent agents
@@ -132,16 +143,27 @@ def get_tier_config_for_tokens(token_count: int) -> List[List[Tuple[str, float]]
 def get_llm_config() -> Tuple[str, dict]:
     """DB-only: Return the first configured LiteLLM model+params.
 
-    Uses the same DB-backed tier selection as get_llm_config_with_failover
-    with token_count=0 and returns the first (primary) config.
-    Raises ValueError if no DB tiers/endpoints are configured.
+    Uses the DB-backed tier selection. When no configuration exists yet,
+    this raises :class:`LLMNotConfiguredError` so callers can handle the
+    bootstrap flow (e.g., the setup wizard) without crashing the app.
     """
-    configs = get_llm_config_with_failover(token_count=0)
+    try:
+        configs = get_llm_config_with_failover(token_count=0, allow_unconfigured=True)
+    except Exception as exc:
+        raise LLMNotConfiguredError("LLM configuration unavailable") from exc
+
     if not configs:
-        raise ValueError("No DB-configured LLM providers/endpoints available")
+        raise LLMNotConfiguredError(
+            "No LLM provider available. Complete the setup wizard or supply credentials first."
+        )
+
     _provider_key, model, params = configs[0]
     # Remove any internal-only hints that shouldn't be passed to litellm
-    params = {k: v for k, v in params.items() if k not in ("supports_tool_choice", "use_parallel_tool_calls")}
+    params = {
+        k: v
+        for k, v in params.items()
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision")
+    }
     return model, params
 
 
@@ -213,7 +235,9 @@ def get_available_providers(provider_tiers: List[List[Tuple[str, float]]] = None
 def get_llm_config_with_failover(
     provider_tiers: List[List[Tuple[str, float]]] = None,
     agent_id: str = None,
-    token_count: int = 0
+    token_count: int = 0,
+    *,
+    allow_unconfigured: bool = False,
 ) -> List[Tuple[str, str, dict]]:
     """
     Get LLM configurations for tiered failover with token-based tier selection.
@@ -227,9 +251,9 @@ def get_llm_config_with_failover(
         
     Returns:
         List of (provider_name, model_name, litellm_params) tuples in failover order
-        
+
     Raises:
-        ValueError: If no providers are available with valid API keys
+        LLMNotConfiguredError: If no providers are available with valid API keys (unless allow_unconfigured=True)
     """
     # Always attempt DB-backed configuration first; fallback to legacy when empty
     try:
@@ -262,8 +286,32 @@ def get_llm_config_with_failover(
                 # Effective key present?
                 has_admin_key = bool(provider.api_key_encrypted)
                 has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
+                # Determine the effective model name, auto-prefixing OpenAI-compatible endpoints when needed
+                raw_model = endpoint.litellm_model or ""
+                has_api_base = bool(getattr(endpoint, 'api_base', None))
+                provider_backend = getattr(provider, 'browser_backend', '')
+                is_openai_backend = provider_backend in ("OPENAI", "OPENAI_COMPAT")
+                should_auto_prefix = (
+                    is_openai_backend
+                    and has_api_base
+                    and raw_model
+                    and '/' not in raw_model
+                )
+                if should_auto_prefix:
+                    effective_model = f"openai/{raw_model}"
+                    logger.info(
+                        "Auto-prefixed OpenAI-compatible model: endpoint=%s provider=%s original_model=%s prefixed_model=%s api_base=%s",
+                        endpoint.key,
+                        provider.key,
+                        raw_model,
+                        effective_model,
+                        endpoint.api_base,
+                    )
+                else:
+                    effective_model = raw_model
+
                 # Allow OpenAI-compatible endpoints with no key (api_base + openai/ prefix)
-                is_openai_compat = endpoint.litellm_model.startswith('openai/') and bool(getattr(endpoint, 'api_base', None))
+                is_openai_compat = effective_model.startswith('openai/') and has_api_base
                 if not (has_admin_key or has_env_key or is_openai_compat):
                     # Skip endpoints that truly require a key but none is configured
                     logger.info(
@@ -272,11 +320,11 @@ def get_llm_config_with_failover(
                         tier.order,
                         endpoint.key,
                         provider.key,
-                        endpoint.litellm_model,
+                        effective_model,
                         getattr(endpoint, 'api_base', '') or ''
                     )
                     continue
-                endpoints_with_weights.append((endpoint, provider, te.weight))
+                endpoints_with_weights.append((endpoint, provider, te.weight, effective_model))
 
             if not endpoints_with_weights:
                 continue
@@ -285,7 +333,7 @@ def get_llm_config_with_failover(
             while remaining:
                 weights = [r[2] for r in remaining]
                 selected_idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
-                endpoint, provider, _w = remaining.pop(selected_idx)
+                endpoint, provider, _w, effective_model = remaining.pop(selected_idx)
 
                 params: Dict[str, Any] = {"temperature": 0.1}
                 # Inject API key directly into LiteLLM params (DB-only routing).
@@ -317,13 +365,13 @@ def get_llm_config_with_failover(
                 # Support OpenAI-compatible endpoints for persistent agents via LiteLLM
                 # When using an OpenAI-compatible proxy, set litellm_model to 'openai/<your-model>'
                 # and configure api_base on the endpoint (e.g., http://vllm-host:port/v1)
-                if endpoint.litellm_model.startswith('openai/') and getattr(endpoint, 'api_base', None):
+                if effective_model.startswith('openai/') and getattr(endpoint, 'api_base', None):
                     params["api_base"] = endpoint.api_base
                     logger.info(
                         "DB LLM endpoint configured with api_base: endpoint=%s provider=%s model=%s api_base=%s has_key=%s",
                         endpoint.key,
                         provider.key,
-                        endpoint.litellm_model,
+                        effective_model,
                         endpoint.api_base,
                         bool(params.get('api_key')),
                     )
@@ -331,17 +379,26 @@ def get_llm_config_with_failover(
                 # Add tool-choice capability hint for callers (not passed to litellm)
                 params_with_hints = dict(params)
                 params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
+                params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
                 # Expose whether the endpoint prefers parallel tool-calling. This is a caller hint.
                 try:
                     params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
                 except Exception:
                     params_with_hints["use_parallel_tool_calls"] = True
-                failover_configs.append((endpoint.key, endpoint.litellm_model, params_with_hints))
+                failover_configs.append((endpoint.key, effective_model, params_with_hints))
 
         if failover_configs:
+            _cache_bootstrap_status(False)
             return failover_configs
 
-    raise ValueError("No DB-configured LLM providers/endpoints available for the given token count")
+    if allow_unconfigured:
+        _cache_bootstrap_status(True)
+        return []
+
+    _cache_bootstrap_status(True)
+    raise LLMNotConfiguredError(
+        "No LLM providers are currently configured. Complete the setup wizard before running agents."
+    )
 
 
 def get_summarization_llm_config() -> Tuple[str, dict]:
@@ -356,13 +413,11 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
     """
     # DB-only: pick primary config and adjust temperature for summarisation
     configs = get_llm_config_with_failover(token_count=0)
-    if not configs:
-        raise ValueError("No DB-configured LLM providers/endpoints available for summarization")
     _provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm
     params = {
         k: v for k, v in params_with_hints.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls")
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision")
     }
 
     # Default to deterministic temperature unless the endpoint already
@@ -374,3 +429,49 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
         params["temperature"] = 1
 
     return model, params
+
+
+def _cache_bootstrap_status(is_required: bool) -> None:
+    """Cache bootstrap status so repeated UI checks avoid heavy DB queries."""
+    try:
+        cache.set(_LLM_BOOTSTRAP_CACHE_KEY, bool(is_required), _LLM_BOOTSTRAP_CACHE_TTL)
+    except Exception:
+        logger.debug("Unable to cache LLM bootstrap status", exc_info=True)
+
+
+def invalidate_llm_bootstrap_cache() -> None:
+    """Invalidate cached bootstrap status after config changes."""
+    try:
+        cache.delete(_LLM_BOOTSTRAP_CACHE_KEY)
+    except Exception:
+        logger.debug("Unable to invalidate LLM bootstrap cache", exc_info=True)
+
+
+def is_llm_bootstrap_required(*, force_refresh: bool = False) -> bool:
+    """Return True when the platform lacks any usable LLM configuration."""
+    if getattr(settings, "LLM_BOOTSTRAP_OPTIONAL", False):
+        return False
+    if not force_refresh:
+        cached = cache.get(_LLM_BOOTSTRAP_CACHE_KEY)
+        if cached is not None:
+            return bool(cached)
+
+    try:
+        configs = get_llm_config_with_failover(token_count=0, allow_unconfigured=True)
+        required = not bool(configs)
+    except Exception:
+        required = True
+
+    _cache_bootstrap_status(required)
+    return required
+
+
+__all__ = [
+    "get_llm_config",
+    "get_llm_config_with_failover",
+    "REFERENCE_TOKENIZER_MODEL",
+    "get_summarization_llm_config",
+    "LLMNotConfiguredError",
+    "invalidate_llm_bootstrap_cache",
+    "is_llm_bootstrap_required",
+]

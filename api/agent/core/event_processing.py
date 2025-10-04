@@ -46,7 +46,13 @@ from tasks.services import TaskCreditService
 from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
 from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps
-from .llm_config import get_llm_config, get_llm_config_with_failover, REFERENCE_TOKENIZER_MODEL
+from .llm_config import (
+    get_llm_config,
+    get_llm_config_with_failover,
+    REFERENCE_TOKENIZER_MODEL,
+    LLMNotConfiguredError,
+    is_llm_bootstrap_required,
+)
 from .promptree import Prompt
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
 
@@ -137,6 +143,13 @@ PROMPT_TOKEN_BUDGET = 120000
 
 # Default reference model for token estimation and rare fallbacks
 _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
+
+try:
+    _AGENT_MODEL, _AGENT_MODEL_PARAMS = get_llm_config()
+except (LLMNotConfiguredError, Exception):
+    # During first-run bootstrap we intentionally allow the LLM config to be missing.
+    # The setup wizard and runtime checks will load the actual values once configured.
+    _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
 
 
 def _create_token_estimator(model: str) -> callable:
@@ -727,6 +740,31 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     try:
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
 
+        if is_llm_bootstrap_required():
+            msg = "Agent execution paused: LLM configuration required."
+            logger.warning(
+                "Persistent agent %s skipped – platform setup requires LLM credentials.",
+                persistent_agent_id,
+            )
+            span.add_event("Agent processing skipped - llm bootstrap pending")
+            span.set_attribute("llm.bootstrap_required", True)
+
+            if not PersistentAgentSystemStep.objects.filter(
+                step__agent=agent,
+                code=PersistentAgentSystemStep.Code.LLM_CONFIGURATION_REQUIRED,
+            ).exists():
+                step = PersistentAgentStep.objects.create(
+                    agent=agent,
+                    description=msg,
+                )
+                PersistentAgentSystemStep.objects.create(
+                    step=step,
+                    code=PersistentAgentSystemStep.Code.LLM_CONFIGURATION_REQUIRED,
+                    notes="llm_configuration_missing",
+                )
+
+            return
+
         try:
             maybe_schedule_short_description(agent)
         except Exception:
@@ -940,10 +978,18 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
             )
             
             # Select provider tiers based on the fitted token count
-            failover_configs = get_llm_config_with_failover(
-                agent_id=str(agent.id),
-                token_count=fitted_token_count
-            )
+            try:
+                failover_configs = get_llm_config_with_failover(
+                    agent_id=str(agent.id),
+                    token_count=fitted_token_count
+                )
+            except LLMNotConfiguredError:
+                logger.warning(
+                    "Agent %s loop aborted – LLM configuration missing mid-run.",
+                    agent.id,
+                )
+                span.add_event("Agent loop aborted - llm bootstrap required")
+                break
 
             try:
                 response, token_usage = _completion_with_failover(
@@ -1037,6 +1083,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
 
             all_calls_sleep = True
             sleep_requested = False  # set only when all calls are sleep
+            sleep_tool_requested = False
             executed_calls = 0
             followup_required = False
             try:
@@ -1047,12 +1094,14 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                     )
                     for c in (tool_calls or [])
                 ]
+                sleep_tool_requested = any(name == "sleep_until_next_trigger" for name in tool_names)
                 has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
                 actionable_calls_total = sum(
                     1 for name in tool_names if name != "sleep_until_next_trigger"
                 )
             except Exception:
                 # Defensive fallback: assume we have actionable work so the agent keeps processing
+                sleep_tool_requested = False
                 has_non_sleep_calls = True
                 actionable_calls_total = len(tool_calls or []) if tool_calls else 0
 
@@ -1293,6 +1342,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                 not followup_required
                 and executed_calls > 0
                 and executed_calls >= actionable_calls_total
+                and sleep_tool_requested
             ):
                 logger.info(
                     "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",
@@ -1403,8 +1453,11 @@ def _build_prompt_context(
     try:
         failover_configs = get_llm_config_with_failover(
             agent_id=str(agent.id),
-            token_count=0
+            token_count=0,
+            allow_unconfigured=True,
         )
+    except LLMNotConfiguredError:
+        failover_configs = None
     except Exception:
         failover_configs = None
     model = failover_configs[0][1] if failover_configs else _AGENT_MODEL
@@ -1997,7 +2050,7 @@ def _get_system_instruction(
         "IF A TOOL IS AVAILABLE, CALL IT FIRST TO SEE IF IT WORKS WITHOUT EXTRA AUTH. MANY MCP TOOLS EITHER WORK OUT‑OF‑THE‑BOX OR WILL RETURN AN 'action_required' RESPONSE WITH A CONNECT/AUTH LINK. IF YOU RECEIVE AN AUTH REQUIREMENT FROM AN MCP TOOL, IMMEDIATELY SURFACE THE PROVIDED LINK TO THE USER AND WAIT — DO NOT CREATE A SECURE CREDENTIALS REQUEST. ONLY USE 'secure_credentials_request' WHEN YOU WILL IMMEDIATELY USE THE CREDENTIALS WITH 'http_request' OR 'spawn_web_task'. "
         
         "Use the http_request tool for any HTTP request, including GET, POST, PUT, DELETE, etc. "
-        "The http_request tool always uses a proxy server for security. If no proxy is available, the tool will fail with an error. "
+        "The http_request tool uses a proxy server for security when one is configured. In proprietary mode a proxy is required; in community mode it falls back to a direct request if no proxy is available. "
         "If you need to look at specific files on the internet, like csv files, etc. use a direct HTTP request. "
         "Sometimes you will want to look up public docs for an API using spawn_web_task, then use the http_request tool to access the API. "
         "Make note of secrets available --if an API key is available, that's a strong signal to use it for the relevant API call. "

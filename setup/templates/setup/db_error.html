@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gobii Setup – Database Unavailable</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: linear-gradient(135deg, #f6f9ff 0%, #e9f2ff 100%);
+      color: #0f172a;
+    }
+    .panel {
+      width: min(540px, 100%);
+      padding: 48px 42px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.97);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      box-shadow: 0 28px 60px -26px rgba(79, 70, 229, 0.28);
+      text-align: center;
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: clamp(1.8rem, 1.7rem + 0.6vw, 2.15rem);
+      font-weight: 500;
+      letter-spacing: -0.015em;
+      color: #111827;
+    }
+    p {
+      margin: 0;
+      color: rgba(15, 23, 42, 0.65);
+      line-height: 1.55;
+      font-size: 0.98rem;
+    }
+    p + p {
+      margin-top: 14px;
+    }
+    code {
+      display: inline-block;
+      padding: 3px 7px;
+      border-radius: 10px;
+      background: rgba(99, 102, 241, 0.12);
+      color: #4338ca;
+      font-size: 0.88rem;
+      font-weight: 600;
+    }
+    .cta {
+      margin-top: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 12px 26px;
+      border-radius: 999px;
+      border: none;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #fff;
+      background: linear-gradient(120deg, #5f5bff, #7a68ff);
+      box-shadow: 0 22px 44px -20px rgba(88, 83, 239, 0.5);
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 26px 52px -20px rgba(76, 83, 238, 0.45);
+    }
+    .support-text {
+      margin-top: 18px;
+      font-size: 0.85rem;
+      color: rgba(15, 23, 42, 0.5);
+    }
+    @media (max-width: 480px) {
+      .panel {
+        padding: 40px 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Waiting for the database…</h1>
+    <p>We haven’t reached PostgreSQL yet. If you’re using Docker Compose, verify the <code>db</code> service is healthy. This page will refresh automatically once Django can connect.</p>
+    <p>If you’re running Django outside Docker, ensure <code>POSTGRES_USER</code>, <code>POSTGRES_PASSWORD</code>, and related environment variables match your stack before retrying.</p>
+    <button class="cta" onclick="window.location.reload()">Try again</button>
+    <div class="support-text">Need a hand? Check the compose logs for <code>db</code> or confirm credentials.</div>
+  </div>
+</body>
+</html>

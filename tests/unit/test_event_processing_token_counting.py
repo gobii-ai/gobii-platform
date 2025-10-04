@@ -124,7 +124,8 @@ class TestEventProcessingTokenCounting(TestCase):
                 # Verify it was called with token_count=0 for model selection
                 mock_get_config.assert_called_with(
                     agent_id=str(self.test_agent.id),
-                    token_count=0
+                    token_count=0,
+                    allow_unconfigured=True,
                 )
 
                 self.assertIsInstance(messages, list)

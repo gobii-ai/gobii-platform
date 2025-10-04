@@ -59,7 +59,18 @@ class TestEventProcessingLLMSelection(TestCase):
         messages = [{"role": "user", "content": "hello"}]
         tools = []
         # Provide endpoint params with our hint
-        failover_configs = [("openai", "openai/gpt-4.1", {"temperature": 0.1, "supports_tool_choice": True, "use_parallel_tool_calls": True})]
+        failover_configs = [
+            (
+                "openai",
+                "openai/gpt-4.1",
+                {
+                    "temperature": 0.1,
+                    "supports_tool_choice": True,
+                    "use_parallel_tool_calls": True,
+                    "supports_vision": True,
+                },
+            )
+        ]
 
         from api.agent.core.event_processing import _completion_with_failover
         _completion_with_failover(messages, tools, failover_configs=failover_configs, agent_id="agent-1")

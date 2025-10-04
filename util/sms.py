@@ -7,6 +7,7 @@ from opentelemetry import trace
 from api.models import SmsNumber, PersistentAgentCommsEndpoint, CommsChannel, UserPhoneNumber
 from config import settings
 from config.settings import TWILIO_MESSAGING_SERVICE_SID
+from util.integrations import twilio_status, twilio_verify_available
 from observability import traced
 from twilio.base.exceptions import TwilioRestException
 
@@ -33,15 +34,26 @@ def ends_with_vanity(phone_number: str, vanity: str) -> bool:
 
 
 def _get_client() -> Optional[Client]:
+    status = twilio_status()
+    if not status.enabled:
+        logger.debug("Twilio client requested while disabled: %s", status.reason)
+        return None
+    if Client is None:
+        logger.warning("Twilio SDK not installed; SMS operations disabled.")
+        return None
     account_sid = settings.TWILIO_ACCOUNT_SID
     auth_token = settings.TWILIO_AUTH_TOKEN
-    if not account_sid or not auth_token or Client is None:
+    if not account_sid or not auth_token:
+        logger.warning("Twilio credentials missing despite enabled flag; skipping client creation.")
         return None
     return Client(account_sid, auth_token)
 
 @tracer.start_as_current_span("SMS start_verification")
 def start_verification(phone_number: str) -> Optional[str]:
     """Start an SMS verification; returns verification SID if sent."""
+    if not twilio_verify_available():
+        logger.warning("Twilio verification service not available; skipping verification send.")
+        return None
     service_sid = settings.TWILIO_VERIFY_SERVICE_SID
     client = _get_client()
     if not client or not service_sid:
@@ -53,6 +65,9 @@ def start_verification(phone_number: str) -> Optional[str]:
 @tracer.start_as_current_span("SMS check_verification")
 def check_verification(phone_number: str, code: str) -> bool:
     """Check a verification code; returns True if approved."""
+    if not twilio_verify_available():
+        logger.warning("Twilio verification service not available; skipping verification check.")
+        return False
     service_sid = settings.TWILIO_VERIFY_SERVICE_SID
     client = _get_client()
     if not client or not service_sid:

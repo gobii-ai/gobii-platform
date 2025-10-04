@@ -5,6 +5,7 @@ Gobii settings – dev profile
 from pathlib import Path
 import environ, os
 from decimal import Decimal
+from typing import Any
 from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 
@@ -66,26 +67,122 @@ GOBII_PROPRIETARY_MODE = env.bool("GOBII_PROPRIETARY_MODE", default=False)
 # In Community Edition, we optionally override limits to be effectively unlimited
 # for agents/tasks. Can be disabled (e.g., in tests) via env.
 GOBII_ENABLE_COMMUNITY_UNLIMITED = env.bool("GOBII_ENABLE_COMMUNITY_UNLIMITED", default=True)
+# Allow disabling the first-run setup redirect (e.g., in automated tests)
+FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
+# Permit skipping LLM bootstrap enforcement (useful for non-interactive tests)
+LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
+
+try:
+    from proprietary import defaults as _proprietary_defaults_module
+except ImportError:  # Community builds may not package proprietary defaults
+    _proprietary_defaults_module = None
+
+
+_COMMUNITY_DEFAULTS = {
+    "brand": {
+        "PUBLIC_DISCORD_URL": "https://discord.gg/yyDB8GwxtE",
+        "PUBLIC_X_URL": "https://x.com/gobii_ai",
+        "PUBLIC_GITHUB_URL": "https://github.com/gobii-ai",
+    }
+}
+
+
+def _proprietary_default(section: str, key: str, *, fallback: str = "") -> str:
+    """Fetch a proprietary default without leaking values into community builds."""
+
+    if not GOBII_PROPRIETARY_MODE or _proprietary_defaults_module is None:
+        return fallback
+
+    defaults_map = getattr(_proprietary_defaults_module, "DEFAULTS", {})
+    section_defaults = defaults_map.get(section, {})
+    return section_defaults.get(key, fallback)
+
+
+def _community_default(section: str, key: str, *, fallback: str = "") -> str:
+    """Provide OSS-friendly defaults for select public links."""
+
+    if GOBII_PROPRIETARY_MODE:
+        return fallback
+
+    section_defaults = _COMMUNITY_DEFAULTS.get(section, {})
+    return section_defaults.get(key, fallback)
 
 # ────────── Core ──────────
 DEBUG = env.bool("DEBUG", default=False)
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 ALLOWED_HOSTS = ["*"]  # tighten in prod
-CSRF_TRUSTED_ORIGINS = [
-    'https://gobii.ai',
-    'https://gobii.ai:443',
-    'https://www.gobii.ai',
-    'https://www.gobii.ai:443',
-    'https://getgobii.com',
-    'https://getgobii.com:443',
-    'https://www.getgobii.com',
-    'https://www.getgobii.com:443',
+
+# Default origins differ between OSS/community mode and proprietary deployments.
+_COMMUNITY_DEFAULT_TRUSTED_ORIGINS = [
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "https://localhost",
+    "https://127.0.0.1",
 ]
+_PROPRIETARY_DEFAULT_TRUSTED_ORIGINS = [
+    "https://gobii.ai",
+    "https://gobii.ai:443",
+    "https://www.gobii.ai",
+    "https://www.gobii.ai:443",
+    "https://getgobii.com",
+    "https://getgobii.com:443",
+    "https://www.getgobii.com",
+    "https://www.getgobii.com:443",
+]
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=_PROPRIETARY_DEFAULT_TRUSTED_ORIGINS
+    if GOBII_PROPRIETARY_MODE
+    else _COMMUNITY_DEFAULT_TRUSTED_ORIGINS,
+)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 USE_X_FORWARDED_HOST = True
 SITE_ID = 1
+
+PUBLIC_BRAND_NAME = env(
+    "PUBLIC_BRAND_NAME",
+    default=_proprietary_default("brand", "PUBLIC_BRAND_NAME", fallback="Agent Platform"),
+)
+PUBLIC_SITE_URL = env(
+    "PUBLIC_SITE_URL",
+    default=_proprietary_default("brand", "PUBLIC_SITE_URL", fallback="http://localhost:8000"),
+)
+PUBLIC_CONTACT_EMAIL = env(
+    "PUBLIC_CONTACT_EMAIL",
+    default=_proprietary_default("brand", "PUBLIC_CONTACT_EMAIL"),
+)
+PUBLIC_SUPPORT_EMAIL = env(
+    "PUBLIC_SUPPORT_EMAIL",
+    default=_proprietary_default("brand", "PUBLIC_SUPPORT_EMAIL"),
+)
+PUBLIC_GITHUB_URL = env(
+    "PUBLIC_GITHUB_URL",
+    default=_proprietary_default(
+        "brand",
+        "PUBLIC_GITHUB_URL",
+        fallback=_community_default("brand", "PUBLIC_GITHUB_URL"),
+    ),
+)
+PUBLIC_DISCORD_URL = env(
+    "PUBLIC_DISCORD_URL",
+    default=_proprietary_default(
+        "brand",
+        "PUBLIC_DISCORD_URL",
+        fallback=_community_default("brand", "PUBLIC_DISCORD_URL"),
+    ),
+)
+PUBLIC_X_URL = env(
+    "PUBLIC_X_URL",
+    default=_proprietary_default(
+        "brand",
+        "PUBLIC_X_URL",
+        fallback=_community_default("brand", "PUBLIC_X_URL"),
+    ),
+)
 
 INSTALLED_APPS = [
     # Django
@@ -114,6 +211,7 @@ INSTALLED_APPS = [
     "waffle",
 
     # first-party
+    "setup",
     "pages",
     "console",
     "api",
@@ -140,6 +238,7 @@ MIDDLEWARE = [
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "setup.middleware.FirstRunSetupMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -166,7 +265,8 @@ TEMPLATES = [
                 "pages.context_processors.account_info",
                 "pages.context_processors.environment_info",
                 "pages.context_processors.show_signup_tracking",
-                "pages.context_processors.analytics"
+                "pages.context_processors.analytics",
+                "pages.context_processors.llm_bootstrap",
             ],
             # Manually register project-local template tag libraries
             "libraries": {
@@ -348,7 +448,12 @@ SIGNUP_BLOCKED_EMAIL_DOMAINS = [
 # Mailgun credentials only exist in hosted/prod environments; local proprietary
 # runs typically omit them. Use that to decide whether to enforce email
 # verification, while still allowing an explicit override via ENV.
-MAILGUN_API_KEY = env("MAILGUN_API_KEY", default=None)
+MAILGUN_API_KEY = env("MAILGUN_API_KEY", default="")
+MAILGUN_HAS_API_KEY = bool(MAILGUN_API_KEY)
+MAILGUN_ENABLED = env.bool(
+    "MAILGUN_ENABLED",
+    default=GOBII_PROPRIETARY_MODE and MAILGUN_HAS_API_KEY,
+)
 
 # Community Edition disables email verification by default to avoid external email providers
 ACCOUNT_EMAIL_VERIFICATION = env(
@@ -467,7 +572,7 @@ CELERY_BEAT_SCHEDULE = {
 
 # Conditionally enable Twilio sync task only when explicitly enabled
 TWILIO_ENABLED = env.bool("TWILIO_ENABLED", default=False)
-if TWILIO_ENABLED and env("TWILIO_MESSAGING_SERVICE_SID", default=""):
+if TWILIO_ENABLED:
     CELERY_BEAT_SCHEDULE["twilio-sync-numbers"] = {
         "task": "api.tasks.sms_tasks.sync_twilio_numbers",
         "schedule": crontab(minute="*/60"),   # hourly
@@ -555,29 +660,65 @@ SOCIALACCOUNT_LOGIN_ON_GET = True
 # login/signup flows do not hard-error while still exercising the email code.
 EMAIL_BACKEND = (
     "anymail.backends.mailgun.EmailBackend"
-    if GOBII_PROPRIETARY_MODE and MAILGUN_API_KEY
+    if MAILGUN_ENABLED
     else "django.core.mail.backends.console.EmailBackend"
 )
 
-ANYMAIL = {
-    "MAILGUN_API_KEY": MAILGUN_API_KEY,
-    "MAILGUN_SENDER_DOMAIN": os.getenv(
-        "MAILGUN_SENDER_DOMAIN", "mg.getgobii.com"
-    ),  # Changed from MAILGUN_DOMAIN to MAILGUN_SENDER_DOMAIN as per Anymail's common setting.
+MAILGUN_SENDER_DOMAIN = env(
+    "MAILGUN_SENDER_DOMAIN",
+    default=_proprietary_default("support", "MAILGUN_SENDER_DOMAIN"),
+)
+
+POSTMARK_SERVER_TOKEN = env("POSTMARK_SERVER_TOKEN", default="")
+POSTMARK_ENABLED = env.bool(
+    "POSTMARK_ENABLED",
+    default=GOBII_PROPRIETARY_MODE and bool(POSTMARK_SERVER_TOKEN),
+)
+
+ANYMAIL: dict[str, Any] = {}
+
+if MAILGUN_ENABLED:
+    ANYMAIL["MAILGUN_API_KEY"] = MAILGUN_API_KEY
     # If you chose the EU region add:
     # "MAILGUN_API_URL": "https://api.eu.mailgun.net/v3",
-    "POSTMARK_SERVER_TOKEN": env("POSTMARK_SERVER_TOKEN", default=None),
-}
+    if MAILGUN_SENDER_DOMAIN:
+        ANYMAIL["MAILGUN_SENDER_DOMAIN"] = MAILGUN_SENDER_DOMAIN  # type: ignore[index]
 
-DEFAULT_FROM_EMAIL = "Gobii <noreply@mg.getgobii.com>"
-SERVER_EMAIL = DEFAULT_FROM_EMAIL
-ACCOUNT_EMAIL_SUBJECT_PREFIX = "[Gobii] "
+if POSTMARK_ENABLED:
+    ANYMAIL["POSTMARK_SERVER_TOKEN"] = POSTMARK_SERVER_TOKEN
+
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL",
+    default=_proprietary_default(
+        "support",
+        "DEFAULT_FROM_EMAIL",
+        fallback=f"{PUBLIC_BRAND_NAME} <no-reply@example.invalid>",
+    ),
+)
+SERVER_EMAIL = env("SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
+ACCOUNT_EMAIL_SUBJECT_PREFIX = env(
+    "ACCOUNT_EMAIL_SUBJECT_PREFIX",
+    default=f"[{PUBLIC_BRAND_NAME}] " if PUBLIC_BRAND_NAME else "",
+)
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"
 
 # dj-stripe / Stripe configuration
-STRIPE_LIVE_SECRET_KEY = os.environ.get("STRIPE_LIVE_SECRET_KEY")
-STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY")
+STRIPE_LIVE_SECRET_KEY = env("STRIPE_LIVE_SECRET_KEY", default="")
+STRIPE_TEST_SECRET_KEY = env("STRIPE_TEST_SECRET_KEY", default="")
 STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", default=False)  # Set to True in production
+STRIPE_KEYS_PRESENT = bool(STRIPE_LIVE_SECRET_KEY or STRIPE_TEST_SECRET_KEY)
+STRIPE_ENABLED = env.bool(
+    "STRIPE_ENABLED",
+    default=GOBII_PROPRIETARY_MODE and STRIPE_KEYS_PRESENT,
+)
+if not STRIPE_ENABLED:
+    STRIPE_DISABLED_REASON = (
+        "Stripe keys not configured"
+        if not STRIPE_KEYS_PRESENT
+        else "Stripe disabled by configuration"
+    )
+else:
+    STRIPE_DISABLED_REASON = ""
 
 DJSTRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="whsec_dummy")
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = "id"
@@ -598,19 +739,38 @@ TOOL_CREDIT_COSTS = {
 }
 
 # Analytics
-SEGMENT_WRITE_KEY = env("SEGMENT_WRITE_KEY", default="")
-SEGMENT_WEB_WRITE_KEY = env("SEGMENT_WEB_WRITE_KEY", default=SEGMENT_WRITE_KEY)
+SEGMENT_WRITE_KEY = env(
+    "SEGMENT_WRITE_KEY",
+    default=_proprietary_default("analytics", "SEGMENT_WRITE_KEY"),
+)
+SEGMENT_WEB_WRITE_KEY = env(
+    "SEGMENT_WEB_WRITE_KEY",
+    default=_proprietary_default(
+        "analytics",
+        "SEGMENT_WEB_WRITE_KEY",
+        fallback=SEGMENT_WRITE_KEY,
+    ),
+)
 
 # Ad/Pixel IDs (empty disables)
-REDDIT_PIXEL_ID = env("REDDIT_PIXEL_ID", default="")
-META_PIXEL_ID = env("META_PIXEL_ID", default="")
+REDDIT_PIXEL_ID = env(
+    "REDDIT_PIXEL_ID",
+    default=_proprietary_default("analytics", "REDDIT_PIXEL_ID"),
+)
+META_PIXEL_ID = env(
+    "META_PIXEL_ID",
+    default=_proprietary_default("analytics", "META_PIXEL_ID"),
+)
 
 
 # Task Credit Settings
 INITIAL_TASK_CREDIT_EXPIRATION_DAYS=env("INITIAL_TASK_CREDIT_EXPIRATION_DAYS", default=30, cast=int)
 
 # Support
-SUPPORT_EMAIL = env("SUPPORT_EMAIL", default="support@gobii.ai")
+SUPPORT_EMAIL = env(
+    "SUPPORT_EMAIL",
+    default=_proprietary_default("support", "SUPPORT_EMAIL"),
+)
 
 # OpenTelemetry Tracing
 OTEL_EXPORTER_OTLP_PROTOCOL = env("OTEL_EXPORTER_OTLP_PROTOCOL", default="http/protobuf")
@@ -656,9 +816,26 @@ TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID", default="")
 TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN", default="")
 TWILIO_VERIFY_SERVICE_SID = env("TWILIO_VERIFY_SERVICE_SID", default="")
 TWILIO_MESSAGING_SERVICE_SID = env("TWILIO_MESSAGING_SERVICE_SID", default="")
+_TWILIO_FEATURE_FLAG = env.bool("TWILIO_ENABLED", default=GOBII_PROPRIETARY_MODE)
+TWILIO_VERIFY_CONFIGURED = bool(TWILIO_VERIFY_SERVICE_SID)
+TWILIO_CREDENTIALS_PRESENT = bool(
+    TWILIO_ACCOUNT_SID
+    and TWILIO_AUTH_TOKEN
+    and TWILIO_MESSAGING_SERVICE_SID
+)
+TWILIO_ENABLED = _TWILIO_FEATURE_FLAG and TWILIO_CREDENTIALS_PRESENT
+TWILIO_DISABLED_REASON = ""
+if not TWILIO_ENABLED:
+    if not _TWILIO_FEATURE_FLAG:
+        TWILIO_DISABLED_REASON = "Twilio disabled by configuration"
+    elif not TWILIO_CREDENTIALS_PRESENT:
+        TWILIO_DISABLED_REASON = "Twilio credentials missing"
 
 # Mixpanel
-MIXPANEL_PROJECT_TOKEN = env("MIXPANEL_PROJECT_TOKEN", default="")
+MIXPANEL_PROJECT_TOKEN = env(
+    "MIXPANEL_PROJECT_TOKEN",
+    default=_proprietary_default("analytics", "MIXPANEL_PROJECT_TOKEN"),
+)
 
 TWILIO_INCOMING_WEBHOOK_TOKEN = env("TWILIO_INCOMING_WEBHOOK_TOKEN", default="dummy-twilio-incoming-webhook-token")
 
@@ -721,7 +898,10 @@ ALLOW_FILE_UPLOAD = env.bool("ALLOW_FILE_UPLOAD", default=True)
 MANUAL_WHITELIST_MAX_PER_AGENT = env.int("MANUAL_WHITELIST_MAX_PER_AGENT", default=100)
 # Default domain used for auto-generated agent email endpoints in Gobii proprietary mode.
 # Community/OSS deployments typically leave this unused.
-DEFAULT_AGENT_EMAIL_DOMAIN = env("DEFAULT_AGENT_EMAIL_DOMAIN", default="my.gobii.ai")
+DEFAULT_AGENT_EMAIL_DOMAIN = env(
+    "DEFAULT_AGENT_EMAIL_DOMAIN",
+    default="my.gobii.ai" if GOBII_PROPRIETARY_MODE else "agents.localhost",
+)
 
 # Whether to auto-create agent-owned email endpoints during agent creation.
 # Defaults follow Gobii proprietary mode: enabled when proprietary, disabled in OSS.

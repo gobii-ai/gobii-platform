@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
 from config.settings import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_MESSAGING_SERVICE_SID
+from util.integrations import twilio_status
 from util import sms
 
 try:
@@ -90,6 +91,10 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
     def handle(self, *args, **opts):  # noqa: PLR0912 – single main function OK
         # ── Twilio credentials ───────────────────────────────────────────
+        status = twilio_status()
+        if not status.enabled:
+            raise CommandError(f"Twilio integration disabled: {status.reason or 'no reason provided'}")
+
         acct_sid = TWILIO_ACCOUNT_SID
         auth_tok = TWILIO_AUTH_TOKEN
 

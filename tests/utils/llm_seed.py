@@ -33,11 +33,29 @@ def seed_persistent_basic(include_openrouter=False):
     prov_g = LLMProvider.objects.create(key='google', display_name='Google', enabled=True, env_var_name='GOOGLE_API_KEY', browser_backend='GOOGLE')
     if include_openrouter:
         prov_o = LLMProvider.objects.create(key='openrouter', display_name='OpenRouter', enabled=True, env_var_name='OPENROUTER_API_KEY', browser_backend='OPENAI_COMPAT')
-    ep_a = PersistentModelEndpoint.objects.create(key='anthropic_sonnet4', provider=prov_a, enabled=True, litellm_model='anthropic/claude-sonnet-4-20250514')
-    ep_g = PersistentModelEndpoint.objects.create(key='google_gemini_25_pro', provider=prov_g, enabled=True, litellm_model='vertex_ai/gemini-2.5-pro')
+    ep_a = PersistentModelEndpoint.objects.create(
+        key='anthropic_sonnet4',
+        provider=prov_a,
+        enabled=True,
+        litellm_model='anthropic/claude-sonnet-4-20250514',
+        supports_vision=True,
+    )
+    ep_g = PersistentModelEndpoint.objects.create(
+        key='google_gemini_25_pro',
+        provider=prov_g,
+        enabled=True,
+        litellm_model='vertex_ai/gemini-2.5-pro',
+        supports_vision=True,
+    )
     ep_o = None
     if include_openrouter:
-        ep_o = PersistentModelEndpoint.objects.create(key='openrouter_glm_45', provider=prov_o, enabled=True, litellm_model='openrouter/z-ai/glm-4.5')
+        ep_o = PersistentModelEndpoint.objects.create(
+            key='openrouter_glm_45',
+            provider=prov_o,
+            enabled=True,
+            litellm_model='openrouter/z-ai/glm-4.5',
+            supports_vision=False,
+        )
 
     small = PersistentTokenRange.objects.create(name='small', min_tokens=0, max_tokens=7500)
     t1 = PersistentLLMTier.objects.create(token_range=small, order=1)

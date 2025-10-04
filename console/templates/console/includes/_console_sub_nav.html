@@ -63,7 +63,7 @@
         Profile
       </a>
     {% endif %}
-    {% if settings.GOBII_PROPRIETARY_MODE %}
+    {% if stripe_enabled %}
       <a href="{% url 'billing' %}"
          x-show="showBilling"
          class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
@@ -90,8 +90,8 @@
             d="M6 16h2m4 0h6"
           />
         </svg>
-        Billing
-      </a>
+      Billing
+    </a>
     {% endif %}
     <!-- Add other console-specific links here -->
   </nav>
@@ -100,10 +100,15 @@
 <script>
 function navigationMenu() {
   return {
-    showBilling: false,
+    showBilling: {{ stripe_enabled|yesno:'true,false' }},
+    hasStripe: {{ stripe_enabled|yesno:'true,false' }},
     userRole: null,
     
     init() {
+      if (!this.hasStripe) {
+        this.showBilling = false;
+        return;
+      }
       // Get current context from localStorage
       const contextType = localStorage.getItem('contextType') || 'personal';
       const contextId = localStorage.getItem('contextId') || '{{ user.id }}';

@@ -14,6 +14,7 @@ from django.template.loader import render_to_string
 
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.integrations import postmark_status
 
 from .email_content import convert_body_to_html_and_plaintext
 from .smtp_transport import SmtpTransport
@@ -215,7 +216,18 @@ tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
 
 
-POSTMARK_CONN = get_connection("anymail.backends.postmark.EmailBackend")
+_postmark_connection = None
+
+
+def _get_postmark_connection():
+    """Return a reusable Postmark connection when integration is enabled."""
+    global _postmark_connection
+    if _postmark_connection is not None:
+        return _postmark_connection
+    if not postmark_status().enabled:
+        return None
+    _postmark_connection = get_connection("anymail.backends.postmark.EmailBackend")
+    return _postmark_connection
 
 @tracer.start_as_current_span("AGENT - Deliver Agent Email")
 def deliver_agent_email(message: PersistentAgentMessage):
@@ -362,9 +374,10 @@ def deliver_agent_email(message: PersistentAgentMessage):
             return
 
     # Check environment and token once up front (Postmark or simulation)
+    postmark_state = postmark_status()
     postmark_token = os.getenv("POSTMARK_SERVER_TOKEN")
     release_env = getattr(settings, "GOBII_RELEASE_ENV", os.getenv("GOBII_RELEASE_ENV", "local"))
-    missing_token = not postmark_token
+    missing_token = (not postmark_token) or not postmark_state.enabled
     simulation_flag = getattr(settings, "SIMULATE_EMAIL_DELIVERY", False)
 
     # Simulate only when explicitly enabled and Postmark is not configured.
@@ -598,7 +611,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             from_email=from_address,
             to=[to_address],
             cc=cc_addresses if cc_addresses else None,
-            connection=POSTMARK_CONN,
+            connection=_get_postmark_connection(),
             tags=["persistent-agent"],
             metadata={
                 "agent_id": str(message.owner_agent_id),

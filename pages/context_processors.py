@@ -2,15 +2,23 @@ import hashlib
 from hashlib import sha256
 
 from agents.services import AgentService
+from api.agent.core.llm_config import is_llm_bootstrap_required
 from config import settings
 from config.plans import AGENTS_UNLIMITED
 from constants.plans import PlanNames
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs
 from util.constants.task_constants import TASKS_UNLIMITED
-from util.subscription_helper import get_user_plan, get_user_api_rate_limit, get_user_agent_limit, \
-    get_user_task_credit_limit, has_unlimited_agents, allow_user_extra_tasks, get_user_extra_task_limit, \
-    get_user_max_contacts_per_agent
+from util.subscription_helper import (
+    get_user_plan,
+    get_user_api_rate_limit,
+    get_user_agent_limit,
+    get_user_task_credit_limit,
+    has_unlimited_agents,
+    allow_user_extra_tasks,
+    get_user_extra_task_limit,
+    get_user_max_contacts_per_agent,
+)
 from util.tool_costs import get_most_expensive_tool_cost
 from util.constants.task_constants import TASKS_UNLIMITED
 
@@ -123,3 +131,10 @@ def analytics(request):
     }
 
     return analyticsContext
+
+
+def llm_bootstrap(request):
+    """Expose whether the platform still requires initial LLM configuration."""
+    return {
+        'llm_bootstrap_required': is_llm_bootstrap_required()
+    }

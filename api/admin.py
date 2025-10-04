@@ -2712,10 +2712,29 @@ class LLMProviderAdmin(admin.ModelAdmin):
 
 @admin.register(PersistentModelEndpoint)
 class PersistentModelEndpointAdmin(admin.ModelAdmin):
-    list_display = ("key", "provider", "litellm_model", "api_base", "enabled", "supports_tool_choice", "use_parallel_tool_calls")
-    list_filter = ("enabled", "provider")
+    list_display = (
+        "key",
+        "provider",
+        "litellm_model",
+        "api_base",
+        "enabled",
+        "supports_tool_choice",
+        "use_parallel_tool_calls",
+        "supports_vision",
+    )
+    list_filter = ("enabled", "provider", "supports_vision")
     search_fields = ("key", "litellm_model")
-    fields = ("key", "provider", "enabled", "litellm_model", "api_base", "temperature_override", "supports_tool_choice", "use_parallel_tool_calls")
+    fields = (
+        "key",
+        "provider",
+        "enabled",
+        "litellm_model",
+        "api_base",
+        "temperature_override",
+        "supports_tool_choice",
+        "use_parallel_tool_calls",
+        "supports_vision",
+    )
 
 
 class PersistentTierEndpointInline(admin.TabularInline):
@@ -2738,9 +2757,10 @@ class PersistentTokenRangeAdmin(admin.ModelAdmin):
 
 @admin.register(BrowserModelEndpoint)
 class BrowserModelEndpointAdmin(admin.ModelAdmin):
-    list_display = ("key", "provider", "browser_model", "browser_base_url", "enabled")
-    list_filter = ("enabled", "provider")
+    list_display = ("key", "provider", "browser_model", "browser_base_url", "enabled", "supports_vision")
+    list_filter = ("enabled", "provider", "supports_vision")
     search_fields = ("key", "browser_model", "browser_base_url")
+    fields = ("key", "provider", "enabled", "browser_model", "browser_base_url", "supports_vision")
 
 
 class BrowserTierEndpointInline(admin.TabularInline):

@@ -186,6 +186,8 @@ jobs:
             tag: batch_charter_tools
           - batch: text_sanitization
             tag: batch_text_sanitization
+          - batch: oss_readiness
+            tag: oss_readiness_batch
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

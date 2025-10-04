@@ -13,6 +13,8 @@ from typing import Dict, Any
 import requests
 from requests.exceptions import RequestException
 
+from django.conf import settings
+
 from ...models import PersistentAgent, PersistentAgentSecret
 from ...proxy_selection import select_proxy_for_persistent_agent
 
@@ -55,7 +57,9 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
        size and content-type.
     3. Allow ranged requests by accepting a ``range`` parameter which, if
        provided, is mapped to the ``Range`` HTTP header (e.g. "bytes=0-1023").
-    4. Always uses a proxy server for the request.
+    4. Uses a proxy server when one is configured. In proprietary mode a proxy
+       is required; community mode falls back to a direct request if none is
+       available.
     """
     method = (params.get("method") or "GET").upper()
     url = params.get("url")
@@ -68,24 +72,38 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         agent.id, method, url
     )
 
-    # Select proxy server - this is required for persistent agents
+    # Select proxy server - enforced in proprietary mode, optional in community
+    proxy_required = getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+    proxy_server = None
     try:
         proxy_server = select_proxy_for_persistent_agent(
-            agent, 
-            allow_no_proxy_in_debug=False  # Never allow no proxy for persistent agents
+            agent,
+            allow_no_proxy_in_debug=False,  # Proprietary mode requires proxies
         )
     except RuntimeError as e:
-        return {"status": "error", "message": f"No proxy server available: {e}"}
-    
-    if not proxy_server:
+        if proxy_required:
+            return {"status": "error", "message": f"No proxy server available: {e}"}
+        logger.warning(
+            "Agent %s proceeding without proxy (community mode): %s",
+            agent.id,
+            e,
+        )
+
+    if proxy_required and not proxy_server:
         return {"status": "error", "message": "No proxy server available"}
 
-    # Configure proxy for requests
-    proxy_url = proxy_server.proxy_url
-    proxies = {
-        "http": proxy_url,
-        "https": proxy_url
-    }
+    proxies = None
+    if proxy_server:
+        proxy_url = proxy_server.proxy_url
+        proxies = {
+            "http": proxy_url,
+            "https": proxy_url,
+        }
+    else:
+        logger.info(
+            "Agent %s executing HTTP request without proxy (community mode).",
+            agent.id,
+        )
 
     headers = params.get("headers") or {}
     # Normalise header keys to str in case they come in as other types
@@ -197,16 +215,22 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     # Safety: timeouts to avoid hanging
     timeout = 15  # seconds
 
+    request_kwargs = {
+        "headers": headers,
+        "data": body,
+        "stream": True,
+        "timeout": timeout,
+    }
+
+    if proxies:
+        request_kwargs["proxies"] = proxies
+
     try:
         # Stream to avoid downloading huge bodies – we'll manually truncate
         resp = requests.request(
             method,
             url,
-            headers=headers,
-            data=body,
-            stream=True,
-            timeout=timeout,
-            proxies=proxies,
+            **request_kwargs,
         )
     except RequestException as e:
         return {"status": "error", "message": f"HTTP request failed: {e}"}
@@ -268,5 +292,5 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         "status_code": resp.status_code,
         "headers": dict(resp.headers),
         "content": content_str,
-        "proxy_used": str(proxy_server),  # Include proxy info in response for debugging
-    } 
+        "proxy_used": str(proxy_server) if proxy_server else None,
+    }

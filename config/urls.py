@@ -77,6 +77,7 @@ from api.views import LinkShortenerRedirectView
 urlpatterns = [
     # Pages app includes homepage, health check, and documentation
     path("", include("pages.urls")),
+    path("setup/", include("setup.urls")),
 
     path("m/<slug:code>/", LinkShortenerRedirectView.as_view(), name="short_link"),
 

@@ -19,6 +19,17 @@ dotenv.config();
 
 // --- Configuration ---
 const GOBII_API_KEY = process.env.GOBII_API_KEY;
+const DEFAULT_API_BASE_URL =
+    process.env.API_BASE_URL ||
+    process.env.GOBII_API_BASE_URL ||
+    process.env.PUBLIC_SITE_URL ||
+    (process.env.GOBII_PROPRIETARY_MODE === 'true'
+        ? 'https://gobii.ai'
+        : 'http://localhost:8000');
+
+function resolveBaseUrl(provided?: string): string {
+    return provided || DEFAULT_API_BASE_URL;
+}
 
 // --- Helper Functions ---
 function generateRandomString(prefix: string): string {
@@ -272,7 +283,11 @@ async function main() {
 
     program
         .option('-k, --api-key <key>', 'Gobii API Key', GOBII_API_KEY)
-        .option('-b, --base-url <url>', 'API Base URL (default: https://gobii.ai)')
+        .option(
+            '-b, --base-url <url>',
+            `API Base URL (default: ${DEFAULT_API_BASE_URL})`,
+            DEFAULT_API_BASE_URL,
+        )
         .option('--task-id <id>', 'Task ID')
         .option('-w, --wait <seconds>', 'Wait for task completion (0-900 seconds)', parseInt)
         .option('-o, --output-schema <schema>', 'JSON schema for output validation');
@@ -283,7 +298,7 @@ async function main() {
         .argument('<n>', 'Name for the new agent')
         .action(async (name: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await createAgent(name);
         });
@@ -293,7 +308,7 @@ async function main() {
         .description('List all agents')
         .action(async (options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await listAgents();
         });
@@ -304,7 +319,7 @@ async function main() {
         .argument('<agentId>', 'ID of the agent')
         .action(async (agentId: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await getAgent(agentId);
         });
@@ -316,7 +331,7 @@ async function main() {
         .argument('<newName>', 'New name for the agent')
         .action(async (agentId: string, newName: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await updateAgentName(agentId, newName);
         });
@@ -327,7 +342,7 @@ async function main() {
         .argument('<agentId>', 'ID of the agent to delete')
         .action(async (agentId: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await deleteAgent(agentId);
         });
@@ -339,7 +354,7 @@ async function main() {
         .argument('<inputData>', 'Input data for the task')
         .action(async (agentId: string, inputData: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await assignTask(agentId, inputData);
         });
@@ -350,7 +365,7 @@ async function main() {
         .argument('<agentId>', 'ID of the agent')
         .action(async (agentId: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await listTasksForAgent(agentId);
         });
@@ -360,7 +375,7 @@ async function main() {
         .description('List all tasks for the authenticated user')
         .action(async (options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await listAllTasks();
         });
@@ -372,7 +387,7 @@ async function main() {
         .argument('<taskId>', 'ID of the task')
         .action(async (agentId: string, taskId: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await getTask(agentId, taskId);
         });
@@ -385,7 +400,7 @@ async function main() {
         .argument('<newInputData>', 'New input data for the task')
         .action(async (agentId: string, taskId: string, newInputData: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await updateTask(agentId, taskId, newInputData);
         });
@@ -397,7 +412,7 @@ async function main() {
         .argument('<taskId>', 'ID of the task')
         .action(async (agentId: string, taskId: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await cancelTask(agentId, taskId);
         });
@@ -409,7 +424,7 @@ async function main() {
         .argument('<taskId>', 'ID of the task')
         .action(async (agentId: string, taskId: string, options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             await deleteTask(agentId, taskId);
         });
@@ -419,7 +434,7 @@ async function main() {
         .description('Run a sequence of demo operations')
         .action(async (options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             await runAllDemo(opts.apiKey, baseUrl);
         });
 
@@ -428,7 +443,7 @@ async function main() {
         .description('Test API connectivity')
         .action(async (options: any) => {
             const opts = { ...program.opts(), ...options };
-            const baseUrl = opts.baseUrl || "https://gobii.ai";
+            const baseUrl = resolveBaseUrl(opts.baseUrl);
             initializeApiClient(opts.apiKey, baseUrl);
             try {
                 // Use direct fetch for ping endpoint

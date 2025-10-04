@@ -18,14 +18,24 @@ os.environ.setdefault("SEGMENT_WRITE_KEY", "")
 os.environ.setdefault("GOBII_ENABLE_COMMUNITY_UNLIMITED", "0")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("GOBII_ENABLE_TRACING", "0")
+os.environ["STRIPE_ENABLED"] = "1"
+os.environ["STRIPE_TEST_SECRET_KEY"] = os.environ.get("STRIPE_TEST_SECRET_KEY") or "sk_test_dummy"
 
 from .settings import *
 
+# Ensure Stripe integration appears enabled during tests when patched/mocked.
+STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY", "sk_test_dummy")
+STRIPE_KEYS_PRESENT = True
+STRIPE_ENABLED = True
+STRIPE_DISABLED_REASON = ""
+
 # Override database to use SQLite for testing
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': ':memory:',
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        # Shared-cache memory DB so threaded tests use the same schema connection.
+        "NAME": "file:memorydb_default?mode=memory&cache=shared",
+        "OPTIONS": {"uri": True},
     }
 }
 
@@ -62,6 +72,12 @@ CHANNEL_LAYERS = {
 
 # Ensure email delivery is simulated in tests (no network calls)
 SIMULATE_EMAIL_DELIVERY = True
+
+# Bypass the first-run setup wizard during tests to keep API responses predictable.
+FIRST_RUN_SETUP_ENABLED = False
+
+# Skip LLM bootstrap gating in tests; specific test cases can override as needed.
+LLM_BOOTSTRAP_OPTIONAL = True
 
 # -----------------------------------------------------------------------------
 #  Silence Django's noisy "Adding permission ..." output at high verbosity
