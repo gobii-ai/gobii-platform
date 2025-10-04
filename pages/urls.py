@@ -1,4 +1,7 @@
 from django.urls import path, include
+
+from config.settings import GOBII_PROPRIETARY_MODE
+from proprietary.views import BlogSitemap
 from .views import (
     MarkdownPageView,
     DocsIndexRedirectView,
@@ -9,8 +12,13 @@ from .views import (
     health_check,
     AboutView,
     CareersView,
-    StartupCheckoutView, StaticViewSitemap, LandingRedirectView, ClearSignupTrackingView,
-    AIEmployeeDirectoryView, AIEmployeeDetailView, AIEmployeeHireView,
+    StartupCheckoutView,
+    StaticViewSitemap,
+    LandingRedirectView,
+    ClearSignupTrackingView,
+    AIEmployeeDirectoryView,
+    AIEmployeeDetailView,
+    AIEmployeeHireView,
 )
 
 from djstripe import views as djstripe_views
@@ -23,6 +31,9 @@ sitemaps = {
     'static': StaticViewSitemap,
 }
 
+if GOBII_PROPRIETARY_MODE:
+    sitemaps['blog'] = BlogSitemap
+
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
     path("spawn-agent/", HomeAgentSpawnView.as_view(), name="home_agent_spawn"),
@@ -30,8 +41,9 @@ urlpatterns = [
     path("ai-employees/<slug:slug>/", AIEmployeeDetailView.as_view(), name="ai_employee_detail"),
     path("ai-employees/<slug:slug>/hire/", AIEmployeeHireView.as_view(), name="ai_employee_hire"),
     path("health/", health_check, name="health_check"),
-    path("healthz/", health_check, name="health_check_k8s"),  # Kubernetes health check endpoint - matches /healthz/ in BackendConfig
-    
+    # Kubernetes health check endpoint - matches /healthz/ in BackendConfig
+    path("healthz/", health_check, name="health_check_k8s"),
+
     # Documentation URLs
     path("docs/", DocsIndexRedirectView.as_view(), name="docs_index"),
     path("docs/<path:slug>/", MarkdownPageView.as_view(), name="markdown_page"),

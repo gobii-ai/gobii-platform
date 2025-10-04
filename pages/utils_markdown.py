@@ -1,8 +1,12 @@
 from functools import lru_cache
 from pathlib import Path
+from datetime import datetime, date
+from typing import Optional
+
 import frontmatter
 import markdown
 from django.conf import settings
+from django.utils import timezone
 
 CONTENT_ROOT = Path(settings.BASE_DIR, "pages", "content")
 
@@ -12,9 +16,9 @@ md_converter = markdown.Markdown(
     output_format="html5",
 )
 
-def _resolve_markdown_file(slug_or_path_part: str) -> Path:
+def _resolve_markdown_file(slug_or_path_part: str, root: Path = CONTENT_ROOT) -> Path:
     """
-    Resolve a slug or partial path to a markdown file within CONTENT_ROOT.
+    Resolve a slug or partial path to a markdown file within the specified content root.
     
     Args:
         slug_or_path_part: The slug or part of the path (e.g., 'guides/introduction' or Path('guides/introduction.md'))
@@ -31,24 +35,26 @@ def _resolve_markdown_file(slug_or_path_part: str) -> Path:
     # Construct the full path
     # If slug_or_path_part was already a Path object from glob, it might have .md
     # If it's a slug string, it won't. with_suffix ensures .md is present.
-    path = (CONTENT_ROOT / slug_str).with_suffix(".md")
+    path = (root / slug_str).with_suffix(".md")
 
-    # Security check: ensure the resolved path is within CONTENT_ROOT
-    if not path.is_file() or CONTENT_ROOT not in path.resolve().parents:
+    # Security check: ensure the resolved path is within root
+    resolved_path = path.resolve()
+    if not path.is_file() or (root != resolved_path and root not in resolved_path.parents):
         # Try finding file if it's a directory with an index.md or readme.md
-        index_path = (CONTENT_ROOT / slug_str / "index.md")
-        readme_path = (CONTENT_ROOT / slug_str / "readme.md")
-        if index_path.is_file() and CONTENT_ROOT in index_path.resolve().parents:
+        index_path = (root / slug_str / "index.md")
+        readme_path = (root / slug_str / "readme.md")
+        if index_path.is_file() and root in index_path.resolve().parents:
             path = index_path
-        elif readme_path.is_file() and CONTENT_ROOT in readme_path.resolve().parents:
+        elif readme_path.is_file() and root in readme_path.resolve().parents:
             path = readme_path
         else:
             raise FileNotFoundError(f"File not found or path traversal detected: {slug_or_path_part}")
     return path
 
-def _extract_slug_from_path(path: Path) -> str:
-    """Extracts slug from a file path relative to CONTENT_ROOT."""
-    return str(path.relative_to(CONTENT_ROOT)).replace(".md", "").replace("index", "").strip('/')
+def _extract_slug_from_path(path: Path, root: Path = CONTENT_ROOT) -> str:
+    """Extracts slug from a file path relative to the provided root."""
+    relative = path.relative_to(root)
+    return str(relative).replace(".md", "").replace("index", "").strip('/')
 
 @lru_cache(maxsize=100)
 def load_page(slug: str):
@@ -66,7 +72,7 @@ def load_page(slug: str):
         - toc_html: HTML for the table of contents
     """
     try:
-        file_path = _resolve_markdown_file(slug)
+        file_path = _resolve_markdown_file(slug, root=CONTENT_ROOT)
         post = frontmatter.load(file_path)
         html = md_converter.reset().convert(post.content)
         
@@ -76,7 +82,7 @@ def load_page(slug: str):
             meta['title'] = slug.replace('-', ' ').replace('_', ' ').capitalize()
 
         return {
-            "slug": _extract_slug_from_path(file_path),
+            "slug": _extract_slug_from_path(file_path, root=CONTENT_ROOT),
             "meta": meta,
             "html": html,
             "toc_html": md_converter.toc,
@@ -95,8 +101,14 @@ def get_all_doc_pages():
     for path in CONTENT_ROOT.rglob("*.md"):
         if path.is_file() and CONTENT_ROOT in path.resolve().parents:
             try:
+                relative_parts = path.relative_to(CONTENT_ROOT).parts
+                if relative_parts and relative_parts[0] == "blogs":
+                    continue
+            except ValueError:
+                continue
+            try:
                 post = frontmatter.load(path)
-                slug = _extract_slug_from_path(path)
+                slug = _extract_slug_from_path(path, root=CONTENT_ROOT)
                 
                 # Skip if slug is empty (e.g. an index.md at the root of content)
                 if not slug and path.name.lower() in ["index.md", "readme.md"]: # Allow root index/readme if slug becomes empty
@@ -241,5 +253,25 @@ def get_prev_next(slug: str):
             }
         except FileNotFoundError:
             pass
-    
+
     return result
+
+
+def _parse_datetime(value) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return timezone.make_aware(value) if timezone.is_naive(value) else value
+    if isinstance(value, date):
+        dt = datetime.combine(value, datetime.min.time())
+        return timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        if candidate.endswith("Z"):
+            candidate = candidate[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            return None
+        return timezone.make_aware(parsed) if timezone.is_naive(parsed) else parsed
+    return None

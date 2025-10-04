@@ -1,7 +1,7 @@
 from django.urls import path
 
 from pages.views import AboutView, CareersView, TermsOfServiceView, PrivacyPolicyView, StartupCheckoutView
-from .views import PricingView, SupportView
+from .views import PricingView, SupportView, BlogIndexView, BlogPostView
 
 # Keep names consistent with pages app so existing {% url 'proprietary:...'%} still work
 app_name = "proprietary"
@@ -15,5 +15,9 @@ urlpatterns = [
     path("privacy/", PrivacyPolicyView.as_view(), name="privacy"),
     path("subscribe/startup/", StartupCheckoutView.as_view(), name="startup_checkout"),
     path("subscribe/pro/", StartupCheckoutView.as_view(), name="pro_checkout"),
+
+    # Blog URLs
+    path("blog/", BlogIndexView.as_view(), name="blog_index"),
+    path("blog/<slug:slug>/", BlogPostView.as_view(), name="blog_post"),
 ]
 

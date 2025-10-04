@@ -1,17 +1,12 @@
-import uuid
 from datetime import timezone, datetime
 
-from django.core.mail import send_mail
 from django.http.response import JsonResponse
-from django.template.loader import render_to_string
-from django.utils.html import strip_tags
 from django.utils.http import urlencode
 from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
 from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect
-from django.urls import reverse
 from django.http import HttpResponseRedirect
 from django.db.models import F, Q
 from .models import LandingPage
@@ -20,7 +15,6 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from api.models import PaidPlanIntent, PersistentAgent
 from api.agent.short_description import build_listing_description
 from agents.services import AIEmployeeTemplateService
-from waffle import flag_is_active
 from api.models import OrganizationMembership
 from config.stripe_config import get_stripe_settings
 
@@ -29,7 +23,11 @@ from djstripe.models import Customer, Subscription, Price
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.payments_helper import PaymentsHelper
 from util.subscription_helper import get_or_create_stripe_customer, get_user_plan
-from .utils_markdown import load_page, get_prev_next, get_all_doc_pages
+from .utils_markdown import (
+    load_page,
+    get_prev_next,
+    get_all_doc_pages,
+)
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from django.contrib import sitemaps
 from django.urls import reverse
@@ -436,13 +434,12 @@ class MarkdownPageView(TemplateView):
             page = load_page(slug)
         except FileNotFoundError:
             raise Http404(f"Page not found: {slug}")
-        
+
         ctx = super().get_context_data(**kwargs)
         ctx.update(page)
         ctx.update(get_prev_next(page["slug"]))
         ctx["all_doc_pages"] = get_all_doc_pages()
         return ctx
-
 
 class DocsIndexRedirectView(RedirectView):
     """
@@ -596,7 +593,6 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 class PricingView(TemplateView):
     pass
 
-
 class StaticViewSitemap(sitemaps.Sitemap):
     priority = 0.5
     changefreq = 'weekly'
@@ -616,6 +612,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 items.insert(4, 'proprietary:about')
                 items.insert(5, 'proprietary:careers')
                 items.insert(5, 'proprietary:startup_checkout')
+                items.insert(6, 'proprietary:blog_index')
         except Exception:
             pass
         return items
