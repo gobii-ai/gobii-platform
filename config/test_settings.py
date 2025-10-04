@@ -31,9 +31,11 @@ STRIPE_DISABLED_REASON = ""
 
 # Override database to use SQLite for testing
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': ':memory:',
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        # Shared-cache memory DB so threaded tests use the same schema connection.
+        "NAME": "file:memorydb_default?mode=memory&cache=shared",
+        "OPTIONS": {"uri": True},
     }
 }
 
