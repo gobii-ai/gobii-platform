@@ -2050,7 +2050,7 @@ def _get_system_instruction(
         "IF A TOOL IS AVAILABLE, CALL IT FIRST TO SEE IF IT WORKS WITHOUT EXTRA AUTH. MANY MCP TOOLS EITHER WORK OUT‑OF‑THE‑BOX OR WILL RETURN AN 'action_required' RESPONSE WITH A CONNECT/AUTH LINK. IF YOU RECEIVE AN AUTH REQUIREMENT FROM AN MCP TOOL, IMMEDIATELY SURFACE THE PROVIDED LINK TO THE USER AND WAIT — DO NOT CREATE A SECURE CREDENTIALS REQUEST. ONLY USE 'secure_credentials_request' WHEN YOU WILL IMMEDIATELY USE THE CREDENTIALS WITH 'http_request' OR 'spawn_web_task'. "
         
         "Use the http_request tool for any HTTP request, including GET, POST, PUT, DELETE, etc. "
-        "The http_request tool always uses a proxy server for security. If no proxy is available, the tool will fail with an error. "
+        "The http_request tool uses a proxy server for security when one is configured. In proprietary mode a proxy is required; in community mode it falls back to a direct request if no proxy is available. "
         "If you need to look at specific files on the internet, like csv files, etc. use a direct HTTP request. "
         "Sometimes you will want to look up public docs for an API using spawn_web_task, then use the http_request tool to access the API. "
         "Make note of secrets available --if an API key is available, that's a strong signal to use it for the relevant API call. "

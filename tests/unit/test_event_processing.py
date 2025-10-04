@@ -1,5 +1,5 @@
 from datetime import timedelta
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from unittest.mock import patch
@@ -1017,3 +1017,49 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         headers = call_args[1]["headers"]
         self.assertEqual(headers["Authorization"], "whole-string-token-value")  # Whole string match
         self.assertEqual(headers["X-Token"], "Bearer whole-string-token-value")  # Placeholder match 
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @patch('requests.request')
+    @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
+    def test_allows_direct_http_request_without_proxy_in_community_mode(self, mock_proxy, mock_request):
+        """Community mode should fall back to direct requests when no proxy exists."""
+        mock_proxy.side_effect = RuntimeError("No proxies configured")
+
+        mock_response = type('Response', (), {
+            'status_code': 200,
+            'headers': {'Content-Type': 'text/plain'},
+            'iter_content': lambda self, chunk_size: [b'ok'],
+            'close': lambda self: None
+        })()
+        mock_request.return_value = mock_response
+
+        params = {
+            "method": "GET",
+            "url": "https://api.example.com/community",
+        }
+
+        result = _execute_http_request(self.agent, params)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIsNone(result["proxy_used"])
+
+        call_args = mock_request.call_args
+        self.assertNotIn("proxies", call_args[1])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch('requests.request')
+    @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
+    def test_requires_proxy_in_proprietary_mode(self, mock_proxy, mock_request):
+        """Proprietary mode must fail if no proxy is available."""
+        mock_proxy.side_effect = RuntimeError("No proxies configured")
+
+        params = {
+            "method": "GET",
+            "url": "https://api.example.com/proprietary",
+        }
+
+        result = _execute_http_request(self.agent, params)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("No proxy server available", result["message"])
+        mock_request.assert_not_called()
