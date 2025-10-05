@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/logo/noBgBlack.png" alt="Gobii logo" width="160" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/noBgWhite.png" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo/noBgBlack.png" />
+    <img src="assets/logo/noBgBlack.png" alt="Gobii logo" width="160" />
+  </picture>
 </p>
 
 # Gobii Platform
