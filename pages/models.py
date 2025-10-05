@@ -31,6 +31,15 @@ class LandingPage(models.Model):
         help_text="Text displayed prominently on the landing page. Use {blue} and {/blue} to format text in blue."
     )
     image_url = models.URLField(blank=True)
+    private_description = models.TextField(
+        blank=True,
+        help_text="Internal-only notes for this landing page."
+    )
+    utm_source = models.CharField(max_length=256, blank=True)
+    utm_medium = models.CharField(max_length=256, blank=True)
+    utm_campaign = models.CharField(max_length=256, blank=True)
+    utm_term = models.CharField(max_length=256, blank=True)
+    utm_content = models.CharField(max_length=256, blank=True)
     hits = models.PositiveIntegerField(default=0)
     disabled = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
@@ -47,4 +56,3 @@ class LandingPage(models.Model):
 
     def __str__(self):
         return self.title or (self.charter[:50] + ('...' if len(self.charter) > 50 else ''))
-

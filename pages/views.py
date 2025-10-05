@@ -1,7 +1,6 @@
 from datetime import timezone, datetime
 
 from django.http.response import JsonResponse
-from django.utils.http import urlencode
 from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
 from django.utils.decorators import method_decorator
@@ -409,11 +408,22 @@ class LandingRedirectView(View):
 
         # 2  Start with whatever query-params came in (UTMs, fbclid, etc.)
         params = request.GET.copy()          # QueryDict → mutable
-        # 3  Add/overwrite our own tracking code
-        params['g'] = code
+        params['g'] = code  # Always tag with the landing code
+
+        utm_fields = (
+            "utm_source",
+            "utm_medium",
+            "utm_campaign",
+            "utm_term",
+            "utm_content",
+        )
+        for field in utm_fields:
+            value = getattr(landing, field, "")
+            if value and not params.get(field):
+                params[field] = value
 
         # 4  Re-encode the combined query string
-        query_string = urlencode(params, doseq=True)
+        query_string = params.urlencode()
 
         # 5  Redirect to the canonical homepage + merged params
         target_url = f"{reverse('pages:home')}?{query_string}" if query_string else reverse('pages:home')

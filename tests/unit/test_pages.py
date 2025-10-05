@@ -1,4 +1,6 @@
 
+from urllib.parse import parse_qs, urlparse
+
 from django.test import TestCase, tag
 from pages.models import LandingPage
 
@@ -37,4 +39,36 @@ class LandingPageRedirectTests(TestCase):
         lp.refresh_from_db()
         self.assertEqual(lp.hits, 1)
 
-    
+    @tag("batch_pages")
+    def test_landing_redirect_includes_stored_utms(self):
+        lp = LandingPage.objects.create(
+            charter="x",
+            utm_source="newsletter",
+            utm_campaign="october_push",
+        )
+
+        resp = self.client.get(f"/g/{lp.code}/")
+        self.assertEqual(resp.status_code, 302)
+        parsed = urlparse(resp["Location"])
+        params = parse_qs(parsed.query)
+
+        self.assertEqual(params.get("g"), [lp.code])
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
+        self.assertEqual(params.get("utm_campaign"), ["october_push"])
+
+    @tag("batch_pages")
+    def test_existing_query_params_take_precedence(self):
+        lp = LandingPage.objects.create(
+            charter="x",
+            utm_source="newsletter",
+            utm_medium="email",
+        )
+
+        resp = self.client.get(f"/g/{lp.code}/", {"utm_source": "override", "fbclid": "abc123"})
+        self.assertEqual(resp.status_code, 302)
+        parsed = urlparse(resp["Location"])
+        params = parse_qs(parsed.query)
+
+        self.assertEqual(params.get("utm_source"), ["override"])
+        self.assertEqual(params.get("utm_medium"), ["email"])
+        self.assertEqual(params.get("fbclid"), ["abc123"])

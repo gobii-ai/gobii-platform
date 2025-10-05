@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
@@ -82,3 +83,50 @@ class GrantCreditsByUserIdsAdminTests(TestCase):
         self.assertEqual(credits.count(), 1)
         credit = credits.get()
         self.assertEqual(credit.expiration_date, expiration_date)
+
+
+@tag("batch_task_credits")
+class TaskCreditAdminSearchTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.admin_user = User.objects.create_superuser(
+            username="admin_search",
+            email="admin_search@example.com",
+            password="password123",
+        )
+        cls.recipient_user = User.objects.create_user(
+            username="recipient_search",
+            email="recipient_search@example.com",
+            password="password123",
+        )
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+        TaskCredit.objects.all().delete()
+
+    def test_search_finds_task_credit_by_user_id(self):
+        now = timezone.localtime().replace(microsecond=0)
+        TaskCredit.objects.create(
+            user=self.recipient_user,
+            credits=Decimal("5"),
+            credits_used=Decimal("1"),
+            granted_date=now,
+            expiration_date=now + timedelta(days=7),
+            plan=PlanNamesChoices.STARTUP,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+            voided=False,
+        )
+
+        url = reverse("admin:api_taskcredit_changelist")
+        response = self.client.get(url, {"q": str(self.recipient_user.id)})
+
+        self.assertEqual(response.status_code, 200)
+        change_list = response.context.get("cl")
+        self.assertIsNotNone(change_list)
+        self.assertEqual(change_list.result_count, 1)
+        self.assertContains(
+            response,
+            f"User: {self.recipient_user.email} ({self.recipient_user.id})",
+        )

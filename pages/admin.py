@@ -11,8 +11,22 @@ from django.urls import reverse
 class LandingPageAdmin(admin.ModelAdmin):
     list_display = ("code", "url", "title", "hits", "disabled")
     readonly_fields = ("hits", "created_at", "updated_at")
-    search_fields = ("code", "title", "charter")
+    search_fields = ("code", "title", "charter", "private_description")
     list_filter = ("disabled",)
+    fieldsets = (
+        (None, {
+            "fields": ("code", "title", "hero_text", "charter", "image_url", "disabled"),
+        }),
+        ("Tracking", {
+            "fields": ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"),
+        }),
+        ("Internal", {
+            "fields": ("private_description",),
+        }),
+        ("Metrics", {
+            "fields": ("hits", "created_at", "updated_at"),
+        }),
+    )
 
     def __init__(self, model, admin_site):
         self.request = None
