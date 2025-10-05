@@ -230,8 +230,13 @@ class TaskCreditAdmin(admin.ModelAdmin):
         queryset, use_distinct = super().get_search_results(request, queryset, search_term)
         term = (search_term or "").strip()
         if term.isdigit():
-            queryset = queryset | self.model.objects.filter(user_id=int(term))
-            use_distinct = True
+            try:
+                queryset = queryset | self.model.objects.filter(user_id=int(term))
+                use_distinct = True
+            except ValueError:
+                # The term is numeric but not a valid integer (e.g., too large),
+                # so we skip the exact user ID search. The default search might still find it.
+                pass
         return queryset, use_distinct
 
     # ---------------- Custom admin view: Grant by Plan -----------------
