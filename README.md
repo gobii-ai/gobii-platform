@@ -12,14 +12,14 @@
 ![Docker Compose](https://img.shields.io/badge/docker-compose-blue?logo=docker)
 ![Status](https://img.shields.io/badge/status-early%20access-orange)
 
-**Powered by [browser-use](https://github.com/browser-use/browser-use)** 🚀
+**The production platform for [browser-use](https://github.com/browser-use/browser-use) agents** 🚀
 
-Gobii is the open-source platform for always-on, web-browsing AI agents. Built on [browser-use](https://github.com/browser-use/browser-use), the leading browser automation framework for AI agents, Gobii lets you spin it up with Docker Compose, breeze through a first-run wizard, and you have self-hosted agents that navigate the web, gather structured insight, and keep working long after you log out. Prefer a managed experience? Gobii Cloud at [gobii.ai](https://gobii.ai) delivers the same agent stack as a hosted service.
+Gobii is the open-source platform for deploying and managing [browser-use](https://github.com/browser-use/browser-use) agents at scale. While browser-use gives AI agents powerful browser automation capabilities, Gobii provides the infrastructure to run them in production: always-on execution, scheduling, email/API triggers, secret management, and team collaboration. Spin it up with Docker Compose, complete a first-run wizard, and you have self-hosted browser-use agents that work 24/7. Prefer managed hosting? Gobii Cloud at [gobii.ai](https://gobii.ai) delivers the same platform as a service.
 
 ## What Makes Gobii Different
-- **[browser-use](https://github.com/browser-use/browser-use) superpowers**: Each agent leverages browser-use's advanced browser automation to search, click, fill forms, download files, and return structured JSON on demand.
-- **Always-on agents**: Communicate with agents over email, web chat, or API, then let them handle follow-ups without manual checkpoints.
-- **Own the runtime, choose the cloud**: MIT-licensed code keeps the core under your control, with Gobii Cloud available when you want SLAs and zero-ops hosting.
+- **Production infrastructure for browser-use**: Turn browser-use agents into always-on services with scheduling, email triggers, API endpoints, and persistent execution.
+- **Self-hosted or managed**: MIT-licensed platform you can run anywhere, or Gobii Cloud for zero-ops hosting with SLAs.
+- **Built for teams**: Share agents, manage secrets, collaborate on workflows, and control access across your organization.
 
 ## Launch in Minutes
 1. **Prerequisites**: Docker with at least 12 GB RAM allocated to its VM and a few GB of disk.
@@ -34,16 +34,16 @@ Gobii is the open-source platform for always-on, web-browsing AI agents. Built o
    ```
 4. Visit [http://localhost:8000](http://localhost:8000) and follow the first-run wizard:
    - Create the first admin account.
-   - Pick the LLM provider (OpenAI, OpenRouter, Anthropic, Fireworks, or custom) powering your agents.
-   - Drop in the API keys and preferred models. You can route [browser-use](https://github.com/browser-use/browser-use) calls to a different model if you'd like.
-5. After the redirect, sign in at [http://localhost:8000/](http://localhost:8000/) and start building agents.
+   - Pick the LLM provider (OpenAI, OpenRouter, Anthropic, Fireworks, or custom) for your agents.
+   - Drop in the API keys and preferred models. You can route browser-use agent calls to a different model if you'd like.
+5. After the redirect, sign in at [http://localhost:8000/](http://localhost:8000/) and start deploying browser-use agents.
 
 Need scheduling, inbox listeners, or extra telemetry later? Launch the optional `beat`, `email`, or `obs` profiles with `docker compose --profile <name> up`.
 
-## Workflows You Can Ship Today
-- Create agents powered by [browser-use](https://github.com/browser-use/browser-use), attach secrets, and wire up email or web chat handoffs.
-- Hand teammates or services an API key so they can trigger browser-use jobs without touching the UI.
-- Watch browser-use tasks stream results, capture structured JSON, or download files created along the way.
+## What You Can Build
+- Deploy browser-use agents with persistent execution, secret management, and email/web chat interfaces.
+- Expose browser-use capabilities via API endpoints for teammates or external services.
+- Monitor agent execution, capture structured outputs, and manage files generated during workflows.
 
 ### Try the API
 ```bash
@@ -70,14 +70,20 @@ curl --no-buffer \
 | Customize runtime, networking, branding, and integrations. | Autoscaling agents, managed upgrades, enterprise support. |
 | Community support via GitHub issues & Discord. | Dedicated success and support (contracted). |
 
-## Built on browser-use
+## The Platform for browser-use
 
-Gobii's browser automation capabilities are powered by [browser-use](https://github.com/browser-use/browser-use), the open-source library that brings human-like web interaction to AI agents. By building on browser-use, Gobii inherits:
+[browser-use](https://github.com/browser-use/browser-use) is the leading open-source library for AI-powered browser automation, giving agents human-like web interaction capabilities. Gobii provides the production infrastructure to deploy and scale these agents:
 
+**browser-use brings the automation:**
 - Advanced web navigation, form filling, and data extraction
 - Visual understanding of web pages for smarter interactions
 - Robust error handling and retry mechanisms
-- Support for complex multi-step browser workflows
+
+**Gobii brings the platform:**
+- Always-on agent execution and scheduling
+- Email triggers, API endpoints, and web interfaces
+- Secret management, team collaboration, and access control
+- Monitoring, logging, and structured output capture
 
 Want to contribute to the browser automation layer? Check out [browser-use on GitHub](https://github.com/browser-use/browser-use).
 
@@ -93,4 +99,4 @@ Want to contribute to the browser automation layer? Check out [browser-use on Gi
 
 ---
 
-Built with ❤️ by the Gobii team, powered by [browser-use](https://github.com/browser-use/browser-use). Let us know what you ship with it!
+Built with ❤️ by the Gobii team. The production platform for [browser-use](https://github.com/browser-use/browser-use) agents.
