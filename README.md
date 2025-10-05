@@ -20,15 +20,15 @@ Gobii is the open-source platform for always-on, web-browsing AI agents. Spin it
 - **Own the runtime, choose the cloud**: MIT-licensed code keeps the core under your control, with Gobii Cloud available when you want SLAs and zero-ops hosting.
 
 ## Launch in Minutes
-1. **Prerequisites**: Docker and about 8 GB of free memory.
+1. **Prerequisites**: Docker with at least 12 GB RAM allocated to its VM and a few GB of disk.
 2. **Clone & enter the repo**
    ```bash
    git clone https://github.com/gobii-ai/gobii-platform.git
    cd gobii-platform
    ```
-3. **Start Gobii**
+3. **Start Gobii** (first run and whenever dependencies change)
    ```bash
-   docker compose up
+   docker compose up --build
    ```
 4. Visit [http://localhost:8000](http://localhost:8000) and follow the first-run wizard:
    - Create the first admin account.
