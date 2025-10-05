@@ -217,7 +217,7 @@ class TaskCreditAdmin(admin.ModelAdmin):
     # UX: allow quick navigation via calendar drill-down
     date_hierarchy = "granted_date"
     change_list_template = "admin/taskcredit_change_list.html"
-    
+
     @admin.display(description='Owner')
     def owner_display(self, obj):
         if obj.organization_id:
@@ -225,6 +225,14 @@ class TaskCreditAdmin(admin.ModelAdmin):
         if obj.user_id:
             return f"User: {obj.user.email} ({obj.user_id})"
         return "-"
+
+    def get_search_results(self, request, queryset, search_term):
+        queryset, use_distinct = super().get_search_results(request, queryset, search_term)
+        term = (search_term or "").strip()
+        if term.isdigit():
+            queryset = queryset | self.model.objects.filter(user_id=int(term))
+            use_distinct = True
+        return queryset, use_distinct
 
     # ---------------- Custom admin view: Grant by Plan -----------------
     def get_urls(self):
