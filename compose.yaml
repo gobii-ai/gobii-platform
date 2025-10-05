@@ -110,7 +110,6 @@ services:
       - static-data:/app/staticfiles
     shm_size: 2gb
     restart: unless-stopped
-    profiles: ["worker"]
 
   beat:
     platform: linux/amd64
