@@ -38,3 +38,4 @@ mediafiles/
 # AI
 .claude/
 .ra-aid/
+*.swp
