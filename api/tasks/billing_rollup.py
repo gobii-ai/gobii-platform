@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from celery import shared_task
-from datetime import datetime, date as dt_date, timedelta, time as dt_time
+from datetime import datetime, date as dt_date, timedelta, time as dt_time, timezone as dt_timezone
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 from numbers import Number
 from typing import Any, Mapping
+
 
 from django.contrib.auth import get_user_model
 from django.db.models import Sum
@@ -89,7 +90,7 @@ def _to_aware_dt(value, *, as_start: bool) -> datetime | None:
                 dt = base if as_start else (base + timedelta(days=1))
             else:
                 try:
-                    dt = datetime.fromtimestamp(float(text), tz=timezone.utc)
+                    dt = datetime.fromtimestamp(float(text), tz=dt_timezone.utc)
                 except (TypeError, ValueError, OverflowError, OSError):
                     dt = None
 
