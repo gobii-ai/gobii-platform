@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -46,7 +46,21 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             owner = organization
             owner_context_type = "organization"
 
-        period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
+        def _parse_query_date(value: str | None) -> date | None:
+            if not value:
+                return None
+            try:
+                return datetime.strptime(value, "%Y-%m-%d").date()
+            except ValueError:
+                return None
+
+        requested_start = _parse_query_date(request.GET.get("from"))
+        requested_end = _parse_query_date(request.GET.get("to"))
+
+        if requested_start and requested_end and requested_start <= requested_end:
+            period_start, period_end = requested_start, requested_end
+        else:
+            period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
 
         tz = timezone.get_current_timezone()
         period_start_dt = timezone.make_aware(datetime.combine(period_start, time.min), tz)

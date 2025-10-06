@@ -2,6 +2,7 @@ import 'vite/modulepreload-polyfill'
 import { StrictMode, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { I18nProvider } from 'react-aria-components'
 import './index.css'
 import './styles/consoleShell.css'
 import { AgentChatPage } from './screens/AgentChatPage'
@@ -39,9 +40,12 @@ switch (appName) {
 }
 
 const queryClient = new QueryClient()
+const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US'
 
 createRoot(mountNode).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>{screen}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider locale={locale}>{screen}</I18nProvider>
+    </QueryClientProvider>
   </StrictMode>,
 )

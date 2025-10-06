@@ -1,5 +1,16 @@
-import { useMemo } from 'react'
-import { useQuery, type QueryFunctionContext } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import {
+  Button as AriaButton,
+  CalendarCell,
+  CalendarGrid,
+  Dialog,
+  DialogTrigger,
+  Heading,
+  Popover,
+  RangeCalendar,
+} from 'react-aria-components'
+import { parseDate, type DateValue } from '@internationalized/date'
 
 type UsageSummaryResponse = {
   period: {
@@ -51,6 +62,11 @@ type MetricCard = {
   progressClass?: string
 }
 
+type DateRangeValue = { start: DateValue; end: DateValue }
+
+type UsageSummaryQueryInput = { from?: string; to?: string }
+type UsageSummaryQueryKey = ['usage-summary', UsageSummaryQueryInput]
+
 const metricDefinitions: MetricDefinition[] = [
   {
     id: 'tasks',
@@ -69,10 +85,19 @@ const metricDefinitions: MetricDefinition[] = [
   },
 ]
 
-const usageSummaryQueryKey = ['usage-summary'] as const
+const fetchUsageSummary = async (params: UsageSummaryQueryInput, signal: AbortSignal): Promise<UsageSummaryResponse> => {
+  const search = new URLSearchParams()
 
-const fetchUsageSummary = async ({ signal }: QueryFunctionContext<typeof usageSummaryQueryKey>): Promise<UsageSummaryResponse> => {
-  const response = await fetch('/console/api/usage/summary/', {
+  if (params.from) {
+    search.set('from', params.from)
+  }
+
+  if (params.to) {
+    search.set('to', params.to)
+  }
+
+  const suffix = search.toString()
+  const response = await fetch(`/console/api/usage/summary/${suffix ? `?${suffix}` : ''}`, {
     method: 'GET',
     headers: {
       Accept: 'application/json',
@@ -93,15 +118,41 @@ const formatContextCaption = (contextName: string, timezone: string): string => 
 }
 
 export function UsageScreen() {
+  const [appliedRange, setAppliedRange] = useState<DateRangeValue | null>(null)
+  const [calendarRange, setCalendarRange] = useState<DateRangeValue | null>(null)
+  const [isPickerOpen, setPickerOpen] = useState(false)
+
+  const queryInput = useMemo<UsageSummaryQueryInput>(() => {
+    if (appliedRange?.start && appliedRange?.end) {
+      return {
+        from: appliedRange.start.toString(),
+        to: appliedRange.end.toString(),
+      }
+    }
+    return {}
+  }, [appliedRange])
+
+  const queryKey: UsageSummaryQueryKey = ['usage-summary', queryInput]
+
   const {
     data: summary,
-    status,
     error,
-  } = useQuery({
-    queryKey: usageSummaryQueryKey,
-    queryFn: fetchUsageSummary,
+    isError,
+    isPending,
+  } = useQuery<UsageSummaryResponse, Error>({
+    queryKey,
+    queryFn: ({ signal }) => fetchUsageSummary(queryInput, signal),
     refetchOnWindowFocus: false,
   })
+
+  useEffect(() => {
+    if (summary && !appliedRange) {
+      setAppliedRange({
+        start: parseDate(summary.period.start),
+        end: parseDate(summary.period.end),
+      })
+    }
+  }, [appliedRange, summary])
 
   const integerFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }), [])
   const creditFormatter = useMemo(
@@ -110,7 +161,7 @@ export function UsageScreen() {
   )
 
   const errorMessage = useMemo(() => {
-    if (status !== 'error') {
+    if (!isError) {
       return null
     }
 
@@ -119,10 +170,10 @@ export function UsageScreen() {
     }
 
     return 'Unable to load usage metrics right now.'
-  }, [error, status])
+  }, [error, isError])
 
   const periodInfo = useMemo(() => {
-    if (status === 'success' && summary) {
+    if (summary) {
       return {
         label: 'Billing period',
         value: summary.period.label,
@@ -130,7 +181,7 @@ export function UsageScreen() {
       }
     }
 
-    if (status === 'error') {
+    if (isError) {
       return {
         label: 'Billing period',
         value: 'Unavailable',
@@ -143,7 +194,7 @@ export function UsageScreen() {
       value: 'Loading…',
       caption: 'Fetching the current billing window.',
     }
-  }, [status, summary])
+  }, [isError, summary])
 
   const cards = useMemo<MetricCard[]>(() => {
     return metricDefinitions.map((metric) => {
@@ -153,14 +204,14 @@ export function UsageScreen() {
       let progressPct: number | undefined
       let progressClass: string | undefined
 
-      if (status === 'pending') {
+      if (isPending) {
         value = 'Loading…'
         valueClasses = 'text-slate-400 animate-pulse'
-      } else if (status === 'error') {
+      } else if (isError) {
         value = '—'
         valueClasses = 'text-slate-500'
         caption = 'Unable to load this metric. Refresh to retry.'
-      } else if (status === 'success' && summary) {
+      } else if (summary) {
         switch (metric.id) {
           case 'tasks': {
             const completed = summary.metrics.tasks.completed
@@ -192,7 +243,7 @@ export function UsageScreen() {
             } else if (progressPct >= 90) {
               progressClass = 'bg-gradient-to-r from-orange-400 to-orange-500'
             } else {
-              progressClass = 'bg-gradient-to-r from-blue-400 to-blue-500'
+              progressClass = 'bg-gradient-to-r from-blue-500 to-sky-500'
             }
             break
           }
@@ -211,7 +262,7 @@ export function UsageScreen() {
         progressClass,
       }
     })
-  }, [creditFormatter, integerFormatter, status, summary])
+  }, [creditFormatter, integerFormatter, isError, isPending, summary])
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8 py-8">
@@ -231,13 +282,64 @@ export function UsageScreen() {
             <span className="text-xs text-slate-500">{periodInfo.caption}</span>
           </div>
           <div className="h-10 w-px bg-slate-200" aria-hidden="true" />
-          <button
-            type="button"
-            className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled
+          <DialogTrigger
+            isOpen={isPickerOpen}
+            onOpenChange={(open) => {
+              setPickerOpen(open)
+              if (!open) {
+                setCalendarRange(null)
+              }
+            }}
           >
-            Change period
-          </button>
+            <AriaButton
+              className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-700"
+              onPress={() => {
+                setCalendarRange(appliedRange)
+                setPickerOpen(true)
+              }}
+            >
+              Change period
+            </AriaButton>
+            <Popover className="z-50 mt-2 rounded-xl border border-slate-200 bg-white shadow-xl">
+              <Dialog className="p-4">
+                <RangeCalendar
+                  aria-label="Select billing period"
+                  value={(calendarRange ?? appliedRange) ?? undefined}
+                  onChange={(range) => {
+                    if (range?.start && range?.end) {
+                      const nextRange = range as DateRangeValue
+                      setCalendarRange(nextRange)
+                      setAppliedRange(nextRange)
+                      setPickerOpen(false)
+                      setCalendarRange(null)
+                    } else {
+                      setCalendarRange(range as DateRangeValue | null)
+                    }
+                  }}
+                  visibleDuration={{ months: 1 }}
+                  className="flex flex-col gap-3"
+                >
+                  <header className="flex items-center justify-between gap-2">
+                    <AriaButton slot="previous" className="rounded-md px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-100">
+                      ‹
+                    </AriaButton>
+                    <Heading className="text-sm font-medium text-slate-700" />
+                    <AriaButton slot="next" className="rounded-md px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-100">
+                      ›
+                    </AriaButton>
+                  </header>
+                  <CalendarGrid className="border-spacing-1 border-separate gap-y-1 text-center text-xs font-medium uppercase text-slate-500">
+                    {(date) => (
+                      <CalendarCell
+                        date={date}
+                        className="m-0.5 flex h-8 w-8 items-center justify-center rounded-md text-sm text-slate-700 transition-colors hover:bg-blue-100 data-[disabled]:text-slate-300 data-[focused]:outline data-[focused]:outline-2 data-[focused]:outline-blue-400 data-[selected]:bg-blue-600 data-[selected]:text-white data-[range-selection]:bg-blue-100 data-[outside-month]:text-slate-300"
+                      />
+                    )}
+                  </CalendarGrid>
+                </RangeCalendar>
+              </Dialog>
+            </Popover>
+          </DialogTrigger>
         </div>
       </header>
 
@@ -270,7 +372,7 @@ export function UsageScreen() {
         ))}
       </section>
 
-      {status === 'error' && errorMessage ? (
+      {isError && errorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {errorMessage}
         </div>
