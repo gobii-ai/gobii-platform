@@ -1,4 +1,10 @@
-import type { UsageSummaryQueryInput, UsageSummaryResponse, UsageTrendQueryInput, UsageTrendResponse } from './types'
+import type {
+  UsageAgentsResponse,
+  UsageSummaryQueryInput,
+  UsageSummaryResponse,
+  UsageTrendQueryInput,
+  UsageTrendResponse,
+} from './types'
 
 export const fetchUsageSummary = async (params: UsageSummaryQueryInput, signal: AbortSignal): Promise<UsageSummaryResponse> => {
   const search = new URLSearchParams()
@@ -9,6 +15,12 @@ export const fetchUsageSummary = async (params: UsageSummaryQueryInput, signal: 
 
   if (params.to) {
     search.set('to', params.to)
+  }
+
+  if (params.agents?.length) {
+    params.agents.forEach((agentId) => {
+      search.append('agent', agentId)
+    })
   }
 
   const suffix = search.toString()
@@ -39,6 +51,12 @@ export const fetchUsageTrends = async (params: UsageTrendQueryInput, signal: Abo
     search.set('to', params.to)
   }
 
+  if (params.agents?.length) {
+    params.agents.forEach((agentId) => {
+      search.append('agent', agentId)
+    })
+  }
+
   const response = await fetch(`/console/api/usage/trends/?${search.toString()}`, {
     method: 'GET',
     headers: {
@@ -49,6 +67,22 @@ export const fetchUsageTrends = async (params: UsageTrendQueryInput, signal: Abo
 
   if (!response.ok) {
     throw new Error(`Usage trends request failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
+export const fetchUsageAgents = async (signal: AbortSignal): Promise<UsageAgentsResponse> => {
+  const response = await fetch('/console/api/usage/agents/', {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+    signal,
+  })
+
+  if (!response.ok) {
+    throw new Error(`Usage agents request failed (${response.status})`)
   }
 
   return response.json()

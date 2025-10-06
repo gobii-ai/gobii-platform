@@ -3,7 +3,7 @@ import type { EChartsOption } from 'echarts'
 
 export type DateRangeValue = { start: DateValue; end: DateValue }
 
-export type UsageSummaryQueryInput = { from?: string; to?: string }
+export type UsageSummaryQueryInput = { from?: string; to?: string; agents?: string[] }
 export type UsageSummaryQueryKey = ['usage-summary', UsageSummaryQueryInput]
 
 export type UsageSummaryResponse = {
@@ -79,7 +79,7 @@ export type UsageTrendResponse = {
   buckets: UsageTrendBucket[]
 }
 
-export type UsageTrendQueryInput = { mode: UsageTrendMode; from?: string; to?: string }
+export type UsageTrendQueryInput = { mode: UsageTrendMode; from?: string; to?: string; agents?: string[] }
 
 export type PeriodInfo = {
   label: string
@@ -94,3 +94,12 @@ export type TrendModeOption = {
 }
 
 export type TrendChartOption = EChartsOption
+
+export type UsageAgent = {
+  id: string
+  name: string
+}
+
+export type UsageAgentsResponse = {
+  agents: UsageAgent[]
+}

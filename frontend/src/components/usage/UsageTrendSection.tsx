@@ -1,11 +1,11 @@
-import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import {useMemo} from 'react'
+import {useQuery} from '@tanstack/react-query'
 import ReactEChartsCore from 'echarts-for-react/lib/core'
 import * as echarts from 'echarts/core'
-import { LineChart } from 'echarts/charts'
-import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
-import { Button as AriaButton } from 'react-aria-components'
+import {LineChart} from 'echarts/charts'
+import {GridComponent, LegendComponent, TooltipComponent} from 'echarts/components'
+import {CanvasRenderer} from 'echarts/renderers'
+import {Button} from 'react-aria-components'
 
 import type {
   DateRangeValue,
@@ -16,14 +16,15 @@ import type {
   UsageTrendQueryInput,
   UsageTrendResponse,
 } from './types'
-import { fetchUsageTrends } from './api'
+import {fetchUsageTrends} from './api'
+
 
 echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 const trendModes: TrendModeOption[] = [
-  { value: 'day', label: 'Day', detail: 'Tasks per hour' },
-  { value: 'week', label: 'Week', detail: 'Tasks per day' },
-  { value: 'month', label: 'Month', detail: 'Tasks per day' },
+  {value: 'day', label: 'Day', detail: 'Tasks per hour'},
+  {value: 'week', label: 'Week', detail: 'Tasks per day'},
+  {value: 'month', label: 'Month', detail: 'Tasks per day'},
 ]
 
 type UsageTrendSectionProps = {
@@ -32,6 +33,7 @@ type UsageTrendSectionProps = {
   effectiveRange: DateRangeValue | null
   fallbackRange: DateRangeValue | null
   timezone?: string
+  agentIds: string[]
 }
 
 export function UsageTrendSection({
@@ -40,6 +42,7 @@ export function UsageTrendSection({
   effectiveRange,
   fallbackRange,
   timezone,
+  agentIds,
 }: UsageTrendSectionProps) {
   const baseRange = effectiveRange ?? fallbackRange
 
@@ -60,29 +63,34 @@ export function UsageTrendSection({
           mode: 'day',
           from: baseEnd.toString(),
           to: baseEnd.toString(),
+          agents: agentIds,
         }
       case 'week': {
-        const candidate = baseEnd.subtract({ days: 6 })
+        const candidate = baseEnd.subtract({days: 6})
         const windowStart = clampStart(candidate)
         return {
           mode: 'week',
           from: windowStart.toString(),
           to: baseEnd.toString(),
+          agents: agentIds,
         }
       }
       case 'month': {
-        const candidate = baseEnd.subtract({ days: 29 })
+        const candidate = baseEnd.subtract({days: 29})
         const windowStart = clampStart(candidate)
         return {
           mode: 'month',
           from: windowStart.toString(),
           to: baseEnd.toString(),
+          agents: agentIds,
         }
       }
       default:
         return null
     }
-  }, [baseRange, trendMode])
+  }, [agentIds, baseRange, trendMode])
+
+  const agentKey = agentIds.length ? agentIds.slice().sort().join(',') : 'all'
 
   const {
     data: trendData,
@@ -90,8 +98,8 @@ export function UsageTrendSection({
     isError: isTrendError,
     isPending: isTrendPending,
   } = useQuery<UsageTrendResponse, Error>({
-    queryKey: ['usage-trends', trendMode, trendQueryInput?.from ?? null, trendQueryInput?.to ?? null],
-    queryFn: ({ signal }) => fetchUsageTrends(trendQueryInput!, signal),
+    queryKey: ['usage-trends', trendMode, trendQueryInput?.from ?? null, trendQueryInput?.to ?? null, agentKey],
+    queryFn: ({signal}) => fetchUsageTrends(trendQueryInput!, signal),
     enabled: Boolean(trendQueryInput),
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
@@ -109,8 +117,8 @@ export function UsageTrendSection({
 
     const tz = trendData.timezone || timezone
     const dateFormatter = trendData.resolution === 'hour'
-      ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', timeZone: tz })
-      : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: tz })
+      ? new Intl.DateTimeFormat(undefined, {hour: 'numeric', timeZone: tz})
+      : new Intl.DateTimeFormat(undefined, {month: 'short', day: 'numeric', timeZone: tz})
 
     const categories = trendData.buckets.map((bucket: UsageTrendBucket) =>
       dateFormatter.format(new Date(bucket.timestamp)),
@@ -209,7 +217,7 @@ export function UsageTrendSection({
             {trendModes.map((mode) => {
               const isActive = trendMode === mode.value
               return (
-                <AriaButton
+                <Button
                   key={mode.value}
                   onPress={() => onTrendModeChange(mode.value)}
                   className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
@@ -217,7 +225,7 @@ export function UsageTrendSection({
                   }`}
                 >
                   {mode.label}
-                </AriaButton>
+                </Button>
               )
             })}
           </div>
@@ -231,7 +239,7 @@ export function UsageTrendSection({
         ) : chartOption ? (
           <div className="flex h-full flex-col">
             <div className="flex-1">
-              <ReactEChartsCore echarts={echarts} option={chartOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }} />
+              <ReactEChartsCore echarts={echarts} option={chartOption} notMerge lazyUpdate style={{height: '100%', width: '100%'}} />
             </div>
             {!hasData ? (
               <div className="mt-2 text-center text-xs text-slate-400">{emptyMessage}</div>
@@ -247,4 +255,4 @@ export function UsageTrendSection({
   )
 }
 
-export type { UsageTrendSectionProps }
+export type {UsageTrendSectionProps}

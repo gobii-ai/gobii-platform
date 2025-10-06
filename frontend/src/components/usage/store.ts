@@ -1,33 +1,60 @@
 import { create } from 'zustand'
 
-import type { UsageSummaryResponse } from './types'
+import type { UsageAgent, UsageSummaryResponse } from './types'
 
 type UsageStatus = 'idle' | 'loading' | 'success' | 'error'
 
 type UsageState = {
   summary: UsageSummaryResponse | null
-  status: UsageStatus
-  errorMessage: string | null
-  setLoading: () => void
-  setSummary: (summary: UsageSummaryResponse) => void
-  setError: (message: string) => void
+  summaryStatus: UsageStatus
+  summaryErrorMessage: string | null
+  agents: UsageAgent[]
+  agentsStatus: UsageStatus
+  agentsErrorMessage: string | null
+  setSummaryLoading: () => void
+  setSummaryData: (summary: UsageSummaryResponse) => void
+  setSummaryError: (message: string) => void
+  setAgentsLoading: () => void
+  setAgentsData: (agents: UsageAgent[]) => void
+  setAgentsError: (message: string) => void
   reset: () => void
 }
 
 export const useUsageStore = create<UsageState>((set) => ({
   summary: null,
-  status: 'idle',
-  errorMessage: null,
-  setLoading: () => set({ status: 'loading', errorMessage: null }),
-  setSummary: (summary) => set({
+  summaryStatus: 'idle',
+  summaryErrorMessage: null,
+  agents: [],
+  agentsStatus: 'idle',
+  agentsErrorMessage: null,
+  setSummaryLoading: () => set({ summaryStatus: 'loading', summaryErrorMessage: null }),
+  setSummaryData: (summary) => set({
     summary,
-    status: 'success',
-    errorMessage: null,
+    summaryStatus: 'success',
+    summaryErrorMessage: null,
   }),
-  setError: (message) => set((state) => ({
-    status: 'error',
-    errorMessage: message,
-    summary: state.summary,
-  })),
-  reset: () => set({ summary: null, status: 'idle', errorMessage: null }),
+  setSummaryError: (message) => set({
+    summaryStatus: 'error',
+    summaryErrorMessage: message,
+  }),
+  setAgentsLoading: () => set({ agentsStatus: 'loading', agentsErrorMessage: null }),
+  setAgentsData: (agents) => set({
+    agents,
+    agentsStatus: 'success',
+    agentsErrorMessage: null,
+  }),
+  setAgentsError: (message) => set({
+    agentsStatus: 'error',
+    agentsErrorMessage: message,
+  }),
+  reset: () => set({
+    summary: null,
+    summaryStatus: 'idle',
+    summaryErrorMessage: null,
+    agents: [],
+    agentsStatus: 'idle',
+    agentsErrorMessage: null,
+  }),
 }))
+
+export type { UsageStatus }

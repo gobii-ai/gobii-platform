@@ -30,13 +30,16 @@ const metricDefinitions: MetricDefinition[] = [
 
 type UsageMetricsGridProps = {
   queryInput: UsageSummaryQueryInput
+  agentIds: string[]
 }
 
-export function UsageMetricsGrid({ queryInput }: UsageMetricsGridProps) {
-  const setLoading = useUsageStore((state) => state.setLoading)
-  const setSummary = useUsageStore((state) => state.setSummary)
-  const setError = useUsageStore((state) => state.setError)
+export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps) {
+  const setSummaryLoading = useUsageStore((state) => state.setSummaryLoading)
+  const setSummaryData = useUsageStore((state) => state.setSummaryData)
+  const setSummaryError = useUsageStore((state) => state.setSummaryError)
   const summary = useUsageStore((state) => state.summary)
+
+  const agentKey = agentIds.length ? agentIds.slice().sort().join(',') : 'all'
 
   const {
     data,
@@ -44,30 +47,30 @@ export function UsageMetricsGrid({ queryInput }: UsageMetricsGridProps) {
     isError,
     error,
   } = useQuery<UsageSummaryResponse, Error>({
-    queryKey: ['usage-summary', queryInput.from ?? null, queryInput.to ?? null],
-    queryFn: ({ signal }) => fetchUsageSummary(queryInput, signal),
+    queryKey: ['usage-summary', queryInput.from ?? null, queryInput.to ?? null, agentKey],
+    queryFn: ({ signal }) => fetchUsageSummary({ ...queryInput, agents: agentIds }, signal),
     placeholderData: (previousData) => previousData,
     refetchOnWindowFocus: false,
   })
 
   useEffect(() => {
     if (isPending) {
-      setLoading()
+      setSummaryLoading()
     }
-  }, [isPending, setLoading])
+  }, [isPending, setSummaryLoading])
 
   useEffect(() => {
     if (data) {
-      setSummary(data)
+      setSummaryData(data)
     }
-  }, [data, setSummary])
+  }, [data, setSummaryData])
 
   useEffect(() => {
     if (isError) {
       const message = error instanceof Error ? error.message : 'Unable to load usage metrics right now.'
-      setError(message)
+      setSummaryError(message)
     }
-  }, [error, isError, setError])
+  }, [error, isError, setSummaryError])
 
   const integerFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }), [])
   const creditFormatter = useMemo(

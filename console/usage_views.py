@@ -1,4 +1,5 @@
 from datetime import date, datetime, time, timedelta
+import uuid
 from decimal import Decimal
 from typing import Any
 
@@ -11,7 +12,7 @@ from django.views import View
 
 from billing.services import BillingService
 
-from api.models import BrowserUseAgentTask, TaskCredit
+from api.models import BrowserUseAgent, BrowserUseAgentTask, TaskCredit
 from console.context_helpers import build_console_context
 
 
@@ -57,6 +58,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
 
         requested_start = _parse_query_date(request.GET.get("from"))
         requested_end = _parse_query_date(request.GET.get("to"))
+        agent_filters_raw = request.GET.getlist("agent")
 
         if requested_start and requested_end and requested_start <= requested_end:
             period_start, period_end = requested_start, requested_end
@@ -77,6 +79,27 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             filters["organization"] = organization
         else:
             filters["user"] = request.user
+
+        if agent_filters_raw:
+            agent_ids: list[uuid.UUID] = []
+            for raw in agent_filters_raw:
+                try:
+                    agent_ids.append(uuid.UUID(raw))
+                except (TypeError, ValueError):
+                    continue
+            if agent_ids:
+                if organization is not None:
+                    allowed_ids = set(
+                        BrowserUseAgent.objects.filter(persistent_agent__organization=organization)
+                        .values_list("id", flat=True)
+                    )
+                else:
+                    allowed_ids = set(
+                        BrowserUseAgent.objects.filter(user=request.user).values_list("id", flat=True)
+                    )
+                filtered_agent_ids = [agent_id for agent_id in agent_ids if agent_id in allowed_ids]
+                if filtered_agent_ids:
+                    filters["agent_id__in"] = filtered_agent_ids
 
         tasks_qs = BrowserUseAgentTask.objects.filter(**filters)
 
@@ -166,6 +189,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
         requested_start = _parse_query_date(request.GET.get("from"))
         requested_end = _parse_query_date(request.GET.get("to"))
         mode = request.GET.get("mode", "week")
+        agent_filters_raw = request.GET.getlist("agent")
 
         if mode not in {"day", "week", "month"}:
             return JsonResponse({"error": "Invalid mode."}, status=400)
@@ -207,6 +231,26 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
             base_filters["organization"] = organization
         else:
             base_filters["user"] = request.user
+
+        agent_ids: list[uuid.UUID] = []
+        for raw in agent_filters_raw:
+            try:
+                agent_ids.append(uuid.UUID(raw))
+            except (TypeError, ValueError):
+                continue
+        if agent_ids:
+            if organization is not None:
+                allowed_ids = set(
+                    BrowserUseAgent.objects.filter(persistent_agent__organization=organization)
+                    .values_list("id", flat=True)
+                )
+            else:
+                allowed_ids = set(
+                    BrowserUseAgent.objects.filter(user=request.user).values_list("id", flat=True)
+                )
+            filtered_agent_ids = [agent_id for agent_id in agent_ids if agent_id in allowed_ids]
+            if filtered_agent_ids:
+                base_filters["agent_id__in"] = filtered_agent_ids
 
         trunc_function = TruncHour if step == timedelta(hours=1) else TruncDay
 
@@ -259,3 +303,30 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
         }
 
         return JsonResponse(payload)
+
+
+class UsageAgentsAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        resolved = build_console_context(request)
+
+        organization = None
+
+        if resolved.current_context.type == "organization" and resolved.current_membership:
+            organization = resolved.current_membership.org
+
+        if organization is not None:
+            agents_qs = BrowserUseAgent.objects.filter(persistent_agent__organization=organization)
+        else:
+            agents_qs = BrowserUseAgent.objects.filter(user=request.user)
+
+        agents = [
+            {
+                "id": str(agent.id),
+                "name": agent.name,
+            }
+            for agent in agents_qs.order_by("name")
+        ]
+
+        return JsonResponse({"agents": agents})

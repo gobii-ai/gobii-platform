@@ -1,16 +1,31 @@
-import {useEffect, useMemo, useRef, useState} from 'react'
-import {parseDate} from '@internationalized/date'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { parseDate } from '@internationalized/date'
 
-import {UsagePeriodHeader, UsageTrendSection, UsageMetricsGrid, useUsageStore} from '../components/usage'
-import type {DateRangeValue, PeriodInfo, UsageSummaryQueryInput, UsageTrendMode} from '../components/usage'
+import {
+  UsagePeriodHeader,
+  UsageTrendSection,
+  UsageMetricsGrid,
+  UsageAgentSelector,
+  useUsageStore,
+} from '../components/usage'
+import { fetchUsageAgents } from '../components/usage/api'
+import type {
+  DateRangeValue,
+  PeriodInfo,
+  UsageAgent,
+  UsageSummaryQueryInput,
+  UsageTrendMode,
+} from '../components/usage'
 import {
   cloneRange,
   areRangesEqual,
   getRangeLengthInDays,
   getAnchorDay,
   shiftBillingRange,
-  shiftCustomRangeByDays
+  shiftCustomRangeByDays,
 } from '../components/usage/utils'
+
 
 type SelectionMode = 'billing' | 'custom'
 
@@ -24,13 +39,23 @@ export function UsageScreen() {
   const [calendarRange, setCalendarRange] = useState<DateRangeValue | null>(null)
   const [isPickerOpen, setPickerOpen] = useState(false)
   const [selectionMode, setSelectionMode] = useState<SelectionMode>('billing')
-  const [trendMode, setTrendMode] = useState<UsageTrendMode>('month')
+  const [trendMode, setTrendMode] = useState<UsageTrendMode>('week')
+  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set())
+
   const initialPeriodRef = useRef<DateRangeValue | null>(null)
   const anchorDayRef = useRef<number | null>(null)
 
   const summary = useUsageStore((state) => state.summary)
-  const summaryStatus = useUsageStore((state) => state.status)
-  const summaryErrorMessage = useUsageStore((state) => state.errorMessage)
+  const summaryStatus = useUsageStore((state) => state.summaryStatus)
+  const summaryErrorMessage = useUsageStore((state) => state.summaryErrorMessage)
+
+  const agents = useUsageStore((state) => state.agents)
+  const agentsStatus = useUsageStore((state) => state.agentsStatus)
+  const agentsErrorMessage = useUsageStore((state) => state.agentsErrorMessage)
+
+  const setAgentsLoading = useUsageStore((state) => state.setAgentsLoading)
+  const setAgentsData = useUsageStore((state) => state.setAgentsData)
+  const setAgentsError = useUsageStore((state) => state.setAgentsError)
 
   const queryInput = useMemo<UsageSummaryQueryInput>(() => {
     if (appliedRange?.start && appliedRange?.end) {
@@ -41,6 +66,54 @@ export function UsageScreen() {
     }
     return {}
   }, [appliedRange])
+
+  const agentsQuery = useQuery({
+    queryKey: ['usage-agents'],
+    queryFn: ({ signal }) => fetchUsageAgents(signal),
+    refetchOnWindowFocus: false,
+  })
+
+  useEffect(() => {
+    if (agentsQuery.isPending) {
+      setAgentsLoading()
+    }
+  }, [agentsQuery.isPending, setAgentsLoading])
+
+  useEffect(() => {
+    if (agentsQuery.data) {
+      setAgentsData(agentsQuery.data.agents)
+    }
+  }, [agentsQuery.data, setAgentsData])
+
+  useEffect(() => {
+    if (agentsQuery.isError) {
+      const message = agentsQuery.error instanceof Error ? agentsQuery.error.message : 'Unable to load agents right now.'
+      setAgentsError(message)
+    }
+  }, [agentsQuery.error, agentsQuery.isError, setAgentsError])
+
+  useEffect(() => {
+    if (!agents.length) {
+      if (selectedAgentIds.size) {
+        setSelectedAgentIds(new Set())
+      }
+      return
+    }
+
+    const allowed = new Set(agents.map((agent: UsageAgent) => agent.id))
+    let changed = false
+    const next = new Set<string>()
+    for (const id of selectedAgentIds) {
+      if (allowed.has(id)) {
+        next.add(id)
+      } else {
+        changed = true
+      }
+    }
+    if (changed) {
+      setSelectedAgentIds(next)
+    }
+  }, [agents, selectedAgentIds])
 
   const summaryRange = useMemo<DateRangeValue | null>(() => {
     if (!summary) {
@@ -81,7 +154,7 @@ export function UsageScreen() {
     }
   }, [appliedRange, summaryRange])
 
-  const applyRange = (range: DateRangeValue, mode: SelectionMode) => {
+  const applyRange = useCallback((range: DateRangeValue, mode: SelectionMode) => {
     const nextRange = cloneRange(range)
     setAppliedRange(nextRange)
     setSelectionMode(mode)
@@ -91,9 +164,9 @@ export function UsageScreen() {
     if (mode === 'billing') {
       anchorDayRef.current = anchorDayRef.current ?? getAnchorDay(nextRange)
     }
-  }
+  }, [])
 
-  const handleShift = (direction: 'previous' | 'next') => {
+  const handleShift = useCallback((direction: 'previous' | 'next') => {
     if (!effectiveRange) {
       return
     }
@@ -120,35 +193,41 @@ export function UsageScreen() {
     const dayDelta = direction === 'next' ? length : -length
     const shifted = shiftCustomRangeByDays(effectiveRange, dayDelta)
     applyRange(shifted, 'custom')
-  }
+  }, [applyRange, effectiveRange, selectionMode])
 
-  const handleResetToCurrent = () => {
+  const handleResetToCurrent = useCallback(() => {
     if (!initialPeriodRef.current) {
       return
     }
     const anchorDay = anchorDayRef.current ?? getAnchorDay(initialPeriodRef.current)
     anchorDayRef.current = anchorDay
     applyRange(initialPeriodRef.current, 'billing')
-  }
+  }, [applyRange])
 
-  const handlePickerOpenChange = (open: boolean) => {
+  const handlePickerOpenChange = useCallback((open: boolean) => {
     setPickerOpen(open)
     if (!open) {
       setCalendarRange(null)
     }
-  }
+  }, [])
 
-  const handleCustomRangePress = () => {
-    setCalendarRange(effectiveRange ? cloneRange(effectiveRange) : null)
+  const handleCustomRangePress = useCallback(() => {
+    if (effectiveRange) {
+      setCalendarRange(cloneRange(effectiveRange))
+    }
     setPickerOpen(true)
-  }
+  }, [effectiveRange])
+
+  const handleAgentSelectionChange = useCallback((ids: Set<string>) => {
+    setSelectedAgentIds(new Set(ids))
+  }, [])
 
   const hasEffectiveRange = Boolean(effectiveRange)
   const hasInitialRange = Boolean(initialPeriodRef.current)
   const isCurrentSelection = Boolean(
     effectiveRange &&
-    initialPeriodRef.current &&
-    areRangesEqual(effectiveRange, initialPeriodRef.current),
+      initialPeriodRef.current &&
+      areRangesEqual(effectiveRange, initialPeriodRef.current),
   )
   const isViewingCurrentBilling = selectionMode === 'billing' && isCurrentSelection
 
@@ -176,8 +255,10 @@ export function UsageScreen() {
     }
   }, [summary, summaryStatus])
 
+  const selectedAgentArray = useMemo(() => Array.from(selectedAgentIds).sort(), [selectedAgentIds])
+
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-8 py-8">
+    <div className="mx-auto flex max-w-5xl flex-col gap-6 py-8">
       <header className="flex flex-col gap-3">
         <div>
           <h1 className="text-3xl font-semibold text-slate-900">Usage</h1>
@@ -202,16 +283,25 @@ export function UsageScreen() {
           isCurrentSelection={isCurrentSelection}
           isViewingCurrentBilling={isViewingCurrentBilling}
         />
+        <UsageAgentSelector
+          agents={agents}
+          status={agentsStatus}
+          errorMessage={agentsErrorMessage}
+          selectedAgentIds={selectedAgentIds}
+          onSelectionChange={handleAgentSelectionChange}
+        />
       </header>
 
-      <UsageMetricsGrid queryInput={queryInput}/>
       <UsageTrendSection
         trendMode={trendMode}
         onTrendModeChange={setTrendMode}
         effectiveRange={effectiveRange}
         fallbackRange={summaryRange}
         timezone={summary?.period.timezone}
+        agentIds={selectedAgentArray}
       />
+
+      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} />
 
       {summaryStatus === 'error' && summaryErrorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
