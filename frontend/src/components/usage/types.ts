@@ -83,6 +83,23 @@ export type UsageTrendResponse = {
 
 export type UsageTrendQueryInput = { mode: UsageTrendMode; from?: string; to?: string; agents?: string[] }
 
+export type UsageToolBreakdownTool = {
+  name: string
+  count: number
+}
+
+export type UsageToolBreakdownResponse = {
+  range: {
+    start: string
+    end: string
+  }
+  timezone: string
+  total: number
+  tools: UsageToolBreakdownTool[]
+}
+
+export type UsageToolBreakdownQueryInput = { from?: string; to?: string; agents?: string[] }
+
 export type PeriodInfo = {
   label: string
   value: string
@@ -96,6 +113,7 @@ export type TrendModeOption = {
 }
 
 export type TrendChartOption = EChartsOption
+export type ToolChartOption = EChartsOption
 
 export type UsageAgent = {
   id: string

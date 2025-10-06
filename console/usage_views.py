@@ -12,7 +12,7 @@ from django.views import View
 
 from billing.services import BillingService
 
-from api.models import BrowserUseAgent, BrowserUseAgentTask, TaskCredit
+from api.models import BrowserUseAgent, BrowserUseAgentTask, PersistentAgentToolCall, TaskCredit
 from console.context_helpers import build_console_context
 
 
@@ -41,6 +41,26 @@ def _format_period_label(start_date, end_date) -> str:
     return f"{start_label} – {end_label}"
 
 
+def _get_accessible_agents(request: HttpRequest, organization):
+    if organization is not None:
+        qs = BrowserUseAgent.objects.filter(persistent_agent__organization=organization)
+    else:
+        qs = BrowserUseAgent.objects.filter(user=request.user)
+    return list(qs.order_by("name"))
+
+
+def _filter_agent_ids(raw_values, accessible_ids: set[uuid.UUID]) -> list[uuid.UUID]:
+    filtered: list[uuid.UUID] = []
+    for raw in raw_values:
+        try:
+            candidate = uuid.UUID(raw)
+        except (TypeError, ValueError):
+            continue
+        if candidate in accessible_ids:
+            filtered.append(candidate)
+    return filtered
+
+
 class UsageSummaryAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
@@ -59,6 +79,8 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         requested_start = _parse_query_date(request.GET.get("from"))
         requested_end = _parse_query_date(request.GET.get("to"))
         agent_filters_raw = request.GET.getlist("agent")
+
+        accessible_agent_ids = {agent.id for agent in _get_accessible_agents(request, organization)}
 
         if requested_start and requested_end and requested_start <= requested_end:
             period_start, period_end = requested_start, requested_end
@@ -80,26 +102,9 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         else:
             filters["user"] = request.user
 
-        if agent_filters_raw:
-            agent_ids: list[uuid.UUID] = []
-            for raw in agent_filters_raw:
-                try:
-                    agent_ids.append(uuid.UUID(raw))
-                except (TypeError, ValueError):
-                    continue
-            if agent_ids:
-                if organization is not None:
-                    allowed_ids = set(
-                        BrowserUseAgent.objects.filter(persistent_agent__organization=organization)
-                        .values_list("id", flat=True)
-                    )
-                else:
-                    allowed_ids = set(
-                        BrowserUseAgent.objects.filter(user=request.user).values_list("id", flat=True)
-                    )
-                filtered_agent_ids = [agent_id for agent_id in agent_ids if agent_id in allowed_ids]
-                if filtered_agent_ids:
-                    filters["agent_id__in"] = filtered_agent_ids
+        filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
+        if filtered_agent_ids:
+            filters["agent_id__in"] = filtered_agent_ids
 
         tasks_qs = BrowserUseAgentTask.objects.filter(**filters)
 
@@ -197,14 +202,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
         tz = timezone.get_current_timezone()
         tz_name = timezone.get_current_timezone_name()
 
-        if organization is not None:
-            accessible_agents_qs = BrowserUseAgent.objects.filter(
-                persistent_agent__organization=organization
-            )
-        else:
-            accessible_agents_qs = BrowserUseAgent.objects.filter(user=request.user)
-
-        accessible_agents = list(accessible_agents_qs.order_by("name"))
+        accessible_agents = _get_accessible_agents(request, organization)
         accessible_agent_ids = {agent.id for agent in accessible_agents}
 
         anchor_end_date = requested_end or timezone.now().date()
@@ -242,13 +240,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
         else:
             base_filters["user"] = request.user
 
-        agent_ids: list[uuid.UUID] = []
-        for raw in agent_filters_raw:
-            try:
-                agent_ids.append(uuid.UUID(raw))
-            except (TypeError, ValueError):
-                continue
-        filtered_agent_ids = [agent_id for agent_id in agent_ids if agent_id in accessible_agent_ids]
+        filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
         if filtered_agent_ids:
             base_filters["agent_id__in"] = filtered_agent_ids
 
@@ -338,6 +330,77 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 for agent in active_agents
             ],
             "buckets": buckets,
+        }
+
+        return JsonResponse(payload)
+
+
+class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        resolved = build_console_context(request)
+
+        organization = None
+
+        if resolved.current_context.type == "organization" and resolved.current_membership:
+            organization = resolved.current_membership.org
+
+        requested_start = _parse_query_date(request.GET.get("from"))
+        requested_end = _parse_query_date(request.GET.get("to"))
+        agent_filters_raw = request.GET.getlist("agent")
+
+        owner = organization if organization is not None else request.user
+
+        if requested_start and requested_end and requested_start <= requested_end:
+            period_start, period_end = requested_start, requested_end
+        else:
+            period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
+
+        tz = timezone.get_current_timezone()
+        tz_name = timezone.get_current_timezone_name()
+        start_dt = timezone.make_aware(datetime.combine(period_start, time.min), tz)
+        end_dt = timezone.make_aware(datetime.combine(period_end, time.max), tz)
+
+        accessible_agent_ids = {agent.id for agent in _get_accessible_agents(request, organization)}
+        filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
+
+        filters = {
+            "step__created_at__gte": start_dt,
+            "step__created_at__lte": end_dt,
+        }
+
+        if organization is not None:
+            filters["step__agent__organization"] = organization
+        else:
+            filters["step__agent__user"] = request.user
+
+        if filtered_agent_ids:
+            filters["step__agent__browser_use_agent_id__in"] = filtered_agent_ids
+
+        tool_rows = list(
+            PersistentAgentToolCall.objects.filter(**filters)
+            .values("tool_name")
+            .annotate(count=Count("tool_name"))
+            .order_by("-count")
+        )
+
+        total = sum(row["count"] for row in tool_rows)
+
+        payload = {
+            "range": {
+                "start": start_dt.isoformat(),
+                "end": end_dt.isoformat(),
+            },
+            "timezone": tz_name,
+            "total": total,
+            "tools": [
+                {
+                    "name": (row["tool_name"] or ""),
+                    "count": row["count"],
+                }
+                for row in tool_rows
+            ],
         }
 
         return JsonResponse(payload)
