@@ -5,6 +5,7 @@ import './index.css'
 import './styles/consoleShell.css'
 import { AgentChatPage } from './screens/AgentChatPage'
 import { DiagnosticsScreen } from './screens/DiagnosticsScreen'
+import { UsageScreen } from './screens/UsageScreen'
 
 const mountNode = document.getElementById('gobii-frontend-root')
 
@@ -28,6 +29,9 @@ switch (appName) {
     break
   case 'diagnostics':
     screen = <DiagnosticsScreen />
+    break
+  case 'usage':
+    screen = <UsageScreen />
     break
   default:
     throw new Error(`Unsupported console React app: ${appName}`)

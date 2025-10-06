@@ -138,6 +138,14 @@
               Billing
           </a>
           {% endif %}
+          <a href="{% url 'usage' %}"
+             class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'usage' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
+            <svg class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'usage' %}text-blue-600{% else %}text-gray-500{% endif %}"
+                 xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 18h16M6 16l3-7 4 4 3-5 2 3" />
+            </svg>
+            Usage
+          </a>
           {% if current_context.type == 'organization' and current_context.id %}
             <a href="{% url 'organization_detail' org_id=current_context.id %}"
                class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'organization_detail' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">

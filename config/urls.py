@@ -24,6 +24,7 @@ from console.views import (
     BillingView,
     PersistentAgentsView,
     ConsoleDiagnosticsView,
+    ConsoleUsageView,
     PersistentAgentChatShellView,
     AgentCreateContactView,
     AgentDetailView,
@@ -87,6 +88,7 @@ urlpatterns = [
     # console
     path("console/", ConsoleHome.as_view(), name="console-home"),
     path("console/diagnostics/", ConsoleDiagnosticsView.as_view(), name="console_diagnostics"),
+    path("console/usage/", ConsoleUsageView.as_view(), name="usage"),
     path("console/switch-context/", SwitchContextView.as_view(), name="switch_context"),
     path("console/api-keys/", ApiKeyListView.as_view(), name="api_keys"),
     path("console/api-keys/blank-form/", ApiKeyBlankFormView.as_view(), name="api_key_blank_form"),
