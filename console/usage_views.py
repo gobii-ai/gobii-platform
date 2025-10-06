@@ -1,10 +1,10 @@
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, DecimalField, Sum, Value
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncDay, TruncHour
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 from django.views import View
@@ -13,6 +13,15 @@ from billing.services import BillingService
 
 from api.models import BrowserUseAgentTask, TaskCredit
 from console.context_helpers import build_console_context
+
+
+def _parse_query_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
 def _format_period_label(start_date, end_date) -> str:
@@ -45,14 +54,6 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             organization = resolved.current_membership.org
             owner = organization
             owner_context_type = "organization"
-
-        def _parse_query_date(value: str | None) -> date | None:
-            if not value:
-                return None
-            try:
-                return datetime.strptime(value, "%Y-%m-%d").date()
-            except ValueError:
-                return None
 
         requested_start = _parse_query_date(request.GET.get("from"))
         requested_end = _parse_query_date(request.GET.get("to"))
@@ -146,6 +147,115 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                     "used_pct": quota_used_pct,
                 },
             },
+        }
+
+        return JsonResponse(payload)
+
+
+class UsageTrendAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        resolved = build_console_context(request)
+
+        organization = None
+
+        if resolved.current_context.type == "organization" and resolved.current_membership:
+            organization = resolved.current_membership.org
+
+        requested_start = _parse_query_date(request.GET.get("from"))
+        requested_end = _parse_query_date(request.GET.get("to"))
+        mode = request.GET.get("mode", "week")
+
+        if mode not in {"day", "week", "month"}:
+            return JsonResponse({"error": "Invalid mode."}, status=400)
+
+        tz = timezone.get_current_timezone()
+        tz_name = timezone.get_current_timezone_name()
+
+        anchor_end_date = requested_end or timezone.now().date()
+        if requested_start and anchor_end_date < requested_start:
+            anchor_end_date = requested_start
+
+        if mode == "day":
+            current_start_date = anchor_end_date
+            current_end_date = anchor_end_date
+            step = timedelta(hours=1)
+            current_start_dt = timezone.make_aware(datetime.combine(current_start_date, time.min), tz)
+            current_end_dt = current_start_dt + timedelta(days=1)
+        else:
+            lookback_days = 6 if mode == "week" else 29
+            candidate_start = anchor_end_date - timedelta(days=lookback_days)
+            if requested_start and candidate_start < requested_start:
+                candidate_start = requested_start
+
+            current_start_date = candidate_start
+            current_end_date = anchor_end_date
+            step = timedelta(days=1)
+            current_start_dt = timezone.make_aware(datetime.combine(current_start_date, time.min), tz)
+            current_end_dt = timezone.make_aware(datetime.combine(current_end_date + timedelta(days=1), time.min), tz)
+
+        current_duration = current_end_dt - current_start_dt
+        previous_end_dt = current_start_dt
+        previous_start_dt = previous_end_dt - current_duration
+
+        base_filters = {
+            "is_deleted": False,
+        }
+
+        if organization is not None:
+            base_filters["organization"] = organization
+        else:
+            base_filters["user"] = request.user
+
+        trunc_function = TruncHour if step == timedelta(hours=1) else TruncDay
+
+        def _build_counts(start_dt: datetime, end_dt: datetime) -> dict[str, int]:
+            filters = base_filters | {
+                "created_at__gte": start_dt,
+                "created_at__lt": end_dt,
+            }
+            rows = (
+                BrowserUseAgentTask.objects.filter(**filters)
+                .annotate(bucket=trunc_function("created_at", tzinfo=tz))
+                .values("bucket")
+                .order_by("bucket")
+                .annotate(count=Count("id"))
+            )
+            return {row["bucket"].isoformat(): row["count"] for row in rows}
+
+        current_counts = _build_counts(current_start_dt, current_end_dt)
+        previous_counts = _build_counts(previous_start_dt, previous_end_dt)
+
+        buckets: list[dict[str, object]] = []
+        current_cursor = current_start_dt
+        previous_cursor = previous_start_dt
+        while current_cursor < current_end_dt:
+            current_key = current_cursor.isoformat()
+            previous_key = previous_cursor.isoformat()
+            buckets.append(
+                {
+                    "timestamp": current_key,
+                    "current": current_counts.get(current_key, 0),
+                    "previous": previous_counts.get(previous_key, 0),
+                }
+            )
+            current_cursor += step
+            previous_cursor += step
+
+        payload = {
+            "mode": mode,
+            "resolution": "hour" if step == timedelta(hours=1) else "day",
+            "timezone": tz_name,
+            "current_period": {
+                "start": current_start_dt.isoformat(),
+                "end": current_end_dt.isoformat(),
+            },
+            "previous_period": {
+                "start": previous_start_dt.isoformat(),
+                "end": previous_end_dt.isoformat(),
+            },
+            "buckets": buckets,
         }
 
         return JsonResponse(payload)
