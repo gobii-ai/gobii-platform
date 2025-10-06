@@ -4,18 +4,24 @@ import type { ToolCallEntry } from '../agentChat/types'
 import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooling/types'
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
 
-export const SKIP_TOOL_NAMES = new Set([
+const COMMUNICATION_TOOL_NAMES = [
   'send_email',
   'send_sms',
   'send_web_message',
   'send_chat_message',
   'send_agent_message',
-  'sleep',
-  'sleep_until_next_trigger',
-  'action',
-  '',
-  null,
+] as const
+
+const BASE_SKIP_TOOL_NAMES = ['sleep', 'sleep_until_next_trigger', 'action', '', null] as const
+
+export const CHAT_SKIP_TOOL_NAMES = new Set<string | null>([
+  ...COMMUNICATION_TOOL_NAMES,
+  ...BASE_SKIP_TOOL_NAMES,
 ])
+
+export const USAGE_SKIP_TOOL_NAMES = new Set<string | null>(BASE_SKIP_TOOL_NAMES)
+
+export const SKIP_TOOL_NAMES = CHAT_SKIP_TOOL_NAMES
 
 export type ToolMetadataConfig = {
   name: string
@@ -240,6 +246,155 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       return {
         caption: caption ?? entry.caption ?? 'Contact permission',
         summary: summaryPieces.length ? summaryPieces.join(' • ') : entry.summary ?? null,
+      }
+    },
+  },
+  {
+    name: 'send_email',
+    label: 'Email sent',
+    iconPaths: [
+      'M3 8l9 6 9-6',
+      'M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+    ],
+    iconBgClass: 'bg-blue-100',
+    iconColorClass: 'text-blue-600',
+    detailKind: 'default',
+    derive(entry, parameters) {
+      const subject = coerceString(parameters?.['subject'])
+      const toAddress = coerceString(parameters?.['to_address']) || coerceString(parameters?.['to'])
+      const ccRaw = parameters?.['cc_addresses']
+      const ccEntries = Array.isArray(ccRaw)
+        ? (ccRaw as unknown[])
+            .map((value) => coerceString(value))
+            .filter((value): value is string => Boolean(value))
+        : []
+
+      const summaryParts: string[] = []
+      if (toAddress) {
+        summaryParts.push(`To ${toAddress}`)
+      }
+      if (ccEntries.length) {
+        summaryParts.push(`CC ${ccEntries.join(', ')}`)
+      }
+
+      const caption = subject ? truncate(subject, 56) : toAddress ? `Email to ${truncate(toAddress, 42)}` : null
+      const summaryText = summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null
+
+      return {
+        caption: caption ?? entry.caption ?? 'Email sent',
+        summary: summaryText,
+      }
+    },
+  },
+  {
+    name: 'send_sms',
+    label: 'SMS sent',
+    iconPaths: [
+      'M20 4H4a2 2 0 00-2 2v9a2 2 0 002 2h4l4 4 4-4h4a2 2 0 002-2V6a2 2 0 00-2-2z',
+      'M7 9h10',
+      'M7 13h6',
+    ],
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-600',
+    detailKind: 'default',
+    derive(entry, parameters) {
+      const toNumber = coerceString(parameters?.['to_number'])
+      const body = coerceString(parameters?.['body'])
+
+      const caption = body ? truncate(body, 56) : toNumber ? `SMS to ${truncate(toNumber, 42)}` : null
+      const summaryParts: string[] = []
+      if (toNumber) {
+        summaryParts.push(`To ${toNumber}`)
+      }
+
+      const ccRaw = parameters?.['cc_numbers']
+      const ccList = Array.isArray(ccRaw)
+        ? (ccRaw as unknown[])
+            .map((value) => coerceString(value))
+            .filter((value): value is string => Boolean(value))
+        : []
+      if (ccList.length) {
+        summaryParts.push(`CC ${ccList.join(', ')}`)
+      }
+
+      return {
+        caption: caption ?? entry.caption ?? 'SMS sent',
+        summary: summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null,
+      }
+    },
+  },
+  {
+    name: 'send_web_message',
+    label: 'Web message sent',
+    iconPaths: [
+      'M4 6h16v9a2 2 0 01-2 2H9l-5 4V6z',
+      'M8 10h8',
+      'M8 13h5',
+    ],
+    iconBgClass: 'bg-violet-100',
+    iconColorClass: 'text-violet-600',
+    detailKind: 'default',
+    derive(entry, parameters) {
+      const body = coerceString(parameters?.['body']) || coerceString(parameters?.['message'])
+      const recipient =
+        coerceString(parameters?.['to_address']) ||
+        coerceString(parameters?.['to']) ||
+        coerceString(parameters?.['recipient'])
+
+      const caption = body ? truncate(body, 56) : recipient ? `Web message to ${truncate(recipient, 42)}` : null
+      const summary = recipient ? truncate(`To ${recipient}`, 96) : entry.summary ?? null
+
+      return {
+        caption: caption ?? entry.caption ?? 'Web message sent',
+        summary,
+      }
+    },
+  },
+  {
+    name: 'send_chat_message',
+    label: 'Chat message sent',
+    iconPaths: [
+      'M5 5h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-4 4v-4H5a2 2 0 01-2-2V7a2 2 0 012-2z',
+      'M8 9h8',
+      'M8 12h5',
+    ],
+    iconBgClass: 'bg-sky-100',
+    iconColorClass: 'text-sky-600',
+    detailKind: 'default',
+    derive(entry, parameters) {
+      const body = coerceString(parameters?.['body'])
+      const toAddress = coerceString(parameters?.['to_address'])
+
+      const caption = body ? truncate(body, 56) : toAddress ? `Chat to ${truncate(toAddress, 42)}` : null
+      const summary = toAddress ? truncate(`To ${toAddress}`, 96) : entry.summary ?? null
+
+      return {
+        caption: caption ?? entry.caption ?? 'Chat message sent',
+        summary,
+      }
+    },
+  },
+  {
+    name: 'send_agent_message',
+    label: 'Peer message sent',
+    iconPaths: [
+      'M3 5a2 2 0 012-2h6l3 3h5a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V5z',
+      'M8 11h8',
+      'M8 14h5',
+    ],
+    iconBgClass: 'bg-amber-100',
+    iconColorClass: 'text-amber-600',
+    detailKind: 'default',
+    derive(entry, parameters) {
+      const peerId = coerceString(parameters?.['peer_agent_id'])
+      const message = coerceString(parameters?.['message'])
+
+      const caption = message ? truncate(message, 56) : peerId ? `Message to ${truncate(peerId, 42)}` : null
+      const summary = peerId ? truncate(`Peer agent ${peerId}`, 96) : entry.summary ?? null
+
+      return {
+        caption: caption ?? entry.caption ?? 'Peer message sent',
+        summary,
       }
     },
   },

@@ -7,7 +7,7 @@ import type {
   ToolEntryDisplay,
 } from './types'
 import {
-  SKIP_TOOL_NAMES,
+  CHAT_SKIP_TOOL_NAMES,
   buildToolDescriptorMap,
   coerceString,
   truncate,
@@ -31,7 +31,7 @@ function deriveCaptionFallback(entry: ToolCallEntry, parameters: Record<string, 
 function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay | null {
   const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
   const normalizedName = (toolName || '').toLowerCase()
-  if (SKIP_TOOL_NAMES.has(normalizedName as string)) {
+  if (CHAT_SKIP_TOOL_NAMES.has(normalizedName as string)) {
     return null
   }
 

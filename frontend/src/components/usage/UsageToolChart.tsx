@@ -13,7 +13,7 @@ import type {
   UsageToolBreakdownResponse,
 } from './types'
 import { fetchUsageToolBreakdown } from './api'
-import { getSharedToolMetadata, SKIP_TOOL_NAMES } from '../tooling/toolMetadata'
+import { getSharedToolMetadata, USAGE_SKIP_TOOL_NAMES } from '../tooling/toolMetadata'
 
 echarts.use([PieChart, LegendComponent, TooltipComponent, CanvasRenderer])
 
@@ -90,7 +90,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
       const rawName = entry.name ?? ''
       const normalized = rawName.toLowerCase()
       const metadata = getSharedToolMetadata(rawName)
-      const shouldSkip = SKIP_TOOL_NAMES.has(normalized) || metadata.skip
+      const shouldSkip = USAGE_SKIP_TOOL_NAMES.has(normalized) || metadata.skip
 
       if (shouldSkip) {
         otherCount += entry.count
@@ -240,4 +240,3 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
 }
 
 export type { UsageToolChartProps }
-
