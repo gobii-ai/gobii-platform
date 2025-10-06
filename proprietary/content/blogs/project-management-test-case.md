@@ -22,7 +22,7 @@ What followed was an illuminating real-world test of how AI employees can transf
 
 ## The Challenge: A Complex Third Renovation
 
-Grace and her husband Abe were embarking on their third—and most complex—home renovation. Unlike their previous projects, this one involved intricate financing decisions, multiple construction phases, selling their current home to fund the work, and navigating a maze of expiring energy rebates.
+Grace and her husband were embarking on their third—and most complex—home renovation. Unlike their previous projects, this one involved intricate financing decisions, multiple construction phases, selling their current home to fund the work, and navigating a maze of expiring energy rebates.
 
 "This is probably our most complex renovation in terms of how we're financing it and the different phases," Grace explained during a feedback session with Gobii's team. "There are a lot of different decision points—like how we can break this up so that we can afford the renovation as a whole."
 
@@ -55,7 +55,7 @@ These AI employees can:
 
 ### Validating Complex Decisions
 
-Grace and Abe had already spent considerable time thinking through their renovation approach when Horus joined the project. Rather than feeling redundant, the AI employee became a valuable sounding board.
+Grace had already spent considerable time thinking through their renovation approach when Horus joined the project. Rather than feeling redundant, the AI employee became a valuable sounding board.
 
 "Horus's research and recommendations aligned with our thinking," Grace noted. "That helped give us confidence in the approach we were taking. If we hadn't already spent so much time thinking through our options, I think Horus would have helped us narrow things down and steer us in a direction."
 
@@ -63,7 +63,7 @@ For couples tackling major projects, this validation function is surprisingly va
 
 ### Navigating the Energy Rebate Maze
 
-One of Horus's most practical contributions involved expiring energy rebates. With a September 30th deadline approaching and multiple appliances to replace, Grace and Abe needed to understand what was available and make purchasing decisions quickly.
+One of Horus's most practical contributions involved expiring energy rebates. With a September 30th deadline approaching and multiple appliances to replace, Grace needed to understand what was available and make purchasing decisions quickly.
 
 "He gave us a summary of what's available and what we should replace," Grace said. "Then he offered to help evaluate the estimates, specifically for the heat pump water heater."
 
@@ -71,7 +71,7 @@ When they received quotes that seemed unusually high, they asked Horus to invest
 
 ### Professional Communication, Instantly
 
-Armed with this research, Grace and Abe wanted to alert the energy rebate organization about the pricing trend they'd observed. This is exactly the kind of task that often gets postponed—important but not urgent, requiring careful wording and attention you don't have at the end of a long day.
+Armed with this research, Grace wanted to alert the energy rebate organization about the pricing trend they'd observed. This is exactly the kind of task that often gets postponed—important but not urgent, requiring careful wording and attention you don't have at the end of a long day.
 
 "We asked him to draft an email," Grace said. "When things don't require a personal voice—when it's business or professional—Horus does a great job setting the right tone and summarizing what you're trying to say. He turned it around instantly, which was really helpful."
 
