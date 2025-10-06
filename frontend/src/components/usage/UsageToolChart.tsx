@@ -14,6 +14,7 @@ import type {
 } from './types'
 import { fetchUsageToolBreakdown } from './api'
 import { getSharedToolMetadata, USAGE_SKIP_TOOL_NAMES } from '../tooling/toolMetadata'
+import type { TopLevelFormatterParams } from 'echarts/types/dist/shared'
 
 echarts.use([PieChart, LegendComponent, TooltipComponent, CanvasRenderer])
 
@@ -135,10 +136,30 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
     return {
       tooltip: {
         trigger: 'item',
-        formatter: ({ name, value, percent }) => {
-          const count = typeof value === 'number' ? value : Number(value)
-          const pct = typeof percent === 'number' ? percent : Number(percent)
-          return `${name}<br />${numberFormatter.format(count)} tasks (${pct.toFixed(1)}%)`
+        formatter: (params: TopLevelFormatterParams) => {
+          const detail = Array.isArray(params) ? params[0] : params
+          if (!detail) {
+            return ''
+          }
+
+          const { name, value: rawValue, percent: rawPercent } = detail
+
+          const count = typeof rawValue === 'number' ? rawValue : Number(rawValue ?? 0)
+          const percentValue =
+            typeof rawPercent === 'number' ? rawPercent : Number(rawPercent ?? 0)
+
+          const safeCount = Number.isFinite(count) ? count : 0
+          const safePercent = Number.isFinite(percentValue) ? percentValue : 0
+
+          const formattedCount = numberFormatter.format(safeCount)
+          const label =
+            typeof name === 'string' && name.length
+              ? name
+              : name != null
+              ? String(name)
+              : 'Tool'
+
+          return `${label}<br />${formattedCount} tasks (${safePercent.toFixed(1)}%)`
         },
       },
       legend: {
