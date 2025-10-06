@@ -39,7 +39,7 @@ export function UsageScreen() {
   const [calendarRange, setCalendarRange] = useState<DateRangeValue | null>(null)
   const [isPickerOpen, setPickerOpen] = useState(false)
   const [selectionMode, setSelectionMode] = useState<SelectionMode>('billing')
-  const [trendMode, setTrendMode] = useState<UsageTrendMode>('week')
+  const [trendMode, setTrendMode] = useState<UsageTrendMode>('month')
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set())
 
   const initialPeriodRef = useRef<DateRangeValue | null>(null)
@@ -292,6 +292,8 @@ export function UsageScreen() {
         />
       </header>
 
+      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} />
+
       <UsageTrendSection
         trendMode={trendMode}
         onTrendModeChange={setTrendMode}
@@ -300,8 +302,6 @@ export function UsageScreen() {
         timezone={summary?.period.timezone}
         agentIds={selectedAgentArray}
       />
-
-      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} />
 
       {summaryStatus === 'error' && summaryErrorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
