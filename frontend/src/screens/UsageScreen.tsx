@@ -1,9 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { parseDate } from '@internationalized/date'
+import {useEffect, useMemo, useRef, useState} from 'react'
+import {parseDate} from '@internationalized/date'
 
-import { UsagePeriodHeader, UsageTrendSection, UsageMetricsGrid, useUsageStore } from '../components/usage'
-import type { DateRangeValue, PeriodInfo, UsageSummaryQueryInput, UsageTrendMode } from '../components/usage'
-import { cloneRange, areRangesEqual, getRangeLengthInDays, getAnchorDay, shiftBillingRange, shiftCustomRangeByDays } from '../components/usage/utils'
+import {UsagePeriodHeader, UsageTrendSection, UsageMetricsGrid, useUsageStore} from '../components/usage'
+import type {DateRangeValue, PeriodInfo, UsageSummaryQueryInput, UsageTrendMode} from '../components/usage'
+import {
+  cloneRange,
+  areRangesEqual,
+  getRangeLengthInDays,
+  getAnchorDay,
+  shiftBillingRange,
+  shiftCustomRangeByDays
+} from '../components/usage/utils'
 
 type SelectionMode = 'billing' | 'custom'
 
@@ -17,7 +24,7 @@ export function UsageScreen() {
   const [calendarRange, setCalendarRange] = useState<DateRangeValue | null>(null)
   const [isPickerOpen, setPickerOpen] = useState(false)
   const [selectionMode, setSelectionMode] = useState<SelectionMode>('billing')
-  const [trendMode, setTrendMode] = useState<UsageTrendMode>('week')
+  const [trendMode, setTrendMode] = useState<UsageTrendMode>('month')
   const initialPeriodRef = useRef<DateRangeValue | null>(null)
   const anchorDayRef = useRef<number | null>(null)
 
@@ -140,8 +147,8 @@ export function UsageScreen() {
   const hasInitialRange = Boolean(initialPeriodRef.current)
   const isCurrentSelection = Boolean(
     effectiveRange &&
-      initialPeriodRef.current &&
-      areRangesEqual(effectiveRange, initialPeriodRef.current),
+    initialPeriodRef.current &&
+    areRangesEqual(effectiveRange, initialPeriodRef.current),
   )
   const isViewingCurrentBilling = selectionMode === 'billing' && isCurrentSelection
 
@@ -197,6 +204,7 @@ export function UsageScreen() {
         />
       </header>
 
+      <UsageMetricsGrid queryInput={queryInput}/>
       <UsageTrendSection
         trendMode={trendMode}
         onTrendModeChange={setTrendMode}
@@ -204,8 +212,6 @@ export function UsageScreen() {
         fallbackRange={summaryRange}
         timezone={summary?.period.timezone}
       />
-
-      <UsageMetricsGrid queryInput={queryInput} />
 
       {summaryStatus === 'error' && summaryErrorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

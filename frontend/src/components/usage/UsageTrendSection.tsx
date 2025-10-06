@@ -228,8 +228,15 @@ export function UsageTrendSection({
           <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading trends…</div>
         ) : isTrendError && trendErrorMessage ? (
           <div className="flex h-full items-center justify-center text-sm text-red-600">{trendErrorMessage}</div>
-        ) : chartOption && hasData ? (
-          <ReactEChartsCore echarts={echarts} option={chartOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }} />
+        ) : chartOption ? (
+          <div className="flex h-full flex-col">
+            <div className="flex-1">
+              <ReactEChartsCore echarts={echarts} option={chartOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }} />
+            </div>
+            {!hasData ? (
+              <div className="mt-2 text-center text-xs text-slate-400">{emptyMessage}</div>
+            ) : null}
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-slate-400">
             {emptyMessage}
