@@ -1,6 +1,7 @@
 import 'vite/modulepreload-polyfill'
 import { StrictMode, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
 import './styles/consoleShell.css'
 import { AgentChatPage } from './screens/AgentChatPage'
@@ -37,4 +38,10 @@ switch (appName) {
     throw new Error(`Unsupported console React app: ${appName}`)
 }
 
-createRoot(mountNode).render(<StrictMode>{screen}</StrictMode>)
+const queryClient = new QueryClient()
+
+createRoot(mountNode).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>{screen}</QueryClientProvider>
+  </StrictMode>,
+)

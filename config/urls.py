@@ -14,6 +14,7 @@ from console.api_views import (
     AgentWebSessionHeartbeatAPIView,
     AgentWebSessionStartAPIView,
 )
+from console.usage_views import UsageSummaryAPIView
 from console.views import (
     ConsoleHome,
     ApiKeyListView,
@@ -111,6 +112,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/web-sessions/start/", AgentWebSessionStartAPIView.as_view(), name="console_agent_web_session_start"),
     path("console/api/agents/<uuid:agent_id>/web-sessions/heartbeat/", AgentWebSessionHeartbeatAPIView.as_view(), name="console_agent_web_session_heartbeat"),
     path("console/api/agents/<uuid:agent_id>/web-sessions/end/", AgentWebSessionEndAPIView.as_view(), name="console_agent_web_session_end"),
+    path("console/api/usage/summary/", UsageSummaryAPIView.as_view(), name="console_usage_summary"),
     path("console/agents/create/contact/", AgentCreateContactView.as_view(), name="agent_create_contact"),
     path("console/agents/<uuid:pk>/", AgentDetailView.as_view(), name="agent_detail"),
     path("console/agents/<uuid:pk>/welcome/", AgentWelcomeView.as_view(), name="agent_welcome"),
