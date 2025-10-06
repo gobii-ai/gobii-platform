@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Button as AriaButton,
@@ -66,6 +66,51 @@ type DateRangeValue = { start: DateValue; end: DateValue }
 
 type UsageSummaryQueryInput = { from?: string; to?: string }
 type UsageSummaryQueryKey = ['usage-summary', UsageSummaryQueryInput]
+type SelectionMode = 'billing' | 'custom'
+
+const cloneRange = (range: DateRangeValue): DateRangeValue => ({
+  start: range.start.copy(),
+  end: range.end.copy(),
+})
+
+const areRangesEqual = (a: DateRangeValue, b: DateRangeValue): boolean =>
+  a.start.compare(b.start) === 0 && a.end.compare(b.end) === 0
+
+const getRangeLengthInDays = (range: DateRangeValue): number => {
+  const startJulian = range.start.calendar.toJulianDay(range.start)
+  const endJulian = range.end.calendar.toJulianDay(range.end)
+  return endJulian - startJulian + 1
+}
+
+const setDayWithClamp = (date: DateValue, day: number): DateValue => {
+  const maxDay = date.calendar.getDaysInMonth(date)
+  return date.set({ day: Math.min(day, maxDay) })
+}
+
+const getAnchorDay = (range: DateRangeValue): number => {
+  const nextStart = range.end.add({ days: 1 })
+  return Math.max(range.start.day, nextStart.day)
+}
+
+const computeBillingRangeFromStart = (start: DateValue, anchorDay: number): DateRangeValue => {
+  const normalizedStart = setDayWithClamp(start, anchorDay)
+  const nextStart = setDayWithClamp(normalizedStart.add({ months: 1 }), anchorDay)
+  const normalizedEnd = nextStart.subtract({ days: 1 })
+  return {
+    start: normalizedStart,
+    end: normalizedEnd,
+  }
+}
+
+const shiftBillingRange = (range: DateRangeValue, anchorDay: number, months: number): DateRangeValue => {
+  const shiftedStart = setDayWithClamp(range.start.add({ months }), anchorDay)
+  return computeBillingRangeFromStart(shiftedStart, anchorDay)
+}
+
+const shiftCustomRangeByDays = (range: DateRangeValue, days: number): DateRangeValue => ({
+  start: range.start.add({ days }),
+  end: range.end.add({ days }),
+})
 
 const metricDefinitions: MetricDefinition[] = [
   {
@@ -121,6 +166,9 @@ export function UsageScreen() {
   const [appliedRange, setAppliedRange] = useState<DateRangeValue | null>(null)
   const [calendarRange, setCalendarRange] = useState<DateRangeValue | null>(null)
   const [isPickerOpen, setPickerOpen] = useState(false)
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('billing')
+  const initialPeriodRef = useRef<DateRangeValue | null>(null)
+  const anchorDayRef = useRef<number | null>(null)
 
   const queryInput = useMemo<UsageSummaryQueryInput>(() => {
     if (appliedRange?.start && appliedRange?.end) {
@@ -145,14 +193,103 @@ export function UsageScreen() {
     refetchOnWindowFocus: false,
   })
 
-  useEffect(() => {
-    if (summary && !appliedRange) {
-      setAppliedRange({
-        start: parseDate(summary.period.start),
-        end: parseDate(summary.period.end),
-      })
+  const summaryRange = useMemo<DateRangeValue | null>(() => {
+    if (!summary) {
+      return null
     }
-  }, [appliedRange, summary])
+    return {
+      start: parseDate(summary.period.start),
+      end: parseDate(summary.period.end),
+    }
+  }, [summary])
+
+  const effectiveRange = useMemo<DateRangeValue | null>(() => {
+    if (appliedRange) {
+      return appliedRange
+    }
+    if (summaryRange) {
+      return summaryRange
+    }
+    return null
+  }, [appliedRange, summaryRange])
+
+  useEffect(() => {
+    if (!summaryRange) {
+      return
+    }
+
+    if (!initialPeriodRef.current) {
+      initialPeriodRef.current = cloneRange(summaryRange)
+    }
+
+    if (anchorDayRef.current == null) {
+      anchorDayRef.current = getAnchorDay(summaryRange)
+    }
+
+    if (!appliedRange) {
+      setAppliedRange(cloneRange(summaryRange))
+      setSelectionMode('billing')
+    }
+  }, [summaryRange, appliedRange])
+
+  const applyRange = (range: DateRangeValue, mode: SelectionMode) => {
+    const nextRange = cloneRange(range)
+    setAppliedRange(nextRange)
+    setSelectionMode(mode)
+    setCalendarRange(null)
+    setPickerOpen(false)
+
+    if (mode === 'billing') {
+      anchorDayRef.current = anchorDayRef.current ?? getAnchorDay(nextRange)
+    }
+  }
+
+  const handleShift = (direction: 'previous' | 'next') => {
+    if (!effectiveRange) {
+      return
+    }
+
+    if (
+      direction === 'next' &&
+      selectionMode === 'billing' &&
+      initialPeriodRef.current &&
+      areRangesEqual(effectiveRange, initialPeriodRef.current)
+    ) {
+      return
+    }
+
+    if (selectionMode === 'billing') {
+      const anchorDay = anchorDayRef.current ?? getAnchorDay(effectiveRange)
+      anchorDayRef.current = anchorDay
+      const monthDelta = direction === 'next' ? 1 : -1
+      const shifted = shiftBillingRange(effectiveRange, anchorDay, monthDelta)
+      applyRange(shifted, 'billing')
+      return
+    }
+
+    const length = getRangeLengthInDays(effectiveRange)
+    const dayDelta = direction === 'next' ? length : -length
+    const shifted = shiftCustomRangeByDays(effectiveRange, dayDelta)
+    applyRange(shifted, 'custom')
+  }
+
+  const handleResetToCurrent = () => {
+    if (!initialPeriodRef.current) {
+      return
+    }
+    const anchorDay = anchorDayRef.current ?? getAnchorDay(initialPeriodRef.current)
+    anchorDayRef.current = anchorDay
+    applyRange(initialPeriodRef.current, 'billing')
+  }
+
+  const hasEffectiveRange = Boolean(effectiveRange)
+  const hasInitialRange = Boolean(initialPeriodRef.current)
+  const isCurrentSelection = Boolean(
+    effectiveRange &&
+      initialPeriodRef.current &&
+      areRangesEqual(effectiveRange, initialPeriodRef.current),
+  )
+  const isViewingCurrentBilling = selectionMode === 'billing' && isCurrentSelection
 
   const integerFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }), [])
   const creditFormatter = useMemo(
@@ -282,64 +419,88 @@ export function UsageScreen() {
             <span className="text-xs text-slate-500">{periodInfo.caption}</span>
           </div>
           <div className="h-10 w-px bg-slate-200" aria-hidden="true" />
-          <DialogTrigger
-            isOpen={isPickerOpen}
-            onOpenChange={(open) => {
-              setPickerOpen(open)
-              if (!open) {
-                setCalendarRange(null)
-              }
-            }}
-          >
-            <AriaButton
-              className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-700"
-              onPress={() => {
-                setCalendarRange(appliedRange)
-                setPickerOpen(true)
+          <div className="flex flex-1 flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <AriaButton
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300"
+                isDisabled={!hasEffectiveRange}
+                onPress={() => handleShift('previous')}
+              >
+                ‹ Previous
+              </AriaButton>
+              <AriaButton
+                className="rounded-md border border-transparent bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300"
+                isDisabled={!hasInitialRange || isCurrentSelection}
+                onPress={handleResetToCurrent}
+              >
+                Current period
+              </AriaButton>
+              <AriaButton
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300"
+                isDisabled={!hasEffectiveRange || isViewingCurrentBilling}
+                onPress={() => handleShift('next')}
+              >
+                Next ›
+              </AriaButton>
+            </div>
+            <div className="hidden h-10 w-px bg-slate-200 sm:block" aria-hidden="true" />
+            <DialogTrigger
+              isOpen={isPickerOpen}
+              onOpenChange={(open) => {
+                setPickerOpen(open)
+                if (!open) {
+                  setCalendarRange(null)
+                }
               }}
             >
-              Change period
-            </AriaButton>
-            <Popover className="z-50 mt-2 rounded-xl border border-slate-200 bg-white shadow-xl">
-              <Dialog className="p-4">
-                <RangeCalendar
-                  aria-label="Select billing period"
-                  value={(calendarRange ?? appliedRange) ?? undefined}
-                  onChange={(range) => {
-                    if (range?.start && range?.end) {
-                      const nextRange = range as DateRangeValue
-                      setCalendarRange(nextRange)
-                      setAppliedRange(nextRange)
-                      setPickerOpen(false)
-                      setCalendarRange(null)
-                    } else {
-                      setCalendarRange(range as DateRangeValue | null)
-                    }
-                  }}
-                  visibleDuration={{ months: 1 }}
-                  className="flex flex-col gap-3"
-                >
-                  <header className="flex items-center justify-between gap-2">
-                    <AriaButton slot="previous" className="rounded-md px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-100">
-                      ‹
-                    </AriaButton>
-                    <Heading className="text-sm font-medium text-slate-700" />
-                    <AriaButton slot="next" className="rounded-md px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-100">
-                      ›
-                    </AriaButton>
-                  </header>
-                  <CalendarGrid className="border-spacing-1 border-separate gap-y-1 text-center text-xs font-medium uppercase text-slate-500">
-                    {(date) => (
-                      <CalendarCell
-                        date={date}
-                        className="m-0.5 flex h-8 w-8 items-center justify-center rounded-md text-sm text-slate-700 transition-colors hover:bg-blue-100 data-[disabled]:text-slate-300 data-[focused]:outline data-[focused]:outline-2 data-[focused]:outline-blue-400 data-[selected]:bg-blue-600 data-[selected]:text-white data-[range-selection]:bg-blue-100 data-[outside-month]:text-slate-300"
-                      />
-                    )}
-                  </CalendarGrid>
-                </RangeCalendar>
-              </Dialog>
-            </Popover>
-          </DialogTrigger>
+              <AriaButton
+                className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-700"
+                onPress={() => {
+                  setCalendarRange(effectiveRange ? cloneRange(effectiveRange) : null)
+                  setPickerOpen(true)
+                }}
+              >
+                Custom range
+              </AriaButton>
+              <Popover className="z-50 mt-2 rounded-xl border border-slate-200 bg-white shadow-xl">
+                <Dialog className="p-4">
+                  <RangeCalendar
+                    aria-label="Select billing period"
+                    value={(calendarRange ?? effectiveRange) ?? undefined}
+                    onChange={(range) => {
+                      if (range?.start && range?.end) {
+                        const nextRange = range as DateRangeValue
+                        setCalendarRange(nextRange)
+                        applyRange(nextRange, 'custom')
+                      } else {
+                        setCalendarRange(range as DateRangeValue | null)
+                      }
+                    }}
+                    visibleDuration={{ months: 1 }}
+                    className="flex flex-col gap-3"
+                  >
+                    <header className="flex items-center justify-between gap-2">
+                      <AriaButton slot="previous" className="rounded-md px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-100">
+                        ‹
+                      </AriaButton>
+                      <Heading className="text-sm font-medium text-slate-700" />
+                      <AriaButton slot="next" className="rounded-md px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-100">
+                        ›
+                      </AriaButton>
+                    </header>
+                    <CalendarGrid className="border-spacing-1 border-separate gap-y-1 text-center text-xs font-medium uppercase text-slate-500">
+                      {(date) => (
+                        <CalendarCell
+                          date={date}
+                          className="m-0.5 flex h-8 w-8 items-center justify-center rounded-md text-sm text-slate-700 transition-colors hover:bg-blue-100 data-[disabled]:text-slate-300 data-[focused]:outline data-[focused]:outline-2 data-[focused]:outline-blue-400 data-[selected]:bg-blue-600 data-[selected]:text-white data-[range-selection]:bg-blue-100 data-[outside-month]:text-slate-300"
+                        />
+                      )}
+                    </CalendarGrid>
+                  </RangeCalendar>
+                </Dialog>
+              </Popover>
+            </DialogTrigger>
+          </div>
         </div>
       </header>
 
