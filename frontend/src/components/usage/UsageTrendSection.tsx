@@ -27,6 +27,21 @@ const trendModes: TrendModeOption[] = [
   {value: 'month', label: 'Month', detail: 'Tasks per day'},
 ]
 
+const agentSeriesColors = [
+  '#2563eb',
+  '#f97316',
+  '#14b8a6',
+  '#6366f1',
+  '#ef4444',
+  '#0ea5e9',
+  '#facc15',
+  '#a855f7',
+  '#22c55e',
+  '#f472b6',
+  '#fb7185',
+  '#0f766e',
+]
+
 type UsageTrendSectionProps = {
   trendMode: UsageTrendMode
   onTrendModeChange: (mode: UsageTrendMode) => void
@@ -126,13 +141,44 @@ export function UsageTrendSection({
     const currentSeries = trendData.buckets.map((bucket: UsageTrendBucket) => bucket.current)
     const previousSeries = trendData.buckets.map((bucket: UsageTrendBucket) => bucket.previous)
 
+    const agentSeries = trendData.agents.map((agent, index) => {
+      const color = agentSeriesColors[index % agentSeriesColors.length]
+      const data = trendData.buckets.map((bucket: UsageTrendBucket) => bucket.agents?.[agent.id] ?? 0)
+      return {
+        name: agent.name,
+        type: 'line' as const,
+        smooth: true,
+        showSymbol: false,
+        stack: 'currentTotal',
+        emphasis: {focus: 'series' as const},
+        lineStyle: {
+          width: 1.5,
+          color,
+        },
+        itemStyle: {
+          color,
+        },
+        areaStyle: {
+          opacity: 0.2,
+        },
+        data,
+      }
+    })
+
+    const palette = agentSeries.map((series) => series.itemStyle?.color as string)
+
     return {
-      color: ['#2563eb', '#a855f7'],
+      ...(palette.length ? {color: palette} : {}),
       tooltip: {
         trigger: 'axis',
       },
       legend: {
-        data: ['Current period', 'Previous period'],
+        type: 'scroll',
+        data: [
+          ...agentSeries.map((series) => series.name),
+          'Total (current period)',
+          'Total (previous period)',
+        ],
         top: 0,
       },
       grid: {
@@ -157,23 +203,34 @@ export function UsageTrendSection({
         },
       },
       series: [
+        ...agentSeries,
         {
-          name: 'Current period',
+          name: 'Total (current period)',
           type: 'line',
           smooth: true,
           showSymbol: false,
-          areaStyle: {
-            opacity: 0.08,
+          emphasis: {focus: 'series'},
+          z: 3,
+          lineStyle: {
+            width: 2.5,
+            color: '#0f172a',
+          },
+          itemStyle: {
+            color: '#0f172a',
           },
           data: currentSeries,
         },
         {
-          name: 'Previous period',
+          name: 'Total (previous period)',
           type: 'line',
           smooth: true,
           showSymbol: false,
           lineStyle: {
             type: 'dashed',
+            color: '#94a3b8',
+          },
+          itemStyle: {
+            color: '#94a3b8',
           },
           data: previousSeries,
         },

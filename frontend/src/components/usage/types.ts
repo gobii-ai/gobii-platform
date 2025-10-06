@@ -62,6 +62,7 @@ export type UsageTrendBucket = {
   timestamp: string
   current: number
   previous: number
+  agents: Record<string, number>
 }
 
 export type UsageTrendResponse = {
@@ -77,6 +78,7 @@ export type UsageTrendResponse = {
     end: string
   }
   buckets: UsageTrendBucket[]
+  agents: UsageAgent[]
 }
 
 export type UsageTrendQueryInput = { mode: UsageTrendMode; from?: string; to?: string; agents?: string[] }

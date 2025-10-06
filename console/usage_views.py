@@ -197,6 +197,16 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
         tz = timezone.get_current_timezone()
         tz_name = timezone.get_current_timezone_name()
 
+        if organization is not None:
+            accessible_agents_qs = BrowserUseAgent.objects.filter(
+                persistent_agent__organization=organization
+            )
+        else:
+            accessible_agents_qs = BrowserUseAgent.objects.filter(user=request.user)
+
+        accessible_agents = list(accessible_agents_qs.order_by("name"))
+        accessible_agent_ids = {agent.id for agent in accessible_agents}
+
         anchor_end_date = requested_end or timezone.now().date()
         if requested_start and anchor_end_date < requested_start:
             anchor_end_date = requested_start
@@ -238,19 +248,14 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 agent_ids.append(uuid.UUID(raw))
             except (TypeError, ValueError):
                 continue
-        if agent_ids:
-            if organization is not None:
-                allowed_ids = set(
-                    BrowserUseAgent.objects.filter(persistent_agent__organization=organization)
-                    .values_list("id", flat=True)
-                )
-            else:
-                allowed_ids = set(
-                    BrowserUseAgent.objects.filter(user=request.user).values_list("id", flat=True)
-                )
-            filtered_agent_ids = [agent_id for agent_id in agent_ids if agent_id in allowed_ids]
-            if filtered_agent_ids:
-                base_filters["agent_id__in"] = filtered_agent_ids
+        filtered_agent_ids = [agent_id for agent_id in agent_ids if agent_id in accessible_agent_ids]
+        if filtered_agent_ids:
+            base_filters["agent_id__in"] = filtered_agent_ids
+
+        if filtered_agent_ids:
+            active_agents = [agent for agent in accessible_agents if agent.id in filtered_agent_ids]
+        else:
+            active_agents = accessible_agents
 
         trunc_function = TruncHour if step == timedelta(hours=1) else TruncDay
 
@@ -268,7 +273,31 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
             )
             return {row["bucket"].isoformat(): row["count"] for row in rows}
 
+        def _build_agent_counts(start_dt: datetime, end_dt: datetime) -> dict[str, dict[str, int]]:
+            filters = base_filters | {
+                "created_at__gte": start_dt,
+                "created_at__lt": end_dt,
+            }
+            rows = (
+                BrowserUseAgentTask.objects.filter(**filters)
+                .annotate(bucket=trunc_function("created_at", tzinfo=tz))
+                .values("bucket", "agent_id")
+                .order_by("bucket", "agent_id")
+                .annotate(count=Count("id"))
+            )
+            bucket_map: dict[str, dict[str, int]] = {}
+            for row in rows:
+                bucket = row.get("bucket")
+                agent_id = row.get("agent_id")
+                if bucket is None or agent_id is None:
+                    continue
+                bucket_key = bucket.isoformat()
+                agent_counts = bucket_map.setdefault(bucket_key, {})
+                agent_counts[str(agent_id)] = row["count"]
+            return bucket_map
+
         current_counts = _build_counts(current_start_dt, current_end_dt)
+        current_agent_counts = _build_agent_counts(current_start_dt, current_end_dt)
         previous_counts = _build_counts(previous_start_dt, previous_end_dt)
 
         buckets: list[dict[str, object]] = []
@@ -277,11 +306,13 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
         while current_cursor < current_end_dt:
             current_key = current_cursor.isoformat()
             previous_key = previous_cursor.isoformat()
+            agent_counts = current_agent_counts.get(current_key, {})
             buckets.append(
                 {
                     "timestamp": current_key,
                     "current": current_counts.get(current_key, 0),
                     "previous": previous_counts.get(previous_key, 0),
+                    "agents": agent_counts,
                 }
             )
             current_cursor += step
@@ -299,6 +330,13 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 "start": previous_start_dt.isoformat(),
                 "end": previous_end_dt.isoformat(),
             },
+            "agents": [
+                {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                }
+                for agent in active_agents
+            ],
             "buckets": buckets,
         }
 
