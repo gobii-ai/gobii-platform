@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -12,9 +12,29 @@ from api.models import (
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    TaskCredit,
 )
+from constants.grant_types import GrantTypeChoices
+
+
+def _grant_task_credits(*, user=None, organization=None, credits: Decimal = Decimal("25")) -> None:
+    """Provision task credits for tests so quota validation passes."""
+    now = timezone.now()
+    grant_kwargs = {
+        "credits": credits,
+        "credits_used": Decimal("0"),
+        "granted_date": now - timedelta(days=1),
+        "expiration_date": now + timedelta(days=30),
+        "grant_type": GrantTypeChoices.COMPENSATION,
+    }
+    if organization is not None:
+        grant_kwargs["organization"] = organization
+    else:
+        grant_kwargs["user"] = user
+    TaskCredit.objects.create(**grant_kwargs)
 
 @tag("batch_usage_api")
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
 class UsageTrendAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -24,6 +44,7 @@ class UsageTrendAPITests(TestCase):
             password="password123",
         )
         self.client.force_login(self.user)
+        _grant_task_credits(user=self.user)
         self.agent_primary = BrowserUseAgent.objects.create(user=self.user, name="Primary")
         self.agent_secondary = BrowserUseAgent.objects.create(user=self.user, name="Secondary")
 
@@ -102,6 +123,7 @@ class UsageTrendAPITests(TestCase):
         self.assertTrue(all(bucket["current"] != 7 for bucket in buckets))
 
 @tag("batch_usage_api")
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
 class UsageAgentLeaderboardAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -111,6 +133,7 @@ class UsageAgentLeaderboardAPITests(TestCase):
             password="password123",
         )
         self.client.force_login(self.user)
+        _grant_task_credits(user=self.user)
         self.agent_primary = BrowserUseAgent.objects.create(user=self.user, name="Agent Alpha")
         self.agent_secondary = BrowserUseAgent.objects.create(user=self.user, name="Agent Beta")
 
@@ -166,6 +189,7 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertAlmostEqual(secondary["tasks_per_day"], 0.5)
 
 @tag("batch_usage_api")
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
 class UsageAgentsAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -175,6 +199,7 @@ class UsageAgentsAPITests(TestCase):
             password="password123",
         )
         self.client.force_login(self.user)
+        _grant_task_credits(user=self.user)
         self.personal_agent = BrowserUseAgent.objects.create(user=self.user, name="Agent A")
         self.personal_agent_two = BrowserUseAgent.objects.create(user=self.user, name="Agent B")
 
@@ -187,6 +212,8 @@ class UsageAgentsAPITests(TestCase):
         billing = self.organization.billing
         billing.purchased_seats = 1
         billing.save()
+
+        _grant_task_credits(organization=self.organization)
 
         OrganizationMembership.objects.create(
             org=self.organization,
@@ -240,6 +267,7 @@ class UsageAgentsAPITests(TestCase):
         reset_session.save()
 
 @tag("batch_usage_api")
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
 class UsageSummaryAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -249,6 +277,7 @@ class UsageSummaryAPITests(TestCase):
           password="password123",
         )
         self.client.force_login(self.user)
+        _grant_task_credits(user=self.user)
         self.agent_primary = BrowserUseAgent.objects.create(user=self.user, name="Primary")
         self.agent_secondary = BrowserUseAgent.objects.create(user=self.user, name="Secondary")
 
@@ -275,6 +304,7 @@ class UsageSummaryAPITests(TestCase):
             charter="Org charter",
             browser_use_agent=self.org_agent,
         )
+        _grant_task_credits(organization=self.organization)
 
     def test_agent_filter_limits_summary(self):
         now = timezone.now()

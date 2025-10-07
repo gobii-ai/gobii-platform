@@ -507,8 +507,6 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
             success = stats["success"]
             error = stats["error"]
             avg_per_day = float(total) / period_length_days if total > 0 else 0.0
-            if total <= 0:
-                continue
             leaderboard.append(
                 {
                     "id": str(agent.id),
