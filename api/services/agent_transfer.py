@@ -130,17 +130,13 @@ class AgentTransferService:
             if invite.status != AgentTransferInvite.Status.PENDING:
                 raise AgentTransferError("Invite already handled")
 
-            agent = (
-                PersistentAgent.objects.select_for_update()
-                .select_related("browser_use_agent", "preferred_contact_endpoint")
-                .get(pk=invite.agent_id)
-            )
+            agent = PersistentAgent.objects.select_for_update().get(pk=invite.agent_id)
             original_owner = agent.user
             allowance = AgentTransferService.allow_transfer(agent, recipient)
             if not allowance.allowed:
                 raise AgentTransferDenied(allowance.reason or "Transfer is not allowed.")
 
-            browser_agent = agent.browser_use_agent
+            browser_agent = getattr(agent, "browser_use_agent", None)
             had_capacity = AgentTransferService._recipient_has_capacity(recipient)
 
             new_agent_name = AgentTransferService._ensure_unique_agent_name(agent, recipient)

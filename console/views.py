@@ -6175,6 +6175,10 @@ class AgentTransferInviteRespondView(LoginRequiredMixin, View):
             messages.error(request, "This transfer invite is not addressed to your account.")
             return redirect('console-home')
 
+        original_owner = invite.initiated_by
+        original_owner_email = getattr(original_owner, "email", "") or ""
+        agent_before = invite.agent
+
         try:
             if action == 'accept':
                 invite = AgentTransferService.accept_invite(invite, request.user)
@@ -6187,9 +6191,63 @@ class AgentTransferInviteRespondView(LoginRequiredMixin, View):
                     )
                 else:
                     messages.success(request, f"You now own {agent.name}.")
+
+                if original_owner_email:
+                    try:
+                        agent_url = request.build_absolute_uri(reverse('agent_detail', args=[agent.id]))
+                        context = {
+                            'owner_name': original_owner.get_full_name() or original_owner_email,
+                            'recipient_name': request.user.get_full_name() or request.user.email,
+                            'agent': agent,
+                            'agent_url': agent_url,
+                        }
+                        subject = f"{context['recipient_name']} accepted your agent {agent.name}"
+                        text_body = render_to_string('emails/agent_transfer_owner_accepted.txt', context)
+                        html_body = render_to_string('emails/agent_transfer_owner_accepted.html', context)
+                        send_mail(
+                            subject,
+                            text_body,
+                            None,
+                            [original_owner_email],
+                            html_message=html_body,
+                            fail_silently=True,
+                        )
+                    except Exception as email_exc:  # pragma: no cover - best effort
+                        logger.warning(
+                            "Failed to send transfer acceptance email to %s: %s",
+                            original_owner_email,
+                            email_exc,
+                        )
             elif action == 'decline':
-                AgentTransferService.decline_invite(invite, request.user)
+                invite = AgentTransferService.decline_invite(invite, request.user)
                 messages.info(request, "Transfer invitation declined.")
+
+                if original_owner_email:
+                    try:
+                        agent_url = request.build_absolute_uri(reverse('agent_detail', args=[agent_before.id]))
+                        context = {
+                            'owner_name': original_owner.get_full_name() or original_owner_email,
+                            'recipient_name': request.user.get_full_name() or request.user.email,
+                            'agent': agent_before,
+                            'agent_url': agent_url,
+                        }
+                        subject = f"{context['recipient_name']} declined your agent {agent_before.name}"
+                        text_body = render_to_string('emails/agent_transfer_owner_declined.txt', context)
+                        html_body = render_to_string('emails/agent_transfer_owner_declined.html', context)
+                        send_mail(
+                            subject,
+                            text_body,
+                            None,
+                            [original_owner_email],
+                            html_message=html_body,
+                            fail_silently=True,
+                        )
+                    except Exception as email_exc:  # pragma: no cover - best effort
+                        logger.warning(
+                            "Failed to send transfer decline email to %s: %s",
+                            original_owner_email,
+                            email_exc,
+                        )
             else:
                 messages.error(request, "Unsupported invite action.")
         except AgentTransferDenied as exc:

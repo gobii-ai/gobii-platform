@@ -3,6 +3,7 @@ from django.core import mail
 from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
+from unittest.mock import patch
 
 from api.models import (
     AgentFileSpace,
@@ -28,6 +29,8 @@ def _create_browser(user: User, name: str) -> BrowserUseAgent:
 @tag('agent_transfer_batch')
 class AgentTransferServiceTests(TestCase):
     def setUp(self) -> None:
+        self.analytics_patcher = patch('util.analytics.Analytics.track_event')
+        self.analytics_patcher.start()
         self.owner = User.objects.create_user(
             username="owner",
             email="owner@example.com",
@@ -73,6 +76,23 @@ class AgentTransferServiceTests(TestCase):
 
     def _initiate(self, email: str) -> AgentTransferInvite:
         return AgentTransferService.initiate_transfer(self.agent, email, self.owner)
+
+    def _send_transfer_invite_via_console(self, email: str = "new-owner@example.com", message: str = "Please take it over.") -> AgentTransferInvite:
+        self.client.login(username="owner", password="pw")
+        url = reverse('agent_detail', args=[self.agent.id])
+        response = self.client.post(
+            url,
+            {
+                'action': 'transfer_agent',
+                'transfer_email': email,
+                'transfer_message': message,
+                'name': self.agent.name,
+                'charter': self.agent.charter,
+                'is_active': 'on',
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        return AgentTransferInvite.objects.get(agent=self.agent)
 
     def test_initiate_transfer_replaces_existing_invite(self):
         first = self._initiate("first@example.com")
@@ -124,26 +144,53 @@ class AgentTransferServiceTests(TestCase):
         self.assertFalse(self.agent.is_active)
 
     def test_transfer_invitation_email_sent(self):
-        self.client.login(username="owner", password="pw")
-
-        url = reverse('agent_detail', args=[self.agent.id])
-        response = self.client.post(
-            url,
-            {
-                'action': 'transfer_agent',
-                'transfer_email': 'new-owner@example.com',
-                'transfer_message': 'Please take it over.',
-                'name': self.agent.name,
-                'charter': self.agent.charter,
-                'is_active': 'on',
-            },
-        )
-        self.assertEqual(response.status_code, 302)
-
-        invite = AgentTransferInvite.objects.get(agent=self.agent)
+        invite = self._send_transfer_invite_via_console()
         self.assertEqual(invite.to_email, 'new-owner@example.com')
 
         self.assertEqual(len(mail.outbox), 1)
         outbound = mail.outbox[0]
         self.assertIn(self.agent.name, outbound.subject)
         self.assertEqual(outbound.to, ['new-owner@example.com'])
+
+    def test_accept_transfer_notifies_initiator(self):
+        invite = self._send_transfer_invite_via_console(email=self.recipient.email)
+        mail.outbox.clear()
+
+        self.client.logout()
+        self.client.login(username="recipient", password="pw")
+        response = self.client.post(
+            reverse('console-agent-transfer-invite', args=[invite.id, 'accept'])
+        )
+        self.assertEqual(response.status_code, 302)
+
+        invite.refresh_from_db()
+        self.assertEqual(invite.status, AgentTransferInvite.Status.ACCEPTED)
+
+        self.assertEqual(len(mail.outbox), 1)
+        msg = mail.outbox[0]
+        self.assertEqual(msg.to, [self.owner.email])
+        self.assertIn('accepted', msg.subject.lower())
+        self.assertIn(self.agent.name, msg.subject)
+
+    def test_decline_transfer_notifies_initiator(self):
+        invite = self._send_transfer_invite_via_console(email=self.recipient.email)
+        mail.outbox.clear()
+
+        self.client.logout()
+        self.client.login(username="recipient", password="pw")
+        response = self.client.post(
+            reverse('console-agent-transfer-invite', args=[invite.id, 'decline'])
+        )
+        self.assertEqual(response.status_code, 302)
+
+        invite.refresh_from_db()
+        self.assertEqual(invite.status, AgentTransferInvite.Status.DECLINED)
+
+        self.assertEqual(len(mail.outbox), 1)
+        msg = mail.outbox[0]
+        self.assertEqual(msg.to, [self.owner.email])
+        self.assertIn('declined', msg.subject.lower())
+        self.assertIn(self.agent.name, msg.subject)
+
+    def tearDown(self) -> None:
+        self.analytics_patcher.stop()
