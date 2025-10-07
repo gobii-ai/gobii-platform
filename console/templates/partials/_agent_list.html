@@ -85,12 +85,20 @@
            <span class="text-xs font-medium text-white/80 uppercase tracking-wide">
              {% if agent.is_active %}Active{% else %}Paused{% endif %}
            </span>
-           {% comment %}
-           <!-- Removed policy display - all agents now use manual mode -->
-           {% endcomment %}
+          {% comment %}
+          <!-- Removed policy display - all agents now use manual mode -->
+          {% endcomment %}
          </div>
+         {% if agent.pending_transfer_invite %}
+         <div class="relative z-10 mt-2 inline-flex items-center gap-2 bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full border border-white/40">
+           <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+             <path d="M3 10a1 1 0 011-1h7.586L9.293 6.707a1 1 0 111.414-1.414l4.586 4.586a1 1 0 010 1.414l-4.586 4.586a1 1 0 11-1.414-1.414L11.586 11H4a1 1 0 01-1-1z"/>
+           </svg>
+           <span>Transfer Pending</span>
+         </div>
+         {% endif %}
        </div>
- 
+
        <!-- Card Body -->
        <div class="p-4 md:p-5 flex-1 flex flex-col">
          <!-- Charter (truncated) -->

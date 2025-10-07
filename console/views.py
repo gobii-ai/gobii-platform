@@ -1530,6 +1530,10 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             agent.listing_description = description
             agent.listing_description_source = source
             agent.is_initializing = source == "placeholder"
+            agent.pending_transfer_invite = AgentTransferInvite.objects.filter(
+                agent=agent,
+                status=AgentTransferInvite.Status.PENDING,
+            ).first()
 
         context['persistent_agents'] = persistent_agents
 
