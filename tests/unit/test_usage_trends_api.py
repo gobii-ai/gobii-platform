@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 
@@ -14,7 +14,7 @@ from api.models import (
     PersistentAgent,
 )
 
-
+@tag("batch_usage_api")
 class UsageTrendAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -101,7 +101,7 @@ class UsageTrendAPITests(TestCase):
         self.assertTrue(any(bucket["current"] == 5 for bucket in buckets))
         self.assertTrue(all(bucket["current"] != 7 for bucket in buckets))
 
-
+@tag("batch_usage_api")
 class UsageAgentLeaderboardAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -165,7 +165,7 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertEqual(secondary["error_count"], 0)
         self.assertAlmostEqual(secondary["tasks_per_day"], 0.5)
 
-
+@tag("batch_usage_api")
 class UsageAgentsAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -239,7 +239,7 @@ class UsageAgentsAPITests(TestCase):
         reset_session["context_name"] = self.user.username
         reset_session.save()
 
-
+@tag("batch_usage_api")
 class UsageSummaryAPITests(TestCase):
     def setUp(self):
         User = get_user_model()

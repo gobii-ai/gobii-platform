@@ -1,31 +1,24 @@
-import {useMemo} from 'react'
-import {useQuery} from '@tanstack/react-query'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import ReactEChartsCore from 'echarts-for-react/lib/core'
 import * as echarts from 'echarts/core'
-import {LineChart} from 'echarts/charts'
-import {GridComponent, LegendComponent, TooltipComponent} from 'echarts/components'
-import {CanvasRenderer} from 'echarts/renderers'
-import {Button} from 'react-aria-components'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 
 import type {
   DateRangeValue,
   TrendChartOption,
-  TrendModeOption,
   UsageTrendBucket,
   UsageTrendMode,
   UsageTrendQueryInput,
   UsageTrendResponse,
 } from './types'
-import {fetchUsageTrends} from './api'
+import { fetchUsageTrends } from './api'
+import { getRangeLengthInDays } from './utils'
 
 
 echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
-
-const trendModes: TrendModeOption[] = [
-  {value: 'day', label: 'Day', detail: 'Tasks per hour'},
-  {value: 'week', label: 'Week', detail: 'Tasks per day'},
-  {value: 'month', label: 'Month', detail: 'Tasks per day'},
-]
 
 const agentSeriesColors = [
   '#2563eb',
@@ -43,8 +36,6 @@ const agentSeriesColors = [
 ]
 
 type UsageTrendSectionProps = {
-  trendMode: UsageTrendMode
-  onTrendModeChange: (mode: UsageTrendMode) => void
   effectiveRange: DateRangeValue | null
   fallbackRange: DateRangeValue | null
   timezone?: string
@@ -52,8 +43,6 @@ type UsageTrendSectionProps = {
 }
 
 export function UsageTrendSection({
-  trendMode,
-  onTrendModeChange,
   effectiveRange,
   fallbackRange,
   timezone,
@@ -61,49 +50,33 @@ export function UsageTrendSection({
 }: UsageTrendSectionProps) {
   const baseRange = effectiveRange ?? fallbackRange
 
-  const trendQueryInput = useMemo<UsageTrendQueryInput | null>(() => {
+  const resolvedMode = useMemo<{ mode: UsageTrendMode; detail: string } | null>(() => {
     if (!baseRange) {
       return null
     }
 
-    const baseEnd = baseRange.end
-    const baseStart = baseRange.start
-
-    const clampStart = (candidate: DateRangeValue['start']) =>
-      candidate.compare(baseStart) < 0 ? baseStart : candidate
-
-    switch (trendMode) {
-      case 'day':
-        return {
-          mode: 'day',
-          from: baseEnd.toString(),
-          to: baseEnd.toString(),
-          agents: agentIds,
-        }
-      case 'week': {
-        const candidate = baseEnd.subtract({days: 6})
-        const windowStart = clampStart(candidate)
-        return {
-          mode: 'week',
-          from: windowStart.toString(),
-          to: baseEnd.toString(),
-          agents: agentIds,
-        }
-      }
-      case 'month': {
-        const candidate = baseEnd.subtract({days: 29})
-        const windowStart = clampStart(candidate)
-        return {
-          mode: 'month',
-          from: windowStart.toString(),
-          to: baseEnd.toString(),
-          agents: agentIds,
-        }
-      }
-      default:
-        return null
+    const lengthInDays = getRangeLengthInDays(baseRange)
+    if (lengthInDays <= 1) {
+      return { mode: 'day', detail: 'Tasks per hour' }
     }
-  }, [agentIds, baseRange, trendMode])
+    if (lengthInDays <= 7) {
+      return { mode: 'week', detail: 'Tasks per day' }
+    }
+    return { mode: 'month', detail: 'Tasks per day' }
+  }, [baseRange])
+
+  const trendQueryInput = useMemo<UsageTrendQueryInput | null>(() => {
+    if (!baseRange || !resolvedMode) {
+      return null
+    }
+
+    return {
+      mode: resolvedMode.mode,
+      from: baseRange.start.toString(),
+      to: baseRange.end.toString(),
+      agents: agentIds,
+    }
+  }, [agentIds, baseRange, resolvedMode])
 
   const agentKey = agentIds.length ? agentIds.slice().sort().join(',') : 'all'
 
@@ -113,17 +86,14 @@ export function UsageTrendSection({
     isError: isTrendError,
     isPending: isTrendPending,
   } = useQuery<UsageTrendResponse, Error>({
-    queryKey: ['usage-trends', trendMode, trendQueryInput?.from ?? null, trendQueryInput?.to ?? null, agentKey],
-    queryFn: ({signal}) => fetchUsageTrends(trendQueryInput!, signal),
+    queryKey: ['usage-trends', resolvedMode?.mode ?? null, trendQueryInput?.from ?? null, trendQueryInput?.to ?? null, agentKey],
+    queryFn: ({ signal }) => fetchUsageTrends(trendQueryInput!, signal),
     enabled: Boolean(trendQueryInput),
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
   })
 
-  const trendModeDetail = useMemo(() => {
-    const active = trendModes.find((mode) => mode.value === trendMode)
-    return active?.detail ?? ''
-  }, [trendMode])
+  const trendModeDetail = resolvedMode?.detail ?? ''
 
   const chartOption = useMemo<TrendChartOption | null>(() => {
     if (!trendData) {
@@ -131,15 +101,13 @@ export function UsageTrendSection({
     }
 
     const tz = trendData.timezone || timezone
-    const dateFormatter = trendData.resolution === 'hour'
-      ? new Intl.DateTimeFormat(undefined, {hour: 'numeric', timeZone: tz})
-      : new Intl.DateTimeFormat(undefined, {month: 'short', day: 'numeric', timeZone: tz})
+    const dateFormatter =
+      trendData.resolution === 'hour'
+        ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', timeZone: tz })
+        : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: tz })
 
-    const categories = trendData.buckets.map((bucket: UsageTrendBucket) =>
-      dateFormatter.format(new Date(bucket.timestamp)),
-    )
+    const categories = trendData.buckets.map((bucket: UsageTrendBucket) => dateFormatter.format(new Date(bucket.timestamp)))
     const currentSeries = trendData.buckets.map((bucket: UsageTrendBucket) => bucket.current)
-    const previousSeries = trendData.buckets.map((bucket: UsageTrendBucket) => bucket.previous)
 
     const agentSeries = trendData.agents.map((agent, index) => {
       const color = agentSeriesColors[index % agentSeriesColors.length]
@@ -168,7 +136,7 @@ export function UsageTrendSection({
     const palette = agentSeries.map((series) => series.itemStyle?.color as string)
 
     return {
-      ...(palette.length ? {color: palette} : {}),
+      ...(palette.length ? { color: palette } : {}),
       tooltip: {
         trigger: 'axis',
       },
@@ -176,8 +144,7 @@ export function UsageTrendSection({
         type: 'scroll',
         data: [
           ...agentSeries.map((series) => series.name),
-          'Total (current period)',
-          'Total (previous period)',
+          'Total tasks',
         ],
         top: 0,
       },
@@ -205,11 +172,11 @@ export function UsageTrendSection({
       series: [
         ...agentSeries,
         {
-          name: 'Total (current period)',
+          name: 'Total tasks',
           type: 'line',
           smooth: true,
           showSymbol: false,
-          emphasis: {focus: 'series'},
+          emphasis: { focus: 'series' },
           z: 3,
           lineStyle: {
             width: 2.5,
@@ -220,20 +187,6 @@ export function UsageTrendSection({
           },
           data: currentSeries,
         },
-        {
-          name: 'Total (previous period)',
-          type: 'line',
-          smooth: true,
-          showSymbol: false,
-          lineStyle: {
-            type: 'dashed',
-            color: '#94a3b8',
-          },
-          itemStyle: {
-            color: '#94a3b8',
-          },
-          data: previousSeries,
-        },
       ],
     }
   }, [timezone, trendData])
@@ -242,7 +195,15 @@ export function UsageTrendSection({
     if (!trendData) {
       return false
     }
-    return trendData.buckets.some((bucket: UsageTrendBucket) => bucket.current > 0 || bucket.previous > 0)
+    return trendData.buckets.some((bucket: UsageTrendBucket) => {
+      if (bucket.current > 0) {
+        return true
+      }
+      if (bucket.agents) {
+        return Object.values(bucket.agents).some((value) => value > 0)
+      }
+      return false
+    })
   }, [trendData])
 
   const isLoading = Boolean(trendQueryInput) && isTrendPending
@@ -267,25 +228,7 @@ export function UsageTrendSection({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Task consumption trend</h2>
-          <p className="text-sm text-slate-500">{trendModeDetail} · Compared with previous period.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
-            {trendModes.map((mode) => {
-              const isActive = trendMode === mode.value
-              return (
-                <Button
-                  key={mode.value}
-                  onPress={() => onTrendModeChange(mode.value)}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
-                    isActive ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:bg-white hover:text-slate-800'
-                  }`}
-                >
-                  {mode.label}
-                </Button>
-              )
-            })}
-          </div>
+          <p className="text-sm text-slate-500">{trendModeDetail} · Total tasks over time.</p>
         </div>
       </div>
       <div className="h-80 w-full">

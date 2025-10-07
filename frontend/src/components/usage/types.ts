@@ -108,12 +108,6 @@ export type PeriodInfo = {
   caption: string
 }
 
-export type TrendModeOption = {
-  value: UsageTrendMode
-  label: string
-  detail: string
-}
-
 export type TrendChartOption = EChartsOption
 export type ToolChartOption = EChartsOption
 

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { parseDate } from '@internationalized/date'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {useQuery} from '@tanstack/react-query'
+import {parseDate} from '@internationalized/date'
 
 import {
   UsagePeriodHeader,
@@ -11,13 +11,12 @@ import {
   UsageAgentLeaderboard,
   useUsageStore,
 } from '../components/usage'
-import { fetchUsageAgents } from '../components/usage/api'
+import {fetchUsageAgents} from '../components/usage/api'
 import type {
   DateRangeValue,
   PeriodInfo,
   UsageAgent,
   UsageSummaryQueryInput,
-  UsageTrendMode,
 } from '../components/usage'
 import {
   cloneRange,
@@ -41,7 +40,6 @@ export function UsageScreen() {
   const [calendarRange, setCalendarRange] = useState<DateRangeValue | null>(null)
   const [isPickerOpen, setPickerOpen] = useState(false)
   const [selectionMode, setSelectionMode] = useState<SelectionMode>('billing')
-  const [trendMode, setTrendMode] = useState<UsageTrendMode>('month')
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set())
 
   const initialPeriodRef = useRef<DateRangeValue | null>(null)
@@ -71,7 +69,7 @@ export function UsageScreen() {
 
   const agentsQuery = useQuery({
     queryKey: ['usage-agents'],
-    queryFn: ({ signal }) => fetchUsageAgents(signal),
+    queryFn: ({signal}) => fetchUsageAgents(signal),
     refetchOnWindowFocus: false,
   })
 
@@ -228,8 +226,8 @@ export function UsageScreen() {
   const hasInitialRange = Boolean(initialPeriodRef.current)
   const isCurrentSelection = Boolean(
     effectiveRange &&
-      initialPeriodRef.current &&
-      areRangesEqual(effectiveRange, initialPeriodRef.current),
+    initialPeriodRef.current &&
+    areRangesEqual(effectiveRange, initialPeriodRef.current),
   )
   const isViewingCurrentBilling = selectionMode === 'billing' && isCurrentSelection
 
@@ -294,11 +292,15 @@ export function UsageScreen() {
         />
       </header>
 
-      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} />
+      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray}/>
+
+      <UsageAgentLeaderboard
+        effectiveRange={effectiveRange}
+        fallbackRange={summaryRange}
+        agentIds={selectedAgentArray}
+      />
 
       <UsageTrendSection
-        trendMode={trendMode}
-        onTrendModeChange={setTrendMode}
         effectiveRange={effectiveRange}
         fallbackRange={summaryRange}
         timezone={summary?.period.timezone}
@@ -310,12 +312,6 @@ export function UsageScreen() {
         fallbackRange={summaryRange}
         agentIds={selectedAgentArray}
         timezone={summary?.period.timezone}
-      />
-
-      <UsageAgentLeaderboard
-        effectiveRange={effectiveRange}
-        fallbackRange={summaryRange}
-        agentIds={selectedAgentArray}
       />
 
       {summaryStatus === 'error' && summaryErrorMessage ? (

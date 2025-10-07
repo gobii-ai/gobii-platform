@@ -177,8 +177,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
         const tasksPerDay = Number(agent.tasks_per_day ?? 0)
         const successCount = Number(agent.success_count ?? 0)
         const errorCount = Number(agent.error_count ?? 0)
-        const attempts = successCount + errorCount
-        const successRate = attempts > 0 ? successCount / attempts : null
+        const successRate = tasksTotal > 0 ? successCount / tasksTotal : null
 
         return {
           id: agent.id,
@@ -248,15 +247,17 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
           </SortableHeader>
         ),
         cell: ({ row }) => {
-          const { successCount, errorCount, successRate } = row.original
-          const total = successCount + errorCount
-          if (total === 0) {
+          const { successCount, errorCount, successRate, tasksTotal } = row.original
+          const totalAttempts = successCount + errorCount
+          if (totalAttempts === 0) {
             return <span className="text-sm text-slate-500">—</span>
           }
 
           const ratioLabel = `${integerFormatter.format(successCount)} : ${integerFormatter.format(errorCount)}`
           const successLabel =
-            successRate != null ? `${percentFormatter.format(successRate)} success` : undefined
+            successRate != null
+              ? `${percentFormatter.format(successRate)} success of ${integerFormatter.format(tasksTotal)} tasks`
+              : undefined
 
           return (
             <div className="flex flex-col items-end gap-0.5 text-right">
