@@ -216,22 +216,41 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
             anchor_end_date = requested_start
 
         if mode == "day":
-            current_start_date = anchor_end_date
-            current_end_date = anchor_end_date
+            if requested_start:
+                current_start_date = requested_start
+            else:
+                current_start_date = anchor_end_date
+
+            if requested_end:
+                current_end_date = requested_end
+            else:
+                current_end_date = current_start_date
+
+            if current_end_date < current_start_date:
+                current_end_date = current_start_date
+
             step = timedelta(hours=1)
             current_start_dt = timezone.make_aware(datetime.combine(current_start_date, time.min), tz)
-            current_end_dt = current_start_dt + timedelta(days=1)
+            current_end_dt = timezone.make_aware(
+                datetime.combine(current_end_date + timedelta(days=1), time.min), tz
+            )
         else:
-            lookback_days = 6 if mode == "week" else 29
-            candidate_start = anchor_end_date - timedelta(days=lookback_days)
-            if requested_start and candidate_start < requested_start:
-                candidate_start = requested_start
+            if requested_start:
+                current_start_date = requested_start
+            else:
+                lookback_days = 6 if mode == "week" else 29
+                current_start_date = anchor_end_date - timedelta(days=lookback_days)
 
-            current_start_date = candidate_start
-            current_end_date = anchor_end_date
+            current_end_date = requested_end or anchor_end_date
+
+            if current_end_date < current_start_date:
+                current_end_date = current_start_date
+
             step = timedelta(days=1)
             current_start_dt = timezone.make_aware(datetime.combine(current_start_date, time.min), tz)
-            current_end_dt = timezone.make_aware(datetime.combine(current_end_date + timedelta(days=1), time.min), tz)
+            current_end_dt = timezone.make_aware(
+                datetime.combine(current_end_date + timedelta(days=1), time.min), tz
+            )
 
         current_duration = current_end_dt - current_start_dt
         previous_end_dt = current_start_dt

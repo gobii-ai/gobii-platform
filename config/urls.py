@@ -121,11 +121,7 @@ urlpatterns = [
     path("console/api/usage/summary/", UsageSummaryAPIView.as_view(), name="console_usage_summary"),
     path("console/api/usage/trends/", UsageTrendAPIView.as_view(), name="console_usage_trends"),
     path("console/api/usage/tools/", UsageToolBreakdownAPIView.as_view(), name="console_usage_tools"),
-    path(
-        "console/api/usage/agents/leaderboard/",
-        UsageAgentLeaderboardAPIView.as_view(),
-        name="console_usage_agents_leaderboard",
-    ),
+    path("console/api/usage/agents/leaderboard/", UsageAgentLeaderboardAPIView.as_view(), name="console_usage_agents_leaderboard"),
     path("console/api/usage/agents/", UsageAgentsAPIView.as_view(), name="console_usage_agents"),
     path("console/agents/create/contact/", AgentCreateContactView.as_view(), name="agent_create_contact"),
     path("console/agents/<uuid:pk>/", AgentDetailView.as_view(), name="agent_detail"),

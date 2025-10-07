@@ -12,6 +12,8 @@ from api.models import (
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentStep,
+    PersistentAgentToolCall,
     TaskCredit,
 )
 from constants.grant_types import GrantTypeChoices
@@ -187,6 +189,203 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertEqual(secondary["success_count"], 1)
         self.assertEqual(secondary["error_count"], 0)
         self.assertAlmostEqual(secondary["tasks_per_day"], 0.5)
+
+@tag("batch_usage_api")
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
+class UsageToolBreakdownAPITests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username="toolbreakdown@example.com",
+            email="toolbreakdown@example.com",
+            password="password123",
+        )
+        self.client.force_login(self.user)
+
+        _grant_task_credits(user=self.user)
+
+        self.primary_agent = BrowserUseAgent.objects.create(user=self.user, name="Primary Tool Agent")
+        self.secondary_agent = BrowserUseAgent.objects.create(user=self.user, name="Secondary Tool Agent")
+
+        self.primary_persistent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Primary Persistent",
+            charter="Primary charter",
+            browser_use_agent=self.primary_agent,
+        )
+        self.secondary_persistent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Secondary Persistent",
+            charter="Secondary charter",
+            browser_use_agent=self.secondary_agent,
+        )
+
+    def _create_tool_call(
+        self,
+        *,
+        persistent_agent: PersistentAgent,
+        created_at: datetime,
+        tool_name: str,
+        credits: Decimal,
+    ) -> None:
+        step = PersistentAgentStep.objects.create(agent=persistent_agent, credits_cost=credits)
+        PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=created_at)
+        PersistentAgentToolCall.objects.create(step=step, tool_name=tool_name)
+
+    def test_returns_tool_totals_for_selected_range(self):
+        tz = timezone.get_current_timezone()
+        window_start = timezone.make_aware(datetime(2024, 5, 1, 12, 0, 0), tz)
+        later = window_start + timedelta(hours=4)
+        much_later = window_start + timedelta(days=1, hours=2)
+
+        self._create_tool_call(
+            persistent_agent=self.primary_persistent,
+            created_at=window_start,
+            tool_name="api_call",
+            credits=Decimal("2.5"),
+        )
+        self._create_tool_call(
+            persistent_agent=self.primary_persistent,
+            created_at=later,
+            tool_name="search_tools",
+            credits=Decimal("1.25"),
+        )
+        self._create_tool_call(
+            persistent_agent=self.secondary_persistent,
+            created_at=much_later,
+            tool_name="api_call",
+            credits=Decimal("0.5"),
+        )
+
+        response = self.client.get(
+            reverse("console_usage_tools"),
+            {
+                "from": (window_start - timedelta(days=1)).date().isoformat(),
+                "to": (much_later + timedelta(days=1)).date().isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload["total_count"], 3)
+        self.assertAlmostEqual(payload["total_credits"], 4.25)
+        self.assertEqual(payload["timezone"], timezone.get_current_timezone_name())
+
+        tool_map = {tool["name"]: tool for tool in payload.get("tools", [])}
+        self.assertIn("api_call", tool_map)
+        self.assertIn("search_tools", tool_map)
+        self.assertEqual(tool_map["api_call"]["count"], 2)
+        self.assertAlmostEqual(tool_map["api_call"]["credits"], 3.0)
+        self.assertEqual(tool_map["search_tools"]["count"], 1)
+        self.assertAlmostEqual(tool_map["search_tools"]["credits"], 1.25)
+
+    def test_agent_filter_limits_results(self):
+        tz = timezone.get_current_timezone()
+        base_dt = timezone.make_aware(datetime(2024, 6, 1, 8, 0, 0), tz)
+
+        self._create_tool_call(
+            persistent_agent=self.primary_persistent,
+            created_at=base_dt,
+            tool_name="api_call",
+            credits=Decimal("2.0"),
+        )
+        self._create_tool_call(
+            persistent_agent=self.secondary_persistent,
+            created_at=base_dt + timedelta(hours=2),
+            tool_name="api_call",
+            credits=Decimal("5.0"),
+        )
+
+        response = self.client.get(
+            reverse("console_usage_tools"),
+            {
+                "from": base_dt.date().isoformat(),
+                "to": (base_dt + timedelta(days=1)).date().isoformat(),
+                "agent": str(self.primary_agent.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload["total_count"], 1)
+        self.assertAlmostEqual(payload["total_credits"], 2.0)
+        self.assertEqual(len(payload.get("tools", [])), 1)
+        self.assertEqual(payload["tools"][0]["name"], "api_call")
+        self.assertEqual(payload["tools"][0]["count"], 1)
+
+    def test_org_context_limits_results(self):
+        organization = Organization.objects.create(
+            name="Tool Org",
+            slug="tool-org",
+            created_by=self.user,
+        )
+        billing = organization.billing
+        billing.purchased_seats = 1
+        billing.save()
+
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+
+        _grant_task_credits(organization=organization)
+
+        org_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Org Tool Agent")
+        org_persistent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=organization,
+            name="Org Persistent",
+            charter="Org charter",
+            browser_use_agent=org_browser_agent,
+        )
+
+        tz = timezone.get_current_timezone()
+        base_dt = timezone.make_aware(datetime(2024, 7, 1, 9, 0, 0), tz)
+
+        self._create_tool_call(
+            persistent_agent=self.primary_persistent,
+            created_at=base_dt,
+            tool_name="api_call",
+            credits=Decimal("3.0"),
+        )
+        self._create_tool_call(
+            persistent_agent=org_persistent,
+            created_at=base_dt + timedelta(hours=1),
+            tool_name="api_call",
+            credits=Decimal("4.0"),
+        )
+
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
+        response = self.client.get(
+            reverse("console_usage_tools"),
+            {
+                "from": base_dt.date().isoformat(),
+                "to": (base_dt + timedelta(days=1)).date().isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload["total_count"], 1)
+        self.assertAlmostEqual(payload["total_credits"], 4.0)
+        self.assertEqual(len(payload.get("tools", [])), 1)
+        self.assertEqual(payload["tools"][0]["name"], "api_call")
+
+        reset_session = self.client.session
+        reset_session["context_type"] = "personal"
+        reset_session["context_id"] = str(self.user.id)
+        reset_session["context_name"] = self.user.username
+        reset_session.save()
+
 
 @tag("batch_usage_api")
 @override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
