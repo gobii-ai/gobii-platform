@@ -35,6 +35,7 @@ type ChartSegment = {
   key: string
   label: string
   value: number
+  count: number
 }
 
 type UsageToolChartProps = {
@@ -44,10 +45,14 @@ type UsageToolChartProps = {
   timezone?: string
 }
 
-const numberFormatter = new Intl.NumberFormat()
-
 export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezone }: UsageToolChartProps) {
   const baseRange = effectiveRange ?? fallbackRange
+
+  const integerFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }), [])
+  const creditFormatter = useMemo(
+    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
+    [],
+  )
 
   const queryInput = useMemo<UsageToolBreakdownQueryInput | null>(() => {
     if (!baseRange) {
@@ -81,10 +86,11 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
     }
 
     const segments = new Map<string, ChartSegment>()
+    let otherCredits = 0
     let otherCount = 0
 
     for (const entry of toolData.tools) {
-      if (!entry || entry.count <= 0) {
+      if (!entry) {
         continue
       }
 
@@ -93,8 +99,18 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
       const metadata = getSharedToolMetadata(rawName)
       const shouldSkip = USAGE_SKIP_TOOL_NAMES.has(normalized) || metadata.skip
 
+      const rawCount = Number(entry.count ?? 0)
+      const count = Number.isFinite(rawCount) && rawCount > 0 ? rawCount : 0
+      const rawCredits = typeof entry.credits === 'number' ? entry.credits : Number(entry.credits ?? 0)
+      const credits = Number.isFinite(rawCredits) && rawCredits > 0 ? rawCredits : 0
+
+      if (count <= 0 && credits <= 0) {
+        continue
+      }
+
       if (shouldSkip) {
-        otherCount += entry.count
+        otherCount += count
+        otherCredits += credits
         continue
       }
 
@@ -102,22 +118,29 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
       const label = metadata.label || (rawName ? rawName.replaceAll('_', ' ') : 'Other')
       const existing = segments.get(key)
       if (existing) {
-        existing.value += entry.count
+        existing.value += credits
+        existing.count += count
       } else {
-        segments.set(key, { key, label, value: entry.count })
+        segments.set(key, { key, label, value: credits, count })
       }
     }
 
-    if (otherCount > 0) {
+    if (otherCredits > 0) {
       const existingOther = segments.get('other')
       if (existingOther) {
-        existingOther.value += otherCount
+        existingOther.value += otherCredits
+        existingOther.count += otherCount
       } else {
-        segments.set('other', { key: 'other', label: 'Other', value: otherCount })
+        segments.set('other', { key: 'other', label: 'Other', value: otherCredits, count: otherCount })
       }
     }
 
-    return Array.from(segments.values()).sort((a, b) => b.value - a.value)
+    return Array.from(segments.values()).sort((a, b) => {
+      if (b.value === a.value) {
+        return b.count - a.count
+      }
+      return b.value - a.value
+    })
   }, [toolData])
 
   const chartOption = useMemo<ToolChartOption | null>(() => {
@@ -128,6 +151,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
     const data = processedSegments.map((segment, index) => ({
       value: segment.value,
       name: segment.label,
+      count: segment.count,
       itemStyle: {
         color: toolPalette[index % toolPalette.length],
       },
@@ -142,16 +166,22 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
             return ''
           }
 
-          const { name, value: rawValue, percent: rawPercent } = detail
+          const { name, value: rawCredits, percent: rawPercent } = detail
 
-          const count = typeof rawValue === 'number' ? rawValue : Number(rawValue ?? 0)
+          const rawCount =
+            typeof detail === 'object' && detail !== null && 'data' in detail && detail.data
+              ? (detail.data as { count?: number }).count
+              : undefined
+
+          const credits = typeof rawCredits === 'number' ? rawCredits : Number(rawCredits ?? 0)
+          const count = typeof rawCount === 'number' ? rawCount : Number(rawCount ?? 0)
           const percentValue =
             typeof rawPercent === 'number' ? rawPercent : Number(rawPercent ?? 0)
 
+          const safeCredits = Number.isFinite(credits) ? credits : 0
           const safeCount = Number.isFinite(count) ? count : 0
           const safePercent = Number.isFinite(percentValue) ? percentValue : 0
 
-          const formattedCount = numberFormatter.format(safeCount)
           const label =
             typeof name === 'string' && name.length
               ? name
@@ -159,7 +189,11 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
               ? String(name)
               : 'Tool'
 
-          return `${label}<br />${formattedCount} tasks (${safePercent.toFixed(1)}%)`
+          const formattedCredits = creditFormatter.format(safeCredits)
+          const formattedCount = integerFormatter.format(safeCount)
+          const taskLabel = safeCount === 1 ? 'task' : 'tasks'
+
+          return `${label}<br />${formattedCredits} credits (${safePercent.toFixed(1)}%) · ${formattedCount} ${taskLabel}`
         },
       },
       legend: {
@@ -171,7 +205,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
       },
       series: [
         {
-          name: 'Tool usage',
+          name: 'Tool credits',
           type: 'pie',
           radius: ['40%', '70%'],
           center: ['40%', '50%'],
@@ -192,7 +226,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
         },
       ],
     }
-  }, [processedSegments])
+  }, [processedSegments, creditFormatter, integerFormatter])
 
   const isLoading = Boolean(queryInput) && isPending
 
@@ -207,7 +241,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
   }, [isError, toolError])
 
   const emptyMessage = baseRange
-    ? 'No tool activity recorded for this window.'
+    ? 'No billable tool usage recorded for this window.'
     : 'Select a billing period to view tool usage.'
 
   const summaryRange = useMemo(() => {
@@ -221,20 +255,23 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
     return start === end ? start : `${start} – ${end}`
   }, [timezone, toolData])
 
-  const displayedTotal = processedSegments.reduce((acc, segment) => acc + segment.value, 0)
+  const totalCredits = toolData?.total_credits ?? processedSegments.reduce((acc, segment) => acc + segment.value, 0)
+  const totalTasks = toolData?.total_count ?? processedSegments.reduce((acc, segment) => acc + segment.count, 0)
 
   return (
     <section className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Tool usage breakdown</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Tool credit breakdown</h2>
           <p className="text-sm text-slate-500">
-            Task share by tool{summaryRange ? ` · ${summaryRange}` : ''}
+            Credits billed by tool{summaryRange ? ` · ${summaryRange}` : ''}
           </p>
         </div>
         {toolData ? (
           <div className="rounded-md bg-slate-50 px-3 py-1 text-sm text-slate-600">
-            Total tasks: <span className="font-medium text-slate-900">{numberFormatter.format(displayedTotal)}</span>
+            <span className="font-medium text-slate-900">{creditFormatter.format(totalCredits)}</span> credits ·{' '}
+            <span className="font-medium text-slate-900">{integerFormatter.format(totalTasks)}</span>{' '}
+            {totalTasks === 1 ? 'task' : 'tasks'}
           </div>
         ) : null}
       </div>

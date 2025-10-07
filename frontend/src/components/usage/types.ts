@@ -86,6 +86,7 @@ export type UsageTrendQueryInput = { mode: UsageTrendMode; from?: string; to?: s
 export type UsageToolBreakdownTool = {
   name: string
   count: number
+  credits: number
 }
 
 export type UsageToolBreakdownResponse = {
@@ -94,7 +95,8 @@ export type UsageToolBreakdownResponse = {
     end: string
   }
   timezone: string
-  total: number
+  total_count: number
+  total_credits: number
   tools: UsageToolBreakdownTool[]
 }
 

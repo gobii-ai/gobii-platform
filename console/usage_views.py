@@ -378,14 +378,20 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
         if filtered_agent_ids:
             filters["step__agent__browser_use_agent_id__in"] = filtered_agent_ids
 
+        zero_decimal = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
+
         tool_rows = list(
             PersistentAgentToolCall.objects.filter(**filters)
             .values("tool_name")
-            .annotate(count=Count("tool_name"))
-            .order_by("-count")
+            .annotate(
+                count=Count("tool_name"),
+                credits=Coalesce(Sum("step__credits_cost"), zero_decimal),
+            )
+            .order_by("-credits", "-count")
         )
 
-        total = sum(row["count"] for row in tool_rows)
+        total_count = sum(row["count"] for row in tool_rows)
+        total_credits = sum((row["credits"] or Decimal("0")) for row in tool_rows)
 
         payload = {
             "range": {
@@ -393,11 +399,13 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
                 "end": end_dt.isoformat(),
             },
             "timezone": tz_name,
-            "total": total,
+            "total_count": total_count,
+            "total_credits": float(total_credits),
             "tools": [
                 {
                     "name": (row["tool_name"] or ""),
                     "count": row["count"],
+                    "credits": float(row["credits"] or Decimal("0")),
                 }
                 for row in tool_rows
             ],
