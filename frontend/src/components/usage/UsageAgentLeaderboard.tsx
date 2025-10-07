@@ -282,7 +282,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
   })
 
   return (
-    <section className="rounded-xl border border-white/60 bg-white/80 shadow-xl">
+    <section className="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
       <header className="border-b border-slate-200/70 px-6 py-4">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-semibold text-slate-900">Agent leaderboard</h2>

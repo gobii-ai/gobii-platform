@@ -549,7 +549,9 @@ class UsageAgentsAPIView(LoginRequiredMixin, View):
         if organization is not None:
             agents_qs = BrowserUseAgent.objects.filter(persistent_agent__organization=organization)
         else:
-            agents_qs = BrowserUseAgent.objects.filter(user=request.user)
+            agents_qs = BrowserUseAgent.objects.filter(user=request.user).filter(
+                Q(persistent_agent__organization__isnull=True) | Q(persistent_agent__isnull=True)
+            )
 
         agents = [
             {
