@@ -2,7 +2,6 @@ Hi {{ owner_name }},
 
 {{ recipient_name }} has accepted ownership of your agent "{{ agent.name }}" on Gobii.
 
-You can review the agent any time here: {{ agent_url }}
-
 Thanks,
+
 The Gobii Team
