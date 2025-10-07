@@ -19,6 +19,21 @@
     </div>
   </div>
 
+  {% if pending_transfer_invite %}
+  <div class="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl shadow-md px-5 py-4 flex flex-col gap-2">
+    <div class="flex items-center gap-2 text-sm font-semibold">
+      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11a.75.75 0 00-1.5 0v4.5a.75.75 0 001.5 0V7zm-.75 6a1 1 0 100 2 1 1 0 000-2z" clip-rule="evenodd" />
+      </svg>
+      Transfer pending
+    </div>
+    <p class="text-sm leading-5">
+      This agent is awaiting acceptance from <strong>{{ pending_transfer_invite.to_email }}</strong> (sent {{ pending_transfer_invite.created_at|date:"M j, Y g:i A" }}).
+      You can continue editing settings, but keep in mind the new owner will take control once they accept.
+    </p>
+  </div>
+  {% endif %}
+
   <!-- Configuration Card -->
   <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
     <div class="p-6 sm:p-8">

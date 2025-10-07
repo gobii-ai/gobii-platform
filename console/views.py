@@ -1553,7 +1553,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 for invite in pending_transfers:
                     if invite.id in unsassigned_ids:
                         invite.to_user = self.request.user
-            context['pending_agent_transfer_invites'] = pending_transfers
+        context['pending_agent_transfer_invites'] = pending_transfers
 
         return context
 
