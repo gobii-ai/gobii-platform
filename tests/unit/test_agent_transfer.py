@@ -13,6 +13,7 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentMessage,
     PersistentAgentWebSession,
     UserQuota,
 )
@@ -159,10 +160,12 @@ class AgentTransferServiceTests(TestCase):
         self.assertIn(self.agent.name, outbound.subject)
         self.assertEqual(outbound.to, ['new-owner@example.com'])
         self.process_events_mock.delay.assert_not_called()
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
 
     def test_accept_transfer_notifies_initiator(self):
         invite = self._send_transfer_invite_via_console(email=self.recipient.email)
         mail.outbox.clear()
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
 
         self.client.logout()
         self.client.login(username="recipient", password="pw")
@@ -179,6 +182,10 @@ class AgentTransferServiceTests(TestCase):
         self.assertEqual(msg.to, [self.owner.email])
         self.assertIn('accepted', msg.subject.lower())
         self.assertIn(self.agent.name, msg.subject)
+        messages = PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False)
+        self.assertEqual(messages.count(), 1)
+        body = messages.first().body.lower()
+        self.assertIn('taking over as your owner', body)
         self.process_events_mock.delay.assert_called_once_with(str(invite.agent.id))
         self.process_events_mock.delay.reset_mock()
 
@@ -202,6 +209,7 @@ class AgentTransferServiceTests(TestCase):
         self.assertIn('declined', msg.subject.lower())
         self.assertIn(self.agent.name, msg.subject)
         self.process_events_mock.delay.assert_not_called()
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
 
     def tearDown(self) -> None:
         self.analytics_patcher.stop()

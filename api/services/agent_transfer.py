@@ -19,6 +19,9 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
+    PersistentAgentConversationParticipant,
+    PersistentAgentMessage,
 )
 
 User = get_user_model()
@@ -179,6 +182,7 @@ class AgentTransferService:
             AgentTransferService._cleanup_peer_links(agent, recipient)
             AgentTransferService._expire_owner_sessions(agent, original_owner)
             AgentTransferService.handle_secrets_transfer(agent, original_owner, recipient)
+            AgentTransferService._send_new_owner_welcome_message(agent, contact_endpoint, recipient)
 
             invite.to_user = recipient
             invite.status = AgentTransferInvite.Status.ACCEPTED
@@ -252,6 +256,69 @@ class AgentTransferService:
             defaults={"address": email, "owner_agent": None},
         )
         return endpoint
+
+    @staticmethod
+    def _send_new_owner_welcome_message(
+        agent: PersistentAgent,
+        owner_endpoint: Optional[PersistentAgentCommsEndpoint],
+        new_owner: User,
+    ) -> None:
+        if owner_endpoint is None:
+            return
+
+        channel = owner_endpoint.channel
+        if channel not in (CommsChannel.EMAIL, CommsChannel.SMS):
+            return
+
+        address = owner_endpoint.address
+        if not address:
+            return
+
+        conversation, _ = PersistentAgentConversation.objects.get_or_create(
+            owner_agent=agent,
+            channel=channel,
+            address=address,
+            defaults={'display_name': new_owner.get_full_name() or address},
+        )
+
+        try:
+            PersistentAgentConversationParticipant.objects.get_or_create(
+                conversation=conversation,
+                endpoint=owner_endpoint,
+                defaults={'role': PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL},
+            )
+        except Exception:
+            pass
+
+        agent_endpoint = agent.comms_endpoints.filter(owner_agent=agent, channel=channel).first()
+        if agent_endpoint is not None:
+            try:
+                PersistentAgentConversationParticipant.objects.get_or_create(
+                    conversation=conversation,
+                    endpoint=agent_endpoint,
+                    defaults={'role': PersistentAgentConversationParticipant.ParticipantRole.AGENT},
+                )
+            except Exception:
+                pass
+
+        owner_display = new_owner.get_full_name() or new_owner.email or "your new owner"
+        welcome_body = (
+            f"Hi {agent.name}, I'm {owner_display} and I'm taking over as your owner. "
+            "Please introduce yourself and share what you're currently working on right now so I can get up to speed."
+        )
+
+        try:
+            PersistentAgentMessage.objects.create(
+                is_outbound=False,
+                from_endpoint=owner_endpoint,
+                conversation=conversation,
+                body=welcome_body,
+                owner_agent=agent,
+            )
+            agent.last_interaction_at = timezone.now()
+            agent.save(update_fields=["last_interaction_at"])
+        except Exception:
+            logger.warning("Failed to record new-owner welcome message for agent %s", agent.id, exc_info=True)
 
     @staticmethod
     def _migrate_filespaces(agent: PersistentAgent, from_user: User, to_user: User) -> None:
