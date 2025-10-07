@@ -17,6 +17,7 @@ from api.models import (
     TaskCredit,
 )
 from constants.grant_types import GrantTypeChoices
+from console.usage_views import API_AGENT_ID
 
 
 def _grant_task_credits(*, user=None, organization=None, credits: Decimal = Decimal("25")) -> None:
@@ -34,6 +35,21 @@ def _grant_task_credits(*, user=None, organization=None, credits: Decimal = Deci
     else:
         grant_kwargs["user"] = user
     TaskCredit.objects.create(**grant_kwargs)
+
+
+def _create_api_task(*, user, created_at: datetime, organization=None, credits_cost: Decimal | None = None) -> BrowserUseAgentTask:
+    task_kwargs = {
+        "user": user,
+        "status": BrowserUseAgentTask.StatusChoices.COMPLETED,
+    }
+    if organization is not None:
+        task_kwargs["organization"] = organization
+    if credits_cost is not None:
+        task_kwargs["credits_cost"] = credits_cost
+
+    task = BrowserUseAgentTask.objects.create(**task_kwargs)
+    BrowserUseAgentTask.objects.filter(pk=task.pk).update(created_at=created_at)
+    return task
 
 @tag("batch_usage_api")
 @override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
@@ -58,6 +74,10 @@ class UsageTrendAPITests(TestCase):
                 status=BrowserUseAgentTask.StatusChoices.COMPLETED,
             )
             BrowserUseAgentTask.objects.filter(pk=task.pk).update(created_at=dt)
+
+    def _create_api_task_at(self, dt: datetime, count: int = 1):
+        for _ in range(count):
+            _create_api_task(user=self.user, created_at=dt)
 
     def test_week_mode_returns_current_and_previous_counts(self):
         tz = timezone.get_current_timezone()
@@ -124,6 +144,30 @@ class UsageTrendAPITests(TestCase):
         self.assertTrue(any(bucket["current"] == 5 for bucket in buckets))
         self.assertTrue(all(bucket["current"] != 7 for bucket in buckets))
 
+    def test_api_agent_appears_in_trend_data(self):
+        tz = timezone.get_current_timezone()
+        current_day = timezone.make_aware(datetime(2024, 3, 1, 0, 0, 0), tz)
+
+        self._create_api_task_at(current_day + timedelta(hours=1), count=3)
+
+        response = self.client.get(
+            reverse("console_usage_trends"),
+            {
+                "mode": "day",
+                "from": current_day.date().isoformat(),
+                "to": current_day.date().isoformat(),
+                "agent": [API_AGENT_ID],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agents = payload.get("agents", [])
+        self.assertEqual(len(agents), 1)
+        self.assertEqual(agents[0]["id"], API_AGENT_ID)
+        current_counts = [bucket["current"] for bucket in payload.get("buckets", [])]
+        self.assertIn(3, current_counts)
+
 @tag("batch_usage_api")
 @override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
 class UsageAgentLeaderboardAPITests(TestCase):
@@ -154,6 +198,7 @@ class UsageAgentLeaderboardAPITests(TestCase):
         agents = {entry["id"]: entry for entry in payload.get("agents", [])}
         self.assertIn(str(self.agent_primary.id), agents)
         self.assertIn(str(self.agent_secondary.id), agents)
+        self.assertIn(API_AGENT_ID, agents)
         self.assertTrue(all(entry["tasks_total"] == 0 for entry in agents.values()))
 
     def test_calculates_totals_and_average_per_day(self):
@@ -179,6 +224,8 @@ class UsageAgentLeaderboardAPITests(TestCase):
 
         primary = agent_map[str(self.agent_primary.id)]
         secondary = agent_map[str(self.agent_secondary.id)]
+        self.assertIn(API_AGENT_ID, agent_map)
+        self.assertEqual(agent_map[API_AGENT_ID]["tasks_total"], 0)
 
         self.assertEqual(primary["tasks_total"], 2)
         self.assertEqual(primary["success_count"], 1)
@@ -189,6 +236,32 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertEqual(secondary["success_count"], 1)
         self.assertEqual(secondary["error_count"], 0)
         self.assertAlmostEqual(secondary["tasks_per_day"], 0.5)
+
+    def test_api_tasks_included_when_selected(self):
+        tz = timezone.get_current_timezone()
+        start_dt = timezone.make_aware(datetime(2024, 4, 2, 9, 0, 0), tz)
+        _create_api_task(user=self.user, created_at=start_dt, credits_cost=Decimal("2.5"))
+        _create_api_task(user=self.user, created_at=start_dt + timedelta(hours=1), credits_cost=Decimal("1.0"))
+
+        response = self.client.get(
+            reverse("console_usage_agents_leaderboard"),
+            {
+                "from": start_dt.date().isoformat(),
+                "to": start_dt.date().isoformat(),
+                "agent": [API_AGENT_ID],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agents = payload.get("agents", [])
+        self.assertEqual(len(agents), 1)
+        api_row = agents[0]
+        self.assertEqual(api_row["id"], API_AGENT_ID)
+        self.assertEqual(api_row["tasks_total"], 2)
+        self.assertEqual(api_row["success_count"], 2)
+        self.assertEqual(api_row["error_count"], 0)
+        self.assertAlmostEqual(api_row["tasks_per_day"], 2.0)
 
 @tag("batch_usage_api")
 @override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
@@ -386,6 +459,34 @@ class UsageToolBreakdownAPITests(TestCase):
         reset_session["context_name"] = self.user.username
         reset_session.save()
 
+    def test_api_tasks_surface_in_tool_breakdown(self):
+        tz = timezone.get_current_timezone()
+        base_dt = timezone.make_aware(datetime(2024, 8, 1, 10, 0, 0), tz)
+
+        _create_api_task(user=self.user, created_at=base_dt, credits_cost=Decimal("1.5"))
+        _create_api_task(user=self.user, created_at=base_dt + timedelta(hours=1), credits_cost=Decimal("2.0"))
+
+        response = self.client.get(
+            reverse("console_usage_tools"),
+            {
+                "from": base_dt.date().isoformat(),
+                "to": base_dt.date().isoformat(),
+                "agent": [API_AGENT_ID],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload["total_count"], 2)
+        self.assertAlmostEqual(payload["total_credits"], 2.0)
+        tools = payload.get("tools", [])
+        self.assertEqual(len(tools), 1)
+        api_tool = tools[0]
+        self.assertEqual(api_tool["name"], "api_task")
+        self.assertEqual(api_tool["count"], 2)
+        self.assertAlmostEqual(api_tool["credits"], 2.0)
+
 
 @tag("batch_usage_api")
 @override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
@@ -435,6 +536,7 @@ class UsageAgentsAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         agent_names = {agent["name"] for agent in payload.get("agents", [])}
+        self.assertIn("API", agent_names)
         self.assertIn("Agent A", agent_names)
         self.assertIn("Agent B", agent_names)
         self.assertNotIn("Org Agent", agent_names)
@@ -456,7 +558,7 @@ class UsageAgentsAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         agent_ids = {agent["id"] for agent in payload.get("agents", [])}
-        self.assertEqual(agent_ids, {str(self.org_agent.id)})
+        self.assertEqual(agent_ids, {str(self.org_agent.id), API_AGENT_ID})
 
         # Reset session context back to personal to avoid leaking state to other tests.
         reset_session = self.client.session
@@ -560,3 +662,29 @@ class UsageSummaryAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["metrics"]["tasks"]["count"], 1)
+
+    def test_api_filter_limits_summary(self):
+        tz = timezone.get_current_timezone()
+        now = timezone.make_aware(datetime(2024, 5, 5, 12, 0, 0), tz)
+        _create_api_task(user=self.user, created_at=now, credits_cost=Decimal("4.0"))
+        BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=self.agent_primary,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            credits_cost=Decimal("2.0"),
+        )
+
+        response = self.client.get(
+            reverse("console_usage_summary"),
+            {
+                "from": now.date().isoformat(),
+                "to": now.date().isoformat(),
+                "agent": API_AGENT_ID,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        metrics = payload["metrics"]["tasks"]
+        self.assertEqual(metrics["count"], 1)
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 1.0)

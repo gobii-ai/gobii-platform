@@ -105,6 +105,19 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'api_task',
+    label: 'API task',
+    iconPaths: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+    iconBgClass: 'bg-slate-100',
+    iconColorClass: 'text-slate-600',
+    detailKind: 'default',
+    derive() {
+      return {
+        caption: 'Agentless task triggered via API',
+      }
+    },
+  },
+  {
     name: 'search_tools',
     aliases: ['search_web', 'web_search', 'search'],
     label: 'Web search',

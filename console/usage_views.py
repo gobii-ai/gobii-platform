@@ -1,11 +1,11 @@
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 import uuid
 from decimal import Decimal
-from typing import Any
+from typing import Any, Iterable, Optional
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Count, DecimalField, Sum, Value
-from django.db.models import Q
+from django.db.models import Case, Count, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Coalesce, TruncDay, TruncHour
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
@@ -15,6 +15,19 @@ from billing.services import BillingService
 
 from api.models import BrowserUseAgent, BrowserUseAgentTask, PersistentAgentToolCall, TaskCredit
 from console.context_helpers import build_console_context
+
+
+API_AGENT_ID = "api"
+API_AGENT_NAME = "API"
+API_CREDIT_DECIMAL = Decimal("1")
+
+
+@dataclass(frozen=True)
+class UsageAgentDescriptor:
+    id: str
+    name: str
+    browser_agent_id: Optional[uuid.UUID]
+    is_api: bool = False
 
 
 def _parse_query_date(value: str | None) -> date | None:
@@ -42,7 +55,7 @@ def _format_period_label(start_date, end_date) -> str:
     return f"{start_label} – {end_label}"
 
 
-def _get_accessible_agents(request: HttpRequest, organization):
+def _get_accessible_agents(request: HttpRequest, organization) -> list[UsageAgentDescriptor]:
     if organization is not None:
         qs = BrowserUseAgent.objects.filter(
             Q(persistent_agent__organization=organization)
@@ -51,19 +64,71 @@ def _get_accessible_agents(request: HttpRequest, organization):
         qs = BrowserUseAgent.objects.filter(user=request.user).filter(
             Q(persistent_agent__organization__isnull=True) | Q(persistent_agent__isnull=True)
         )
-    return list(qs.order_by("name"))
+
+    descriptors: list[UsageAgentDescriptor] = [
+        UsageAgentDescriptor(id=API_AGENT_ID, name=API_AGENT_NAME, browser_agent_id=None, is_api=True)
+    ]
+
+    for agent in qs.order_by("name"):
+        descriptors.append(
+            UsageAgentDescriptor(
+                id=str(agent.id),
+                name=agent.name,
+                browser_agent_id=agent.id,
+            )
+        )
+
+    # Sort alphabetically so the API option appears in a predictable position.
+    descriptors.sort(key=lambda descriptor: descriptor.name.lower())
+    return descriptors
 
 
-def _filter_agent_ids(raw_values, accessible_ids: set[uuid.UUID]) -> list[uuid.UUID]:
-    filtered: list[uuid.UUID] = []
+def _filter_agent_ids(raw_values: Iterable[str], accessible_ids: set[str]) -> list[str]:
+    filtered: list[str] = []
     for raw in raw_values:
+        if raw in accessible_ids:
+            filtered.append(raw)
+    return filtered
+
+
+def _split_agent_filter_values(agent_ids: Iterable[str]) -> tuple[list[uuid.UUID], bool]:
+    concrete_ids: list[uuid.UUID] = []
+    include_api = False
+    for agent_id in agent_ids:
+        if agent_id == API_AGENT_ID:
+            include_api = True
+            continue
         try:
-            candidate = uuid.UUID(raw)
+            concrete_ids.append(uuid.UUID(agent_id))
         except (TypeError, ValueError):
             continue
-        if candidate in accessible_ids:
-            filtered.append(candidate)
-    return filtered
+    return concrete_ids, include_api
+
+
+def _build_agent_filter(actual_agent_ids: Iterable[uuid.UUID], include_api: bool) -> Optional[Q]:
+    clauses: list[Q] = []
+    actual_ids = list(actual_agent_ids)
+    if actual_ids:
+        clauses.append(Q(agent_id__in=actual_ids))
+    if include_api:
+        clauses.append(Q(agent_id__isnull=True))
+
+    if not clauses:
+        return None
+
+    combined = clauses[0]
+    for clause in clauses[1:]:
+        combined |= clause
+    return combined
+
+
+def _per_task_credit_expression() -> Case:
+    zero_decimal = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
+    return Case(
+        When(agent_id__isnull=True, then=Value(API_CREDIT_DECIMAL, output_field=DecimalField(max_digits=20, decimal_places=6))),
+        default=Coalesce(F("credits_cost"), zero_decimal),
+        output_field=DecimalField(max_digits=20, decimal_places=6),
+    )
 
 
 class UsageSummaryAPIView(LoginRequiredMixin, View):
@@ -85,7 +150,8 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         requested_end = _parse_query_date(request.GET.get("to"))
         agent_filters_raw = request.GET.getlist("agent")
 
-        accessible_agent_ids = {agent.id for agent in _get_accessible_agents(request, organization)}
+        accessible_agents = _get_accessible_agents(request, organization)
+        accessible_agent_ids = {agent.id for agent in accessible_agents}
 
         if requested_start and requested_end and requested_start <= requested_end:
             period_start, period_end = requested_start, requested_end
@@ -109,10 +175,12 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             filters["organization__isnull"] = True
 
         filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
-        if filtered_agent_ids:
-            filters["agent_id__in"] = filtered_agent_ids
+        actual_agent_ids, include_api = _split_agent_filter_values(filtered_agent_ids)
 
         tasks_qs = BrowserUseAgentTask.objects.filter(**filters)
+        agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
+        if agent_filter_q is not None:
+            tasks_qs = tasks_qs.filter(agent_filter_q)
 
         status_counts = {status: 0 for status in BrowserUseAgentTask.StatusChoices.values}
         for row in tasks_qs.values("status").annotate(count=Count("status")):
@@ -120,8 +188,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
 
         tasks_total = tasks_qs.count()
 
-        credits_zero = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
-        credits_agg = tasks_qs.aggregate(total=Coalesce(Sum("credits_cost"), credits_zero))
+        credits_agg = tasks_qs.aggregate(total=Sum(_per_task_credit_expression()))
         total_credits = credits_agg.get("total") or Decimal("0")
 
         now = timezone.now()
@@ -135,6 +202,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         else:
             credit_filters["user"] = request.user
 
+        credits_zero = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
         credit_agg = TaskCredit.objects.filter(**credit_filters).aggregate(
             available=Coalesce(Sum("available_credits"), credits_zero),
             total=Coalesce(Sum("credits"), credits_zero),
@@ -267,8 +335,9 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
             base_filters["organization__isnull"] = True
 
         filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
-        if filtered_agent_ids:
-            base_filters["agent_id__in"] = filtered_agent_ids
+        actual_agent_ids, include_api = _split_agent_filter_values(filtered_agent_ids)
+
+        agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
 
         if filtered_agent_ids:
             active_agents = [agent for agent in accessible_agents if agent.id in filtered_agent_ids]
@@ -282,9 +351,11 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 "created_at__gte": start_dt,
                 "created_at__lt": end_dt,
             }
+            qs = BrowserUseAgentTask.objects.filter(**filters)
+            if agent_filter_q is not None:
+                qs = qs.filter(agent_filter_q)
             rows = (
-                BrowserUseAgentTask.objects.filter(**filters)
-                .annotate(bucket=trunc_function("created_at", tzinfo=tz))
+                qs.annotate(bucket=trunc_function("created_at", tzinfo=tz))
                 .values("bucket")
                 .order_by("bucket")
                 .annotate(count=Count("id"))
@@ -296,9 +367,11 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 "created_at__gte": start_dt,
                 "created_at__lt": end_dt,
             }
+            qs = BrowserUseAgentTask.objects.filter(**filters)
+            if agent_filter_q is not None:
+                qs = qs.filter(agent_filter_q)
             rows = (
-                BrowserUseAgentTask.objects.filter(**filters)
-                .annotate(bucket=trunc_function("created_at", tzinfo=tz))
+                qs.annotate(bucket=trunc_function("created_at", tzinfo=tz))
                 .values("bucket", "agent_id")
                 .order_by("bucket", "agent_id")
                 .annotate(count=Count("id"))
@@ -306,12 +379,13 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
             bucket_map: dict[str, dict[str, int]] = {}
             for row in rows:
                 bucket = row.get("bucket")
-                agent_id = row.get("agent_id")
-                if bucket is None or agent_id is None:
+                if bucket is None:
                     continue
+                agent_id = row.get("agent_id")
+                agent_key = API_AGENT_ID if agent_id is None else str(agent_id)
                 bucket_key = bucket.isoformat()
                 agent_counts = bucket_map.setdefault(bucket_key, {})
-                agent_counts[str(agent_id)] = row["count"]
+                agent_counts[agent_key] = row["count"]
             return bucket_map
 
         current_counts = _build_counts(current_start_dt, current_end_dt)
@@ -388,8 +462,11 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
         start_dt = timezone.make_aware(datetime.combine(period_start, time.min), tz)
         end_dt = timezone.make_aware(datetime.combine(period_end, time.max), tz)
 
-        accessible_agent_ids = {agent.id for agent in _get_accessible_agents(request, organization)}
+        accessible_agents = _get_accessible_agents(request, organization)
+        accessible_agent_ids = {agent.id for agent in accessible_agents}
         filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
+        actual_agent_ids, include_api = _split_agent_filter_values(filtered_agent_ids)
+        agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
 
         filters = {
             "step__created_at__gte": start_dt,
@@ -402,13 +479,19 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
             filters["step__agent__user"] = request.user
             filters["step__agent__organization__isnull"] = True
 
-        if filtered_agent_ids:
-            filters["step__agent__browser_use_agent_id__in"] = filtered_agent_ids
-
         zero_decimal = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
 
+        persistent_qs = PersistentAgentToolCall.objects.filter(**filters)
+        if filtered_agent_ids:
+            if actual_agent_ids:
+                persistent_q_filter = Q(step__agent__browser_use_agent_id__in=actual_agent_ids)
+                persistent_qs = persistent_qs.filter(persistent_q_filter)
+            else:
+                # Only API usage was requested; no persistent agent tool calls should be returned.
+                persistent_qs = persistent_qs.none()
+
         tool_rows = list(
-            PersistentAgentToolCall.objects.filter(**filters)
+            persistent_qs
             .values("tool_name")
             .annotate(
                 count=Count("tool_name"),
@@ -416,6 +499,40 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
             )
             .order_by("-credits", "-count")
         )
+
+        # Include API-originated browser tasks (agentless) as their own category.
+        api_task_filters = {
+            "is_deleted": False,
+            "created_at__gte": start_dt,
+            "created_at__lte": end_dt,
+        }
+
+        if organization is not None:
+            api_task_filters["organization"] = organization
+        else:
+            api_task_filters["user"] = request.user
+            api_task_filters["organization__isnull"] = True
+
+        api_tasks_qs = BrowserUseAgentTask.objects.filter(**api_task_filters)
+        if agent_filter_q is not None:
+            api_tasks_qs = api_tasks_qs.filter(agent_filter_q)
+        api_tasks_qs = api_tasks_qs.filter(agent_id__isnull=True)
+
+        api_task_stats = api_tasks_qs.aggregate(
+            count=Count("id"),
+        )
+
+        api_task_count = api_task_stats.get("count", 0) or 0
+        api_task_credits = API_CREDIT_DECIMAL * api_task_count
+
+        if api_task_count:
+            tool_rows.append(
+                {
+                    "tool_name": "api_task",
+                    "count": api_task_count,
+                    "credits": api_task_credits,
+                }
+            )
 
         total_count = sum(row["count"] for row in tool_rows)
         total_credits = sum((row["credits"] or Decimal("0")) for row in tool_rows)
@@ -472,6 +589,8 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
         accessible_agent_ids = {agent.id for agent in accessible_agents}
 
         filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
+        actual_agent_ids, include_api = _split_agent_filter_values(filtered_agent_ids)
+
         if filtered_agent_ids:
             active_agent_ids = set(filtered_agent_ids)
             active_agents = [agent for agent in accessible_agents if agent.id in active_agent_ids]
@@ -483,7 +602,6 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
             "is_deleted": False,
             "created_at__gte": period_start_dt,
             "created_at__lte": period_end_dt,
-            "agent_id__isnull": False,
         }
 
         if organization is not None:
@@ -492,11 +610,14 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
             task_filters["user"] = request.user
             task_filters["organization__isnull"] = True
 
-        if active_agent_ids:
-            task_filters["agent_id__in"] = list(active_agent_ids)
+        agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
+
+        tasks_qs = BrowserUseAgentTask.objects.filter(**task_filters)
+        if agent_filter_q is not None:
+            tasks_qs = tasks_qs.filter(agent_filter_q)
 
         aggregates = (
-            BrowserUseAgentTask.objects.filter(**task_filters)
+            tasks_qs
             .values("agent_id")
             .order_by()
             .annotate(
@@ -506,12 +627,11 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
             )
         )
 
-        aggregate_map: dict[uuid.UUID, dict[str, int]] = {}
+        aggregate_map: dict[str, dict[str, int]] = {}
         for row in aggregates:
             agent_id = row.get("agent_id")
-            if agent_id is None:
-                continue
-            aggregate_map[agent_id] = {
+            key = API_AGENT_ID if agent_id is None else str(agent_id)
+            aggregate_map[key] = {
                 "total": row.get("total", 0),
                 "success": row.get("success", 0),
                 "error": row.get("error", 0),
@@ -563,19 +683,14 @@ class UsageAgentsAPIView(LoginRequiredMixin, View):
         if resolved.current_context.type == "organization" and resolved.current_membership:
             organization = resolved.current_membership.org
 
-        if organization is not None:
-            agents_qs = BrowserUseAgent.objects.filter(persistent_agent__organization=organization)
-        else:
-            agents_qs = BrowserUseAgent.objects.filter(user=request.user).filter(
-                Q(persistent_agent__organization__isnull=True) | Q(persistent_agent__isnull=True)
-            )
+        accessible_agents = _get_accessible_agents(request, organization)
 
         agents = [
             {
-                "id": str(agent.id),
+                "id": agent.id,
                 "name": agent.name,
             }
-            for agent in agents_qs.order_by("name")
+            for agent in accessible_agents
         ]
 
         return JsonResponse({"agents": agents})
