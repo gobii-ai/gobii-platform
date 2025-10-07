@@ -371,6 +371,50 @@
     </div>
   </div>
 
+  <!-- Ownership Transfer -->
+  <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
+    <div class="p-6 sm:p-8 space-y-4">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-800">Transfer Ownership</h2>
+        <p class="text-sm text-gray-500">Send this agent to someone else. They can accept or decline from their dashboard.</p>
+      </div>
+
+      {% if pending_transfer_invite %}
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-indigo-50 border border-indigo-100 rounded-lg p-4">
+        <div>
+          <p class="text-sm text-indigo-800">Transfer invitation sent to <strong>{{ pending_transfer_invite.to_email }}</strong> on {{ pending_transfer_invite.created_at|date:"M j, Y g:i A" }}.</p>
+          <p class="text-xs text-indigo-700 mt-1">They'll need to sign in with that email to accept.</p>
+        </div>
+        <form method="post" class="flex">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="cancel_transfer_invite">
+          <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition">
+            Cancel Invitation
+          </button>
+        </form>
+      </div>
+      {% else %}
+      <form method="post" class="space-y-4">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="transfer_agent">
+        <div>
+          <label for="transfer-email" class="text-sm font-medium text-gray-700">Recipient email</label>
+          <input id="transfer-email" name="transfer_email" type="email" required placeholder="user@example.com" class="mt-1 block w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+        </div>
+        <div>
+          <label for="transfer-message" class="text-sm font-medium text-gray-700">Message <span class="text-gray-400">(optional)</span></label>
+          <textarea id="transfer-message" name="transfer_message" rows="2" class="mt-1 block w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500" placeholder="Share any context you'd like them to know."></textarea>
+        </div>
+        <div class="flex justify-end">
+          <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition">
+            Send Transfer Invite
+          </button>
+        </div>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- Agent Contacts (Peer Links) -->
   <div class="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
     <div class="p-6 sm:p-8 space-y-6">
