@@ -44,6 +44,7 @@ export function UsageScreen() {
   const initialPeriodRef = useRef<DateRangeValue | null>(null)
   const anchorDayRef = useRef<number | null>(null)
 
+  // Persisted API data so the UI stays responsive while React Query loads.
   const summary = useUsageStore((state) => state.summary)
   const summaryStatus = useUsageStore((state) => state.summaryStatus)
   const summaryErrorMessage = useUsageStore((state) => state.summaryErrorMessage)
@@ -56,6 +57,7 @@ export function UsageScreen() {
   const setAgentsData = useUsageStore((state) => state.setAgentsData)
   const setAgentsError = useUsageStore((state) => state.setAgentsError)
 
+  // Only request summary data when a concrete range has been selected.
   const queryInput = useMemo<UsageSummaryQueryInput>(() => {
     if (appliedRange?.start && appliedRange?.end) {
       return {
@@ -66,18 +68,21 @@ export function UsageScreen() {
     return {}
   }, [appliedRange])
 
+  // Agents are stable enough that we cache them globally and reuse between tabs.
   const agentsQuery = useQuery({
     queryKey: ['usage-agents'],
     queryFn: ({signal}) => fetchUsageAgents(signal),
     refetchOnWindowFocus: false,
   })
 
+  // Keep the local store aligned with the React Query lifecycle so components can react synchronously.
   useEffect(() => {
     if (agentsQuery.isPending) {
       setAgentsLoading()
     }
   }, [agentsQuery.isPending, setAgentsLoading])
 
+  // When the agents list changes, drop any stale selections the user can no longer access.
   useEffect(() => {
     if (agentsQuery.data) {
       setAgentsData(agentsQuery.data.agents)
@@ -114,6 +119,7 @@ export function UsageScreen() {
     }
   }, [agents, selectedAgentIds])
 
+  // Convert the string dates coming from the API into calendar-aware values so range math stays accurate.
   const summaryRange = useMemo<DateRangeValue | null>(() => {
     if (!summary) {
       return null
@@ -124,6 +130,7 @@ export function UsageScreen() {
     }
   }, [summary])
 
+  // The effective range is whichever range is currently applied: either the user override or the server billing window.
   const effectiveRange = useMemo<DateRangeValue | null>(() => {
     if (appliedRange) {
       return appliedRange
@@ -134,6 +141,7 @@ export function UsageScreen() {
     return null
   }, [appliedRange, summaryRange])
 
+  // On first load, prime the local state with the billing period so pagination buttons work immediately.
   useEffect(() => {
     if (!summaryRange) {
       return
@@ -165,6 +173,7 @@ export function UsageScreen() {
     }
   }, [])
 
+  // Shift either by full billing cycles or by the length of the custom range the user picked.
   const handleShift = useCallback((direction: 'previous' | 'next') => {
     if (!effectiveRange) {
       return
@@ -230,6 +239,7 @@ export function UsageScreen() {
   )
   const isViewingCurrentBilling = selectionMode === 'billing' && isCurrentSelection
 
+  // Format the header caption so it calls out the active context and timezone.
   const periodInfo = useMemo<PeriodInfo>(() => {
     if (summary) {
       return {

@@ -39,7 +39,7 @@ def _parse_query_date(value: str | None) -> date | None:
         return None
 
 
-def _format_period_label(start_date, end_date) -> str:
+def _format_period_label(start_date: date, end_date: date) -> str:
     """Return a concise date range label such as 'Jul 1 – Jul 31, 2024'."""
 
     start_month = start_date.strftime("%b")
