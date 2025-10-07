@@ -193,7 +193,7 @@ class AgentTransferService:
 
     @staticmethod
     def _lock_invite(invite_id) -> AgentTransferInvite:
-        return AgentTransferInvite.objects.select_for_update().get(pk=invite_id)
+        return AgentTransferInvite.objects.get(pk=invite_id)
 
     @staticmethod
     def _recipient_has_capacity(user: User) -> bool:
