@@ -270,7 +270,7 @@ export function UsageScreen() {
     <div className="mx-auto flex max-w-5xl flex-col gap-6 py-8">
       <header className="flex flex-col gap-3">
         <div>
-          <h1 className="text-3xl font-semibold text-slate-900">Usage</h1>
+          <h1 className="text-2xl font-semibold text-gray-800">Usage</h1>
           <p className="mt-2 text-base text-slate-600">
             Monitor agent activity and metered consumption for the current billing cycle.
           </p>
@@ -304,12 +304,6 @@ export function UsageScreen() {
 
       <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray}/>
 
-      <UsageAgentLeaderboard
-        effectiveRange={effectiveRange}
-        fallbackRange={summaryRange}
-        agentIds={selectedAgentArray}
-      />
-
       <UsageTrendSection
         effectiveRange={effectiveRange}
         fallbackRange={summaryRange}
@@ -322,6 +316,12 @@ export function UsageScreen() {
         fallbackRange={summaryRange}
         agentIds={selectedAgentArray}
         timezone={summary?.period.timezone}
+      />
+
+      <UsageAgentLeaderboard
+        effectiveRange={effectiveRange}
+        fallbackRange={summaryRange}
+        agentIds={selectedAgentArray}
       />
 
       {summaryStatus === 'error' && summaryErrorMessage ? (

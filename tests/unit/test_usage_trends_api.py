@@ -182,6 +182,18 @@ class UsageAgentLeaderboardAPITests(TestCase):
         _grant_task_credits(user=self.user)
         self.agent_primary = BrowserUseAgent.objects.create(user=self.user, name="Agent Alpha")
         self.agent_secondary = BrowserUseAgent.objects.create(user=self.user, name="Agent Beta")
+        self.persistent_primary = PersistentAgent.objects.create(
+            user=self.user,
+            name="Agent Alpha Persistent",
+            charter="Primary charter",
+            browser_use_agent=self.agent_primary,
+        )
+        self.persistent_secondary = PersistentAgent.objects.create(
+            user=self.user,
+            name="Agent Beta Persistent",
+            charter="Secondary charter",
+            browser_use_agent=self.agent_secondary,
+        )
 
     def _create_task(self, *, dt: datetime, agent: BrowserUseAgent, status: str):
         task = BrowserUseAgentTask.objects.create(
@@ -200,6 +212,9 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertIn(str(self.agent_secondary.id), agents)
         self.assertIn(API_AGENT_ID, agents)
         self.assertTrue(all(entry["tasks_total"] == 0 for entry in agents.values()))
+        self.assertEqual(agents[str(self.agent_primary.id)]["persistent_id"], str(self.persistent_primary.id))
+        self.assertEqual(agents[str(self.agent_secondary.id)]["persistent_id"], str(self.persistent_secondary.id))
+        self.assertIsNone(agents[API_AGENT_ID]["persistent_id"])
 
     def test_calculates_totals_and_average_per_day(self):
         tz = timezone.get_current_timezone()
@@ -226,6 +241,9 @@ class UsageAgentLeaderboardAPITests(TestCase):
         secondary = agent_map[str(self.agent_secondary.id)]
         self.assertIn(API_AGENT_ID, agent_map)
         self.assertEqual(agent_map[API_AGENT_ID]["tasks_total"], 0)
+        self.assertEqual(primary["persistent_id"], str(self.persistent_primary.id))
+        self.assertEqual(secondary["persistent_id"], str(self.persistent_secondary.id))
+        self.assertIsNone(agent_map[API_AGENT_ID]["persistent_id"])
 
         self.assertEqual(primary["tasks_total"], 2)
         self.assertEqual(primary["success_count"], 1)
@@ -262,6 +280,7 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertEqual(api_row["success_count"], 2)
         self.assertEqual(api_row["error_count"], 0)
         self.assertAlmostEqual(api_row["tasks_per_day"], 2.0)
+        self.assertIsNone(api_row["persistent_id"])
 
 @tag("batch_usage_api")
 @override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)

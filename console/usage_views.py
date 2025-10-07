@@ -27,6 +27,7 @@ class UsageAgentDescriptor:
     id: str
     name: str
     browser_agent_id: Optional[uuid.UUID]
+    persistent_agent_id: Optional[uuid.UUID] = None
     is_api: bool = False
 
 
@@ -66,15 +67,24 @@ def _get_accessible_agents(request: HttpRequest, organization) -> list[UsageAgen
         )
 
     descriptors: list[UsageAgentDescriptor] = [
-        UsageAgentDescriptor(id=API_AGENT_ID, name=API_AGENT_NAME, browser_agent_id=None, is_api=True)
+        UsageAgentDescriptor(
+            id=API_AGENT_ID,
+            name=API_AGENT_NAME,
+            browser_agent_id=None,
+            persistent_agent_id=None,
+            is_api=True,
+        )
     ]
 
-    for agent in qs.order_by("name"):
+    for agent in qs.select_related("persistent_agent").order_by("name"):
+        persistent_obj = getattr(agent, "persistent_agent", None)
+        persistent_agent_id = getattr(persistent_obj, "id", None)
         descriptors.append(
             UsageAgentDescriptor(
                 id=str(agent.id),
                 name=agent.name,
                 browser_agent_id=agent.id,
+                persistent_agent_id=persistent_agent_id,
             )
         )
 
@@ -646,6 +656,7 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
             success = stats["success"]
             error = stats["error"]
             avg_per_day = float(total) / period_length_days if total > 0 else 0.0
+
             leaderboard.append(
                 {
                     "id": str(agent.id),
@@ -654,6 +665,7 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
                     "tasks_per_day": avg_per_day,
                     "success_count": success,
                     "error_count": error,
+                    "persistent_id": str(agent.persistent_agent_id) if agent.persistent_agent_id else None,
                 }
             )
 

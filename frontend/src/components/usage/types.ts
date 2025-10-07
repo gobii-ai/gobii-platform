@@ -127,6 +127,7 @@ export type UsageAgentLeaderboardEntry = {
   tasks_per_day: number
   success_count: number
   error_count: number
+  persistent_id?: string | null
 }
 
 export type UsageAgentLeaderboardResponse = {

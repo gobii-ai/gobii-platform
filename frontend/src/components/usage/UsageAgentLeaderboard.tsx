@@ -19,6 +19,8 @@ import type {
 } from './types'
 import { fetchUsageAgentLeaderboard } from './api'
 
+const API_AGENT_ID = 'api'
+
 type LeaderboardRow = {
   id: string
   name: string
@@ -27,6 +29,8 @@ type LeaderboardRow = {
   successCount: number
   errorCount: number
   successRate: number | null
+  persistentId: string | null
+  isApi: boolean
 }
 
 type UsageAgentLeaderboardProps = {
@@ -187,6 +191,8 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
           successCount,
           errorCount,
           successRate,
+          persistentId: agent.persistent_id ?? null,
+          isApi: agent.id === API_AGENT_ID,
         }
       })
   }, [data])
@@ -268,6 +274,34 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
         },
         sortingFn: 'basic',
       },
+      {
+        id: 'actions',
+        accessorFn: () => null,
+        enableSorting: false,
+        header: () => (
+          <div className="flex w-full justify-end text-right text-xs font-medium uppercase tracking-wider text-slate-500">
+            Actions
+          </div>
+        ),
+        cell: ({ row }) => {
+          if (row.original.isApi) {
+            return <span className="text-sm text-slate-500">—</span>
+          }
+
+          const persistentId = row.original.persistentId
+          if (!persistentId) {
+            return <span className="text-sm text-slate-500">—</span>
+          }
+
+          const configureHref = `/console/agents/${persistentId}/`
+
+          return (
+            <a href={configureHref} className="text-sm font-semibold text-indigo-600 hover:text-indigo-500">
+              Configure
+            </a>
+          )
+        },
+      },
     ]
   }, [decimalFormatter, integerFormatter, percentFormatter])
 
@@ -292,7 +326,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
 
       <div className="overflow-x-auto">
         <table className="w-full divide-y divide-white/40">
-          <thead className="bg-white/50">
+          <thead className="bg-gray-50/50">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => {
@@ -314,7 +348,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
               </tr>
             ))}
           </thead>
-          <tbody className="divide-y divide-white/40">
+          <tbody className="divide-y divide-gray-200/70">
             {!queryInput ? (
               <tr>
                 <td className="px-3 md:px-6 py-4 text-center text-sm text-slate-500" colSpan={columns.length}>
@@ -341,7 +375,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
               </tr>
             ) : (
               table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className="bg-white/70">
+                <tr key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
