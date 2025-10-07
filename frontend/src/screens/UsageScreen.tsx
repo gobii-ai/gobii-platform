@@ -8,6 +8,7 @@ import {
   UsageMetricsGrid,
   UsageAgentSelector,
   UsageToolChart,
+  UsageAgentLeaderboard,
   useUsageStore,
 } from '../components/usage'
 import { fetchUsageAgents } from '../components/usage/api'
@@ -309,6 +310,12 @@ export function UsageScreen() {
         fallbackRange={summaryRange}
         agentIds={selectedAgentArray}
         timezone={summary?.period.timezone}
+      />
+
+      <UsageAgentLeaderboard
+        effectiveRange={effectiveRange}
+        fallbackRange={summaryRange}
+        agentIds={selectedAgentArray}
       />
 
       {summaryStatus === 'error' && summaryErrorMessage ? (

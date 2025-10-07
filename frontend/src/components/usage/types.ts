@@ -125,3 +125,24 @@ export type UsageAgent = {
 export type UsageAgentsResponse = {
   agents: UsageAgent[]
 }
+
+export type UsageAgentLeaderboardEntry = {
+  id: string
+  name: string
+  tasks_total: number
+  tasks_per_day: number
+  success_count: number
+  error_count: number
+}
+
+export type UsageAgentLeaderboardResponse = {
+  period: {
+    start: string
+    end: string
+    label: string
+    timezone: string
+  }
+  agents: UsageAgentLeaderboardEntry[]
+}
+
+export type UsageAgentLeaderboardQueryInput = UsageSummaryQueryInput

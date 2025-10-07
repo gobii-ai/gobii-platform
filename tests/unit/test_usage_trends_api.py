@@ -6,7 +6,13 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from api.models import BrowserUseAgent, BrowserUseAgentTask
+from api.models import (
+    BrowserUseAgent,
+    BrowserUseAgentTask,
+    Organization,
+    OrganizationMembership,
+    PersistentAgent,
+)
 
 
 class UsageTrendAPITests(TestCase):
@@ -96,6 +102,70 @@ class UsageTrendAPITests(TestCase):
         self.assertTrue(all(bucket["current"] != 7 for bucket in buckets))
 
 
+class UsageAgentLeaderboardAPITests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username="leaderboard@example.com",
+            email="leaderboard@example.com",
+            password="password123",
+        )
+        self.client.force_login(self.user)
+        self.agent_primary = BrowserUseAgent.objects.create(user=self.user, name="Agent Alpha")
+        self.agent_secondary = BrowserUseAgent.objects.create(user=self.user, name="Agent Beta")
+
+    def _create_task(self, *, dt: datetime, agent: BrowserUseAgent, status: str):
+        task = BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=agent,
+            status=status,
+        )
+        BrowserUseAgentTask.objects.filter(pk=task.pk).update(created_at=dt)
+
+    def test_returns_all_agents_with_zero_counts(self):
+        response = self.client.get(reverse("console_usage_agents_leaderboard"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agents = {entry["id"]: entry for entry in payload.get("agents", [])}
+        self.assertIn(str(self.agent_primary.id), agents)
+        self.assertIn(str(self.agent_secondary.id), agents)
+        self.assertTrue(all(entry["tasks_total"] == 0 for entry in agents.values()))
+
+    def test_calculates_totals_and_average_per_day(self):
+        tz = timezone.get_current_timezone()
+        start_dt = timezone.make_aware(datetime(2024, 1, 10, 12, 0, 0), tz)
+        next_day = start_dt + timedelta(days=1)
+
+        self._create_task(dt=start_dt, agent=self.agent_primary, status=BrowserUseAgentTask.StatusChoices.COMPLETED)
+        self._create_task(dt=start_dt + timedelta(hours=2), agent=self.agent_primary, status=BrowserUseAgentTask.StatusChoices.FAILED)
+        self._create_task(dt=next_day, agent=self.agent_secondary, status=BrowserUseAgentTask.StatusChoices.COMPLETED)
+
+        response = self.client.get(
+            reverse("console_usage_agents_leaderboard"),
+            {
+                "from": start_dt.date().isoformat(),
+                "to": next_day.date().isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agent_map = {entry["id"]: entry for entry in payload.get("agents", [])}
+
+        primary = agent_map[str(self.agent_primary.id)]
+        secondary = agent_map[str(self.agent_secondary.id)]
+
+        self.assertEqual(primary["tasks_total"], 2)
+        self.assertEqual(primary["success_count"], 1)
+        self.assertEqual(primary["error_count"], 1)
+        self.assertAlmostEqual(primary["tasks_per_day"], 1.0)
+
+        self.assertEqual(secondary["tasks_total"], 1)
+        self.assertEqual(secondary["success_count"], 1)
+        self.assertEqual(secondary["error_count"], 0)
+        self.assertAlmostEqual(secondary["tasks_per_day"], 0.5)
+
+
 class UsageAgentsAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -105,8 +175,34 @@ class UsageAgentsAPITests(TestCase):
             password="password123",
         )
         self.client.force_login(self.user)
-        BrowserUseAgent.objects.create(user=self.user, name="Agent A")
-        BrowserUseAgent.objects.create(user=self.user, name="Agent B")
+        self.personal_agent = BrowserUseAgent.objects.create(user=self.user, name="Agent A")
+        self.personal_agent_two = BrowserUseAgent.objects.create(user=self.user, name="Agent B")
+
+        self.organization = Organization.objects.create(
+            name="Org Inc",
+            slug="org-inc",
+            created_by=self.user,
+        )
+        # Ensure seats are available so org-owned agents can be created.
+        billing = self.organization.billing
+        billing.purchased_seats = 1
+        billing.save()
+
+        OrganizationMembership.objects.create(
+            org=self.organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+
+        org_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Org Agent")
+        PersistentAgent.objects.create(
+            user=self.user,
+            organization=self.organization,
+            name="Org Agent Persistent",
+            charter="Test charter",
+            browser_use_agent=org_browser_agent,
+        )
+        self.org_agent = org_browser_agent
 
     def test_agent_list_returns_agents(self):
         response = self.client.get(reverse("console_usage_agents"))
@@ -115,6 +211,33 @@ class UsageAgentsAPITests(TestCase):
         agent_names = {agent["name"] for agent in payload.get("agents", [])}
         self.assertIn("Agent A", agent_names)
         self.assertIn("Agent B", agent_names)
+        self.assertNotIn("Org Agent", agent_names)
+
+    def test_user_context_excludes_org_agents(self):
+        response = self.client.get(reverse("console_usage_agents"))
+        payload = response.json()
+        agent_ids = {agent["id"] for agent in payload.get("agents", [])}
+        self.assertNotIn(str(self.org_agent.id), agent_ids)
+
+    def test_org_context_returns_only_org_agents(self):
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.organization.id)
+        session["context_name"] = self.organization.name
+        session.save()
+
+        response = self.client.get(reverse("console_usage_agents"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agent_ids = {agent["id"] for agent in payload.get("agents", [])}
+        self.assertEqual(agent_ids, {str(self.org_agent.id)})
+
+        # Reset session context back to personal to avoid leaking state to other tests.
+        reset_session = self.client.session
+        reset_session["context_type"] = "personal"
+        reset_session["context_id"] = str(self.user.id)
+        reset_session["context_name"] = self.user.username
+        reset_session.save()
 
 
 class UsageSummaryAPITests(TestCase):
@@ -128,6 +251,30 @@ class UsageSummaryAPITests(TestCase):
         self.client.force_login(self.user)
         self.agent_primary = BrowserUseAgent.objects.create(user=self.user, name="Primary")
         self.agent_secondary = BrowserUseAgent.objects.create(user=self.user, name="Secondary")
+
+        self.organization = Organization.objects.create(
+            name="Summary Org",
+            slug="summary-org",
+            created_by=self.user,
+        )
+        billing = self.organization.billing
+        billing.purchased_seats = 1
+        billing.save()
+
+        OrganizationMembership.objects.create(
+            org=self.organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+
+        self.org_agent = BrowserUseAgent.objects.create(user=self.user, name="Org Summary Agent")
+        PersistentAgent.objects.create(
+            user=self.user,
+            organization=self.organization,
+            name="Summary Org Agent",
+            charter="Org charter",
+            browser_use_agent=self.org_agent,
+        )
 
     def test_agent_filter_limits_summary(self):
         now = timezone.now()
@@ -151,6 +298,34 @@ class UsageSummaryAPITests(TestCase):
             "to": now.date().isoformat(),
             "agent": str(self.agent_primary.id),
           },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["metrics"]["tasks"]["count"], 1)
+
+    def test_personal_context_excludes_org_tasks(self):
+        now = timezone.now()
+        BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=self.agent_primary,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            credits_cost=Decimal("1"),
+        )
+        BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=self.org_agent,
+            organization=self.organization,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            credits_cost=Decimal("1"),
+        )
+
+        response = self.client.get(
+            reverse("console_usage_summary"),
+            {
+                "from": (now - timedelta(days=1)).date().isoformat(),
+                "to": (now + timedelta(days=1)).date().isoformat(),
+            },
         )
 
         self.assertEqual(response.status_code, 200)

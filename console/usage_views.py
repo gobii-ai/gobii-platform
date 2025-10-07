@@ -5,6 +5,7 @@ from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, DecimalField, Sum, Value
+from django.db.models import Q
 from django.db.models.functions import Coalesce, TruncDay, TruncHour
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
@@ -43,9 +44,13 @@ def _format_period_label(start_date, end_date) -> str:
 
 def _get_accessible_agents(request: HttpRequest, organization):
     if organization is not None:
-        qs = BrowserUseAgent.objects.filter(persistent_agent__organization=organization)
+        qs = BrowserUseAgent.objects.filter(
+            Q(persistent_agent__organization=organization)
+        )
     else:
-        qs = BrowserUseAgent.objects.filter(user=request.user)
+        qs = BrowserUseAgent.objects.filter(user=request.user).filter(
+            Q(persistent_agent__organization__isnull=True) | Q(persistent_agent__isnull=True)
+        )
     return list(qs.order_by("name"))
 
 
@@ -101,6 +106,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             filters["organization"] = organization
         else:
             filters["user"] = request.user
+            filters["organization__isnull"] = True
 
         filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
         if filtered_agent_ids:
@@ -239,6 +245,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
             base_filters["organization"] = organization
         else:
             base_filters["user"] = request.user
+            base_filters["organization__isnull"] = True
 
         filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
         if filtered_agent_ids:
@@ -374,6 +381,7 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
             filters["step__agent__organization"] = organization
         else:
             filters["step__agent__user"] = request.user
+            filters["step__agent__organization__isnull"] = True
 
         if filtered_agent_ids:
             filters["step__agent__browser_use_agent_id__in"] = filtered_agent_ids
@@ -409,6 +417,119 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
                 }
                 for row in tool_rows
             ],
+        }
+
+        return JsonResponse(payload)
+
+
+class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        resolved = build_console_context(request)
+
+        organization = None
+
+        if resolved.current_context.type == "organization" and resolved.current_membership:
+            organization = resolved.current_membership.org
+
+        owner = organization if organization is not None else request.user
+
+        requested_start = _parse_query_date(request.GET.get("from"))
+        requested_end = _parse_query_date(request.GET.get("to"))
+        agent_filters_raw = request.GET.getlist("agent")
+
+        if requested_start and requested_end and requested_start <= requested_end:
+            period_start, period_end = requested_start, requested_end
+        else:
+            period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
+
+        tz = timezone.get_current_timezone()
+        tz_name = timezone.get_current_timezone_name()
+        period_start_dt = timezone.make_aware(datetime.combine(period_start, time.min), tz)
+        period_end_dt = timezone.make_aware(datetime.combine(period_end, time.max), tz)
+
+        accessible_agents = _get_accessible_agents(request, organization)
+        accessible_agent_ids = {agent.id for agent in accessible_agents}
+
+        filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
+        if filtered_agent_ids:
+            active_agent_ids = set(filtered_agent_ids)
+            active_agents = [agent for agent in accessible_agents if agent.id in active_agent_ids]
+        else:
+            active_agent_ids = accessible_agent_ids
+            active_agents = accessible_agents
+
+        task_filters = {
+            "is_deleted": False,
+            "created_at__gte": period_start_dt,
+            "created_at__lte": period_end_dt,
+            "agent_id__isnull": False,
+        }
+
+        if organization is not None:
+            task_filters["organization"] = organization
+        else:
+            task_filters["user"] = request.user
+            task_filters["organization__isnull"] = True
+
+        if active_agent_ids:
+            task_filters["agent_id__in"] = list(active_agent_ids)
+
+        aggregates = (
+            BrowserUseAgentTask.objects.filter(**task_filters)
+            .values("agent_id")
+            .order_by()
+            .annotate(
+                total=Count("id"),
+                success=Count("id", filter=Q(status=BrowserUseAgentTask.StatusChoices.COMPLETED)),
+                error=Count("id", filter=Q(status=BrowserUseAgentTask.StatusChoices.FAILED)),
+            )
+        )
+
+        aggregate_map: dict[uuid.UUID, dict[str, int]] = {}
+        for row in aggregates:
+            agent_id = row.get("agent_id")
+            if agent_id is None:
+                continue
+            aggregate_map[agent_id] = {
+                "total": row.get("total", 0),
+                "success": row.get("success", 0),
+                "error": row.get("error", 0),
+            }
+
+        period_length_days = max((period_end - period_start).days + 1, 1)
+
+        leaderboard: list[dict[str, object]] = []
+        for agent in active_agents:
+            stats = aggregate_map.get(agent.id, {"total": 0, "success": 0, "error": 0})
+            total = stats["total"]
+            success = stats["success"]
+            error = stats["error"]
+            avg_per_day = float(total) / period_length_days if total > 0 else 0.0
+            if total <= 0:
+                continue
+            leaderboard.append(
+                {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "tasks_total": total,
+                    "tasks_per_day": avg_per_day,
+                    "success_count": success,
+                    "error_count": error,
+                }
+            )
+
+        leaderboard.sort(key=lambda entry: entry["tasks_total"], reverse=True)
+
+        payload = {
+            "period": {
+                "start": period_start.isoformat(),
+                "end": period_end.isoformat(),
+                "label": _format_period_label(period_start, period_end),
+                "timezone": tz_name,
+            },
+            "agents": leaderboard,
         }
 
         return JsonResponse(payload)
