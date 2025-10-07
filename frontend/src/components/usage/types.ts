@@ -41,7 +41,7 @@ export type UsageSummaryResponse = {
 }
 
 export type MetricDefinition = {
-  id: 'tasks' | 'credits' | 'quota'
+  id: 'tasks' | 'tasks_per_day' | 'credits' | 'quota'
   label: string
   baseCaption: string
 }

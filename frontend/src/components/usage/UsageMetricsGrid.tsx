@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { parseDate } from '@internationalized/date'
 
 import { fetchUsageSummary } from './api'
 import { useUsageStore } from './store'
@@ -15,6 +16,11 @@ const metricDefinitions: MetricDefinition[] = [
     id: 'tasks',
     label: 'Tasks run',
     baseCaption: 'Counts every agent task created in the selected billing period.',
+  },
+  {
+    id: 'tasks_per_day',
+    label: 'Average tasks per day',
+    baseCaption: 'Average number of tasks created per day in the selected billing period.',
   },
   {
     id: 'credits',
@@ -77,8 +83,32 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
     () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
     [],
   )
+  const averageFormatter = useMemo(
+    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }),
+    [],
+  )
 
   const resolvedSummary = data ?? summary
+
+  const periodDayCount = useMemo(() => {
+    if (!resolvedSummary) {
+      return null
+    }
+
+    const { start, end } = resolvedSummary.period
+
+    try {
+      const startDate = parseDate(start)
+      const endDate = parseDate(end)
+      const startJulian = startDate.calendar.toJulianDay(startDate)
+      const endJulian = endDate.calendar.toJulianDay(endDate)
+      const span = endJulian - startJulian + 1
+      return span > 0 ? span : null
+    } catch (error) {
+      console.error('Failed to compute period length in days', error)
+      return null
+    }
+  }, [resolvedSummary])
 
   const cards = useMemo<MetricCard[]>(() => {
     return metricDefinitions.map((metric) => {
@@ -102,6 +132,19 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
             const active = resolvedSummary.metrics.tasks.in_progress + resolvedSummary.metrics.tasks.pending
             value = integerFormatter.format(resolvedSummary.metrics.tasks.count)
             caption = `Completed ${integerFormatter.format(completed)} · Active ${integerFormatter.format(active)}`
+            break
+          }
+          case 'tasks_per_day': {
+            const totalTasks = resolvedSummary.metrics.tasks.count
+            if (periodDayCount && periodDayCount > 0) {
+              const average = totalTasks / periodDayCount
+              value = averageFormatter.format(average)
+              const pluralSuffix = periodDayCount === 1 ? '' : 's'
+              caption = `${integerFormatter.format(totalTasks)} total across ${periodDayCount} day${pluralSuffix}.`
+            } else {
+              value = '—'
+              caption = 'Unable to determine the period length for this metric.'
+            }
             break
           }
           case 'credits': {
@@ -146,7 +189,7 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
         progressClass,
       }
     })
-  }, [creditFormatter, integerFormatter, isError, isPending, resolvedSummary])
+  }, [averageFormatter, creditFormatter, integerFormatter, isError, isPending, periodDayCount, resolvedSummary])
 
   return (
     <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
