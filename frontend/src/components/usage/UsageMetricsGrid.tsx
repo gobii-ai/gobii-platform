@@ -154,7 +154,7 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
         <article
           key={card.id}
           data-usage-metric={card.id}
-          className="flex h-full flex-col justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-5 shadow-sm"
+          className="flex h-full flex-col justify-between gap-3 rounded-xl border border-white/60 bg-white/80 p-5 shadow-xl backdrop-blur-sm"
         >
           <div>
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -163,7 +163,7 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
             <p className={`mt-2 text-2xl font-semibold ${card.valueClasses}`}>{card.value}</p>
             {typeof card.progressPct === 'number' ? (
               <div className="mt-3">
-                <div className="relative h-2 rounded-full bg-slate-200/80">
+                <div className="relative h-2 rounded-full bg-white/50">
                   <div
                     className={`absolute inset-y-0 left-0 rounded-full ${card.progressClass ?? ''}`}
                     style={{ width: `${card.progressPct}%` }}

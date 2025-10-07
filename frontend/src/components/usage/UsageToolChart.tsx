@@ -259,7 +259,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
   const totalTasks = toolData?.total_count ?? processedSegments.reduce((acc, segment) => acc + segment.count, 0)
 
   return (
-    <section className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+    <section className="flex flex-col gap-4 rounded-xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Tool credit breakdown</h2>
@@ -268,7 +268,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
           </p>
         </div>
         {toolData ? (
-          <div className="rounded-md bg-slate-50 px-3 py-1 text-sm text-slate-600">
+          <div className="rounded-md border border-white/60 bg-white/60 px-3 py-1 text-sm text-slate-600">
             <span className="font-medium text-slate-900">{creditFormatter.format(totalCredits)}</span> credits ·{' '}
             <span className="font-medium text-slate-900">{integerFormatter.format(totalTasks)}</span>{' '}
             {totalTasks === 1 ? 'task' : 'tasks'}

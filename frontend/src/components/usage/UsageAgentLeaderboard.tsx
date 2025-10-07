@@ -282,8 +282,8 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
   })
 
   return (
-    <section className="bg-white/80 backdrop-blur-sm border border-white/60 shadow-xl rounded-xl overflow-hidden">
-      <header className="border-b border-slate-200/70 px-6 py-4">
+    <section className="rounded-xl border border-white/60 bg-white/80 shadow-xl backdrop-blur-sm overflow-hidden">
+      <header className="border-b border-white/50 px-6 py-4">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-semibold text-slate-900">Agent leaderboard</h2>
           <p className="text-sm text-slate-600">Ranked by task volume for the selected period.</p>
@@ -291,8 +291,8 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
       </header>
 
       <div className="overflow-x-auto">
-        <table className="w-full divide-y divide-slate-200/70">
-          <thead className="bg-slate-50/50">
+        <table className="w-full divide-y divide-white/40">
+          <thead className="bg-white/50">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => {
@@ -314,7 +314,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
               </tr>
             ))}
           </thead>
-          <tbody className="divide-y divide-slate-200/70">
+          <tbody className="divide-y divide-white/40">
             {!queryInput ? (
               <tr>
                 <td className="px-3 md:px-6 py-4 text-center text-sm text-slate-500" colSpan={columns.length}>

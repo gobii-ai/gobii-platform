@@ -7,7 +7,7 @@ type UsagePeriodHeaderProps = {
 
 export function UsagePeriodHeader({ periodInfo, ...rangeProps }: UsagePeriodHeaderProps) {
   return (
-    <div className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+    <div className="flex flex-wrap items-center gap-4 rounded-xl border border-white/60 bg-white/80 px-5 py-4 shadow-xl backdrop-blur-sm">
       <div className="flex flex-col">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           {periodInfo.label}
@@ -15,7 +15,7 @@ export function UsagePeriodHeader({ periodInfo, ...rangeProps }: UsagePeriodHead
         <span className="text-lg font-medium text-slate-900">{periodInfo.value}</span>
         <span className="text-xs text-slate-500">{periodInfo.caption}</span>
       </div>
-      <div className="h-10 w-px bg-slate-200" aria-hidden="true" />
+      <div className="h-10 w-px bg-white/50" aria-hidden="true" />
       <UsageRangeControls {...rangeProps} />
     </div>
   )
