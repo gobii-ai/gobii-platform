@@ -188,6 +188,8 @@ jobs:
             tag: batch_text_sanitization
           - batch: oss_readiness
             tag: oss_readiness_batch
+          - batch: agent_transfer
+            tag: batch_agent_transfer
           - batch: usage_api
             tag: batch_usage_api
     env:

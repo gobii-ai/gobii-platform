@@ -26,7 +26,7 @@ def _create_browser(user: User, name: str) -> BrowserUseAgent:
     return BrowserUseAgent.objects.create(user=user, name=name)
 
 
-@tag('agent_transfer_batch')
+@tag('batch_agent_transfer')
 class AgentTransferServiceTests(TestCase):
     def setUp(self) -> None:
         self.analytics_patcher = patch('util.analytics.Analytics.track_event')
