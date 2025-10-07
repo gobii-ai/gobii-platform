@@ -1,6 +1,7 @@
 {% extends "console_page.html" %}
 
 {% block console_content %}
+{% include "partials/_pending_agent_transfers.html" %}
 {% if not has_agents %}
   {% include "partials/_agent_empty_state.html" %}
 {% else %}

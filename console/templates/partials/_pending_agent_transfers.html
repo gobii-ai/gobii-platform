@@ -1,0 +1,31 @@
+{% if pending_agent_transfer_invites %}
+<div class="space-y-4" style="margin-bottom: 10px;">
+  {% for invite in pending_agent_transfer_invites %}
+  <div class="bg-white/90 backdrop-blur-sm border border-white/70 shadow-xl rounded-xl p-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <h2 class="text-lg font-semibold text-slate-900">Ownership transfer for {{ invite.agent.name }}</h2>
+        <p class="text-sm text-slate-600 mt-1">{{ invite.agent.user.get_full_name|default:invite.agent.user.email }} wants to transfer this agent to you.</p>
+        {% if invite.message %}
+        <p class="text-sm text-slate-500 mt-2 border-l-2 border-indigo-400 pl-3">{{ invite.message }}</p>
+        {% endif %}
+      </div>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <form method="post" action="{% url 'console-agent-transfer-invite' invite.id 'decline' %}" class="flex">
+          {% csrf_token %}
+          <button type="submit" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition">
+            Decline
+          </button>
+        </form>
+        <form method="post" action="{% url 'console-agent-transfer-invite' invite.id 'accept' %}" class="flex">
+          {% csrf_token %}
+          <button type="submit" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition">
+            Accept Transfer
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

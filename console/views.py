@@ -1535,6 +1535,22 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
 
         context['has_agents'] = bool(persistent_agents)
 
+        pending_transfers_qs = AgentTransferInvite.objects.filter(
+            status=AgentTransferInvite.Status.PENDING,
+        ).filter(
+            Q(to_user=self.request.user) | Q(to_user__isnull=True, to_email__iexact=self.request.user.email)
+        ).select_related('agent', 'agent__user')
+
+        pending_transfers: list[AgentTransferInvite] = list(pending_transfers_qs)
+        if pending_transfers:
+            unsassigned_ids = [invite.id for invite in pending_transfers if invite.to_user_id is None]
+            if unsassigned_ids:
+                AgentTransferInvite.objects.filter(id__in=unsassigned_ids).update(to_user=self.request.user)
+                for invite in pending_transfers:
+                    if invite.id in unsassigned_ids:
+                        invite.to_user = self.request.user
+            context['pending_agent_transfer_invites'] = pending_transfers
+
         return context
 
 
