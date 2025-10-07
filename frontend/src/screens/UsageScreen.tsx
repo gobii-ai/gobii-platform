@@ -6,7 +6,6 @@ import {
   UsagePeriodHeader,
   UsageTrendSection,
   UsageMetricsGrid,
-  UsageAgentSelector,
   UsageToolChart,
   UsageAgentLeaderboard,
   useUsageStore,
@@ -282,13 +281,14 @@ export function UsageScreen() {
           hasInitialRange={hasInitialRange}
           isCurrentSelection={isCurrentSelection}
           isViewingCurrentBilling={isViewingCurrentBilling}
-        />
-        <UsageAgentSelector
-          agents={agents}
-          status={agentsStatus}
-          errorMessage={agentsErrorMessage}
-          selectedAgentIds={selectedAgentIds}
-          onSelectionChange={handleAgentSelectionChange}
+          agentSelectorProps={{
+            agents,
+            status: agentsStatus,
+            errorMessage: agentsErrorMessage,
+            selectedAgentIds,
+            onSelectionChange: handleAgentSelectionChange,
+            variant: 'condensed',
+          }}
         />
       </header>
 

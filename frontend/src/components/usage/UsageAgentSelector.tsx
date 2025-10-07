@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useId, useMemo } from 'react'
 import {
   Button,
   Dialog,
@@ -19,6 +19,7 @@ type UsageAgentSelectorProps = {
   errorMessage: string | null
   selectedAgentIds: Set<string>
   onSelectionChange: (ids: Set<string>) => void
+  variant?: 'default' | 'condensed'
 }
 
 export function UsageAgentSelector({
@@ -27,11 +28,18 @@ export function UsageAgentSelector({
   errorMessage,
   selectedAgentIds,
   onSelectionChange,
+  variant = 'default',
 }: UsageAgentSelectorProps) {
   const isLoading = status === 'loading'
   const isErrored = status === 'error'
 
   const selectedKeys = useMemo(() => new Set<Key>(Array.from(selectedAgentIds)), [selectedAgentIds])
+  const labelId = useId()
+
+  const containerClasses = 'flex flex-col gap-1'
+  const buttonClassName = `${
+    'flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60'
+  } ${variant === 'condensed' ? 'sm:w-auto' : ''}`.trim()
 
   const selectionLabel = useMemo(() => {
     if (selectedAgentIds.size === 0) {
@@ -58,11 +66,17 @@ export function UsageAgentSelector({
   }
 
   return (
-    <div className="flex flex-col gap-1">
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Agents</div>
+    <div className={containerClasses}>
+      <div
+        id={labelId}
+        className={variant === 'condensed' ? 'sr-only' : 'text-xs font-semibold uppercase tracking-wide text-slate-500'}
+      >
+        Agents
+      </div>
       <DialogTrigger>
         <Button
-          className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+          aria-labelledby={labelId}
+          className={buttonClassName}
           isDisabled={isLoading || isErrored || agents.length === 0}
         >
           <span>{selectionLabel}</span>
