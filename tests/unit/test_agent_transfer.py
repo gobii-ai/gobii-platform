@@ -31,6 +31,9 @@ class AgentTransferServiceTests(TestCase):
     def setUp(self) -> None:
         self.analytics_patcher = patch('util.analytics.Analytics.track_event')
         self.analytics_patcher.start()
+        self.process_events_patcher = patch('api.services.agent_transfer.process_agent_events_task')
+        self.process_events_mock = self.process_events_patcher.start()
+        self.process_events_mock.delay.reset_mock()
         self.owner = User.objects.create_user(
             username="owner",
             email="owner@example.com",
@@ -132,6 +135,8 @@ class AgentTransferServiceTests(TestCase):
         invite.refresh_from_db()
         self.assertEqual(invite.status, AgentTransferInvite.Status.ACCEPTED)
         self.assertIsNotNone(invite.accepted_at)
+        self.process_events_mock.delay.assert_called_once_with(str(self.agent.id))
+        self.process_events_mock.delay.reset_mock()
 
     def test_accept_transfer_pauses_agent_when_no_capacity(self):
         UserQuota.objects.filter(user=self.recipient).update(agent_limit=1)
@@ -142,6 +147,8 @@ class AgentTransferServiceTests(TestCase):
 
         self.agent.refresh_from_db()
         self.assertFalse(self.agent.is_active)
+        self.process_events_mock.delay.assert_called_once_with(str(self.agent.id))
+        self.process_events_mock.delay.reset_mock()
 
     def test_transfer_invitation_email_sent(self):
         invite = self._send_transfer_invite_via_console()
@@ -151,6 +158,7 @@ class AgentTransferServiceTests(TestCase):
         outbound = mail.outbox[0]
         self.assertIn(self.agent.name, outbound.subject)
         self.assertEqual(outbound.to, ['new-owner@example.com'])
+        self.process_events_mock.delay.assert_not_called()
 
     def test_accept_transfer_notifies_initiator(self):
         invite = self._send_transfer_invite_via_console(email=self.recipient.email)
@@ -171,6 +179,8 @@ class AgentTransferServiceTests(TestCase):
         self.assertEqual(msg.to, [self.owner.email])
         self.assertIn('accepted', msg.subject.lower())
         self.assertIn(self.agent.name, msg.subject)
+        self.process_events_mock.delay.assert_called_once_with(str(invite.agent.id))
+        self.process_events_mock.delay.reset_mock()
 
     def test_decline_transfer_notifies_initiator(self):
         invite = self._send_transfer_invite_via_console(email=self.recipient.email)
@@ -191,6 +201,8 @@ class AgentTransferServiceTests(TestCase):
         self.assertEqual(msg.to, [self.owner.email])
         self.assertIn('declined', msg.subject.lower())
         self.assertIn(self.agent.name, msg.subject)
+        self.process_events_mock.delay.assert_not_called()
 
     def tearDown(self) -> None:
         self.analytics_patcher.stop()
+        self.process_events_patcher.stop()

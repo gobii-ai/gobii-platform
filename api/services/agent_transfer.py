@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Optional, Tuple
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
 from agents.services import AgentService
+from api.agent.tasks import process_agent_events_task
 from api.models import (
     AgentFileSpace,
     AgentPeerLink,
@@ -21,6 +22,7 @@ from api.models import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class AgentTransferError(Exception):
@@ -184,6 +186,11 @@ class AgentTransferService:
             invite.responded_at = now
             invite.accepted_at = now
             invite.save(update_fields=["to_user", "status", "responded_at", "accepted_at"])
+
+            try:
+                process_agent_events_task.delay(str(agent.id))
+            except Exception:  # pragma: no cover - task queue failures shouldn't break transfer
+                logger.warning("Failed to trigger event processing for transferred agent %s", agent.id, exc_info=True)
 
             return invite
 
