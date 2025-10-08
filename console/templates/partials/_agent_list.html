@@ -101,6 +101,11 @@
 
        <!-- Card Body -->
        <div class="p-4 md:p-5 flex-1 flex flex-col">
+        {% if agent.daily_credit_low %}
+          <div class="mb-4 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">
+            {{ agent.name }} is out of daily task credits ({{ agent.daily_credit_remaining|floatformat:2 }} left). Increase the daily limit on the agent detail page if you want them to keep working today.
+          </div>
+        {% endif %}
          <!-- Charter (truncated) -->
          <div class="flex-1">
            {% if agent.listing_description_source == "placeholder" %}

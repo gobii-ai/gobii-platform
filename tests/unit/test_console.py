@@ -262,11 +262,13 @@ class ConsoleViewsTest(TestCase):
         agent.refresh_from_db()
         self.assertEqual(agent.daily_credit_limit, Decimal('5.000'))
 
-        agent.increment_daily_credit_usage(Decimal('2'))
+        agent.increment_daily_credit_usage(Decimal('4.3'))
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context['daily_credit_limit'], Decimal('5.000'))
-        self.assertEqual(response.context['daily_credit_usage'], Decimal('2'))
+        self.assertEqual(response.context['daily_credit_usage'], Decimal('4.3'))
+        self.assertTrue(response.context['daily_credit_low'])
+        self.assertContains(response, 'out of daily task credits')
 
         response = self.client.post(url, {
             'name': agent.name,
@@ -279,3 +281,26 @@ class ConsoleViewsTest(TestCase):
 
         agent.refresh_from_db()
         self.assertIsNone(agent.daily_credit_limit)
+        response = self.client.get(url)
+        self.assertFalse(response.context['daily_credit_low'])
+
+    @tag("batch_console_agents")
+    def test_agent_list_shows_daily_credit_warning(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='List Browser'
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='List Agent',
+            charter='Monitor stuff',
+            browser_use_agent=browser_agent,
+            daily_credit_limit=Decimal('1')
+        )
+        agent.increment_daily_credit_usage(Decimal('0.3'))
+
+        response = self.client.get(reverse('agents'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'List Agent is out of daily task credits')

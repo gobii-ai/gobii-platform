@@ -1525,6 +1525,17 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
         persistent_agents = list(persistent_agents)
+        today = timezone.localdate()
+        next_reset = (
+            timezone.localtime(timezone.now()).replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            + timedelta(days=1)
+        )
+
         for agent in persistent_agents:
             description, source = build_listing_description(agent, max_length=200)
             agent.listing_description = description
@@ -1534,6 +1545,26 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 agent=agent,
                 status=AgentTransferInvite.Status.PENDING,
             ).first()
+
+            try:
+                limit = agent.get_daily_credit_limit_value()
+                usage = agent.get_daily_credit_usage(usage_date=today)
+                remaining = agent.get_daily_credit_remaining(usage_date=today)
+            except Exception:
+                limit = None
+                usage = Decimal("0")
+                remaining = None
+
+            agent.daily_credit_limit = limit
+            agent.daily_credit_usage = usage
+            agent.daily_credit_remaining = remaining
+            agent.daily_credit_unlimited = limit is None
+            agent.daily_credit_next_reset = next_reset
+            agent.daily_credit_low = (
+                limit is not None
+                and remaining is not None
+                and remaining < Decimal("1")
+            )
 
         context['persistent_agents'] = persistent_agents
 
@@ -2332,6 +2363,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     "daily_credit_unlimited": unlimited,
                     "daily_credit_percent_used": percent_used,
                     "daily_credit_next_reset": next_reset,
+                    "daily_credit_low": (not unlimited and remaining is not None and remaining < Decimal("1")),
                 }
             )
         except Exception:
@@ -2344,6 +2376,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     "daily_credit_unlimited": True,
                     "daily_credit_percent_used": None,
                     "daily_credit_next_reset": None,
+                    "daily_credit_low": False,
                 }
             )
 

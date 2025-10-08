@@ -216,6 +216,11 @@
 
           <div class="sm:col-span-9 space-y-4">
             <div class="p-4 border border-gray-200 rounded-lg bg-white/60 space-y-3">
+              {% if daily_credit_low %}
+                <div class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium">
+                  Your agent is out of daily task credits ({{ daily_credit_remaining|floatformat:2 }} left). Increase the daily limit below if you want them to keep working today.
+                </div>
+              {% endif %}
               {% if not daily_credit_unlimited and daily_credit_limit %}
                 <div class="flex items-center justify-between text-sm text-gray-700">
                   <span>Used today</span>
