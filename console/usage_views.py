@@ -18,7 +18,7 @@ from console.context_helpers import build_console_context
 
 
 API_AGENT_ID = "api"
-API_AGENT_NAME = "API Requests"
+API_AGENT_NAME = "API"
 API_CREDIT_DECIMAL = Decimal("1")
 
 
