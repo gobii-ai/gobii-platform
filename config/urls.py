@@ -14,6 +14,13 @@ from console.api_views import (
     AgentWebSessionHeartbeatAPIView,
     AgentWebSessionStartAPIView,
 )
+from console.usage_views import (
+    UsageSummaryAPIView,
+    UsageTrendAPIView,
+    UsageToolBreakdownAPIView,
+    UsageAgentLeaderboardAPIView,
+    UsageAgentsAPIView,
+)
 from console.views import (
     ConsoleHome,
     ApiKeyListView,
@@ -24,6 +31,7 @@ from console.views import (
     BillingView,
     PersistentAgentsView,
     ConsoleDiagnosticsView,
+    ConsoleUsageView,
     PersistentAgentChatShellView,
     AgentCreateContactView,
     AgentDetailView,
@@ -87,6 +95,7 @@ urlpatterns = [
     # console
     path("console/", ConsoleHome.as_view(), name="console-home"),
     path("console/diagnostics/", ConsoleDiagnosticsView.as_view(), name="console_diagnostics"),
+    path("console/usage/", ConsoleUsageView.as_view(), name="usage"),
     path("console/switch-context/", SwitchContextView.as_view(), name="switch_context"),
     path("console/api-keys/", ApiKeyListView.as_view(), name="api_keys"),
     path("console/api-keys/blank-form/", ApiKeyBlankFormView.as_view(), name="api_key_blank_form"),
@@ -109,6 +118,11 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/web-sessions/start/", AgentWebSessionStartAPIView.as_view(), name="console_agent_web_session_start"),
     path("console/api/agents/<uuid:agent_id>/web-sessions/heartbeat/", AgentWebSessionHeartbeatAPIView.as_view(), name="console_agent_web_session_heartbeat"),
     path("console/api/agents/<uuid:agent_id>/web-sessions/end/", AgentWebSessionEndAPIView.as_view(), name="console_agent_web_session_end"),
+    path("console/api/usage/summary/", UsageSummaryAPIView.as_view(), name="console_usage_summary"),
+    path("console/api/usage/trends/", UsageTrendAPIView.as_view(), name="console_usage_trends"),
+    path("console/api/usage/tools/", UsageToolBreakdownAPIView.as_view(), name="console_usage_tools"),
+    path("console/api/usage/agents/leaderboard/", UsageAgentLeaderboardAPIView.as_view(), name="console_usage_agents_leaderboard"),
+    path("console/api/usage/agents/", UsageAgentsAPIView.as_view(), name="console_usage_agents"),
     path("console/agents/create/contact/", AgentCreateContactView.as_view(), name="agent_create_contact"),
     path("console/agents/<uuid:pk>/", AgentDetailView.as_view(), name="agent_detail"),
     path("console/agents/<uuid:pk>/welcome/", AgentWelcomeView.as_view(), name="agent_welcome"),

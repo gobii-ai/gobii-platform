@@ -2837,6 +2837,13 @@ class ConsoleDiagnosticsView(ConsoleViewMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
+class ConsoleUsageView(ConsoleViewMixin, TemplateView):
+    template_name = "console/usage.html"
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
+        return HttpResponseNotAllowed(['GET'])
+
+
 class PersistentAgentChatShellView(AgentDetailView):
     template_name = "console/persistent_agent_chat_shell.html"
 
