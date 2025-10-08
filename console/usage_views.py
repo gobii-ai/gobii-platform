@@ -13,12 +13,12 @@ from django.views import View
 
 from billing.services import BillingService
 
-from api.models import BrowserUseAgent, BrowserUseAgentTask, PersistentAgentToolCall, TaskCredit
+from api.models import BrowserUseAgent, BrowserUseAgentTask, Organization, PersistentAgentToolCall, TaskCredit
 from console.context_helpers import build_console_context
 
 
 API_AGENT_ID = "api"
-API_AGENT_NAME = "API"
+API_AGENT_NAME = "API Requests"
 API_CREDIT_DECIMAL = Decimal("1")
 
 
@@ -56,7 +56,7 @@ def _format_period_label(start_date: date, end_date: date) -> str:
     return f"{start_label} – {end_label}"
 
 
-def _get_accessible_agents(request: HttpRequest, organization) -> list[UsageAgentDescriptor]:
+def _get_accessible_agents(request: HttpRequest, organization: Organization | None) -> list[UsageAgentDescriptor]:
     if organization is not None:
         qs = BrowserUseAgent.objects.filter(
             Q(persistent_agent__organization=organization)

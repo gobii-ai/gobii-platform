@@ -91,7 +91,10 @@ export function UsageScreen() {
 
   useEffect(() => {
     if (agentsQuery.isError) {
-      const message = agentsQuery.error instanceof Error ? agentsQuery.error.message : 'Unable to load agents right now.'
+      const message =
+        agentsQuery.error instanceof Error
+          ? agentsQuery.error.message
+          : 'Unable to load agents or API data right now.'
       setAgentsError(message)
     }
   }, [agentsQuery.error, agentsQuery.isError, setAgentsError])
@@ -272,7 +275,7 @@ export function UsageScreen() {
         <div>
           <h1 className="text-2xl font-semibold text-gray-800">Usage</h1>
           <p className="mt-2 text-base text-slate-600">
-            Monitor agent activity and metered consumption for the current billing cycle.
+            Monitor agent and API activity alongside metered consumption for the current billing cycle.
           </p>
         </div>
         <UsagePeriodHeader

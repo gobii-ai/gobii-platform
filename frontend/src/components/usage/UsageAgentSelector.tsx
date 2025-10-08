@@ -43,14 +43,14 @@ export function UsageAgentSelector({
 
   const selectionLabel = useMemo(() => {
     if (selectedAgentIds.size === 0) {
-      return 'All agents'
+      return 'All agents & API'
     }
     if (selectedAgentIds.size === 1) {
       const id = Array.from(selectedAgentIds)[0]
       const agent = agents.find((item) => item.id === id)
-      return agent ? agent.name : '1 agent selected'
+      return agent ? agent.name : '1 source selected'
     }
-    return `${selectedAgentIds.size} agents selected`
+    return `${selectedAgentIds.size} sources selected`
   }, [agents, selectedAgentIds])
 
   const handleSelectionChange = (keys: Selection) => {
@@ -71,7 +71,7 @@ export function UsageAgentSelector({
         id={labelId}
         className={variant === 'condensed' ? 'sr-only' : 'text-xs font-semibold uppercase tracking-wide text-slate-500'}
       >
-        Agents
+        Agents & API
       </div>
       <DialogTrigger>
         <Button
@@ -106,7 +106,7 @@ export function UsageAgentSelector({
         </Popover>
       </DialogTrigger>
       {isLoading ? (
-        <span className="text-xs text-slate-400">Loading agents…</span>
+        <span className="text-xs text-slate-400">Loading agents and API…</span>
       ) : null}
       {isErrored && errorMessage ? (
         <span className="text-xs text-red-600">{errorMessage}</span>

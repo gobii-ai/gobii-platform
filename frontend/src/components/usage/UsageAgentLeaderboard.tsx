@@ -319,7 +319,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
     <section className="rounded-xl border border-white/60 bg-white/80 shadow-xl backdrop-blur-sm overflow-hidden">
       <header className="border-b border-white/50 px-6 py-4">
         <div className="flex flex-col gap-1">
-          <h2 className="text-lg font-semibold text-slate-900">Agent leaderboard</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Agents &amp; API leaderboard</h2>
           <p className="text-sm text-slate-600">Ranked by task volume for the selected period.</p>
         </div>
       </header>
@@ -352,25 +352,25 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
             {!queryInput ? (
               <tr>
                 <td className="px-3 md:px-6 py-4 text-center text-sm text-slate-500" colSpan={columns.length}>
-                  Select a date range to view agent performance.
+                  Select a date range to view agent and API performance.
                 </td>
               </tr>
             ) : isPending ? (
               <tr>
                 <td className="px-3 md:px-6 py-4 text-center text-sm text-slate-500" colSpan={columns.length}>
-                  Loading agent activity…
+                  Loading agent and API activity…
                 </td>
               </tr>
             ) : isError ? (
               <tr>
                 <td className="px-3 md:px-6 py-4 text-center text-sm text-red-600" colSpan={columns.length}>
-                  {error?.message || 'Unable to load agent leaderboard right now.'}
+                  {error?.message || 'Unable to load agent and API leaderboard right now.'}
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
                 <td className="px-3 md:px-6 py-4 text-center text-sm text-slate-500" colSpan={columns.length}>
-                  No agent activity yet.
+                  No agent or API activity yet.
                 </td>
               </tr>
             ) : (
