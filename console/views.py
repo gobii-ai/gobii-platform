@@ -27,6 +27,7 @@ from functools import cached_property
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
+from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
 from api.agent.short_description import build_listing_description
 
 from api.models import (
@@ -97,7 +98,7 @@ from api.agent.tasks import process_agent_events_task
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
-from api.models import CommsAllowlistEntry, AgentAllowlistInvite, OrganizationMembership
+from api.models import CommsAllowlistEntry, AgentAllowlistInvite, AgentTransferInvite, OrganizationMembership
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
@@ -371,6 +372,22 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
                 context['has_api_key'] = False
         else:
             context['has_api_key'] = False
+
+        pending_transfers_qs = AgentTransferInvite.objects.filter(
+            status=AgentTransferInvite.Status.PENDING,
+        ).filter(
+            Q(to_user=self.request.user) | Q(to_user__isnull=True, to_email__iexact=self.request.user.email)
+        ).select_related('agent', 'agent__user')
+
+        pending_transfers: list[AgentTransferInvite] = list(pending_transfers_qs)
+        if pending_transfers:
+            unsassigned_ids = [invite.id for invite in pending_transfers if invite.to_user_id is None]
+            if unsassigned_ids:
+                AgentTransferInvite.objects.filter(id__in=unsassigned_ids).update(to_user=self.request.user)
+                for invite in pending_transfers:
+                    if invite.id in unsassigned_ids:
+                        invite.to_user = self.request.user
+            context['pending_agent_transfer_invites'] = pending_transfers
 
         # Add agent statistics (personal vs organization)
         from api.models import BrowserUseAgent, BrowserUseAgentTask
@@ -1513,10 +1530,30 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             agent.listing_description = description
             agent.listing_description_source = source
             agent.is_initializing = source == "placeholder"
+            agent.pending_transfer_invite = AgentTransferInvite.objects.filter(
+                agent=agent,
+                status=AgentTransferInvite.Status.PENDING,
+            ).first()
 
         context['persistent_agents'] = persistent_agents
 
         context['has_agents'] = bool(persistent_agents)
+
+        pending_transfers_qs = AgentTransferInvite.objects.filter(
+            status=AgentTransferInvite.Status.PENDING,
+        ).filter(
+            Q(to_user=self.request.user) | Q(to_user__isnull=True, to_email__iexact=self.request.user.email)
+        ).select_related('agent', 'agent__user')
+
+        pending_transfers: list[AgentTransferInvite] = list(pending_transfers_qs)
+        if pending_transfers:
+            unsassigned_ids = [invite.id for invite in pending_transfers if invite.to_user_id is None]
+            if unsassigned_ids:
+                AgentTransferInvite.objects.filter(id__in=unsassigned_ids).update(to_user=self.request.user)
+                for invite in pending_transfers:
+                    if invite.id in unsassigned_ids:
+                        invite.to_user = self.request.user
+        context['pending_agent_transfer_invites'] = pending_transfers
 
         return context
 
@@ -2244,6 +2281,12 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'window_hours': 6,
         }
 
+        pending_transfer = AgentTransferInvite.objects.filter(
+            agent=agent,
+            status=AgentTransferInvite.Status.PENDING,
+        ).first()
+        context['pending_transfer_invite'] = pending_transfer
+
         return context
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - Post")
@@ -2261,7 +2304,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         
         if is_ajax:
             from django.http import JsonResponse
-            from django.template.loader import render_to_string
             from api.models import CommsAllowlistEntry
             from django.core.exceptions import ValidationError
             from django.db import IntegrityError
@@ -2588,7 +2630,72 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             from django.contrib import messages as django_messages
             django_messages.error(request, "Please enable JavaScript to manage the allowlist.")
             return redirect('agent_detail', pk=agent.pk)
-        
+
+        if action == 'transfer_agent':
+            transfer_email = (request.POST.get('transfer_email') or '').strip()
+            transfer_message = (request.POST.get('transfer_message') or '').strip()
+
+            try:
+                invite = AgentTransferService.initiate_transfer(
+                    agent,
+                    transfer_email,
+                    request.user,
+                    message=transfer_message,
+                )
+                try:
+                    dashboard_url = request.build_absolute_uri(reverse('console-home'))
+                    initiator_name = request.user.get_full_name() or request.user.email or "A Gobii user"
+                    context = {
+                        'agent': agent,
+                        'invite': invite,
+                        'recipient_email': invite.to_email,
+                        'initiator_name': initiator_name,
+                        'dashboard_url': dashboard_url,
+                    }
+                    text_body = render_to_string('emails/agent_transfer_invite.txt', context)
+                    html_body = render_to_string('emails/agent_transfer_invite.html', context)
+                    subject = f"{initiator_name} wants to transfer {agent.name} to you"
+                    send_mail(
+                        subject,
+                        text_body,
+                        None,
+                        [invite.to_email],
+                        html_message=html_body,
+                        fail_silently=True,
+                    )
+                except Exception as email_exc:  # pragma: no cover - best effort
+                    logger.warning(
+                        "Failed to send transfer invite email to %s: %s",
+                        invite.to_email,
+                        email_exc,
+                    )
+            except ValidationError as exc:
+                messages.error(request, '; '.join(exc.messages if hasattr(exc, 'messages') else exc.args))
+                return redirect('agent_detail', pk=agent.pk)
+            except AgentTransferError as exc:
+                messages.error(request, str(exc))
+                return redirect('agent_detail', pk=agent.pk)
+
+            messages.success(
+                request,
+                f"Transfer invitation sent to {invite.to_email}. They'll need to sign in to accept it.",
+            )
+            return redirect('agent_detail', pk=agent.pk)
+
+        if action == 'cancel_transfer_invite':
+            updated = AgentTransferInvite.objects.filter(
+                agent=agent,
+                status=AgentTransferInvite.Status.PENDING,
+            ).update(
+                status=AgentTransferInvite.Status.CANCELLED,
+                responded_at=timezone.now(),
+            )
+            if updated:
+                messages.success(request, "Transfer invitation cancelled.")
+            else:
+                messages.info(request, "There is no pending transfer invitation to cancel.")
+            return redirect('agent_detail', pk=agent.pk)
+
         new_name = request.POST.get('name', '').strip()
         new_charter = request.POST.get('charter', '').strip()
         # Checkbox inputs are only present in POST data when checked. Determine the desired
@@ -4090,8 +4197,6 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                         
                         # Send invitation emails for new invitations
                         if invitations_sent:
-                            from django.core.mail import send_mail
-                            from django.template.loader import render_to_string
                             from django.urls import reverse
                             from api.models import AgentAllowlistInvite, CommsChannel
                             
@@ -6068,6 +6173,109 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
         ))
         messages.success(request, "Member role updated.")
         return redirect("organization_detail", org_id=org.id)
+
+
+class AgentTransferInviteRespondView(LoginRequiredMixin, View):
+    """Handle accept/decline actions for agent transfer invites."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, invite_id: uuid.UUID, action: str):
+        invite = get_object_or_404(
+            AgentTransferInvite.objects.select_related("agent", "agent__user"),
+            pk=invite_id,
+        )
+
+        if invite.status != AgentTransferInvite.Status.PENDING:
+            messages.info(request, "This transfer invite has already been handled.")
+            return redirect('console-home')
+
+        user_email = (request.user.email or "").lower()
+        if not user_email or invite.to_email.lower() != user_email:
+            messages.error(request, "This transfer invite is not addressed to your account.")
+            return redirect('console-home')
+
+        original_owner = invite.initiated_by
+        original_owner_email = getattr(original_owner, "email", "") or ""
+        agent_before = invite.agent
+
+        try:
+            if action == 'accept':
+                invite = AgentTransferService.accept_invite(invite, request.user)
+                agent = invite.agent
+                agent.refresh_from_db(fields=["name", "is_active"])
+                if not agent.is_active:
+                    messages.warning(
+                        request,
+                        f"You now own {agent.name}, but it has been paused because you are at your agent limit.",
+                    )
+                else:
+                    messages.success(request, f"You now own {agent.name}.")
+
+                if original_owner_email:
+                    try:
+                        agent_url = request.build_absolute_uri(reverse('agent_detail', args=[agent.id]))
+                        context = {
+                            'owner_name': original_owner.get_full_name() or original_owner_email,
+                            'recipient_name': request.user.get_full_name() or request.user.email,
+                            'agent': agent,
+                            'agent_url': agent_url,
+                        }
+                        subject = f"{context['recipient_name']} accepted your agent {agent.name}"
+                        text_body = render_to_string('emails/agent_transfer_owner_accepted.txt', context)
+                        html_body = render_to_string('emails/agent_transfer_owner_accepted.html', context)
+                        send_mail(
+                            subject,
+                            text_body,
+                            None,
+                            [original_owner_email],
+                            html_message=html_body,
+                            fail_silently=True,
+                        )
+                    except Exception as email_exc:  # pragma: no cover - best effort
+                        logger.warning(
+                            "Failed to send transfer acceptance email to %s: %s",
+                            original_owner_email,
+                            email_exc,
+                        )
+            elif action == 'decline':
+                invite = AgentTransferService.decline_invite(invite, request.user)
+                messages.info(request, "Transfer invitation declined.")
+
+                if original_owner_email:
+                    try:
+                        agent_url = request.build_absolute_uri(reverse('agent_detail', args=[agent_before.id]))
+                        context = {
+                            'owner_name': original_owner.get_full_name() or original_owner_email,
+                            'recipient_name': request.user.get_full_name() or request.user.email,
+                            'agent': agent_before,
+                            'agent_url': agent_url,
+                        }
+                        subject = f"{context['recipient_name']} declined your agent {agent_before.name}"
+                        text_body = render_to_string('emails/agent_transfer_owner_declined.txt', context)
+                        html_body = render_to_string('emails/agent_transfer_owner_declined.html', context)
+                        send_mail(
+                            subject,
+                            text_body,
+                            None,
+                            [original_owner_email],
+                            html_message=html_body,
+                            fail_silently=True,
+                        )
+                    except Exception as email_exc:  # pragma: no cover - best effort
+                        logger.warning(
+                            "Failed to send transfer decline email to %s: %s",
+                            original_owner_email,
+                            email_exc,
+                        )
+            else:
+                messages.error(request, "Unsupported invite action.")
+        except AgentTransferDenied as exc:
+            messages.error(request, str(exc))
+        except AgentTransferError as exc:
+            messages.error(request, f"Could not process the transfer invite: {exc}")
+
+        return redirect('console-home')
 
 
 class AgentAllowlistInviteAcceptView(TemplateView):

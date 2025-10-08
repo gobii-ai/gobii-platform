@@ -3154,6 +3154,68 @@ class AgentAllowlistInvite(models.Model):
         return f"Invite<{self.channel}:{self.address}> for {self.agent.name} ({self.status})"
 
 
+def _generate_transfer_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+class AgentTransferInvite(models.Model):
+    """Invitation representing a pending agent ownership transfer."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        DECLINED = "declined", "Declined"
+        CANCELLED = "cancelled", "Cancelled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="transfer_invites",
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="transfer_invites_sent",
+    )
+    to_email = models.EmailField()
+    to_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transfer_invites_received",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    token = models.CharField(max_length=64, unique=True, default=_generate_transfer_token)
+    message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "status"], name="ati_agent_status_idx"),
+            models.Index(fields=["to_email", "status"], name="ati_email_status_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent"],
+                condition=models.Q(status="pending"),
+                name="uniq_pending_agent_transfer_invite",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        self.to_email = (self.to_email or "").strip().lower()
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"TransferInvite<{self.agent_id}->{self.to_email} ({self.status})>"
+
+
 class CommsAllowlistRequest(models.Model):
     """Request from agent to add a contact to allowlist."""
     

@@ -50,6 +50,7 @@ from console.views import (
     AgentContactRequestsView,
     AgentContactRequestsThanksView,
     AgentAllowlistView,
+    AgentTransferInviteRespondView,
     AgentAllowlistInviteAcceptView,
     AgentAllowlistInviteRejectView,
     OrganizationListView,
@@ -143,6 +144,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/contact-requests/", AgentContactRequestsView.as_view(), name="agent_contact_requests"),
     path("console/agents/<uuid:pk>/contact-requests/thanks/", AgentContactRequestsThanksView.as_view(), name="agent_contact_requests_thanks"),
     path("console/agents/<uuid:pk>/allowlist/", AgentAllowlistView.as_view(), name="agent_allowlist"),
+    path("console/agent-transfer-invites/<uuid:invite_id>/<str:action>/", AgentTransferInviteRespondView.as_view(), name="console-agent-transfer-invite"),
     path("console/agent-allowlist-invite/<str:token>/accept/", AgentAllowlistInviteAcceptView.as_view(), name="agent_allowlist_invite_accept"),
     path("console/agent-allowlist-invite/<str:token>/reject/", AgentAllowlistInviteRejectView.as_view(), name="agent_allowlist_invite_reject"),
 

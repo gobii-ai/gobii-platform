@@ -1,0 +1,8 @@
+Hi {{ owner_name }},
+
+{{ recipient_name }} has declined the transfer of your agent "{{ agent.name }}" on Gobii.
+
+If you still want to hand it off, you can send the agent to someone else from its settings page: {{ agent_url }}
+
+Thanks,
+The Gobii Team

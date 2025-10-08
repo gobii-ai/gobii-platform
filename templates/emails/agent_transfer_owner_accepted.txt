@@ -1,0 +1,7 @@
+Hi {{ owner_name }},
+
+{{ recipient_name }} has accepted ownership of your agent "{{ agent.name }}" on Gobii.
+
+Thanks,
+
+The Gobii Team

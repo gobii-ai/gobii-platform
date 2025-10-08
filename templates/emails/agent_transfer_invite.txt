@@ -1,0 +1,17 @@
+Hi {{ recipient_email }},
+
+{{ initiator_name }} wants to transfer the agent "{{ agent.name }}" to you on Gobii.
+{% if invite.message %}
+They included this note:
+"{{ invite.message }}"
+{% endif %}
+To take ownership, sign in to your Gobii dashboard with this email address. If you don't have an account yet, you can sign up using the same email and the invitation will be waiting for you.
+
+Dashboard: {{ dashboard_url }}
+
+Once you’re in, you’ll see the pending transfer at the top of your dashboard where you can accept or decline it.
+
+If you weren’t expecting this, you can simply ignore the message.
+
+Thanks,
+The Gobii Team
