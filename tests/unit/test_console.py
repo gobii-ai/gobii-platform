@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.test import TestCase, Client, tag
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -230,3 +232,50 @@ class ConsoleViewsTest(TestCase):
             )
         )
         self.assertEqual(PersistentAgent.objects.filter(organization=org).count(), 0)
+
+    @tag("batch_console_agents")
+    @patch('util.analytics.Analytics.track_event')
+    def test_agent_detail_updates_daily_credit_limit(self, mock_track_event):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Limit Browser'
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Limit Test Agent',
+            charter='Ensure limits',
+            browser_use_agent=browser_agent
+        )
+
+        url = reverse('agent_detail', kwargs={'pk': agent.id})
+
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '5',
+        })
+        self.assertEqual(response.status_code, 302)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.daily_credit_limit, Decimal('5.000'))
+
+        agent.increment_daily_credit_usage(Decimal('2'))
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['daily_credit_limit'], Decimal('5.000'))
+        self.assertEqual(response.context['daily_credit_usage'], Decimal('2'))
+
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit_unlimited': 'on',
+            'daily_credit_limit': '',
+        })
+        self.assertEqual(response.status_code, 302)
+
+        agent.refresh_from_db()
+        self.assertIsNone(agent.daily_credit_limit)

@@ -1,5 +1,5 @@
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import stripe
 from django.template.loader import render_to_string
@@ -1733,6 +1733,22 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                         preferred_contact_endpoint=None  # Temporary until we set it below
                     )
 
+                    # Default daily credit limit for free plans
+                    plan_value = None
+                    if organization is not None:
+                        plan_value = getattr(getattr(organization, "billing", None), "subscription", PlanNamesChoices.FREE)
+                    else:
+                        plan_value = getattr(getattr(request.user, "billing", None), "subscription", PlanNamesChoices.FREE)
+
+                    try:
+                        plan_choice = PlanNamesChoices(plan_value)
+                    except ValueError:
+                        plan_choice = PlanNamesChoices.FREE
+
+                    if plan_choice == PlanNamesChoices.FREE:
+                        persistent_agent.daily_credit_limit = Decimal('10')
+                        persistent_agent.save(update_fields=["daily_credit_limit"])
+
                     if selected_template:
                         fields_to_update = []
                         if selected_template.charter:
@@ -2281,6 +2297,56 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'window_hours': 6,
         }
 
+        # Daily task credit usage overview for progress UI
+        try:
+            today = timezone.localdate()
+            limit = agent.get_daily_credit_limit_value()
+            usage = agent.get_daily_credit_usage(usage_date=today)
+            remaining = agent.get_daily_credit_remaining(usage_date=today)
+            unlimited = limit is None
+
+            percent_used: float | None = None
+            if limit is not None and limit > Decimal("0"):
+                try:
+                    percent_used = float((usage / limit) * 100)
+                    if percent_used > 100:
+                        percent_used = 100.0
+                except Exception:
+                    percent_used = None
+
+            next_reset = (
+                timezone.localtime(timezone.now()).replace(
+                    hour=0,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                )
+                + timedelta(days=1)
+            )
+
+            context.update(
+                {
+                    "daily_credit_limit": limit,
+                    "daily_credit_usage": usage,
+                    "daily_credit_remaining": remaining,
+                    "daily_credit_unlimited": unlimited,
+                    "daily_credit_percent_used": percent_used,
+                    "daily_credit_next_reset": next_reset,
+                }
+            )
+        except Exception:
+            # If anything goes wrong, fall back to safe defaults so UI still renders.
+            context.update(
+                {
+                    "daily_credit_limit": None,
+                    "daily_credit_usage": Decimal("0"),
+                    "daily_credit_remaining": None,
+                    "daily_credit_unlimited": True,
+                    "daily_credit_percent_used": None,
+                    "daily_credit_next_reset": None,
+                }
+            )
+
         pending_transfer = AgentTransferInvite.objects.filter(
             agent=agent,
             status=AgentTransferInvite.Status.PENDING,
@@ -2305,7 +2371,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         if is_ajax:
             from django.http import JsonResponse
             from api.models import CommsAllowlistEntry
-            from django.core.exceptions import ValidationError
             from django.db import IntegrityError
             
             action = request.POST.get('action')
@@ -2701,9 +2766,32 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         # Checkbox inputs are only present in POST data when checked. Determine the desired
         # active state based on whether the "is_active" field was submitted.
         new_is_active = 'is_active' in request.POST
-        
+
         # Handle whitelist policy update (flag removed)
         new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
+
+        limit_unlimited = request.POST.get('daily_credit_limit_unlimited') == 'on'
+        raw_limit = (request.POST.get('daily_credit_limit') or '').strip()
+
+        if limit_unlimited:
+            new_daily_limit = None
+        else:
+            if not raw_limit:
+                messages.error(request, "Daily task credit limit is required unless unlimited is selected.")
+                return redirect('agent_detail', pk=agent.pk)
+            try:
+                new_daily_limit = Decimal(raw_limit)
+            except InvalidOperation:
+                messages.error(request, "Enter a valid number for the daily task credit limit.")
+                return redirect('agent_detail', pk=agent.pk)
+            if new_daily_limit < 0:
+                messages.error(request, "Daily task credit limit cannot be negative.")
+                return redirect('agent_detail', pk=agent.pk)
+            try:
+                new_daily_limit = new_daily_limit.quantize(Decimal('0.001'))
+            except InvalidOperation:
+                messages.error(request, "Daily task credit limit must have at most three decimal places.")
+                return redirect('agent_detail', pk=agent.pk)
 
         if not new_name:
             messages.error(request, "Agent name cannot be empty.")
@@ -2767,8 +2855,13 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         agent.whitelist_policy = new_whitelist_policy
                         agent_fields_to_update.append('whitelist_policy')
 
+                # Update daily credit limit if changed
+                if agent.daily_credit_limit != new_daily_limit:
+                    agent.daily_credit_limit = new_daily_limit
+                    agent_fields_to_update.append('daily_credit_limit')
+                    setattr(agent, '_daily_credit_state', None)
+
                 # Mark interaction time and reactivate if previously expired
-                from django.utils import timezone
                 agent.last_interaction_at = timezone.now()
                 agent_fields_to_update.append('last_interaction_at')
 
@@ -2796,6 +2889,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         'agent_name': new_name,
                         'is_active': new_is_active,
                         'charter': new_charter,
+                        'daily_credit_limit': float(new_daily_limit) if new_daily_limit is not None else None,
                     },
                     organization=agent.organization,
                 )

@@ -198,6 +198,61 @@
             <p class="mt-2 text-xs text-gray-500">Use this switch to activate or pause the agent. Click "Save Changes" to apply.</p>
           </div>
 
+          <!-- Daily Task Credits -->
+          <div class="sm:col-span-3">
+            <label class="inline-block text-sm font-medium text-gray-800 mt-2.5">
+              Daily Task Credits
+            </label>
+            <div class="hs-tooltip inline-block">
+              <svg class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+              </svg>
+              <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-56 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
+                Track and control how many task credits this agent may use each day.
+              </span>
+            </div>
+          </div>
+
+          <div class="sm:col-span-9 space-y-4">
+            <div class="p-4 border border-gray-200 rounded-lg bg-white/60 space-y-3">
+              {% if not daily_credit_unlimited and daily_credit_limit %}
+                <div class="flex items-center justify-between text-sm text-gray-700">
+                  <span>Used today</span>
+                  <span class="font-medium">{{ daily_credit_usage|floatformat:2 }} / {{ daily_credit_limit|floatformat:2 }} credits</span>
+                </div>
+                <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div class="h-full bg-blue-600 rounded-full transition-all"
+                       style="width: {{ daily_credit_percent_used|default:0|floatformat:0 }}%;"></div>
+                </div>
+                {% if daily_credit_remaining is not None %}
+                  <p class="text-xs text-gray-500">Remaining today: {{ daily_credit_remaining|floatformat:2 }} credits.</p>
+                {% endif %}
+                {% if daily_credit_next_reset %}
+                  <p class="text-xs text-gray-500">Resets at {{ daily_credit_next_reset|date:"Y-m-d H:i T" }}.</p>
+                {% endif %}
+              {% else %}
+                <p class="text-sm text-gray-700">Daily task credits are currently unlimited for this agent.</p>
+              {% endif %}
+            </div>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label for="daily-credit-limit" class="inline-block text-sm font-medium text-gray-700">Daily limit (credits)</label>
+                <input id="daily-credit-limit" name="daily_credit_limit" type="number" step="0.001" min="0"
+                       value="{% if daily_credit_limit is not None %}{{ daily_credit_limit }}{% endif %}"
+                       class="mt-1 py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500">
+                <p class="mt-1 text-xs text-gray-500">Fractional credits are supported. Leave blank and check unlimited to remove the cap.</p>
+              </div>
+              <div class="flex items-end">
+                <label class="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" name="daily_credit_limit_unlimited" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if daily_credit_unlimited %}checked{% endif %}>
+                  <span>Unlimited daily task credits</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <!-- Assignment -->
           <div class="sm:col-span-3">
             <label for="agent-charter" class="inline-block text-sm font-medium text-gray-800 mt-2.5">

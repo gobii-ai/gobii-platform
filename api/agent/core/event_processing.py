@@ -24,6 +24,7 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction, close_old_connections
 from django.db.models import Q
 from django.db.utils import OperationalError
+from django.utils import timezone as dj_timezone
 from tenacity import (
     before_sleep_log,
     retry,
@@ -378,6 +379,80 @@ def _completion_with_backoff(**kwargs):
 # --------------------------------------------------------------------------- #
 #  Credit gating utilities
 # --------------------------------------------------------------------------- #
+def _get_agent_daily_credit_state(
+    agent: PersistentAgent,
+    *,
+    force_refresh: bool = False,
+) -> dict:
+    """Return cached daily credit usage/limit information for the agent."""
+
+    today = dj_timezone.localdate()
+    cached = getattr(agent, "_daily_credit_state", None)
+
+    if (
+        not force_refresh
+        and cached is not None
+        and cached.get("date") == today
+    ):
+        return cached
+
+    try:
+        limit = agent.get_daily_credit_limit_value()
+    except Exception:
+        limit = None
+
+    try:
+        used = agent.get_daily_credit_usage(usage_date=today)
+    except Exception:
+        used = Decimal("0")
+
+    if limit is None:
+        remaining: Optional[Decimal] = None
+    else:
+        try:
+            remaining = limit - used
+            if remaining < Decimal("0"):
+                remaining = Decimal("0")
+        except Exception:
+            remaining = Decimal("0")
+
+    local_now = dj_timezone.localtime(dj_timezone.now())
+    next_reset = (local_now + timedelta(days=1)).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+    state = {
+        "date": today,
+        "limit": limit,
+        "used": used,
+        "remaining": remaining,
+        "next_reset": next_reset,
+        "unlimited": limit is None,
+    }
+    agent._daily_credit_state = state
+    return state
+
+
+def _has_sufficient_daily_credit(state: dict, cost: Decimal | None) -> bool:
+    """Return True if the daily credit limit permits the additional cost."""
+
+    if cost is None:
+        return True
+
+    limit = state.get("limit")
+    if limit is None:
+        return True
+
+    remaining = state.get("remaining", Decimal("0"))
+    try:
+        return remaining >= cost
+    except Exception:
+        return False
+
+
 def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -> bool|Decimal:
     """Ensure the agent's owner has a task credit and consume it just-in-time.
 
@@ -416,6 +491,10 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         )
         available = None
 
+    daily_state = _get_agent_daily_credit_state(agent)
+    daily_limit = daily_state.get("limit")
+    daily_remaining = daily_state.get("remaining")
+
     if span is not None:
         try:
             span.set_attribute(
@@ -431,6 +510,53 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
             )
         except Exception as e:
             logger.debug("Failed to set span attribute 'credit_check.tool_cost': %s", e)
+        try:
+            span.set_attribute(
+                "credit_check.daily_limit",
+                float(daily_limit) if daily_limit is not None else -1.0,
+            )
+        except Exception:
+            pass
+        try:
+            span.set_attribute(
+                "credit_check.daily_remaining_before",
+                float(daily_remaining) if daily_remaining is not None else -1.0,
+            )
+        except Exception:
+            pass
+
+    if not _has_sufficient_daily_credit(daily_state, cost):
+        limit_display = daily_limit
+        used_display = daily_state.get("used")
+        msg_desc = (
+            f"Skipped tool '{tool_name}' because this agent reached its daily task credit limit for today."
+        )
+        if limit_display is not None:
+            msg_desc += f" {used_display} of {limit_display} credits already used."
+
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description=msg_desc,
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes="daily_credit_limit_mid_loop",
+        )
+        if span is not None:
+            try:
+                span.add_event("Tool skipped - daily credit limit reached")
+                span.set_attribute("credit_check.daily_limit_block", True)
+            except Exception:
+                pass
+        logger.warning(
+            "Agent %s skipped tool %s due to daily credit limit (used=%s limit=%s)",
+            agent.id,
+            tool_name,
+            used_display,
+            limit_display,
+        )
+        return False
 
     if (
         available is not None
@@ -506,6 +632,27 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
             agent.id,
         )
         return False
+
+    if cost is not None:
+        try:
+            agent.increment_daily_credit_usage(cost)
+        except Exception as exc:
+            logger.error(
+                "Failed to record daily credit usage for agent %s: %s",
+                agent.id,
+                exc,
+            )
+    else:
+        if span is not None:
+            try:
+                updated_state = _get_agent_daily_credit_state(agent)
+                remaining_after = updated_state.get("remaining")
+                span.set_attribute(
+                    "credit_check.daily_remaining_after",
+                    float(remaining_after) if remaining_after is not None else -1.0,
+                )
+            except Exception:
+                pass
 
     return cost if cost is not None else True
 
@@ -811,6 +958,45 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
                     span.add_event("Agent processing skipped - insufficient credits")
                     span.set_attribute("credit_check.sufficient", False)
+                    return
+                daily_state = _get_agent_daily_credit_state(agent)
+                daily_limit = daily_state.get("limit")
+                daily_remaining = daily_state.get("remaining")
+                try:
+                    span.set_attribute(
+                        "credit_check.daily_limit",
+                        float(daily_limit) if daily_limit is not None else -1.0,
+                    )
+                    span.set_attribute(
+                        "credit_check.daily_remaining_before_loop",
+                        float(daily_remaining) if daily_remaining is not None else -1.0,
+                    )
+                except Exception:
+                    pass
+
+                if daily_limit is not None and (daily_remaining is None or daily_remaining <= Decimal("0")):
+                    msg = (
+                        "Skipped processing because this agent has reached its daily task credit limit."
+                    )
+                    logger.warning(
+                        "Persistent agent %s not processed – daily limit reached (used=%s limit=%s).",
+                        persistent_agent_id,
+                        daily_state.get("used"),
+                        daily_limit,
+                    )
+
+                    step = PersistentAgentStep.objects.create(
+                        agent=agent,
+                        description=msg,
+                    )
+                    PersistentAgentSystemStep.objects.create(
+                        step=step,
+                        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                        notes="daily_credit_limit_exhausted",
+                    )
+
+                    span.add_event("Agent processing skipped - daily credit limit reached")
+                    span.set_attribute("credit_check.daily_limit_block", True)
                     return
             else:
                 # Agents without a linked user (system/automation) are not gated
@@ -1417,6 +1603,7 @@ def _build_prompt_context(
     max_iterations: int = MAX_AGENT_LOOP_ITERATIONS,
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
+    daily_credit_state: dict | None = None,
 ) -> tuple[List[dict], int]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
@@ -1577,10 +1764,12 @@ def _build_prompt_context(
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
 
+    daily_credit_state = _get_agent_daily_credit_state(agent)
     _add_budget_awareness_sections(
         critical_group,
         current_iteration=current_iteration,
         max_iterations=max_iterations,
+        daily_credit_state=daily_credit_state,
     )
 
     reasoning_streak_text = _get_reasoning_streak_prompt(reasoning_only_streak)
@@ -1881,6 +2070,7 @@ def _add_budget_awareness_sections(
     *,
     current_iteration: int,
     max_iterations: int,
+    daily_credit_state: dict | None = None,
 ) -> bool:
     """Populate structured budget awareness sections in the prompt tree."""
 
@@ -1933,6 +2123,67 @@ def _add_budget_awareness_sections(
     except Exception:
         # Non-fatal; omit budget note
         pass
+
+    if daily_credit_state:
+        try:
+            limit = daily_credit_state.get("limit")
+            used = daily_credit_state.get("used", Decimal("0"))
+            remaining = daily_credit_state.get("remaining")
+            next_reset = daily_credit_state.get("next_reset")
+
+            if limit is None:
+                daily_text = (
+                    f"Daily task credit usage: {used} credits consumed today. No daily limit is configured."
+                )
+            else:
+                remaining_text = (
+                    f" Remaining: {remaining}." if remaining is not None else ""
+                )
+                reset_text = (
+                    f" Resets at {next_reset.isoformat()}" if next_reset else ""
+                )
+                daily_text = (
+                    f"Daily task credit usage: {used}/{limit} credits consumed today.{remaining_text}{reset_text}"
+                )
+            sections.append((
+                "daily_credits_status",
+                daily_text,
+                3,
+                True,
+            ))
+
+            if limit is not None and limit > Decimal("0"):
+                try:
+                    ratio = used / limit
+                except Exception:
+                    ratio = None
+
+                if ratio is not None:
+                    if ratio >= Decimal("0.9"):
+                        warning_text = (
+                            "Warning: You are almost out of daily task credits. Consider prioritizing"
+                            " critical actions or contacting the user to adjust the limit."
+                        )
+                        sections.append((
+                            "daily_credits_warning",
+                            warning_text,
+                            2,
+                            True,
+                        ))
+                    elif remaining is not None and remaining <= get_default_task_credit_cost():
+                        warning_text = (
+                            "Warning: Only enough daily task credits remain for a single default-cost tool call."
+                            " Use remaining credits carefully."
+                        )
+                        sections.append((
+                            "daily_credits_low",
+                            warning_text,
+                            2,
+                            True,
+                        ))
+        except Exception:
+            # Do not block prompt creation if credit summary fails
+            pass
 
     if max_iterations and max_iterations > 0:
         try:
