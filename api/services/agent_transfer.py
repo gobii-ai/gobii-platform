@@ -110,12 +110,16 @@ class AgentTransferService:
         if invite.status != AgentTransferInvite.Status.PENDING:
             raise AgentTransferError("Invite already handled")
 
-        invite = AgentTransferService._lock_invite(invite.pk)
-        invite.to_user = recipient
-        invite.status = AgentTransferInvite.Status.DECLINED
-        invite.responded_at = timezone.now()
-        invite.save(update_fields=["to_user", "status", "responded_at"])
-        return invite
+        with transaction.atomic():
+            invite = AgentTransferService._lock_invite(invite.pk)
+            if invite.status != AgentTransferInvite.Status.PENDING:
+                raise AgentTransferError("Invite already handled")
+
+            invite.to_user = recipient
+            invite.status = AgentTransferInvite.Status.DECLINED
+            invite.responded_at = timezone.now()
+            invite.save(update_fields=["to_user", "status", "responded_at"])
+            return invite
 
     @staticmethod
     def accept_invite(invite: AgentTransferInvite, recipient: User) -> AgentTransferInvite:
