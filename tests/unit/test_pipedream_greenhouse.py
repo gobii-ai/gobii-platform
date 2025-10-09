@@ -1,11 +1,9 @@
 import json
-from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
 from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 from django.contrib.sites.models import Site
-from django.utils import timezone
 
 from api.models import PersistentAgent, BrowserUseAgent, PipedreamConnectSession
 from api.integrations.pipedream_connect import create_connect_session
@@ -37,11 +35,10 @@ class PipedreamGreenhouseConnectTests(TestCase):
         mock_get_mgr.return_value = mgr
 
         resp = MagicMock()
-        future_expires = (timezone.now() + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
         resp.json.return_value = {
             "token": "ctok_gh",
             "connect_link_url": "https://pipedream.com/_static/connect.html?token=ctok_gh",
-            "expires_at": future_expires,
+            "expires_at": "2025-10-01T00:00:00Z",
         }
         resp.raise_for_status.return_value = None
         mock_post.return_value = resp
@@ -59,7 +56,7 @@ class PipedreamGreenhouseConnectTests(TestCase):
 
     @patch("api.integrations.pipedream_connect.create_connect_session")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
-    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async")
     def test_execute_tool_rewrites_connect_link_greenhouse(self, mock_exec, mock_loop, mock_create):
         """Connect Link rewrite works for Greenhouse app/tool names."""
         # Arrange agent
@@ -89,9 +86,8 @@ class PipedreamGreenhouseConnectTests(TestCase):
         block.text = "Please connect: https://pipedream.com/_static/connect.html?token=ctok_gh&app=greenhouse"
         r.content = [block]
         loop = MagicMock()
-        loop.run_until_complete.side_effect = lambda _: r
+        loop.run_until_complete.return_value = r
         mock_loop.return_value = loop
-        mock_exec.return_value = r
 
         # Our session factory returns custom URL (first-party)
         fake_session = MagicMock()
