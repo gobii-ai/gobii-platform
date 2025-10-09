@@ -29,7 +29,7 @@ from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
 
-from ...models import PersistentAgent, PersistentAgentEnabledTool
+from ...models import PersistentAgent, PersistentAgentEnabledTool, PipedreamConnectSession
 from ..core.llm_config import get_llm_config_with_failover, LLMNotConfiguredError
 from ..core.llm_utils import run_completion
 
@@ -510,6 +510,23 @@ class MCPToolManager:
                             "PD Connect: created session id=%s app=%s agent=%s",
                             getattr(session, 'id', None), app_slug or "", str(agent.id)
                         )
+
+                        if not first_party_url and isinstance(session, PipedreamConnectSession):
+                            session_status = getattr(session, "status", None)
+                            session_expiry = getattr(session, "expires_at", None)
+                            if session_status == PipedreamConnectSession.Status.ERROR and session_expiry:
+                                logger.warning(
+                                    "PD Connect: refusing expired connect link session=%s app=%s expires_at=%s",
+                                    getattr(session, 'id', None), app_slug or "", str(session_expiry)
+                                )
+                                return {
+                                    "status": "action_required",
+                                    "result": (
+                                        "Authorization link expired before it could be delivered. "
+                                        "Please ask me again to generate a new connect link."
+                                    ),
+                                }
+
                         # Fall back to server‑provided URL if helper could not produce one
                         final_url = first_party_url or connect_url
                         logger.info(
