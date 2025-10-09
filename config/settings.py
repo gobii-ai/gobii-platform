@@ -462,6 +462,7 @@ ACCOUNT_EMAIL_VERIFICATION = env(
 )
 ACCOUNT_LOGOUT_ON_GET = True
 ACCOUNT_ADAPTER = "config.account_adapter.GobiiAccountAdapter"
+SOCIALACCOUNT_ADAPTER = "config.socialaccount_adapter.GobiiSocialAccountAdapter"
 
 # TODO: Test the removal of this; got deprecation warning
 #ACCOUNT_EMAIL_REQUIRED = True
@@ -470,6 +471,14 @@ ACCOUNT_UNIQUE_EMAIL  = True
 ACCOUNT_CONFIRM_EMAIL_ON_GET = True  # auto-confirm as soon as user hits the link
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"
 ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS = 10
+
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {
+        "AUTH_PARAMS": {
+            "prompt": "select_account",
+        },
+    },
+}
 
 
 LOGIN_REDIRECT_URL = "/"
