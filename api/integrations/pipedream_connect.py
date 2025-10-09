@@ -16,6 +16,9 @@ from api.agent.tools.mcp_manager import get_mcp_manager
 
 logger = logging.getLogger(__name__)
 
+# Buffer in seconds to consider a Pipedream connect link as effectively expired
+# to account for delivery time to the user.
+EFFECTIVE_EXPIRATION_BUFFER_SECONDS = 30
 
 def _https_base_url() -> str:
     current_site = Site.objects.get_current()
@@ -115,7 +118,7 @@ def create_connect_session(agent: PersistentAgent, app_slug: str) -> Tuple[Piped
         # Refuse to surface links that are already expired (or effectively expired)
         expires_at = session.expires_at
         now = timezone.now()
-        if expires_at and expires_at <= now + timedelta(seconds=30):
+        if expires_at and expires_at <= now + timedelta(seconds=EFFECTIVE_EXPIRATION_BUFFER_SECONDS):
             logger.warning(
                 "PD Connect: token expired before delivery session=%s expires_at=%s now=%s",
                 str(session.id), str(expires_at), str(now)
