@@ -449,7 +449,8 @@ def _has_sufficient_daily_credit(state: dict, cost: Decimal | None) -> bool:
     remaining = state.get("remaining", Decimal("0"))
     try:
         return remaining >= cost
-    except Exception:
+    except TypeError as e:
+        logger.warning("Type error during daily credit check: %s", e)
         return False
 
 
@@ -515,15 +516,15 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
                 "credit_check.daily_limit",
                 float(daily_limit) if daily_limit is not None else -1.0,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to set span attribute 'credit_check.daily_limit': %s", e)
         try:
             span.set_attribute(
                 "credit_check.daily_remaining_before",
                 float(daily_remaining) if daily_remaining is not None else -1.0,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to set span attribute 'credit_check.daily_remaining_before': %s", e)
 
     if not _has_sufficient_daily_credit(daily_state, cost):
         limit_display = daily_limit
@@ -2181,9 +2182,11 @@ def _add_budget_awareness_sections(
                             2,
                             True,
                         ))
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to generate daily credit summary for prompt: %s", e, exc_info=True)
             # Do not block prompt creation if credit summary fails
             pass
+
 
     if max_iterations and max_iterations > 0:
         try:

@@ -1765,11 +1765,8 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
 
                     # Default daily credit limit for free plans
                     if settings.GOBII_PROPRIETARY_MODE:
-                        plan_value = None
-                        if organization is not None:
-                            plan_value = getattr(getattr(organization, "billing", None), "subscription", PlanNamesChoices.FREE)
-                        else:
-                            plan_value = getattr(getattr(request.user, "billing", None), "subscription", PlanNamesChoices.FREE)
+                        owner = organization or request.user
+                        plan_value = getattr(getattr(owner, "billing", None), "subscription", PlanNamesChoices.FREE)
 
                         try:
                             plan_choice = PlanNamesChoices(plan_value)
@@ -2366,7 +2363,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     "daily_credit_low": (not unlimited and remaining is not None and remaining < Decimal("1")),
                 }
             )
-        except Exception:
+        except Exception as e:
+            logger.error("Failed to get daily credit usage for agent detail view (agent %s): %s", agent.id, e, exc_info=True)
             # If anything goes wrong, fall back to safe defaults so UI still renders.
             context.update(
                 {
