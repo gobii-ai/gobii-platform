@@ -1,4 +1,4 @@
-import hashlib, secrets, uuid, os, string, re
+import hashlib, secrets, uuid, os, string, re, datetime
 from decimal import Decimal
 from typing import Optional, Tuple
 
@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.validators import RegexValidator
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F
+from django.db.models import UniqueConstraint, Sum
 from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -2110,9 +2110,7 @@ class PersistentAgent(models.Model):
         related_name="persistent_agent"
     )
     is_active = models.BooleanField(default=True, help_text="Whether this agent is currently active")
-    daily_credit_limit = models.DecimalField(
-        max_digits=12,
-        decimal_places=3,
+    daily_credit_limit = models.PositiveIntegerField(
         null=True,
         blank=True,
         help_text="Maximum task credits this agent may consume per day. Null means unlimited.",
@@ -2228,17 +2226,28 @@ class PersistentAgent(models.Model):
 
     def get_daily_credit_limit_value(self) -> Decimal | None:
         """Return the configured daily task credit limit, or None if unlimited."""
-        return self.daily_credit_limit if self.daily_credit_limit is not None else None
+        limit = self.daily_credit_limit
+        if limit is None:
+            return None
+        return Decimal(limit)
 
     def get_daily_credit_usage(self, usage_date=None) -> Decimal:
         """Return the credits consumed by this agent on the given date."""
         usage_date = usage_date or timezone.localdate()
-        usage = (
-            self.daily_credit_usages.filter(usage_date=usage_date)
-            .values_list("credits_used", flat=True)
-            .first()
-        )
-        return usage if usage is not None else Decimal("0")
+        start = datetime.datetime.combine(usage_date, datetime.time.min)
+        if timezone.is_naive(start):
+            start = timezone.make_aware(start)
+        end = start + datetime.timedelta(days=1)
+
+        total = (
+            self.steps.filter(
+                created_at__gte=start,
+                created_at__lt=end,
+                credits_cost__isnull=False,
+            ).aggregate(sum=Sum("credits_cost"))
+        ).get("sum")
+
+        return total if total is not None else Decimal("0")
 
     def get_daily_credit_remaining(self, usage_date=None) -> Decimal | None:
         """Return remaining daily credits; None indicates unlimited."""
@@ -2248,47 +2257,6 @@ class PersistentAgent(models.Model):
         used = self.get_daily_credit_usage(usage_date=usage_date)
         remaining = limit - used
         return remaining if remaining > Decimal("0") else Decimal("0")
-
-    def increment_daily_credit_usage(self, amount: Decimal, usage_date=None) -> None:
-        """Record additional credit consumption for this agent on the given date."""
-        if amount is None:
-            return
-        amount = Decimal(amount)
-        if amount <= 0:
-            return
-
-        usage_date = usage_date or timezone.localdate()
-
-        updated = (
-            PersistentAgentDailyCreditUsage.objects.filter(
-                agent=self,
-                usage_date=usage_date,
-            ).update(credits_used=F("credits_used") + amount)
-        )
-
-        if not updated:
-            from django.db import IntegrityError
-
-            try:
-                PersistentAgentDailyCreditUsage.objects.create(
-                    agent=self,
-                    usage_date=usage_date,
-                    credits_used=amount,
-                )
-            except IntegrityError:
-                PersistentAgentDailyCreditUsage.objects.filter(
-                    agent=self,
-                    usage_date=usage_date,
-                ).update(credits_used=F("credits_used") + amount)
-
-        state = getattr(self, "_daily_credit_state", None)
-        if state and state.get("date") == usage_date:
-            state_used = state.get("used", Decimal("0")) + amount
-            state["used"] = state_used
-            limit = state.get("limit")
-            if limit is not None:
-                remaining = limit - state_used
-                state["remaining"] = remaining if remaining > Decimal("0") else Decimal("0")
 
     @tracer.start_as_current_span("WHITELIST PersistentAgent Inbound Sender Check")
     def is_sender_whitelisted(self, channel: CommsChannel | str, address: str) -> bool:
@@ -2763,27 +2731,6 @@ class PersistentAgent(models.Model):
                 exc_info=True,
             )
             return self.__class__.objects.filter(pk=self.pk).delete()
-
-
-class PersistentAgentDailyCreditUsage(models.Model):
-    """Daily task credit consumption ledger for a persistent agent."""
-
-    agent = models.ForeignKey(
-        PersistentAgent,
-        on_delete=models.CASCADE,
-        related_name="daily_credit_usages",
-    )
-    usage_date = models.DateField()
-    credits_used = models.DecimalField(max_digits=12, decimal_places=3, default=0)
-
-    class Meta:
-        unique_together = ("agent", "usage_date")
-        indexes = [
-            models.Index(fields=["agent", "usage_date"], name="pa_daily_usage_idx"),
-        ]
-
-    def __str__(self):
-        return f"Agent {self.agent_id} on {self.usage_date}: {self.credits_used} credits"
 
 
 class PersistentAgentEnabledTool(models.Model):

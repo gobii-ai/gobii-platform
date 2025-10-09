@@ -635,24 +635,23 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
 
     if cost is not None:
         try:
-            agent.increment_daily_credit_usage(cost)
+            updated_state = _get_agent_daily_credit_state(agent, force_refresh=True)
         except Exception as exc:
             logger.error(
-                "Failed to record daily credit usage for agent %s: %s",
+                "Failed to refresh daily credit usage for agent %s: %s",
                 agent.id,
                 exc,
             )
-    else:
-        if span is not None:
-            try:
-                updated_state = _get_agent_daily_credit_state(agent)
-                remaining_after = updated_state.get("remaining")
-                span.set_attribute(
-                    "credit_check.daily_remaining_after",
-                    float(remaining_after) if remaining_after is not None else -1.0,
-                )
-            except Exception:
-                pass
+        else:
+            if span is not None:
+                try:
+                    remaining_after = updated_state.get("remaining")
+                    span.set_attribute(
+                        "credit_check.daily_remaining_after",
+                        float(remaining_after) if remaining_after is not None else -1.0,
+                    )
+                except Exception:
+                    pass
 
     return cost if cost is not None else True
 
@@ -1315,6 +1314,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         step_kwargs = {
                             "agent": agent,
                             "description": "Decided to sleep until next trigger.",
+                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
                         }
                         if token_usage:
                             step_kwargs.update({
@@ -1483,6 +1483,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         step_kwargs = {
                             "agent": agent,
                             "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
+                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
                         }
                         if token_usage:
                             step_kwargs.update({

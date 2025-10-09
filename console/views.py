@@ -1555,7 +1555,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 usage = Decimal("0")
                 remaining = None
 
-            agent.daily_credit_limit = limit
+            agent.daily_credit_limit_value = limit
             agent.daily_credit_usage = usage
             agent.daily_credit_remaining = remaining
             agent.daily_credit_unlimited = limit is None
@@ -1777,7 +1777,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                         plan_choice = PlanNamesChoices.FREE
 
                     if plan_choice == PlanNamesChoices.FREE:
-                        persistent_agent.daily_credit_limit = Decimal('10')
+                        persistent_agent.daily_credit_limit = 10
                         persistent_agent.save(update_fields=["daily_credit_limit"])
 
                     if selected_template:
@@ -2803,28 +2803,23 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         # Handle whitelist policy update (flag removed)
         new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
 
-        limit_unlimited = request.POST.get('daily_credit_limit_unlimited') == 'on'
         raw_limit = (request.POST.get('daily_credit_limit') or '').strip()
 
-        if limit_unlimited:
+        if not raw_limit:
             new_daily_limit = None
         else:
-            if not raw_limit:
-                messages.error(request, "Daily task credit limit is required unless unlimited is selected.")
-                return redirect('agent_detail', pk=agent.pk)
             try:
-                new_daily_limit = Decimal(raw_limit)
+                parsed_limit = Decimal(raw_limit)
             except InvalidOperation:
                 messages.error(request, "Enter a valid number for the daily task credit limit.")
                 return redirect('agent_detail', pk=agent.pk)
-            if new_daily_limit < 0:
+            if parsed_limit < 0:
                 messages.error(request, "Daily task credit limit cannot be negative.")
                 return redirect('agent_detail', pk=agent.pk)
-            try:
-                new_daily_limit = new_daily_limit.quantize(Decimal('0.001'))
-            except InvalidOperation:
-                messages.error(request, "Daily task credit limit must have at most three decimal places.")
+            if parsed_limit != parsed_limit.to_integral_value():
+                messages.error(request, "Daily task credit limit must be a whole number.")
                 return redirect('agent_detail', pk=agent.pk)
+            new_daily_limit = int(parsed_limit)
 
         if not new_name:
             messages.error(request, "Agent name cannot be empty.")

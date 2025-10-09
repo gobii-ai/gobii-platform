@@ -149,9 +149,14 @@ class PersistentAgentCreditGateTests(TestCase):
         """Processing should exit early when the agent hit its daily limit."""
         from api.agent.core.event_processing import _process_agent_events_locked
 
-        self.agent.daily_credit_limit = Decimal("1")
+        self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
-        self.agent.increment_daily_credit_usage(Decimal("1"))
+        with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
+            PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Previously consumed",
+                credits_cost=Decimal("1"),
+            )
 
         with patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
             _process_agent_events_locked(self.agent.id, _DummySpan())
@@ -304,15 +309,21 @@ class PersistentAgentToolCreditTests(TestCase):
         mock_consume,
     ):
         span = MagicMock()
-        self.agent.daily_credit_limit = Decimal("1")
+        self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
-        self.agent.increment_daily_credit_usage(Decimal("0.7"))
+        with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
+            PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Partial usage",
+                credits_cost=Decimal("0.7"),
+            )
 
         result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
 
         self.assertFalse(result)
         mock_consume.assert_not_called()
-        step = PersistentAgentStep.objects.get(agent=self.agent)
+        step = PersistentAgentStep.objects.filter(agent=self.agent).order_by('-created_at').first()
+        self.assertIsNotNone(step)
         self.assertIn("daily task credit limit", step.description.lower())
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
