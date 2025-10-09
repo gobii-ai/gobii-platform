@@ -1764,20 +1764,21 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                     )
 
                     # Default daily credit limit for free plans
-                    plan_value = None
-                    if organization is not None:
-                        plan_value = getattr(getattr(organization, "billing", None), "subscription", PlanNamesChoices.FREE)
-                    else:
-                        plan_value = getattr(getattr(request.user, "billing", None), "subscription", PlanNamesChoices.FREE)
+                    if settings.GOBII_PROPRIETARY_MODE:
+                        plan_value = None
+                        if organization is not None:
+                            plan_value = getattr(getattr(organization, "billing", None), "subscription", PlanNamesChoices.FREE)
+                        else:
+                            plan_value = getattr(getattr(request.user, "billing", None), "subscription", PlanNamesChoices.FREE)
 
-                    try:
-                        plan_choice = PlanNamesChoices(plan_value)
-                    except ValueError:
-                        plan_choice = PlanNamesChoices.FREE
+                        try:
+                            plan_choice = PlanNamesChoices(plan_value)
+                        except ValueError:
+                            plan_choice = PlanNamesChoices.FREE
 
-                    if plan_choice == PlanNamesChoices.FREE:
-                        persistent_agent.daily_credit_limit = 10
-                        persistent_agent.save(update_fields=["daily_credit_limit"])
+                        if plan_choice == PlanNamesChoices.FREE:
+                            persistent_agent.daily_credit_limit = settings.DEFAULT_AGENT_DAILY_CREDIT_LIMIT
+                            persistent_agent.save(update_fields=["daily_credit_limit"])
 
                     if selected_template:
                         fields_to_update = []

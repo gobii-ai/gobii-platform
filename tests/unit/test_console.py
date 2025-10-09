@@ -274,7 +274,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.context['daily_credit_limit'], Decimal('5'))
         self.assertEqual(response.context['daily_credit_usage'], Decimal('4.3'))
         self.assertTrue(response.context['daily_credit_low'])
-        self.assertContains(response, 'out of daily task credits')
+        self.assertContains(response, 'almost out of daily task credits')
 
         response = self.client.post(url, {
             'name': agent.name,
@@ -313,4 +313,4 @@ class ConsoleViewsTest(TestCase):
 
         response = self.client.get(reverse('agents'))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'List Agent is out of daily task credits')
+        self.assertContains(response, 'List Agent is almost out of daily task credits')
