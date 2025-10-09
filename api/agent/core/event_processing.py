@@ -430,7 +430,6 @@ def _get_agent_daily_credit_state(
         "used": used,
         "remaining": remaining,
         "next_reset": next_reset,
-        "unlimited": limit is None,
     }
     agent._daily_credit_state = state
     return state
@@ -1604,11 +1603,10 @@ def _build_prompt_context(
     max_iterations: int = MAX_AGENT_LOOP_ITERATIONS,
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
-    daily_credit_state: dict | None = None,
 ) -> tuple[List[dict], int]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
-    
+
     Args:
         agent: Persistent agent being processed.
         current_iteration: 1-based iteration counter inside the loop.

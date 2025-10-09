@@ -1555,7 +1555,6 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 usage = Decimal("0")
                 remaining = None
 
-            agent.daily_credit_limit_value = limit
             agent.daily_credit_usage = usage
             agent.daily_credit_remaining = remaining
             agent.daily_credit_unlimited = limit is None
