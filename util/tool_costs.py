@@ -12,6 +12,11 @@ from django.db import OperationalError, ProgrammingError
 _TOOL_COST_CACHE_KEY = "task_credit_costs:v1"
 _TOOL_COST_CACHE_TTL_SECONDS = 300  # 5 minutes is enough for eventual consistency in workers
 
+_CHANNEL_TOOL_NAMES: Dict[str, str] = {
+    "email": "send_email",
+    "sms": "send_sms",
+    "web": "send_chat_message",
+}
 
 def clear_tool_credit_cost_cache() -> None:
     """Evict the cached tool credit cost mapping."""
@@ -131,3 +136,17 @@ def get_most_expensive_tool_cost() -> Decimal:
             max_cost = candidate
 
     return max_cost
+
+
+def get_tool_credit_cost_for_channel(channel: str) -> Decimal:
+    """Return the credit cost associated with an outbound communication channel."""
+
+    # TextChoices values behave like strings, but also expose ``.value``. Prefer the
+    # explicit value when available to avoid stringifying to ``CommsChannel.EMAIL``.
+    raw_value = getattr(channel, "value", channel)
+    normalized_channel = (
+        raw_value.strip().lower() if isinstance(raw_value, str) else ""
+    )
+
+    tool_name = _CHANNEL_TOOL_NAMES.get(normalized_channel)
+    return get_tool_credit_cost(tool_name)

@@ -1,12 +1,13 @@
 from decimal import Decimal
 from django.test import TestCase, tag
 
-from api.models import TaskCreditConfig, ToolCreditCost
+from api.models import CommsChannel, TaskCreditConfig, ToolCreditCost
 from util.tool_costs import (
     clear_tool_credit_cost_cache,
     get_default_task_credit_cost,
     get_tool_credit_cost,
     get_most_expensive_tool_cost,
+    get_tool_credit_cost_for_channel,
 )
 
 
@@ -53,6 +54,28 @@ class ToolCostTests(TestCase):
         override.save()
 
         self.assertEqual(get_tool_credit_cost("search_web"), Decimal("0.25"))
+
+    def test_get_tool_cost_for_email_channel(self):
+        ToolCreditCost.objects.create(tool_name="send_email", credit_cost=Decimal("0.90"))
+
+        self.assertEqual(
+            get_tool_credit_cost_for_channel(CommsChannel.EMAIL),
+            Decimal("0.90"),
+        )
+
+    def test_get_tool_cost_for_sms_channel_string(self):
+        ToolCreditCost.objects.create(tool_name="send_sms", credit_cost=Decimal("0.35"))
+
+        self.assertEqual(
+            get_tool_credit_cost_for_channel("sms"),
+            Decimal("0.35"),
+        )
+
+    def test_get_tool_cost_for_unknown_channel_defaults(self):
+        self.assertEqual(
+            get_tool_credit_cost_for_channel("discord"),
+            Decimal("0.50"),
+        )
 
     def test_get_most_expensive_tool_cost_uses_highest_db_value(self):
         ToolCreditCost.objects.bulk_create(

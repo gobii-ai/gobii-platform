@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.tool_costs import get_tool_credit_cost_for_channel
 
 """Service helpers for inbound communication messages."""
 
@@ -431,7 +432,8 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
                     limit_value = agent_obj.get_daily_credit_limit_value()
                     if limit_value is not None:
                         remaining = agent_obj.get_daily_credit_remaining()
-                        if remaining is None or remaining <= Decimal("0"):
+                        comm_tool_cost = get_tool_credit_cost_for_channel(channel_val)
+                        if remaining is None or (remaining - comm_tool_cost) <= Decimal("0"):
                             should_skip_processing = True
 
                             try:
