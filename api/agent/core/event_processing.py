@@ -389,17 +389,18 @@ def _get_agent_daily_credit_state(
     today = dj_timezone.localdate()
     cached = getattr(agent, "_daily_credit_state", None)
 
-    if (
-        not force_refresh
-        and cached is not None
-        and cached.get("date") == today
-    ):
-        return cached
-
     try:
         limit = agent.get_daily_credit_limit_value()
     except Exception:
         limit = None
+
+    if (
+        not force_refresh
+        and cached is not None
+        and cached.get("date") == today
+        and cached.get("limit") == limit
+    ):
+        return cached
 
     try:
         used = agent.get_daily_credit_usage(usage_date=today)

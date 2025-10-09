@@ -4241,7 +4241,13 @@ class PersistentAgentStep(models.Model):
                 if self.credits_cost is None:
                     self.credits_cost = default_cost
 
-        return super().save(*args, **kwargs)
+        result = super().save(*args, **kwargs)
+
+        agent_ref = getattr(self, "agent", None)
+        if agent_ref is not None:
+            setattr(agent_ref, "_daily_credit_state", None)
+
+        return result
 
 
 class PersistentAgentToolCall(models.Model):
