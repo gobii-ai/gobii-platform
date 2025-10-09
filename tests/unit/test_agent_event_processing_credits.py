@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
 from api.models import (
@@ -158,7 +158,8 @@ class PersistentAgentCreditGateTests(TestCase):
                 credits_cost=Decimal("1"),
             )
 
-        with patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+        with override_settings(GOBII_PROPRIETARY_MODE=True), \
+             patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
             _process_agent_events_locked(self.agent.id, _DummySpan())
             loop_mock.assert_not_called()
 
