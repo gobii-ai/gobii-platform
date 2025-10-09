@@ -7,28 +7,34 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 """Service helpers for inbound communication messages."""
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Iterable, Any
 
 import logging
 import requests
-
-import requests
+from django.contrib.sites.models import Site
 from django.core.files.base import ContentFile, File
 from django.core.mail import send_mail
-from django.template.loader import render_to_string
 from django.db import transaction
+from django.template.loader import render_to_string
+from django.urls import reverse
+from django.utils import timezone
 from ..files.filespace_service import enqueue_import_after_commit
 
 from ...models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
+    PersistentAgent,
     PersistentAgentConversationParticipant,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     CommsChannel,
+    DeliveryStatus,
+    build_web_agent_address,
 )
 
 from .adapters import ParsedMessage
+from .outbound_delivery import deliver_agent_sms
 from observability import traced
 from opentelemetry import baggage
 from config import settings
@@ -133,6 +139,143 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
             )
 
 
+def _build_agent_detail_url(agent) -> str:
+    """Return an absolute URL to the agent's detail page."""
+
+    current_site = Site.objects.get_current()
+    protocol = "https://"
+    base = f"{protocol}{current_site.domain}"
+    path = reverse("agent_detail", kwargs={"pk": agent.id})
+    return f"{base}{path}"
+
+
+def _find_agent_endpoint(agent, channel: str) -> PersistentAgentCommsEndpoint | None:
+    """Find the agent-owned endpoint to send from for the given channel."""
+
+    return (
+        agent.comms_endpoints.filter(channel=channel, is_primary=True).first()
+        or agent.comms_endpoints.filter(channel=channel).first()
+    )
+
+
+def _ensure_agent_web_endpoint(agent) -> PersistentAgentCommsEndpoint:
+    """Ensure the agent has a web chat endpoint for outbound messages."""
+
+    address = build_web_agent_address(agent.id)
+    endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=CommsChannel.WEB,
+        address=address,
+        defaults={"owner_agent": agent},
+    )
+    if endpoint.owner_agent_id != agent.id:
+        endpoint.owner_agent = agent
+        endpoint.save(update_fields=["owner_agent"])
+    return endpoint
+
+
+def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
+                              sender_endpoint: PersistentAgentCommsEndpoint | None,
+                              conversation: PersistentAgentConversation | None,
+                              link: str) -> bool:
+    """Send a daily credit limit notice back to the inbound sender."""
+
+    message = (
+        f"Hi there - {agent.name} has already used today's task allowance and can't reply right now. "
+        f"You can increase or remove the limit here: {link}"
+    )
+
+    try:
+        if channel == CommsChannel.EMAIL:
+            recipient = (parsed.sender or "").strip()
+            if not recipient:
+                return False
+            if not agent.is_sender_whitelisted(CommsChannel.EMAIL, recipient):
+                return False
+
+            subject = f"{agent.name} hit today's task limit"
+            send_mail(
+                subject,
+                message,
+                None,
+                [recipient],
+                fail_silently=True,
+            )
+            return True
+
+        if channel == CommsChannel.SMS:
+            if not parsed.sender or sender_endpoint is None:
+                return False
+            if not agent.is_sender_whitelisted(CommsChannel.SMS, parsed.sender):
+                return False
+
+            from_endpoint = _find_agent_endpoint(agent, CommsChannel.SMS)
+            if not from_endpoint:
+                logging.info("Agent %s has no SMS endpoint for daily credit notice.", agent.id)
+                return False
+
+            outbound = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=from_endpoint,
+                to_endpoint=sender_endpoint,
+                is_outbound=True,
+                body=message,
+                raw_payload={"kind": "daily_credit_limit_notice"},
+            )
+            deliver_agent_sms(outbound)
+            return True
+
+        if channel == CommsChannel.WEB:
+            if not parsed.sender or sender_endpoint is None:
+                return False
+            if not agent.is_sender_whitelisted(CommsChannel.WEB, parsed.sender):
+                return False
+
+            agent_endpoint = _ensure_agent_web_endpoint(agent)
+            conv = conversation or _get_or_create_conversation(
+                CommsChannel.WEB,
+                parsed.sender,
+                owner_agent=agent,
+            )
+            if conv.owner_agent_id != agent.id:
+                conv.owner_agent = agent
+                conv.save(update_fields=["owner_agent"])
+
+            _ensure_participant(
+                conv,
+                agent_endpoint,
+                PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+            )
+            _ensure_participant(
+                conv,
+                sender_endpoint,
+                PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
+            )
+
+            outbound = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=agent_endpoint,
+                conversation=conv,
+                is_outbound=True,
+                body=message,
+                raw_payload={"source": "daily_credit_limit_notice"},
+            )
+
+            now = timezone.now()
+            PersistentAgentMessage.objects.filter(pk=outbound.pk).update(
+                latest_status=DeliveryStatus.DELIVERED,
+                latest_sent_at=now,
+                latest_delivered_at=now,
+                latest_error_code="",
+                latest_error_message="",
+            )
+            return True
+
+    except Exception:
+        logging.exception("Failed sending daily credit limit notice for agent %s", agent.id)
+
+    return False
+
+
 @transaction.atomic
 def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -> InboundMessageInfo:
     """Persist an inbound message and trigger event processing."""
@@ -180,12 +323,13 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
         owner_id = message.owner_agent_id
         if owner_id:
             # Update last interaction timestamp and reactivate if needed
-            from django.utils import timezone
-            from api.models import PersistentAgent
+            agent_obj: PersistentAgent | None = None
             try:
                 with transaction.atomic():
                     agent_locked: PersistentAgent = (
-                        PersistentAgent.objects.select_for_update().get(id=owner_id)
+                        PersistentAgent.objects.select_for_update()
+                        .select_related("user")
+                        .get(id=owner_id)
                     )
                     # Update last interaction
                     agent_locked.last_interaction_at = timezone.now()
@@ -204,8 +348,14 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
                         agent_locked.save(update_fields=updates)
                     else:
                         agent_locked.save(update_fields=updates)
+                    agent_obj = agent_locked
             except PersistentAgent.DoesNotExist:
-                pass
+                agent_obj = None
+            except Exception:
+                logging.exception("Failed updating last interaction for agent %s", owner_id, exc_info=True)
+
+            if agent_obj is None:
+                agent_obj = PersistentAgent.objects.filter(id=owner_id).select_related("user").first()
 
             # Before triggering agent processing, check if the agent owner's
             # account is out of credits. If so, send a reply email to the sender
@@ -213,72 +363,102 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
             should_skip_processing = False
 
             try:
-                if channel_val == CommsChannel.EMAIL:
-                    from api.models import PersistentAgent
+                if agent_obj and agent_obj.user_id and channel_val == CommsChannel.EMAIL:
                     from tasks.services import TaskCreditService
 
-                    agent_obj = PersistentAgent.objects.filter(id=owner_id).select_related("user").first()
-                    if agent_obj and agent_obj.user_id:
-                        # Ensure the sender is in the agent's allow list before replying
-                        if agent_obj.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):
-                            available = TaskCreditService.calculate_available_tasks(agent_obj.user)
-                            if available != TASKS_UNLIMITED and available <= 0:
+                    if agent_obj.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):
+                        available = TaskCreditService.calculate_available_tasks(agent_obj.user)
+                        if available != TASKS_UNLIMITED and available <= 0:
                                 # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
+                            try:
+                                context = {
+                                    "agent": agent_obj,
+                                    "owner": agent_obj.user,
+                                    "sender": parsed.sender,
+                                    "subject": parsed.subject or "",
+                                }
+                                subject = render_to_string(
+                                    "emails/agent_out_of_credits_subject.txt", context
+                                ).strip() or f"Re: {parsed.subject or agent_obj.name}"
+                                text_body = render_to_string(
+                                    "emails/agent_out_of_credits.txt", context
+                                )
+                                html_body = render_to_string(
+                                    "emails/agent_out_of_credits.html", context
+                                )
+                                recipients = {parsed.sender}
                                 try:
-                                    context = {
-                                        "agent": agent_obj,
-                                        "owner": agent_obj.user,
-                                        "sender": parsed.sender,
-                                        "subject": parsed.subject or "",
-                                    }
-                                    subject = render_to_string(
-                                        "emails/agent_out_of_credits_subject.txt", context
-                                    ).strip() or f"Re: {parsed.subject or agent_obj.name}"
-                                    text_body = render_to_string(
-                                        "emails/agent_out_of_credits.txt", context
-                                    )
-                                    html_body = render_to_string(
-                                        "emails/agent_out_of_credits.html", context
-                                    )
-                                    recipients = {parsed.sender}
-                                    try:
-                                        owner_email = (agent_obj.user.email or "").strip()
-                                        if owner_email:
-                                            recipients.add(owner_email)
-                                    except Exception:
+                                    owner_email = (agent_obj.user.email or "").strip()
+                                    if owner_email:
+                                        recipients.add(owner_email)
+                                except Exception:
                                         logging.warning(f"Failed to add owner's email to recipients for agent {agent_obj.id}", exc_info=True)
 
-                                    send_mail(
-                                        subject,
-                                        text_body,
+                                send_mail(
+                                    subject,
+                                    text_body,
                                         None,  # use DEFAULT_FROM_EMAIL
-                                        list(recipients),
-                                        html_message=html_body,
-                                        fail_silently=True,
-                                    )
+                                    list(recipients),
+                                    html_message=html_body,
+                                    fail_silently=True,
+                                )
 
-                                    Analytics.track_event(
-                                        user_id=str(agent_obj.user.id),
-                                        event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS,
-                                        source=AnalyticsSource.EMAIL,
-                                        properties=Analytics.with_org_properties(
-                                            {
-                                                "agent_id": str(agent_obj.id),
-                                                "agent_name": agent_obj.name,
-                                                "channel": channel_val,
-                                                "sender": parsed.sender,
-                                            },
-                                            organization=getattr(agent_obj, "organization", None),
-                                        ),
-                                    )
-                                except Exception:
+                                Analytics.track_event(
+                                    user_id=str(agent_obj.user.id),
+                                    event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS,
+                                    source=AnalyticsSource.EMAIL,
+                                    properties=Analytics.with_org_properties(
+                                        {
+                                            "agent_id": str(agent_obj.id),
+                                            "agent_name": agent_obj.name,
+                                            "channel": channel_val,
+                                            "sender": parsed.sender,
+                                        },
+                                        organization=getattr(agent_obj, "organization", None),
+                                    ),
+                                )
+                            except Exception:
                                     # Do not block on email failures
-                                    logging.exception("Failed sending out-of-credits reply email")
+                                logging.exception("Failed sending out-of-credits reply email")
 
                                 # Skip processing by the agent
-                                should_skip_processing = True
+                            should_skip_processing = True
             except Exception:
                 logging.exception("Error during out-of-credits pre-processing check")
+
+            if not should_skip_processing and agent_obj:
+                try:
+                    limit_value = agent_obj.get_daily_credit_limit_value()
+                    if limit_value is not None:
+                        remaining = agent_obj.get_daily_credit_remaining()
+                        if remaining is None or remaining <= Decimal("0"):
+                            should_skip_processing = True
+
+                            try:
+                                link = _build_agent_detail_url(agent_obj)
+                            except Exception:
+                                logging.exception(
+                                    "Failed building agent detail URL for agent %s",
+                                    agent_obj.id,
+                                )
+                                try:
+                                    link = reverse("agent_detail", kwargs={"pk": agent_obj.id})
+                                except Exception:
+                                    link = ""
+
+                            _send_daily_credit_notice(
+                                agent_obj,
+                                channel_val,
+                                parsed,
+                                sender_endpoint=from_ep,
+                                conversation=conv,
+                                link=link,
+                            )
+                except Exception:
+                    logging.exception(
+                        "Error while evaluating daily credit state for agent %s",
+                        getattr(agent_obj, "id", owner_id),
+                    )
 
             if not should_skip_processing:
                 from api.agent.tasks import process_agent_events_task
