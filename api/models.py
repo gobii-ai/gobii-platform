@@ -531,6 +531,7 @@ class BrowserUseAgent(models.Model):
             with traced("SELECT BrowserUseAgent Healthy Static Proxy"):
                 healthy_static_proxy = ProxyServer.objects.filter(
                     is_active=True,
+                    is_dedicated=False,
                     static_ip__isnull=False,
                     health_check_results__status='PASSED',
                     health_check_results__checked_at__gte=recent_cutoff
@@ -550,6 +551,7 @@ class BrowserUseAgent(models.Model):
             with traced("SELECT BrowserUseAgent Healthy Static Proxy 2nd Priority"):
                 healthy_proxy = ProxyServer.objects.filter(
                     is_active=True,
+                    is_dedicated=False,
                     health_check_results__status='PASSED',
                     health_check_results__checked_at__gte=recent_cutoff
                 ).distinct().order_by('?').first()
@@ -568,6 +570,7 @@ class BrowserUseAgent(models.Model):
             with traced("SELECT BrowserUseAgent Healthy Static Proxy - 3rd Priority"):
                 static_ip_proxy = ProxyServer.objects.filter(
                     is_active=True,
+                    is_dedicated=False,
                     static_ip__isnull=False
                 ).exclude(static_ip='').order_by('?').first()
 
@@ -587,7 +590,8 @@ class BrowserUseAgent(models.Model):
                 # This will return any active proxy, regardless of health checks
                 # or static IP status
                 proxy = ProxyServer.objects.filter(
-                    is_active=True
+                    is_active=True,
+                    is_dedicated=False
                 ).order_by('?').first()
 
                 if proxy:
