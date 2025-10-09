@@ -4,9 +4,10 @@ import logging
 
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
+from allauth.socialaccount.models import SocialLogin
 from django.contrib import messages
 from django.contrib.auth import get_user_model
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, HttpRequest
 from django.urls import reverse
 
 
@@ -16,15 +17,15 @@ logger = logging.getLogger(__name__)
 class GobiiSocialAccountAdapter(DefaultSocialAccountAdapter):
     """Tighten the social login flow for existing email/password users."""
 
-    def pre_social_login(self, request, sociallogin) -> None:  # type: ignore[override]
+    def pre_social_login(self, request: HttpRequest, social_login: SocialLogin) -> None:
         """Stop Google (or other) logins from hijacking password accounts."""
 
         # Allow normal processing when the social account already exists or the
         # user is connecting a provider while authenticated.
-        if request.user.is_authenticated or sociallogin.account.pk:
+        if request.user.is_authenticated or social_login.account.pk:
             return
 
-        email = (sociallogin.user and sociallogin.user.email or "").strip()
+        email = (getattr(social_login.user, "email", None) or "").strip()
         if not email:
             return
 
@@ -34,8 +35,7 @@ class GobiiSocialAccountAdapter(DefaultSocialAccountAdapter):
         except UserModel.DoesNotExist:
             return
 
-        provider_id = (sociallogin.account and sociallogin.account.provider) or "this"
-        provider_name = provider_id.replace("_", " ").title()
+        provider_id = social_login.account.provider
 
         logger.info(
             "Social login blocked because email already exists",
@@ -48,9 +48,7 @@ class GobiiSocialAccountAdapter(DefaultSocialAccountAdapter):
 
         messages.error(
             request,
-            (
-                f"We already have an account for {email}. Please sign in with your email and password."
-            ),
+            f"We already have an account for {email}. Please sign in with your email and password.",
         )
 
         raise ImmediateHttpResponse(HttpResponseRedirect(reverse("account_login")))
