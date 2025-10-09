@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.test import TestCase, tag
 
+from api.admin_forms import StripeConfigForm
 from api.models import StripeConfig
 from config import plans as plan_module
 from config.stripe_config import get_stripe_settings, invalidate_stripe_settings_cache
@@ -96,3 +97,30 @@ class StripeConfigHelperTests(TestCase):
         self.assertTrue(secret_entry.is_secret)
         self.assertTrue(secret_entry.value_encrypted)
         self.assertEqual(config.webhook_secret, "whsec_123")
+
+    def test_stripe_config_form_saves_dedicated_ip_fields(self):
+        config = StripeConfig.objects.create(
+            release_env=settings.GOBII_RELEASE_ENV,
+            live_mode=False,
+        )
+
+        form_data = {
+            "release_env": settings.GOBII_RELEASE_ENV,
+            "live_mode": "on",
+            "webhook_secret": "",
+            "clear_webhook_secret": "",
+            "startup_dedicated_ip_product_id": "prod_startup_dedicated_form",
+            "startup_dedicated_ip_price_id": "price_startup_dedicated_form",
+            "org_team_dedicated_ip_product_id": "prod_org_dedicated_form",
+            "org_team_dedicated_ip_price_id": "price_org_dedicated_form",
+        }
+
+        form = StripeConfigForm(data=form_data, instance=config)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+
+        config.refresh_from_db()
+        self.assertEqual(config.startup_dedicated_ip_product_id, "prod_startup_dedicated_form")
+        self.assertEqual(config.startup_dedicated_ip_price_id, "price_startup_dedicated_form")
+        self.assertEqual(config.org_team_dedicated_ip_product_id, "prod_org_dedicated_form")
+        self.assertEqual(config.org_team_dedicated_ip_price_id, "price_org_dedicated_form")
