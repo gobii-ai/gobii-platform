@@ -926,6 +926,12 @@ DEFAULT_AGENT_EMAIL_DOMAIN = env(
     default="my.gobii.ai" if GOBII_PROPRIETARY_MODE else "agents.localhost",
 )
 
+# Dedicated IP configuration
+DEDICATED_IP_ALLOW_MULTI_ASSIGN = env.bool(
+    "DEDICATED_IP_ALLOW_MULTI_ASSIGN",
+    default=True,
+)
+
 # Whether to auto-create agent-owned email endpoints during agent creation.
 # Defaults follow Gobii proprietary mode: enabled when proprietary, disabled in OSS.
 # Can be overridden explicitly via env if needed.

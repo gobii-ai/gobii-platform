@@ -30,6 +30,10 @@ class StripeSettings:
     org_team_product_id: str
     org_team_price_id: str
     org_team_additional_task_price_id: str
+    startup_dedicated_ip_product_id: str
+    startup_dedicated_ip_price_id: str
+    org_team_dedicated_ip_product_id: str
+    org_team_dedicated_ip_price_id: str
     task_meter_id: str
     task_meter_event_name: str
     org_team_task_meter_id: str
@@ -47,9 +51,13 @@ def _env_defaults() -> StripeSettings:
         startup_price_id=env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup"),
         startup_additional_task_price_id=env("STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_startup_additional_task"),
         startup_product_id=env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup"),
+        startup_dedicated_ip_product_id=env("STRIPE_STARTUP_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_startup_dedicated_ip"),
+        startup_dedicated_ip_price_id=env("STRIPE_STARTUP_DEDICATED_IP_PRICE_ID", default="price_dummy_startup_dedicated_ip"),
         org_team_product_id=env("STRIPE_ORG_TEAM_PRODUCT_ID", default="prod_dummy_org_team"),
         org_team_price_id=env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team"),
         org_team_additional_task_price_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task"),
+        org_team_dedicated_ip_product_id=env("STRIPE_ORG_TEAM_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_org_dedicated_ip"),
+        org_team_dedicated_ip_price_id=env("STRIPE_ORG_TEAM_DEDICATED_IP_PRICE_ID", default="price_dummy_org_dedicated_ip"),
         task_meter_id=env("STRIPE_TASK_METER_ID", default="meter_dummy_task"),
         task_meter_event_name=env("STRIPE_TASK_METER_EVENT_NAME", default="task"),
         org_team_task_meter_id=env("STRIPE_ORG_TASK_METER_ID", default="meter_dummy_org_task"),
@@ -99,9 +107,13 @@ def _load_from_database() -> Optional[StripeSettings]:
         startup_price_id=config.startup_price_id or "",
         startup_additional_task_price_id=config.startup_additional_task_price_id or "",
         startup_product_id=config.startup_product_id or "",
+        startup_dedicated_ip_product_id=config.startup_dedicated_ip_product_id or "",
+        startup_dedicated_ip_price_id=config.startup_dedicated_ip_price_id or "",
         org_team_product_id=config.org_team_product_id or "",
         org_team_price_id=config.org_team_price_id or "",
         org_team_additional_task_price_id=org_team_additional_price,
+        org_team_dedicated_ip_product_id=config.org_team_dedicated_ip_product_id or "",
+        org_team_dedicated_ip_price_id=config.org_team_dedicated_ip_price_id or "",
         task_meter_id=config.task_meter_id or "",
         task_meter_event_name=config.task_meter_event_name or "",
         org_team_task_meter_id=config.org_team_task_meter_id or "",

@@ -1715,6 +1715,38 @@ class StripeConfig(models.Model):
         self.set_value("org_team_additional_task_price_id", value)
 
     @property
+    def startup_dedicated_ip_product_id(self) -> str:
+        return self.get_value("startup_dedicated_ip_product_id")
+
+    @startup_dedicated_ip_product_id.setter
+    def startup_dedicated_ip_product_id(self, value: str | None) -> None:
+        self.set_value("startup_dedicated_ip_product_id", value)
+
+    @property
+    def startup_dedicated_ip_price_id(self) -> str:
+        return self.get_value("startup_dedicated_ip_price_id")
+
+    @startup_dedicated_ip_price_id.setter
+    def startup_dedicated_ip_price_id(self, value: str | None) -> None:
+        self.set_value("startup_dedicated_ip_price_id", value)
+
+    @property
+    def org_team_dedicated_ip_product_id(self) -> str:
+        return self.get_value("org_team_dedicated_ip_product_id")
+
+    @org_team_dedicated_ip_product_id.setter
+    def org_team_dedicated_ip_product_id(self, value: str | None) -> None:
+        self.set_value("org_team_dedicated_ip_product_id", value)
+
+    @property
+    def org_team_dedicated_ip_price_id(self) -> str:
+        return self.get_value("org_team_dedicated_ip_price_id")
+
+    @org_team_dedicated_ip_price_id.setter
+    def org_team_dedicated_ip_price_id(self, value: str | None) -> None:
+        self.set_value("org_team_dedicated_ip_price_id", value)
+
+    @property
     def task_meter_id(self) -> str:
         return self.get_value("task_meter_id")
 
