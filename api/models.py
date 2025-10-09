@@ -988,8 +988,12 @@ class ProxyServer(models.Model):
     
     # Status and metadata
     is_active = models.BooleanField(default=True, help_text="Whether this proxy is currently active")
+    is_dedicated = models.BooleanField(
+        default=False,
+        help_text="Marked true when this proxy is held as dedicated inventory and not part of the shared pool.",
+    )
     notes = models.TextField(blank=True, help_text="Additional notes about this proxy server")
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1004,6 +1008,7 @@ class ProxyServer(models.Model):
             models.Index(fields=['proxy_type']),
             models.Index(fields=['is_active']),
             models.Index(fields=['static_ip']),
+            models.Index(fields=['is_dedicated']),
             # Composite index for efficient proxy selection queries
             models.Index(fields=['is_active', 'static_ip'], name='proxy_active_static_ip_idx'),
         ]
@@ -1025,6 +1030,139 @@ class ProxyServer(models.Model):
     def requires_auth(self) -> bool:
         """Check if this proxy requires authentication"""
         return bool(self.username and self.password)
+
+    @property
+    def is_dedicated_allocated(self) -> bool:
+        """Return True when this dedicated proxy is currently assigned to an owner."""
+        if not self.is_dedicated:
+            return False
+        try:
+            allocation = self.dedicated_allocation
+        except DedicatedProxyAllocation.DoesNotExist:
+            return False
+        except AttributeError:
+            return False
+        return allocation is not None
+
+    def set_dedicated_state(self, *, dedicated: bool, save: bool = True) -> None:
+        """Toggle dedicated state with optional persistence hook."""
+        self.is_dedicated = dedicated
+        if save:
+            self.save(update_fields=["is_dedicated", "updated_at"])
+
+
+class DedicatedProxyAllocationQuerySet(models.QuerySet):
+    def for_owner(self, owner):
+        filters = DedicatedProxyAllocation._prepare_owner_filters(owner)
+        return self.filter(**filters)
+
+
+class DedicatedProxyAllocationManager(models.Manager.from_queryset(DedicatedProxyAllocationQuerySet)):  # type: ignore[misc]
+    def assign_to_owner(self, proxy: 'ProxyServer', owner, *, notes: str | None = None):
+        if proxy is None:
+            raise ValueError("Proxy instance is required.")
+        if owner is None:
+            raise ValueError("Owner instance is required.")
+        if not proxy.is_dedicated:
+            raise ValidationError("Proxy must be marked dedicated before assignment.")
+        if getattr(proxy, "dedicated_allocation", None) is not None:
+            raise ValidationError("Proxy already has a dedicated owner.")
+
+        filters = DedicatedProxyAllocation._prepare_owner_filters(owner)
+        allocation = self.model(proxy=proxy, **filters)
+        if notes:
+            allocation.notes = notes
+        allocation.full_clean()
+        allocation.save()
+        return allocation
+
+
+class DedicatedProxyAllocation(models.Model):
+    """Ownership record for a dedicated proxy reserved to a user or organization."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    proxy = models.OneToOneField(
+        ProxyServer,
+        on_delete=models.CASCADE,
+        related_name="dedicated_allocation",
+        help_text="Proxy reserved for this owner.",
+    )
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="dedicated_proxy_allocations",
+    )
+    owner_organization = models.ForeignKey(
+        'Organization',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="dedicated_proxy_allocations",
+    )
+    notes = models.TextField(blank=True)
+    allocated_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = DedicatedProxyAllocationManager()
+
+    class Meta:
+        ordering = ['-allocated_at']
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (models.Q(owner_user__isnull=False) & models.Q(owner_organization__isnull=True))
+                    |
+                    (models.Q(owner_user__isnull=True) & models.Q(owner_organization__isnull=False))
+                ),
+                name='dedicated_proxy_single_owner',
+            )
+        ]
+        indexes = [
+            models.Index(fields=['owner_user']),
+            models.Index(fields=['owner_organization']),
+        ]
+
+    def __str__(self) -> str:
+        owner = self.owner
+        return f"DedicatedProxyAllocation<{self.proxy_id}:{owner}>"
+
+    @property
+    def owner(self):
+        return self.owner_user or self.owner_organization
+
+    def clean(self):
+        super().clean()
+        if not self.proxy_id:
+            raise ValidationError({"proxy": "Proxy is required."})
+        if not self.proxy.is_dedicated:
+            raise ValidationError({"proxy": "Proxy must be marked dedicated."})
+        if bool(self.owner_user_id) == bool(self.owner_organization_id):
+            raise ValidationError({"owner": "Dedicated proxies must be linked to exactly one owner."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def release(self):
+        """Release this allocation back to the pool."""
+        self.delete()
+
+    @staticmethod
+    def _prepare_owner_filters(owner):
+        from django.contrib.auth import get_user_model
+        from django.apps import apps
+
+        UserModel = get_user_model()
+        Organization = apps.get_model("api", "Organization")
+
+        if isinstance(owner, UserModel):
+            return {"owner_user": owner}
+        if isinstance(owner, Organization):
+            return {"owner_organization": owner}
+
+        raise TypeError(f"Unsupported owner type: {owner.__class__.__name__}")
 
 
 # --------------------------------------------------------------------------- #
