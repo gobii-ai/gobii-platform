@@ -167,6 +167,7 @@ class PersistentAgentCreditGateTests(TestCase):
         }
 
         with override_settings(GOBII_PROPRIETARY_MODE=True), \
+             patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
              patch("api.agent.core.event_processing._get_agent_daily_credit_state", return_value=fake_state), \
              patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
             _process_agent_events_locked(self.agent.id, _DummySpan())
