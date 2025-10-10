@@ -1,8 +1,10 @@
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.sites.models import Site
 from django.test import TestCase, override_settings, tag
+from django.utils import timezone
 
 from api.integrations.pipedream_connect import create_connect_session
 from api.models import BrowserUseAgent, PersistentAgent, PipedreamConnectSession
@@ -33,10 +35,11 @@ class PipedreamTrelloConnectTests(TestCase):
         mock_get_mgr.return_value = mgr
 
         resp = MagicMock()
+        future_expires = (timezone.now() + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
         resp.json.return_value = {
             "token": "ctok_trello",
             "connect_link_url": "https://pipedream.com/_static/connect.html?token=ctok_trello",
-            "expires_at": "2025-11-01T00:00:00Z",
+            "expires_at": future_expires,
         }
         resp.raise_for_status.return_value = None
         mock_post.return_value = resp
@@ -57,7 +60,7 @@ class PipedreamTrelloManagerTests(TestCase):
 
     @patch("api.integrations.pipedream_connect.create_connect_session")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
-    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async")
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
     def test_execute_tool_rewrites_connect_link_trello(self, mock_exec, mock_loop, mock_create):
         """Connect link extraction and rewrite works for Trello tools."""
 
@@ -85,8 +88,9 @@ class PipedreamTrelloManagerTests(TestCase):
         block.text = "Please connect: https://pipedream.com/_static/connect.html?token=ctok_trello&app=trello"
         fake_result.content = [block]
         loop = MagicMock()
-        loop.run_until_complete.return_value = fake_result
+        loop.run_until_complete.side_effect = lambda _: fake_result
         mock_loop.return_value = loop
+        mock_exec.return_value = fake_result
 
         mock_create.return_value = (MagicMock(), "https://example.com/connect?token=abc&app=trello")
 

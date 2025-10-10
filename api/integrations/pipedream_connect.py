@@ -1,12 +1,13 @@
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from typing import Tuple, Optional
 
 import requests
 from django.contrib.sites.models import Site
 from django.urls import reverse
 from django.conf import settings
+from django.utils import timezone
 
 from api.models import PersistentAgent
 from api.models import PipedreamConnectSession
@@ -15,6 +16,9 @@ from api.agent.tools.mcp_manager import get_mcp_manager
 
 logger = logging.getLogger(__name__)
 
+# Buffer in seconds to consider a Pipedream connect link as effectively expired
+# to account for delivery time to the user.
+EFFECTIVE_EXPIRATION_BUFFER_SECONDS = 30
 
 def _https_base_url() -> str:
     current_site = Site.objects.get_current()
@@ -110,6 +114,18 @@ def create_connect_session(agent: PersistentAgent, app_slug: str) -> Tuple[Piped
             # Non-fatal
             pass
         session.save(update_fields=["connect_token", "connect_link_url", "expires_at", "updated_at"])
+
+        # Refuse to surface links that are already expired (or effectively expired)
+        expires_at = session.expires_at
+        now = timezone.now()
+        if expires_at and expires_at <= now + timedelta(seconds=EFFECTIVE_EXPIRATION_BUFFER_SECONDS):
+            logger.warning(
+                "PD Connect: token expired before delivery session=%s expires_at=%s now=%s",
+                str(session.id), str(expires_at), str(now)
+            )
+            session.status = PipedreamConnectSession.Status.ERROR
+            session.save(update_fields=["status", "updated_at"])
+            return session, None
 
         # Append &app=...
         app = (app_slug or "").strip()
