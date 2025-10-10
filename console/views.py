@@ -1758,7 +1758,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                     persistent_agent = provisioning.agent
                     browser_agent = provisioning.browser_agent
                     agent_name = persistent_agent.name
-                    applied_schedule = provisioning.applied_schedule or applied_schedule
+                    applied_schedule = provisioning.applied_schedule
                     
                     # Generate a unique email for the agent itself
                     user_contact = None

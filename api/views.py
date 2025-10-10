@@ -858,14 +858,15 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='activate')
     def activate(self, request, id=None):
         agent = self.get_object()
-        updates = {}
+        updates = set()
         if not agent.is_active:
             agent.is_active = True
-            updates['is_active'] = True
+            updates.add('is_active')
         if agent.life_state != PersistentAgent.LifeState.ACTIVE:
             agent.life_state = PersistentAgent.LifeState.ACTIVE
-            updates['life_state'] = agent.life_state
+            updates.add('life_state')
         if updates:
+            agent.save(update_fields=list(updates))
             agent.save(update_fields=list(updates.keys()))
             self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_UPDATED)
         return Response({'status': 'activated', 'updated': bool(updates)})
