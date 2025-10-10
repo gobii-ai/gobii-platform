@@ -379,28 +379,14 @@ def _completion_with_backoff(**kwargs):
 # --------------------------------------------------------------------------- #
 #  Credit gating utilities
 # --------------------------------------------------------------------------- #
-def _get_agent_daily_credit_state(
-    agent: PersistentAgent,
-    *,
-    force_refresh: bool = False,
-) -> dict:
-    """Return cached daily credit usage/limit information for the agent."""
-
+def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
+    """Return daily credit usage/limit information for the agent."""
     today = dj_timezone.localdate()
-    cached = getattr(agent, "_daily_credit_state", None)
 
     try:
         limit = agent.get_daily_credit_limit_value()
     except Exception:
         limit = None
-
-    if (
-        not force_refresh
-        and cached is not None
-        and cached.get("date") == today
-        and cached.get("limit") == limit
-    ):
-        return cached
 
     try:
         used = agent.get_daily_credit_usage(usage_date=today)
@@ -425,15 +411,13 @@ def _get_agent_daily_credit_state(
         microsecond=0,
     )
 
-    state = {
+    return {
         "date": today,
         "limit": limit,
         "used": used,
         "remaining": remaining,
         "next_reset": next_reset,
     }
-    agent._daily_credit_state = state
-    return state
 
 
 def _has_sufficient_daily_credit(state: dict, cost: Decimal | None) -> bool:
@@ -636,7 +620,7 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
 
     if cost is not None:
         try:
-            updated_state = _get_agent_daily_credit_state(agent, force_refresh=True)
+            updated_state = _get_agent_daily_credit_state(agent)
         except Exception as exc:
             logger.error(
                 "Failed to refresh daily credit usage for agent %s: %s",

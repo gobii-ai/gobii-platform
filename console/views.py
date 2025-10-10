@@ -2885,7 +2885,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if agent.daily_credit_limit != new_daily_limit:
                     agent.daily_credit_limit = new_daily_limit
                     agent_fields_to_update.append('daily_credit_limit')
-                    setattr(agent, '_daily_credit_state', None)
 
                 # Mark interaction time and reactivate if previously expired
                 agent.last_interaction_at = timezone.now()
