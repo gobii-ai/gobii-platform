@@ -10,7 +10,14 @@ from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
-from api.models import ProxyServer, ProxyHealthCheckResult, ProxyHealthCheckSpec, BrowserUseAgent, BrowserUseAgentTask
+from api.models import (
+    ProxyServer,
+    ProxyHealthCheckResult,
+    ProxyHealthCheckSpec,
+    BrowserUseAgent,
+    BrowserUseAgentTask,
+    DedicatedProxyAllocation,
+)
 from api.proxy_selection import (
     proxy_has_recent_health_pass,
     select_proxy,
@@ -515,13 +522,40 @@ class ProxySelectionIntegrationTests(TestCase):
             status=ProxyHealthCheckResult.Status.PASSED,
             checked_at=timezone.now() - timedelta(hours=1)
         )
+        owner = User.objects.create_user(
+            username=f"dedicated-owner-{uuid.uuid4()}",
+            email=f"dedicated-owner-{uuid.uuid4()}@example.com",
+            password="testpass123",
+        )
+        DedicatedProxyAllocation.objects.assign_to_owner(dedicated, owner)
 
         selected = BrowserUseAgent.select_random_proxy()
         self.assertIn(selected, {self.healthy_proxy1, self.healthy_proxy2})
         self.assertNotEqual(selected, dedicated)
 
+    def test_select_random_proxy_includes_unallocated_dedicated(self):
+        ProxyServer.objects.all().delete()
+        dedicated = ProxyServer.objects.create(
+            name="Dedicated Available",
+            proxy_type=ProxyServer.ProxyType.HTTP,
+            host="dedicated.available.proxy.com",
+            port=8083,
+            static_ip="192.168.4.4",
+            is_active=True,
+            is_dedicated=True,
+        )
+        ProxyHealthCheckResult.objects.create(
+            proxy_server=dedicated,
+            health_check_spec=self.health_check_spec,
+            status=ProxyHealthCheckResult.Status.PASSED,
+            checked_at=timezone.now() - timedelta(hours=1)
+        )
+
+        selected = BrowserUseAgent.select_random_proxy()
+        self.assertEqual(selected, dedicated)
+
     def test_select_random_proxy_returns_none_when_only_dedicated(self):
-        ProxyServer.objects.exclude(is_dedicated=True).delete()
+        ProxyServer.objects.all().delete()
         dedicated = ProxyServer.objects.create(
             name="Dedicated Pool",
             proxy_type=ProxyServer.ProxyType.HTTP,
@@ -537,5 +571,11 @@ class ProxySelectionIntegrationTests(TestCase):
             status=ProxyHealthCheckResult.Status.PASSED,
             checked_at=timezone.now() - timedelta(hours=1)
         )
+        owner = User.objects.create_user(
+            username=f"dedicated-only-{uuid.uuid4()}",
+            email=f"dedicated-only-{uuid.uuid4()}@example.com",
+            password="testpass123",
+        )
+        DedicatedProxyAllocation.objects.assign_to_owner(dedicated, owner)
 
         self.assertIsNone(BrowserUseAgent.select_random_proxy())
