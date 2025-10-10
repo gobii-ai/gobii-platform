@@ -3,77 +3,75 @@
 {% block console_content %}
 <div class="space-y-6">
     <!-- Task header with status -->
-    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
-        <div class="p-6 border-b border-gray-200/70">
-            <div class="flex items-center justify-between flex-wrap gap-4">
-                <div>
-                    <h1 class="text-2xl font-semibold text-gray-800 mb-1">Task Details</h1>
-                    <p class="text-sm text-gray-500">Created on {{ task.created_at|date:"F j, Y" }} at {{ task.created_at|time:"H:i" }}</p>
-                    <a href="{% url 'tasks' %}" class="group flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
-                        <svg class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-                        </svg>
-                        Back to tasks
-                    </a>
-                </div>
+    <div class="gobii-card-base p-6">
+        <div class="flex items-center justify-between flex-wrap gap-4">
+            <div>
+                <h1 class="text-2xl font-semibold text-gray-800 mb-1">Task Details</h1>
+                <p class="text-sm text-gray-500">Created on {{ task.created_at|date:"F j, Y" }} at {{ task.created_at|time:"H:i" }}</p>
+                <a href="{% url 'tasks' %}" class="group flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
+                    <svg class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                    </svg>
+                    Back to tasks
+                </a>
+            </div>
 
-                <div class="flex items-center gap-3">
-                    <!-- Status badge -->
-                    {% if task.status == 'pending' %}
-                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-yellow-100 text-yellow-800">
-                        <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Pending
-                    </span>
-                    {% elif task.status == 'in_progress' %}
-                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-blue-100 text-blue-800">
-                        <svg class="w-4 h-4 mr-1.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        In Progress
-                    </span>
-                    {% elif task.status == 'completed' %}
-                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-green-100 text-green-800">
-                        <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                        </svg>
-                        Completed
-                    </span>
-                    {% elif task.status == 'failed' %}
-                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-red-100 text-red-800">
-                        <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        Failed
-                    </span>
-                    {% elif task.status == 'cancelled' %}
-                    <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-gray-100 text-gray-800">
-                        <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                        Cancelled
-                    </span>
+            <div class="flex items-center gap-3">
+                <!-- Status badge -->
+                {% if task.status == 'pending' %}
+                <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-yellow-100 text-yellow-800">
+                    <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Pending
+                </span>
+                {% elif task.status == 'in_progress' %}
+                <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-blue-100 text-blue-800">
+                    <svg class="w-4 h-4 mr-1.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    In Progress
+                </span>
+                {% elif task.status == 'completed' %}
+                <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-green-100 text-green-800">
+                    <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Completed
+                </span>
+                {% elif task.status == 'failed' %}
+                <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-red-100 text-red-800">
+                    <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    Failed
+                </span>
+                {% elif task.status == 'cancelled' %}
+                <span class="px-3 py-1.5 inline-flex items-center text-sm font-medium rounded-full bg-gray-100 text-gray-800">
+                    <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Cancelled
+                </span>
+                {% endif %}
+
+                <!-- Action buttons -->
+                <div class="flex gap-2">
+                    {% if task.status == 'pending' or task.status == 'in_progress' %}
+                    <form method="post" action="{% url 'task_cancel' task.id %}">
+                        {% csrf_token %}
+                        <button type="submit" class="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                            Cancel Task
+                        </button>
+                    </form>
                     {% endif %}
 
-                    <!-- Action buttons -->
-                    <div class="flex gap-2">
-                        {% if task.status == 'pending' or task.status == 'in_progress' %}
-                        <form method="post" action="{% url 'task_cancel' task.id %}">
-                            {% csrf_token %}
-                            <button type="submit" class="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                                Cancel Task
-                            </button>
-                        </form>
-                        {% endif %}
-
-                        {% if task.status == 'completed' %}
-                        <a href="{% url 'task_result' task.id %}" class="px-4 py-2 bg-blue-600 rounded-lg text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                            View Result
-                        </a>
-                        {% endif %}
-                    </div>
+                    {% if task.status == 'completed' %}
+                    <a href="{% url 'task_result' task.id %}" class="px-4 py-2 bg-blue-600 rounded-lg text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        View Result
+                    </a>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -82,7 +80,7 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- Task information -->
         <div class="lg:col-span-2 space-y-6">
-            <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
+            <div class="gobii-card-base">
                 <div class="border-b border-gray-200/70 bg-gray-50/80 px-6 py-3">
                     <h2 class="text-lg font-medium text-gray-800">Task Information</h2>
                 </div>
@@ -126,7 +124,7 @@
             </div>
 
             <!-- Task prompt -->
-            <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
+            <div class="gobii-card-base">
                 <div class="border-b border-gray-200/70 bg-gray-50/80 px-6 py-3">
                     <h2 class="text-lg font-medium text-gray-800">Task Prompt</h2>
                 </div>
@@ -150,7 +148,7 @@
 
         <!-- Task steps timeline -->
         <div class="lg:col-span-1">
-            <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden h-full">
+            <div class="gobii-card-base h-full">
                 <div class="border-b border-gray-200/70 bg-gray-50/80 px-6 py-3">
                     <h2 class="text-lg font-medium text-gray-800">Execution Steps</h2>
                 </div>

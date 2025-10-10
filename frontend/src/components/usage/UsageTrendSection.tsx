@@ -224,7 +224,7 @@ export function UsageTrendSection({
     : 'Select a billing period to view task trends.'
 
   return (
-    <section className="flex flex-col gap-4 rounded-xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur-sm">
+    <section className="gobii-card-base flex flex-col gap-4 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Task consumption trend</h2>

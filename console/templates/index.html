@@ -38,7 +38,7 @@
   <!-- Stats Cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
     <!-- Tasks Quota Card -->
-    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6 flex flex-col text-center">
+    <div class="gobii-card-base p-6 flex flex-col text-center">
       <div class="flex flex-col items-center gap-3">
         <div class="p-3 rounded-xl bg-blue-100">
           <svg aria-hidden="true" class="w-6 h-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -163,7 +163,7 @@
     </div>
     
     <!-- Active Agents Card -->
-    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6 flex flex-col text-center">
+    <div class="gobii-card-base p-6 flex flex-col text-center">
       <div class="flex flex-col items-center gap-3">
         <div class="p-3 rounded-xl bg-purple-100">
           <svg aria-hidden="true" class="w-6 h-6 text-purple-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -178,7 +178,7 @@
     </div>
     
     <!-- Task Status Card -->
-    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6 flex flex-col text-center">
+    <div class="gobii-card-base p-6 flex flex-col text-center">
       <div class="flex flex-col items-center gap-3">
         <div class="p-3 rounded-xl bg-green-100">
           <svg aria-hidden="true" class="w-6 h-6 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -209,7 +209,7 @@
   </div>
 
   <!-- API Section -->
-  <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6">
+  <div class="gobii-card-base p-6">
     <h2 class="text-lg font-semibold text-gray-800 mb-4">API</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       <!-- API Reference Card -->
@@ -247,7 +247,7 @@
   </div>
 
   <!-- API Key Card -->
-  <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl p-6">
+  <div class="gobii-card-base p-6">
     <h2 class="text-lg font-semibold text-gray-800 mb-3">API Key</h2>
     
     {% if has_api_key %}

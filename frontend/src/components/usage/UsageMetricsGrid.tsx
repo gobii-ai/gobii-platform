@@ -197,7 +197,7 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
         <article
           key={card.id}
           data-usage-metric={card.id}
-          className="flex h-full flex-col justify-between gap-3 rounded-xl border border-white/60 bg-white/80 p-5 shadow-xl backdrop-blur-sm"
+          className="gobii-card-base flex h-full flex-col justify-between gap-3 p-5"
         >
           <div>
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
