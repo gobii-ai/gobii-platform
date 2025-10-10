@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
-from django.test import TestCase, override_settings
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 
 from api.models import Organization, OrganizationMembership
@@ -14,6 +14,7 @@ from constants.plans import PlanNamesChoices
 User = get_user_model()
 
 
+@tag("batch_dedicated_proxy_service")
 @override_settings(SEGMENT_WRITE_KEY="", SEGMENT_WEB_WRITE_KEY="")
 class DedicatedIpBillingTests(TestCase):
     def setUp(self):
