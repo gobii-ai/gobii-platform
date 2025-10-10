@@ -76,6 +76,33 @@ from util.subscription_helper import (
 )
 from config import settings
 from config.stripe_config import get_stripe_settings
+from config.plans import PLAN_CONFIG
+
+
+def _resolve_dedicated_ip_pricing(plan):
+    plan = plan or {}
+    currency = plan.get("currency")
+    unit_price = plan.get("dedicated_ip_price")
+    plan_id = plan.get("id")
+
+    if (unit_price is None) and plan_id:
+        fallback = PLAN_CONFIG.get(str(plan_id).lower())
+        if fallback:
+            if unit_price is None:
+                unit_price = fallback.get("dedicated_ip_price")
+            if not currency:
+                currency = fallback.get("currency", currency)
+
+    if unit_price is None:
+        unit_price = 0
+
+    try:
+        price_decimal = Decimal(str(unit_price))
+    except Exception:
+        price_decimal = Decimal("0")
+
+    normalized_currency = (currency or "USD").upper()
+    return price_decimal, normalized_currency
 
 from .forms import (
     ApiKeyForm,
@@ -1060,6 +1087,13 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                     'dedicated_ip_error': None,
                 })
 
+                unit_price, price_currency = _resolve_dedicated_ip_pricing(overview.get('plan'))
+                context.update({
+                    'dedicated_ip_unit_price': unit_price,
+                    'dedicated_ip_total_cost': unit_price * Decimal(dedicated_total),
+                    'dedicated_ip_currency': price_currency,
+                })
+
                 granted = Decimal(str(overview['credits']['granted'])) if overview['credits']['granted'] else Decimal('0')
                 used = Decimal(str(overview['credits']['used'])) if overview['credits']['used'] else Decimal('0')
                 usage_pct = 0
@@ -1124,6 +1158,13 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             'dedicated_ip_multi_assign': is_multi_assign_enabled(),
             'dedicated_ip_allowed': dedicated_allowed,
             'dedicated_ip_error': None,
+        })
+
+        unit_price, price_currency = _resolve_dedicated_ip_pricing(dedicated_plan)
+        context.update({
+            'dedicated_ip_unit_price': unit_price,
+            'dedicated_ip_total_cost': unit_price * Decimal(dedicated_total),
+            'dedicated_ip_currency': price_currency,
         })
 
         return render(request, self.template_name, context)

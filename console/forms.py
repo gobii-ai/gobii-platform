@@ -24,8 +24,9 @@ class DedicatedIpAddForm(forms.Form):
         min_value=1,
         widget=forms.NumberInput(
             attrs={
-                "class": "py-2 px-3 w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500",
+                "class": "py-2 px-2 w-20 border-gray-200 rounded-lg text-sm text-center focus:border-blue-500 focus:ring-blue-500",
                 "inputmode": "numeric",
+                "max": "99",
             }
         ),
         label="Add Dedicated IPs",

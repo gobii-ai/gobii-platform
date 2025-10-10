@@ -267,6 +267,9 @@
               <div>
                 <p class="text-sm font-semibold text-gray-800">Dedicated IPs</p>
                 <p class="text-xs text-gray-500 mt-1">Add new dedicated IPs or release ones you no longer need.</p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Each dedicated IP costs ${{ dedicated_ip_unit_price|floatformat:2 }} {{ dedicated_ip_currency }}/month.
+                </p>
               </div>
             </div>
 
@@ -274,11 +277,11 @@
               <form method="post" action="{% url 'add_dedicated_ip_quantity' %}" class="mt-3 flex flex-col sm:flex-row sm:items-center sm:gap-3">
                 {% csrf_token %}
                 <div class="flex items-center gap-3">
-                  {{ dedicated_ip_add_form.quantity.label_tag }}
+                  <span class="whitespace-nowrap text-sm font-medium text-gray-700">Add Dedicated IPs</span>
                   {{ dedicated_ip_add_form.quantity }}
                 </div>
                 <button type="submit" class="mt-3 sm:mt-0 inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600">
-                  Add Dedicated IPs
+                  Purchase Dedicated IPs
                 </button>
               </form>
             {% else %}
@@ -294,6 +297,9 @@
               {% else %}
                 (one IP per agent).
               {% endif %}
+            </p>
+            <p class="mt-2 text-sm text-gray-600">
+              Current dedicated IP charges (monthly): <span class="font-semibold text-gray-800">${{ dedicated_ip_total_cost|floatformat:2 }} {{ dedicated_ip_currency }}</span> in addition to your plan price.
             </p>
 
             {% if dedicated_ip_proxies %}
