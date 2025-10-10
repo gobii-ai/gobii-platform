@@ -15,6 +15,7 @@ from api.models import (
     UserQuota,
 )
 
+PERSISTENT_AGENT_BASE_URL = '/api/v1/agents/'
 
 def create_browser_agent_without_proxy(user, name):
     """Helper to create BrowserUseAgent without triggering proxy selection."""
@@ -241,6 +242,9 @@ class PersistentAgentAPITests(TestCase):
         self._on_commit_patcher = patch('api.serializers.transaction.on_commit', side_effect=lambda fn: fn())
         self.on_commit_mock = self._on_commit_patcher.start()
         self.addCleanup(self._on_commit_patcher.stop)
+        self._analytics_patcher = patch('api.views.Analytics.track_event')
+        self.analytics_mock = self._analytics_patcher.start()
+        self.addCleanup(self._analytics_patcher.stop)
 
     def _create_agent_via_api(self, payload: dict | None = None) -> dict:
         data = {
@@ -251,11 +255,7 @@ class PersistentAgentAPITests(TestCase):
         if payload:
             data.update(payload)
 
-        response = self.client.post(
-            '/api/v1/agents/persistent/',
-            data=json.dumps(data),
-            content_type='application/json',
-        )
+        response = self.client.post(PERSISTENT_AGENT_BASE_URL, data=json.dumps(data), content_type='application/json')
         self.assertEqual(response.status_code, 201, response.content)
         return response.json()
 
@@ -292,7 +292,7 @@ class PersistentAgentAPITests(TestCase):
 
     def test_create_agent_with_sms_preferred_endpoint_missing_verified_number_rolls_back(self):
         response = self.client.post(
-            '/api/v1/agents/persistent/',
+            PERSISTENT_AGENT_BASE_URL,
             data=json.dumps({
                 'name': 'API Persistent Agent',
                 'charter': 'Automate product updates',
@@ -310,7 +310,7 @@ class PersistentAgentAPITests(TestCase):
         agent_id = payload['id']
 
         update_response = self.client.patch(
-            f'/api/v1/agents/persistent/{agent_id}/',
+            f'{PERSISTENT_AGENT_BASE_URL}{agent_id}/',
             data=json.dumps({'charter': 'Refine outreach list', 'is_active': False}),
             content_type='application/json',
         )
@@ -331,7 +331,7 @@ class PersistentAgentAPITests(TestCase):
         )
 
         update_response = self.client.patch(
-            f'/api/v1/agents/persistent/{agent_id}/',
+            f'{PERSISTENT_AGENT_BASE_URL}{agent_id}/',
             data=json.dumps({'preferred_contact_endpoint': 'sms'}),
             content_type='application/json',
         )
@@ -345,7 +345,7 @@ class PersistentAgentAPITests(TestCase):
         payload = self._create_agent_via_api({'schedule': '0 12 * * *'})
         agent_id = payload['id']
 
-        delete_response = self.client.delete(f'/api/v1/agents/persistent/{agent_id}/')
+        delete_response = self.client.delete(f'{PERSISTENT_AGENT_BASE_URL}{agent_id}/')
         self.assertEqual(delete_response.status_code, 204, delete_response.content)
 
         agent = PersistentAgent.objects.get(id=agent_id)
@@ -371,7 +371,7 @@ class PersistentAgentAPITests(TestCase):
             'body': 'Status update from API client.',
         }
         message_response = self.client.post(
-            f"/api/v1/agents/persistent/{agent.id}/messages/",
+            f"{PERSISTENT_AGENT_BASE_URL}{agent.id}/messages/",
             data=json.dumps(message_body),
             content_type='application/json',
         )
@@ -379,7 +379,7 @@ class PersistentAgentAPITests(TestCase):
         event = message_response.json().get('event', {})
         self.assertEqual(event.get('kind'), 'message')
 
-        timeline_response = self.client.get(f"/api/v1/agents/persistent/{agent.id}/timeline/")
+        timeline_response = self.client.get(f"{PERSISTENT_AGENT_BASE_URL}{agent.id}/timeline/")
         self.assertEqual(timeline_response.status_code, 200, timeline_response.content)
         events = timeline_response.json().get('events', [])
         self.assertTrue(any(evt.get('kind') == 'message' for evt in events))
@@ -395,13 +395,13 @@ class PersistentAgentAPITests(TestCase):
             status=BrowserUseAgentTask.StatusChoices.PENDING,
         )
 
-        status_response = self.client.get(f"/api/v1/agents/persistent/{agent.id}/processing-status/")
+        status_response = self.client.get(f"{PERSISTENT_AGENT_BASE_URL}{agent.id}/processing-status/")
         self.assertEqual(status_response.status_code, 200, status_response.content)
         status_payload = status_response.json()
         self.assertIn('processing_active', status_payload)
         self.assertIn('processing_snapshot', status_payload)
 
-        tasks_response = self.client.get(f"/api/v1/agents/persistent/{agent.id}/web-tasks/?limit=10")
+        tasks_response = self.client.get(f"{PERSISTENT_AGENT_BASE_URL}{agent.id}/web-tasks/?limit=10")
         self.assertEqual(tasks_response.status_code, 200, tasks_response.content)
         results = tasks_response.json().get('results', [])
         self.assertGreaterEqual(len(results), 1)

@@ -997,6 +997,31 @@ class AutoCreateApiKeyTest(APITestCase):
         user_quota = UserQuota.objects.filter(user=new_user)
         self.assertEqual(user_quota.count(), 1)
 
+
+@tag("batch_api_agents")
+class AgentApiExceptionHandlingTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="exception-user@example.com",
+            email="exception-user@example.com",
+            password="password123",
+        )
+        UserQuota.objects.get_or_create(user=self.user, defaults={"agent_limit": 5})
+        self.raw_key, _ = ApiKey.create_for_user(self.user, name="exception-key")
+        self.client.credentials(HTTP_X_API_KEY=self.raw_key)
+
+    def test_unexpected_error_returns_json(self):
+        url = reverse("api:persistentagent-list")
+
+        with patch("api.views.PersistentAgentViewSet.list", side_effect=RuntimeError("boom")):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertTrue(response["Content-Type"].startswith("application/json"))
+        payload = response.json()
+        self.assertEqual(payload["detail"], "Internal server error.")
+        self.assertIn("error_id", payload)
+
 @tag("batch_api_tasks")
 class BrowserUseAgentTaskQuotaTests(TestCase):
     """Tests for quota checks when creating BrowserUseAgentTask."""

@@ -21,7 +21,7 @@ app_name = "api"
 
 # Simple router for agents
 router = SimpleRouter()
-router.register(r'agents/persistent', PersistentAgentViewSet, basename='persistentagent')
+router.register(r'agents', PersistentAgentViewSet, basename='persistentagent')
 router.register(r'agents/browser-use', BrowserUseAgentViewSet, basename='browseruseagent')
 
 urlpatterns = [
