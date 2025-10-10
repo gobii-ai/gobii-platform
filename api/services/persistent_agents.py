@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Optional
 
@@ -120,32 +118,34 @@ class PersistentAgentProvisioningService:
 
             if template_code:
                 template = AIEmployeeTemplateService.get_template_by_code(template_code)
-                if template:
-                    applied_template_code = template.code
-                    updates: list[str] = []
+                if template is None:
+                    raise PersistentAgentProvisioningError(f"Unknown template code '{template_code}'.")
 
-                    if not charter and template.charter:
-                        persistent_agent.charter = template.charter
-                        updates.append("charter")
+                applied_template_code = template.code
+                updates: list[str] = []
 
-                    computed = AIEmployeeTemplateService.compute_schedule_with_jitter(
-                        template.base_schedule,
-                        template.schedule_jitter_minutes,
-                    )
-                    if computed:
-                        persistent_agent.schedule = computed
-                        persistent_agent.schedule_snapshot = template.base_schedule
-                        applied_schedule = computed
-                        updates.extend(["schedule", "schedule_snapshot"])
+                if not charter and template.charter:
+                    persistent_agent.charter = template.charter
+                    updates.append("charter")
 
-                    if updates:
-                        try:
-                            persistent_agent.full_clean()
-                        except ValidationError as exc:
-                            raise PersistentAgentProvisioningError(
-                                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
-                            ) from exc
-                        persistent_agent.save(update_fields=updates)
+                computed = AIEmployeeTemplateService.compute_schedule_with_jitter(
+                    template.base_schedule,
+                    template.schedule_jitter_minutes,
+                )
+                if computed:
+                    persistent_agent.schedule = computed
+                    persistent_agent.schedule_snapshot = template.base_schedule
+                    applied_schedule = computed
+                    updates.extend(["schedule", "schedule_snapshot"])
+
+                if updates:
+                    try:
+                        persistent_agent.full_clean()
+                    except ValidationError as exc:
+                        raise PersistentAgentProvisioningError(
+                            exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+                        ) from exc
+                    persistent_agent.save(update_fields=updates)
 
             return ProvisioningResult(
                 agent=persistent_agent,

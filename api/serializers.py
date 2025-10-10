@@ -1,11 +1,15 @@
 # gobii_platform/api/serializers.py
+import uuid
+
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import serializers
 from api.agent.short_description import build_listing_description
 from .models import (
     ApiKey,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
 )
@@ -225,6 +229,33 @@ class PersistentAgentListSerializer(serializers.ModelSerializer):
         ref_name = "PersistentAgentList"
 
 
+class PreferredEndpointInputField(serializers.Field):
+    default_error_messages = {
+        'invalid_choice': 'preferred_contact_endpoint must be "email", "sms", or a valid endpoint id.',
+        'does_not_exist': 'Contact endpoint does not exist: {value}.',
+    }
+
+    def to_internal_value(self, data):
+        if data is None:
+            return None
+        if isinstance(data, str):
+            normalized = data.strip().lower()
+            if normalized in {'email', 'sms'}:
+                return normalized
+            try:
+                uuid.UUID(normalized)
+            except ValueError:
+                self.fail('invalid_choice')
+            try:
+                return PersistentAgentCommsEndpoint.objects.get(id=normalized)
+            except PersistentAgentCommsEndpoint.DoesNotExist:
+                self.fail('does_not_exist', value=normalized)
+        self.fail('invalid_choice')
+
+    def to_representation(self, value):
+        return None
+
+
 class PersistentAgentSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
     user_id = serializers.UUIDField(source='user.id', read_only=True, format='hex_verbose')
@@ -236,8 +267,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         allow_null=True,
         format='hex_verbose',
     )
-    preferred_contact_endpoint = serializers.PrimaryKeyRelatedField(
-        queryset=PersistentAgentCommsEndpoint.objects.all(),
+    preferred_contact_endpoint = PreferredEndpointInputField(
         required=False,
         allow_null=True,
         write_only=True,
@@ -282,11 +312,60 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
     def validate_preferred_contact_endpoint(self, value):
         if value is None:
             return None
-
+        if isinstance(value, str):
+            return value
         instance = getattr(self, 'instance', None)
         if value.owner_agent_id and (instance is None or value.owner_agent_id != instance.id):
             raise serializers.ValidationError("Contact endpoint belongs to a different agent.")
         return value
+
+    def _resolve_preferred_endpoint_channel(self, agent, channel_key: str):
+        try:
+            channel = CommsChannel(channel_key)
+        except ValueError:
+            raise serializers.ValidationError({'preferred_contact_endpoint': ['Unsupported contact channel.']})
+
+        endpoint = (
+            PersistentAgentCommsEndpoint.objects.filter(owner_agent=agent, channel=channel.value)
+            .order_by('-is_primary', 'address')
+            .first()
+        )
+        if endpoint:
+            return endpoint
+
+        request = self.context.get('request')
+        if request is None:
+            raise serializers.ValidationError({'preferred_contact_endpoint': ['Request context unavailable.']})
+
+        if agent.organization_id:
+            raise serializers.ValidationError({'preferred_contact_endpoint': [f"Agent has no {channel.value} endpoint available."]})
+
+        if channel == CommsChannel.EMAIL:
+            email = (request.user.email or "").strip().lower()
+            if not email:
+                raise serializers.ValidationError({'preferred_contact_endpoint': ['User email required to select email contact endpoint.']})
+            endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                channel=CommsChannel.EMAIL,
+                address=email,
+                defaults={'owner_agent': None},
+            )
+            return endpoint
+
+        if channel == CommsChannel.SMS:
+            from util.sms import get_user_primary_sms_number
+
+            sms_number = get_user_primary_sms_number(request.user)
+            if sms_number is None:
+                raise serializers.ValidationError({'preferred_contact_endpoint': ['User has no verified primary SMS number.']})
+
+            endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                channel=CommsChannel.SMS,
+                address=sms_number.phone_number,
+                defaults={'owner_agent': None},
+            )
+            return endpoint
+
+        raise serializers.ValidationError({'preferred_contact_endpoint': ['Unsupported contact channel.']})
 
     def create(self, validated_data):
         from api.services.persistent_agents import (
@@ -297,7 +376,9 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         request = self.context['request']
         organization = self.context.get('organization')
         template_code = validated_data.pop('template_code', None)
-        preferred_endpoint = validated_data.pop('preferred_contact_endpoint', None)
+        preferred_input = validated_data.pop('preferred_contact_endpoint', None)
+        preferred_endpoint = preferred_input if not isinstance(preferred_input, str) else None
+        preferred_channel = preferred_input if isinstance(preferred_input, str) else None
 
         provision_kwargs = {
             'user': request.user,
@@ -319,6 +400,17 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
 
         agent = result.agent
 
+        if agent:
+            if preferred_channel:
+                resolved_endpoint = self._resolve_preferred_endpoint_channel(agent, preferred_channel)
+                agent.preferred_contact_endpoint = resolved_endpoint
+                agent.save(update_fields=['preferred_contact_endpoint'])
+
+            from api.agent.tasks import process_agent_events_task
+
+            agent_id = str(agent.id)
+            transaction.on_commit(lambda: process_agent_events_task.delay(agent_id))
+
         # If incoming payload explicitly provided fields that differ from defaults,
         # ensure they are persisted after provisioning.
         post_create_updates = {}
@@ -336,7 +428,13 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         return agent
 
     def update(self, instance, validated_data):
-        preferred_endpoint = validated_data.pop('preferred_contact_endpoint', serializers.empty)
+        preferred_input = validated_data.pop('preferred_contact_endpoint', serializers.empty)
+        preferred_channel = None
+        preferred_endpoint = preferred_input
+        if preferred_input is not serializers.empty and isinstance(preferred_input, str):
+            preferred_channel = preferred_input
+            preferred_endpoint = serializers.empty
+
         validated_data.pop('template_code', None)
 
         dirty_fields = set()
@@ -344,7 +442,11 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             setattr(instance, field, value)
             dirty_fields.add(field)
 
-        if preferred_endpoint is not serializers.empty:
+        if preferred_channel:
+            resolved = self._resolve_preferred_endpoint_channel(instance, preferred_channel)
+            instance.preferred_contact_endpoint = resolved
+            dirty_fields.add('preferred_contact_endpoint')
+        elif preferred_endpoint is not serializers.empty:
             instance.preferred_contact_endpoint = preferred_endpoint
             dirty_fields.add('preferred_contact_endpoint')
 
