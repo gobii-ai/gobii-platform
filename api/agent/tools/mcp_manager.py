@@ -503,12 +503,64 @@ class MCPToolManager:
                                 actual_tool_name, app_slug or ""
                             )
 
-                        # Create a first‑party Connect session + link
-                        from api.integrations.pipedream_connect import create_connect_session
-                        session, first_party_url = create_connect_session(agent, app_slug or "")
+                        # Create (or reuse) a first-party Connect session + link
+                        from api.integrations.pipedream_connect import create_connect_session, EFFECTIVE_EXPIRATION_BUFFER_SECONDS
+
+                        normalized_app = (app_slug or "").strip()
+
+                        existing_session = (
+                            PipedreamConnectSession.objects
+                            .filter(
+                                agent=agent,
+                                app_slug=normalized_app,
+                                status=PipedreamConnectSession.Status.PENDING,
+                            )
+                            .exclude(connect_link_url="")
+                            .order_by("-created_at")
+                            .first()
+                        )
+
+                        reused_url: Optional[str] = None
+                        if existing_session is not None:
+                            expires_at = existing_session.expires_at
+                            now = datetime.now(UTC)
+                            if not expires_at or expires_at > now + timedelta(seconds=EFFECTIVE_EXPIRATION_BUFFER_SECONDS):
+                                reused_url = existing_session.connect_link_url
+                                if (
+                                    normalized_app
+                                    and isinstance(reused_url, str)
+                                    and "app=" not in reused_url
+                                ):
+                                    reused_url = (
+                                        f"{reused_url}{'&' if '?' in reused_url else '?'}app={normalized_app}"
+                                    )
+                                logger.info(
+                                    "PD Connect: reusing pending session id=%s app=%s agent=%s",
+                                    getattr(existing_session, 'id', None),
+                                    normalized_app,
+                                    str(agent.id),
+                                )
+                            else:
+                                existing_session.status = PipedreamConnectSession.Status.ERROR
+                                existing_session.save(update_fields=["status", "updated_at"])
+                                logger.info(
+                                    "PD Connect: pending session expired session=%s app=%s agent=%s",
+                                    getattr(existing_session, 'id', None),
+                                    normalized_app,
+                                    str(agent.id),
+                                )
+
+                        if reused_url:
+                            return {
+                                "status": "action_required",
+                                "result": f"Authorization required. Please connect your account via: {reused_url}",
+                                "connect_url": reused_url,
+                            }
+
+                        session, first_party_url = create_connect_session(agent, normalized_app)
                         logger.info(
                             "PD Connect: created session id=%s app=%s agent=%s",
-                            getattr(session, 'id', None), app_slug or "", str(agent.id)
+                            getattr(session, 'id', None), normalized_app, str(agent.id)
                         )
 
                         if not first_party_url and isinstance(session, PipedreamConnectSession):

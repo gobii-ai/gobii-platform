@@ -238,3 +238,58 @@ class PipedreamManagerConnectLinkTests(TestCase):
         self.assertEqual(res.get("status"), "action_required")
         self.assertIsNone(res.get("connect_url"))
         self.assertIn("expired", res.get("result", "").lower())
+
+    @patch("api.integrations.pipedream_connect.create_connect_session")
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
+    def test_execute_tool_reuses_pending_session(self, mock_exec, mock_loop, mock_create):
+        User = get_user_model()
+        user = User.objects.create_user(username="reuse@example.com")
+        with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
+            bua = BrowserUseAgent.objects.create(user=user, name="bua-reuse")
+        agent = PersistentAgent.objects.create(user=user, name="agent-reuse", charter="c", browser_use_agent=bua)
+
+        from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, enable_mcp_tool
+        mgr = MCPToolManager()
+        mgr._initialized = True
+        tool = MCPToolInfo("google_sheets-add-single-row", "pipedream", "google_sheets-add-single-row", "desc", {})
+        mgr._tools_cache = {"pipedream": [tool]}
+
+        with patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools') as mock_all:
+            mock_all.return_value = [tool]
+            enable_mcp_tool(agent, "google_sheets-add-single-row")
+
+        # Tool response containing connect link
+        response = MagicMock()
+        response.is_error = False
+        response.data = None
+        block = MagicMock()
+        block.text = "https://pipedream.com/_static/connect.html?token=ctok_reuse&app=google_sheets"
+        response.content = [block]
+        loop = MagicMock()
+        loop.run_until_complete.side_effect = lambda _: response
+        mock_loop.return_value = loop
+        mock_exec.return_value = response
+
+        # Existing pending session that should be reused
+        future_expiry = timezone.now() + timedelta(hours=1)
+        session = PipedreamConnectSession.objects.create(
+            agent=agent,
+            external_user_id=str(agent.id),
+            conversation_id=str(agent.id),
+            app_slug="google_sheets",
+            connect_token="ctok_reuse",
+            connect_link_url="https://pipedream.com/_static/connect.html?token=ctok_reuse",
+            expires_at=future_expiry,
+            webhook_secret="secret",
+            status=PipedreamConnectSession.Status.PENDING,
+        )
+
+        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"instruction": "x"})
+
+        self.assertEqual(res.get("status"), "action_required")
+        self.assertIn("ctok_reuse", res.get("connect_url", ""))
+        self.assertIn("app=google_sheets", res.get("connect_url", ""))
+        mock_create.assert_not_called()
+        session.refresh_from_db()
+        self.assertEqual(session.status, PipedreamConnectSession.Status.PENDING)
