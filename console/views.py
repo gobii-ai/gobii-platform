@@ -28,6 +28,11 @@ import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
+from api.services.dedicated_proxy_service import (
+    DedicatedProxyService,
+    DedicatedProxyUnavailableError,
+    is_multi_assign_enabled,
+)
 from api.agent.short_description import build_listing_description
 
 from api.models import (
@@ -61,8 +66,14 @@ from util import sms
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
 from util.sms import find_unused_number, get_user_primary_sms_number
-from util.subscription_helper import get_user_plan, get_active_subscription, allow_user_extra_tasks, \
-    calculate_extra_tasks_used_during_subscription_period, get_user_extra_task_limit, get_or_create_stripe_customer
+from util.subscription_helper import (
+    get_user_plan,
+    get_active_subscription,
+    allow_user_extra_tasks,
+    calculate_extra_tasks_used_during_subscription_period,
+    get_user_extra_task_limit,
+    get_or_create_stripe_customer,
+)
 from config import settings
 from config.stripe_config import get_stripe_settings
 
@@ -78,6 +89,7 @@ from .forms import (
     OrganizationInviteForm,
     OrganizationSeatPurchaseForm,
     OrganizationSeatReductionForm,
+    DedicatedIpAddForm,
 )
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
@@ -1032,6 +1044,22 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 seat_purchase_form = OrganizationSeatPurchaseForm(org=organization)
                 seat_reduction_form = OrganizationSeatReductionForm(org=organization)
 
+                dedicated_total = DedicatedProxyService.allocated_count(organization)
+                dedicated_proxies = list(
+                    DedicatedProxyService.allocated_proxies(organization).select_related("dedicated_allocation")
+                )
+                dedicated_allowed = overview.get('plan', {}).get('id') != PlanNamesChoices.FREE.value
+
+                context.update({
+                    'dedicated_ip_add_form': DedicatedIpAddForm(),
+                    'dedicated_ip_total': dedicated_total,
+                    'dedicated_ip_available': dedicated_total,
+                    'dedicated_ip_proxies': dedicated_proxies,
+                    'dedicated_ip_multi_assign': is_multi_assign_enabled(),
+                    'dedicated_ip_allowed': dedicated_allowed,
+                    'dedicated_ip_error': None,
+                })
+
                 granted = Decimal(str(overview['credits']['granted'])) if overview['credits']['granted'] else Decimal('0')
                 used = Decimal(str(overview['credits']['used'])) if overview['credits']['used'] else Decimal('0')
                 usage_pct = 0
@@ -1067,7 +1095,8 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 return render(request, self.template_name, context)
 
         # Personal billing fallback
-        context['subscription_plan'] = get_user_plan(self.request.user)
+        subscription_plan = get_user_plan(self.request.user)
+        context['subscription_plan'] = subscription_plan
         sub = get_active_subscription(self.request.user)
         paid_subscriber = sub is not None
 
@@ -1080,6 +1109,22 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
 
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
+
+        dedicated_plan = subscription_plan
+        dedicated_allowed = (dedicated_plan or {}).get('id') != PlanNamesChoices.FREE.value
+        dedicated_total = DedicatedProxyService.allocated_count(request.user)
+        dedicated_proxies = list(
+            DedicatedProxyService.allocated_proxies(request.user).select_related("dedicated_allocation")
+        )
+        context.update({
+            'dedicated_ip_add_form': DedicatedIpAddForm(),
+            'dedicated_ip_total': dedicated_total,
+            'dedicated_ip_available': dedicated_total,
+            'dedicated_ip_proxies': dedicated_proxies,
+            'dedicated_ip_multi_assign': is_multi_assign_enabled(),
+            'dedicated_ip_allowed': dedicated_allowed,
+            'dedicated_ip_error': None,
+        })
 
         return render(request, self.template_name, context)
 
@@ -2153,7 +2198,21 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         context['primary_email'] = primary_email
         context['primary_sms'] = primary_sms
-        
+
+        owner = agent.organization or agent.user
+        dedicated_total = 0
+        dedicated_available = 0
+        if owner:
+            dedicated_total = DedicatedProxyService.allocated_count(owner)
+            dedicated_available = dedicated_total
+
+        context['dedicated_ip_total'] = dedicated_total
+        context['dedicated_ip_available'] = dedicated_available
+        context['dedicated_ip_multi_assign'] = is_multi_assign_enabled()
+        context['dedicated_ip_owner_type'] = (
+            'organization' if agent.organization_id else 'user'
+        )
+
         # Always include allowlist configuration (flag removed)
         from api.models import CommsAllowlistEntry
         context['show_allowlist'] = True
@@ -6450,3 +6509,285 @@ class AgentAllowlistInviteRejectView(TemplateView):
             messages.error(request, f"Error rejecting invitation: {e}")
             
         return redirect("agent_allowlist_invite_reject", token=token)
+@login_required
+@require_POST
+@transaction.atomic
+@tracer.start_as_current_span("BILLING Add Dedicated IP Quantity")
+def add_dedicated_ip_quantity(request):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect('billing')
+
+    resolved = build_console_context(request)
+    if resolved.current_context.type == "organization" and resolved.current_membership is None:
+        messages.error(request, "You no longer have access to manage this organization.")
+        return redirect('billing')
+    owner = None
+    owner_type = ""
+
+    if resolved.current_context.type == "organization" and resolved.current_membership:
+        membership = resolved.current_membership
+        if membership.role not in BILLING_MANAGE_ROLES:
+            messages.error(request, "You do not have permission to modify billing settings for this organization.")
+            return redirect('billing')
+        owner = membership.org
+        owner_type = "organization"
+    else:
+        owner = request.user
+        owner_type = "user"
+
+    owner_plan_id = None
+    if owner_type == "user":
+        plan = get_user_plan(owner)
+        owner_plan_id = (plan or {}).get("id")
+    else:
+        billing = getattr(owner, "billing", None)
+        owner_plan_id = getattr(billing, "subscription", PlanNamesChoices.FREE.value) if billing else PlanNamesChoices.FREE.value
+
+    if owner_plan_id in (PlanNamesChoices.FREE.value, PlanNamesChoices.FREE):
+        messages.error(request, "Upgrade to a paid plan to add dedicated IPs.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    form = DedicatedIpAddForm(request.POST)
+    if not form.is_valid():
+        for field_errors in form.errors.values():
+            for error in field_errors:
+                messages.error(request, error)
+        redirect_url = 'billing'
+        if owner_type == "organization":
+            redirect_url = f"{reverse('billing')}?org_id={owner.id}"
+            return redirect(redirect_url)
+        return redirect('billing')
+
+    add_quantity = form.cleaned_data["quantity"]
+
+    try:
+        _assign_stripe_api_key()
+
+        customer = get_or_create_stripe_customer(owner)
+        if not customer:
+            raise ValueError("Stripe customer not found for owner")
+
+        subscription = get_active_subscription(owner)
+        if not subscription:
+            raise ValueError("Active subscription not found")
+
+        stripe_settings = get_stripe_settings()
+        if owner_type == "user":
+            dedicated_price_id = stripe_settings.startup_dedicated_ip_price_id
+        else:
+            dedicated_price_id = stripe_settings.org_team_dedicated_ip_price_id
+
+        if not dedicated_price_id:
+            raise ValueError("Dedicated IP price not configured")
+
+        current_qty = DedicatedProxyService.allocated_count(owner)
+        desired_qty = current_qty + int(add_quantity)
+
+        subscription_data = stripe.Subscription.retrieve(
+            subscription.id,
+            expand=["items.data.price"],
+        )
+
+        dedicated_item = None
+        for item in subscription_data.get("items", {}).get("data", []) or []:
+            price = item.get("price") or {}
+            if price.get("id") == dedicated_price_id:
+                dedicated_item = item
+                break
+
+        if dedicated_item is None:
+            stripe.SubscriptionItem.create(
+                subscription=subscription.id,
+                price=dedicated_price_id,
+                quantity=desired_qty,
+            )
+        else:
+            stripe.SubscriptionItem.modify(
+                dedicated_item.get("id"),
+                quantity=desired_qty,
+            )
+
+        missing = desired_qty - current_qty
+        allocated = 0
+        for _ in range(missing):
+            try:
+                DedicatedProxyService.allocate_proxy(owner)
+                allocated += 1
+            except DedicatedProxyUnavailableError:
+                messages.warning(
+                    request,
+                    "Not enough dedicated IP inventory was available. We've allocated as many as possible.",
+                )
+                break
+
+        messages.success(request, "Dedicated IP quantity updated.")
+    except Exception as exc:
+        logger.exception("Failed to update dedicated IP quantity", exc_info=True)
+        messages.error(request, f"Failed to update dedicated IPs: {exc}")
+
+    redirect_url = reverse('billing')
+    if owner_type == "organization":
+        redirect_url = f"{redirect_url}?org_id={owner.id}"
+        return redirect(redirect_url)
+    return redirect('billing')
+
+
+@login_required
+@require_POST
+@transaction.atomic
+@tracer.start_as_current_span("BILLING Remove Dedicated IP")
+def remove_dedicated_ip(request):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect('billing')
+
+    resolved = build_console_context(request)
+    owner = None
+    owner_type = ""
+
+    if resolved.current_context.type == "organization" and resolved.current_membership:
+        membership = resolved.current_membership
+        if membership.role not in BILLING_MANAGE_ROLES:
+            messages.error(request, "You do not have permission to modify billing settings for this organization.")
+            return redirect('billing')
+        owner = membership.org
+        owner_type = "organization"
+    else:
+        owner = request.user
+        owner_type = "user"
+
+    proxy_id = request.POST.get("proxy_id")
+    if not proxy_id:
+        messages.error(request, "Missing dedicated IP identifier.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    try:
+        _assign_stripe_api_key()
+        current_qty = DedicatedProxyService.allocated_count(owner)
+        if current_qty <= 0:
+            messages.info(request, "No dedicated IPs to remove.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        if not DedicatedProxyService.release_specific(owner, proxy_id):
+            messages.error(request, "Dedicated IP was already released.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        desired_qty = max(current_qty - 1, 0)
+
+        subscription = get_active_subscription(owner)
+        if not subscription:
+            raise ValueError("Active subscription not found")
+
+        stripe_settings = get_stripe_settings()
+        dedicated_price_id = (
+            stripe_settings.startup_dedicated_ip_price_id
+            if owner_type == "user"
+            else stripe_settings.org_team_dedicated_ip_price_id
+        )
+        if not dedicated_price_id:
+            raise ValueError("Dedicated IP price not configured")
+
+        subscription_data = stripe.Subscription.retrieve(
+            subscription.id,
+            expand=["items.data.price"],
+        )
+
+        dedicated_item = None
+        for item in subscription_data.get("items", {}).get("data", []) or []:
+            price = item.get("price") or {}
+            if price.get("id") == dedicated_price_id:
+                dedicated_item = item
+                break
+
+        if desired_qty > 0:
+            if dedicated_item is None:
+                stripe.SubscriptionItem.create(
+                    subscription=subscription.id,
+                    price=dedicated_price_id,
+                    quantity=desired_qty,
+                )
+            else:
+                stripe.SubscriptionItem.modify(
+                    dedicated_item.get("id"),
+                    quantity=desired_qty,
+                )
+        else:
+            if dedicated_item is not None:
+                stripe.SubscriptionItem.delete(dedicated_item.get("id"))
+
+        messages.success(request, "Dedicated IP removed.")
+    except Exception as exc:
+        logger.exception("Failed to remove dedicated IP", exc_info=True)
+        messages.error(request, f"Failed to remove dedicated IP: {exc}")
+
+    return redirect(_billing_redirect(owner, owner_type))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+@tracer.start_as_current_span("BILLING Remove All Dedicated IPs")
+def remove_all_dedicated_ip(request):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect('billing')
+
+    resolved = build_console_context(request)
+    owner = None
+    owner_type = ""
+
+    if resolved.current_context.type == "organization" and resolved.current_membership:
+        membership = resolved.current_membership
+        if membership.role not in BILLING_MANAGE_ROLES:
+            messages.error(request, "You do not have permission to modify billing settings for this organization.")
+            return redirect('billing')
+        owner = membership.org
+        owner_type = "organization"
+    else:
+        owner = request.user
+        owner_type = "user"
+
+    try:
+        _assign_stripe_api_key()
+        current_qty = DedicatedProxyService.allocated_count(owner)
+        if current_qty <= 0:
+            messages.info(request, "No dedicated IPs to remove.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        DedicatedProxyService.release_for_owner(owner)
+
+        subscription = get_active_subscription(owner)
+        if not subscription:
+            raise ValueError("Active subscription not found")
+
+        stripe_settings = get_stripe_settings()
+        dedicated_price_id = (
+            stripe_settings.startup_dedicated_ip_price_id
+            if owner_type == "user"
+            else stripe_settings.org_team_dedicated_ip_price_id
+        )
+        if dedicated_price_id:
+            subscription_data = stripe.Subscription.retrieve(
+                subscription.id,
+                expand=["items.data.price"],
+            )
+            for item in subscription_data.get("items", {}).get("data", []) or []:
+                price = item.get("price") or {}
+                if price.get("id") == dedicated_price_id:
+                    stripe.SubscriptionItem.delete(item.get("id"))
+                    break
+
+        messages.success(request, "All dedicated IPs removed.")
+    except Exception as exc:
+        logger.exception("Failed to remove all dedicated IPs", exc_info=True)
+        messages.error(request, f"Failed to remove dedicated IPs: {exc}")
+
+    return redirect(_billing_redirect(owner, owner_type))
+
+
+def _billing_redirect(owner, owner_type: str) -> str:
+    url = reverse('billing')
+    if owner_type == "organization" and owner is not None:
+        return f"{url}?org_id={owner.id}"
+    return url

@@ -14,8 +14,11 @@ from api.models import (
     BrowserUseAgentTask,
     TaskCredit,
     OrganizationInvite,
+    ProxyServer,
+    DedicatedProxyAllocation,
 )
 from django.utils import timezone
+from constants.plans import PlanNamesChoices
 
 
 User = get_user_model()
@@ -27,7 +30,9 @@ User = get_user_model()
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': ':memory:',
         }
-    }
+    },
+    SEGMENT_WRITE_KEY="",
+    SEGMENT_WEB_WRITE_KEY="",
 )
 
 @tag('batch_console_context')
@@ -52,7 +57,11 @@ class ConsoleContextTests(TestCase):
         )
         billing = self.org.billing
         billing.purchased_seats = 3
-        billing.save(update_fields=["purchased_seats"])
+        billing.subscription = PlanNamesChoices.ORG_TEAM.value
+        billing.save(update_fields=["purchased_seats", "subscription"])
+        owner_billing = self.owner.billing
+        owner_billing.subscription = PlanNamesChoices.STARTUP.value
+        owner_billing.save(update_fields=["subscription"])
 
         # Agents
         self.personal_browser = BrowserUseAgent.objects.create(user=self.owner, name="Personal Agent")
@@ -201,6 +210,28 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(resp2.status_code, 200)
         content2 = resp2.content.decode()
         self.assertIn("Profile", content2)
+
+    def test_agent_detail_includes_dedicated_ip_counts(self):
+        self._set_personal_context()
+        proxy = ProxyServer.objects.create(
+            name="Dedicated Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTP,
+            host="dedicated.example.com",
+            port=8080,
+            username="dedicated",
+            password="secret",
+            static_ip="203.0.113.5",
+            is_active=True,
+            is_dedicated=True,
+        )
+        DedicatedProxyAllocation.objects.assign_to_owner(proxy, self.owner)
+
+        url = reverse("agent_detail", kwargs={"pk": self.personal_agent.id})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('data-dedicated-ip-total="1"', html)
+        self.assertIn('Remove', html)
 
     def test_billing_query_switches_to_org_context(self):
         self._set_personal_context()

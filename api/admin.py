@@ -1186,11 +1186,19 @@ class DecodoIPAdmin(admin.ModelAdmin):
 
 @admin.register(ProxyServer)
 class ProxyServerAdmin(admin.ModelAdmin):
-    list_display = ('name', 'proxy_type', 'host', 'port', 'username', 'static_ip', 'is_active', 'health_results_link', 'decodo_ip_link', 'test_now', 'created_at')
-    list_filter = ('proxy_type', 'is_active', 'created_at')
+    list_display = ('name', 'proxy_type', 'host', 'port', 'username', 'static_ip', 'is_active', 'is_dedicated', 'health_results_link', 'decodo_ip_link', 'test_now', 'created_at')
+    list_filter = ('proxy_type', 'is_active', 'is_dedicated', 'created_at')
     search_fields = ('name', 'host', 'username', 'static_ip', 'notes')
     readonly_fields = ('id', 'created_at', 'updated_at')
     raw_id_fields = ('decodo_ip',)
+    fieldsets = (
+        ('Details', {
+            'fields': (
+                'id', 'name', 'proxy_type', 'host', 'port', 'username', 'password', 'static_ip',
+                'is_active', 'is_dedicated', 'notes', 'decodo_ip', 'created_at', 'updated_at'
+            )
+        }),
+    )
     
     def get_urls(self):
         """Add custom URL for health check functionality."""
@@ -1203,6 +1211,16 @@ class ProxyServerAdmin(admin.ModelAdmin):
             ),
         ]
         return custom_urls + urls
+
+    @admin.action(description="Mark selected proxies as dedicated")
+    def mark_as_dedicated(self, request, queryset):
+        updated = queryset.update(is_dedicated=True)
+        self.message_user(request, f"{updated} proxy server(s) marked as dedicated.", level=messages.SUCCESS)
+
+    @admin.action(description="Mark selected proxies as shared")
+    def mark_as_shared(self, request, queryset):
+        updated = queryset.update(is_dedicated=False)
+        self.message_user(request, f"{updated} proxy server(s) marked as shared.", level=messages.SUCCESS)
 
     @admin.display(description="")
     def test_now(self, obj):
@@ -1293,7 +1311,7 @@ class ProxyServerAdmin(admin.ModelAdmin):
         return None
     decodo_ip_link.short_description = 'Decodo IP'
     
-    actions = ['backfill_missing_proxies', 'test_selected_proxies']
+    actions = ['mark_as_dedicated', 'mark_as_shared', 'backfill_missing_proxies', 'test_selected_proxies']
     
     def backfill_missing_proxies(self, request, queryset):
         """Action to backfill missing proxy records for all Decodo IPs."""
