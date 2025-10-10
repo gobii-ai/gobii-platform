@@ -194,6 +194,8 @@ jobs:
             tag: batch_usage_api
           - batch: dedicated_proxy_models
             tag: batch_dedicated_proxy_models
+          - batch: dedicated_proxy_service
+            tag: batch_dedicated_proxy_service
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
