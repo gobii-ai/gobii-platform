@@ -8,6 +8,7 @@ from django.core.files.storage import default_storage
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.validators import RegexValidator
 from django.db import models, transaction
+from django.db.models import UniqueConstraint, Q
 from django.db.models import UniqueConstraint, Sum
 from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
@@ -518,6 +519,14 @@ class BrowserUseAgent(models.Model):
         return cls._select_proxy_with_health_preference()
     
     @classmethod
+    def _shared_proxy_queryset(cls):
+        """Return proxies eligible for the shared pool (excluding actively allocated dedicated proxies)."""
+        return ProxyServer.objects.filter(
+            Q(is_dedicated=False) | Q(is_dedicated=True, dedicated_allocation__isnull=True),
+            is_active=True,
+        )
+
+    @classmethod
     def _select_proxy_with_health_preference(cls):
         """Select proxy with preference for recent health check passes"""
         from datetime import timedelta
@@ -526,12 +535,11 @@ class BrowserUseAgent(models.Model):
         with traced("SELECT BrowserUseAgent Random Proxy") as span:
             # Consider health checks from the last 45 days as "recent"
             recent_cutoff = timezone.now() - timedelta(days=45)
+            available_proxies = cls._shared_proxy_queryset()
 
             # First priority: Static IP proxies with recent successful health checks
             with traced("SELECT BrowserUseAgent Healthy Static Proxy"):
-                healthy_static_proxy = ProxyServer.objects.filter(
-                    is_active=True,
-                    is_dedicated=False,
+                healthy_static_proxy = available_proxies.filter(
                     static_ip__isnull=False,
                     health_check_results__status='PASSED',
                     health_check_results__checked_at__gte=recent_cutoff
@@ -549,9 +557,7 @@ class BrowserUseAgent(models.Model):
 
             # Second priority: Any proxy with recent successful health checks
             with traced("SELECT BrowserUseAgent Healthy Static Proxy 2nd Priority"):
-                healthy_proxy = ProxyServer.objects.filter(
-                    is_active=True,
-                    is_dedicated=False,
+                healthy_proxy = available_proxies.filter(
                     health_check_results__status='PASSED',
                     health_check_results__checked_at__gte=recent_cutoff
                 ).distinct().order_by('?').first()
@@ -568,9 +574,7 @@ class BrowserUseAgent(models.Model):
 
             # Third priority: Static IP proxies (even without recent health checks)
             with traced("SELECT BrowserUseAgent Healthy Static Proxy - 3rd Priority"):
-                static_ip_proxy = ProxyServer.objects.filter(
-                    is_active=True,
-                    is_dedicated=False,
+                static_ip_proxy = available_proxies.filter(
                     static_ip__isnull=False
                 ).exclude(static_ip='').order_by('?').first()
 
@@ -589,10 +593,7 @@ class BrowserUseAgent(models.Model):
 
                 # This will return any active proxy, regardless of health checks
                 # or static IP status
-                proxy = ProxyServer.objects.filter(
-                    is_active=True,
-                    is_dedicated=False
-                ).order_by('?').first()
+                proxy = available_proxies.order_by('?').first()
 
                 if proxy:
                     span.set_attribute('proxy_choice', str(proxy.id))
@@ -994,7 +995,10 @@ class ProxyServer(models.Model):
     is_active = models.BooleanField(default=True, help_text="Whether this proxy is currently active")
     is_dedicated = models.BooleanField(
         default=False,
-        help_text="Marked true when this proxy is held as dedicated inventory and not part of the shared pool.",
+        help_text=(
+            "True when this proxy can be allocated as dedicated inventory. "
+            "Proxies with an active DedicatedProxyAllocation are withheld from the shared pool."
+        ),
     )
     notes = models.TextField(blank=True, help_text="Additional notes about this proxy server")
 

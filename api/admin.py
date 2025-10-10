@@ -13,7 +13,7 @@ from api.agent.tasks import process_agent_events_task
 from .admin_forms import TestSmsForm, GrantPlanCreditsForm, GrantCreditsByUserIdsForm, AgentEmailAccountForm, StripeConfigForm
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
-    DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, ProxyHealthCheckSpec, ProxyHealthCheckResult,
+    DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, PersistentAgentPromptArchive, CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
@@ -1366,6 +1366,34 @@ class ProxyServerAdmin(admin.ModelAdmin):
                 messages.ERROR
             )
     test_selected_proxies.short_description = "Run health checks on selected proxy servers"
+
+
+@admin.register(DedicatedProxyAllocation)
+class DedicatedProxyAllocationAdmin(admin.ModelAdmin):
+    list_display = ('proxy', 'owner_display', 'allocated_at', 'updated_at')
+    list_filter = ('owner_user', 'owner_organization')
+    search_fields = (
+        'proxy__name',
+        'proxy__host',
+        'owner_user__email',
+        'owner_user__username',
+        'owner_organization__name',
+    )
+    raw_id_fields = ('proxy', 'owner_user', 'owner_organization')
+    readonly_fields = ('id', 'allocated_at', 'updated_at')
+    ordering = ('-allocated_at',)
+    fieldsets = (
+        ('Allocation', {
+            'fields': ('id', 'proxy', 'allocated_at', 'updated_at')
+        }),
+        ('Owner', {
+            'fields': ('owner_user', 'owner_organization', 'notes')
+        }),
+    )
+
+    def owner_display(self, obj):
+        return obj.owner
+    owner_display.short_description = 'Owner'
 
 
 @admin.register(ProxyHealthCheckSpec)
