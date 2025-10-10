@@ -380,50 +380,50 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         preferred_endpoint = preferred_input if not isinstance(preferred_input, str) else None
         preferred_channel = preferred_input if isinstance(preferred_input, str) else None
 
-        provision_kwargs = {
-            'user': request.user,
-            'organization': organization,
-            'name': validated_data.get('name'),
-            'charter': validated_data.get('charter'),
-            'schedule': validated_data.get('schedule'),
-            'is_active': validated_data.get('is_active', True),
-            'life_state': validated_data.get('life_state'),
-            'whitelist_policy': validated_data.get('whitelist_policy'),
-            'preferred_contact_endpoint': preferred_endpoint,
-            'template_code': template_code or None,
-        }
+        with transaction.atomic():
+            provision_kwargs = {
+                'user': request.user,
+                'organization': organization,
+                'name': validated_data.get('name'),
+                'charter': validated_data.get('charter'),
+                'schedule': validated_data.get('schedule'),
+                'is_active': validated_data.get('is_active', True),
+                'life_state': validated_data.get('life_state'),
+                'whitelist_policy': validated_data.get('whitelist_policy'),
+                'preferred_contact_endpoint': preferred_endpoint,
+                'template_code': template_code or None,
+            }
 
-        try:
-            result = PersistentAgentProvisioningService.provision(**provision_kwargs)
-        except PersistentAgentProvisioningError as exc:
-            raise serializers.ValidationError({'non_field_errors': [str(exc)]}) from exc
+            try:
+                result = PersistentAgentProvisioningService.provision(**provision_kwargs)
+            except PersistentAgentProvisioningError as exc:
+                raise serializers.ValidationError({'non_field_errors': [str(exc)]}) from exc
 
-        agent = result.agent
+            agent = result.agent
 
-        if agent:
-            if preferred_channel:
+            if agent and preferred_channel:
                 resolved_endpoint = self._resolve_preferred_endpoint_channel(agent, preferred_channel)
                 agent.preferred_contact_endpoint = resolved_endpoint
                 agent.save(update_fields=['preferred_contact_endpoint'])
+
+            # If incoming payload explicitly provided fields that differ from defaults,
+            # ensure they are persisted after provisioning.
+            post_create_updates = {}
+            for field in ('charter', 'schedule', 'is_active', 'life_state', 'whitelist_policy'):
+                if field in validated_data and getattr(agent, field) != validated_data[field]:
+                    setattr(agent, field, validated_data[field])
+                    post_create_updates[field] = validated_data[field]
+            if post_create_updates:
+                try:
+                    agent.full_clean()
+                except DjangoValidationError as exc:
+                    raise serializers.ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages) from exc
+                agent.save(update_fields=list(post_create_updates.keys()))
 
             from api.agent.tasks import process_agent_events_task
 
             agent_id = str(agent.id)
             transaction.on_commit(lambda: process_agent_events_task.delay(agent_id))
-
-        # If incoming payload explicitly provided fields that differ from defaults,
-        # ensure they are persisted after provisioning.
-        post_create_updates = {}
-        for field in ('charter', 'schedule', 'is_active', 'life_state', 'whitelist_policy'):
-            if field in validated_data and getattr(agent, field) != validated_data[field]:
-                setattr(agent, field, validated_data[field])
-                post_create_updates[field] = validated_data[field]
-        if post_create_updates:
-            try:
-                agent.full_clean()
-            except DjangoValidationError as exc:
-                raise serializers.ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages) from exc
-            agent.save(update_fields=list(post_create_updates.keys()))
 
         return agent
 

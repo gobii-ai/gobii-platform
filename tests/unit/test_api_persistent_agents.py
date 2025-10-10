@@ -290,6 +290,21 @@ class PersistentAgentAPITests(TestCase):
         self.assertEqual(agent.preferred_contact_endpoint.channel, CommsChannel.SMS)
         self.assertEqual(agent.preferred_contact_endpoint.address, '+15550000001')
 
+    def test_create_agent_with_sms_preferred_endpoint_missing_verified_number_rolls_back(self):
+        response = self.client.post(
+            '/api/v1/agents/persistent/',
+            data=json.dumps({
+                'name': 'API Persistent Agent',
+                'charter': 'Automate product updates',
+                'schedule': '0 9 * * 1',
+                'preferred_contact_endpoint': 'sms',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(PersistentAgent.objects.count(), 0)
+        self.assertEqual(BrowserUseAgent.objects.count(), 0)
+
     def test_update_agent_fields(self):
         payload = self._create_agent_via_api()
         agent_id = payload['id']
