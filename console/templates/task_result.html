@@ -33,7 +33,7 @@
 {% block console_content %}
 <div class="space-y-6">
     <!-- Result header -->
-    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
+    <div class="gobii-card-base overflow-hidden">
         <div class="p-6 border-b border-gray-200/70">
             <h1 class="text-2xl font-semibold text-gray-800 mb-1">Task Result</h1>
             <p class="text-sm text-gray-500">Completed on {{ task.updated_at|date:"F j, Y" }} at {{ task.updated_at|time:"H:i" }}</p>
@@ -47,7 +47,7 @@
     </div>
 
     <!-- Result content -->
-    <div class="bg-white/80 backdrop-blur-sm border border-white/60 rounded-xl shadow-xl overflow-hidden">
+    <div class="gobii-card-base overflow-hidden">
         <div class="border-b border-gray-200/70 bg-gray-50/80 px-6 py-3 flex items-center justify-between">
             <h2 class="text-lg font-medium text-gray-800">Result Data</h2>
 

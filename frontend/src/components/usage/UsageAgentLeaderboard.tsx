@@ -316,7 +316,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
   })
 
   return (
-    <section className="rounded-xl border border-white/60 bg-white/80 shadow-xl backdrop-blur-sm overflow-hidden">
+    <section className="gobii-card-base">
       <header className="border-b border-white/50 px-6 py-4">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-semibold text-slate-900">Agents &amp; API leaderboard</h2>
