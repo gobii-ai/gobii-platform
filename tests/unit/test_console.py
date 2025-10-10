@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.test import TestCase, Client, tag
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -20,7 +22,7 @@ class ConsoleViewsTest(TestCase):
     @tag("batch_console_agents")
     def test_delete_persistent_agent_also_deletes_browser_agent(self):
         """Test that deleting a persistent agent also deletes its browser agent."""
-        from api.models import PersistentAgent, BrowserUseAgent
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
 
         # Create a browser use agent
         browser_agent = BrowserUseAgent.objects.create(
@@ -58,7 +60,7 @@ class ConsoleViewsTest(TestCase):
     @tag("batch_console_agents")
     def test_delete_persistent_agent_handles_missing_browser_agent(self):
         """Deletion should succeed even if the BrowserUseAgent record is missing."""
-        from api.models import PersistentAgent, BrowserUseAgent
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -84,7 +86,7 @@ class ConsoleViewsTest(TestCase):
     def test_delete_persistent_agent_missing_browser_row(self):
         """Actual missing BrowserUseAgent row should not cause deletion to fail."""
         from django.db import connection
-        from api.models import PersistentAgent, BrowserUseAgent
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -123,7 +125,7 @@ class ConsoleViewsTest(TestCase):
     @tag("batch_console_agents")
     def test_delete_persistent_agent_handles_delete_raises_browser_agent_missing(self):
         """Deletion should succeed even if PersistentAgent.delete raises BrowserUseAgent.DoesNotExist."""
-        from api.models import PersistentAgent, BrowserUseAgent
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -230,3 +232,85 @@ class ConsoleViewsTest(TestCase):
             )
         )
         self.assertEqual(PersistentAgent.objects.filter(organization=org).count(), 0)
+
+    @tag("batch_console_agents")
+    @patch('util.analytics.Analytics.track_event')
+    def test_agent_detail_updates_daily_credit_limit(self, mock_track_event):
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Limit Browser'
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Limit Test Agent',
+            charter='Ensure limits',
+            browser_use_agent=browser_agent
+        )
+
+        url = reverse('agent_detail', kwargs={'pk': agent.id})
+
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '5',
+        })
+        self.assertEqual(response.status_code, 302)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.daily_credit_limit, 5)
+        self.assertEqual(agent.get_daily_credit_limit_value(), Decimal('5'))
+
+        with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
+            PersistentAgentStep.objects.create(
+                agent=agent,
+                description='Usage',
+                credits_cost=Decimal('4.3'),
+            )
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['daily_credit_limit'], Decimal('5'))
+        self.assertEqual(response.context['daily_credit_usage'], Decimal('4.3'))
+        self.assertTrue(response.context['daily_credit_low'])
+        self.assertContains(response, 'almost out of daily task credits')
+
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '',
+        })
+        self.assertEqual(response.status_code, 302)
+
+        agent.refresh_from_db()
+        self.assertIsNone(agent.daily_credit_limit)
+        response = self.client.get(url)
+        self.assertFalse(response.context['daily_credit_low'])
+
+    @tag("batch_console_agents")
+    def test_agent_list_shows_daily_credit_warning(self):
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='List Browser'
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='List Agent',
+            charter='Monitor stuff',
+            browser_use_agent=browser_agent,
+            daily_credit_limit=1
+        )
+        with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
+            PersistentAgentStep.objects.create(
+                agent=agent,
+                description='Usage',
+                credits_cost=Decimal('0.3'),
+            )
+
+        response = self.client.get(reverse('agents'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'List Agent is almost out of daily task credits')

@@ -1,5 +1,5 @@
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import stripe
 from django.template.loader import render_to_string
@@ -1525,6 +1525,17 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
         persistent_agents = list(persistent_agents)
+        today = timezone.localdate()
+        next_reset = (
+            timezone.localtime(timezone.now()).replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            + timedelta(days=1)
+        )
+
         for agent in persistent_agents:
             description, source = build_listing_description(agent, max_length=200)
             agent.listing_description = description
@@ -1534,6 +1545,25 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 agent=agent,
                 status=AgentTransferInvite.Status.PENDING,
             ).first()
+
+            try:
+                limit = agent.get_daily_credit_limit_value()
+                usage = agent.get_daily_credit_usage(usage_date=today)
+                remaining = agent.get_daily_credit_remaining(usage_date=today)
+            except Exception:
+                limit = None
+                usage = Decimal("0")
+                remaining = None
+
+            agent.daily_credit_usage = usage
+            agent.daily_credit_remaining = remaining
+            agent.daily_credit_unlimited = limit is None
+            agent.daily_credit_next_reset = next_reset
+            agent.daily_credit_low = (
+                limit is not None
+                and remaining is not None
+                and remaining < Decimal("1")
+            )
 
         context['persistent_agents'] = persistent_agents
 
@@ -1732,6 +1762,20 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                         browser_use_agent=browser_agent,
                         preferred_contact_endpoint=None  # Temporary until we set it below
                     )
+
+                    # Default daily credit limit for free plans
+                    if settings.GOBII_PROPRIETARY_MODE:
+                        owner = organization or request.user
+                        plan_value = getattr(getattr(owner, "billing", None), "subscription", PlanNamesChoices.FREE)
+
+                        try:
+                            plan_choice = PlanNamesChoices(plan_value)
+                        except ValueError:
+                            plan_choice = PlanNamesChoices.FREE
+
+                        if plan_choice == PlanNamesChoices.FREE:
+                            persistent_agent.daily_credit_limit = settings.DEFAULT_AGENT_DAILY_CREDIT_LIMIT
+                            persistent_agent.save(update_fields=["daily_credit_limit"])
 
                     if selected_template:
                         fields_to_update = []
@@ -2281,6 +2325,59 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'window_hours': 6,
         }
 
+        # Daily task credit usage overview for progress UI
+        try:
+            today = timezone.localdate()
+            limit = agent.get_daily_credit_limit_value()
+            usage = agent.get_daily_credit_usage(usage_date=today)
+            remaining = agent.get_daily_credit_remaining(usage_date=today)
+            unlimited = limit is None
+
+            percent_used: float | None = None
+            if limit is not None and limit > Decimal("0"):
+                try:
+                    percent_used = float((usage / limit) * 100)
+                    if percent_used > 100:
+                        percent_used = 100.0
+                except Exception:
+                    percent_used = None
+
+            next_reset = (
+                timezone.localtime(timezone.now()).replace(
+                    hour=0,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                )
+                + timedelta(days=1)
+            )
+
+            context.update(
+                {
+                    "daily_credit_limit": limit,
+                    "daily_credit_usage": usage,
+                    "daily_credit_remaining": remaining,
+                    "daily_credit_unlimited": unlimited,
+                    "daily_credit_percent_used": percent_used,
+                    "daily_credit_next_reset": next_reset,
+                    "daily_credit_low": (not unlimited and remaining is not None and remaining < Decimal("1")),
+                }
+            )
+        except Exception as e:
+            logger.error("Failed to get daily credit usage for agent detail view (agent %s): %s", agent.id, e, exc_info=True)
+            # If anything goes wrong, fall back to safe defaults so UI still renders.
+            context.update(
+                {
+                    "daily_credit_limit": None,
+                    "daily_credit_usage": Decimal("0"),
+                    "daily_credit_remaining": None,
+                    "daily_credit_unlimited": True,
+                    "daily_credit_percent_used": None,
+                    "daily_credit_next_reset": None,
+                    "daily_credit_low": False,
+                }
+            )
+
         pending_transfer = AgentTransferInvite.objects.filter(
             agent=agent,
             status=AgentTransferInvite.Status.PENDING,
@@ -2305,7 +2402,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         if is_ajax:
             from django.http import JsonResponse
             from api.models import CommsAllowlistEntry
-            from django.core.exceptions import ValidationError
             from django.db import IntegrityError
             
             action = request.POST.get('action')
@@ -2701,9 +2797,27 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         # Checkbox inputs are only present in POST data when checked. Determine the desired
         # active state based on whether the "is_active" field was submitted.
         new_is_active = 'is_active' in request.POST
-        
+
         # Handle whitelist policy update (flag removed)
         new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
+
+        raw_limit = (request.POST.get('daily_credit_limit') or '').strip()
+
+        if not raw_limit:
+            new_daily_limit = None
+        else:
+            try:
+                parsed_limit = Decimal(raw_limit)
+            except InvalidOperation:
+                messages.error(request, "Enter a valid number for the daily task credit limit.")
+                return redirect('agent_detail', pk=agent.pk)
+            if parsed_limit < 0:
+                messages.error(request, "Daily task credit limit cannot be negative.")
+                return redirect('agent_detail', pk=agent.pk)
+            if parsed_limit != parsed_limit.to_integral_value():
+                messages.error(request, "Daily task credit limit must be a whole number.")
+                return redirect('agent_detail', pk=agent.pk)
+            new_daily_limit = int(parsed_limit)
 
         if not new_name:
             messages.error(request, "Agent name cannot be empty.")
@@ -2767,8 +2881,12 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         agent.whitelist_policy = new_whitelist_policy
                         agent_fields_to_update.append('whitelist_policy')
 
+                # Update daily credit limit if changed
+                if agent.daily_credit_limit != new_daily_limit:
+                    agent.daily_credit_limit = new_daily_limit
+                    agent_fields_to_update.append('daily_credit_limit')
+
                 # Mark interaction time and reactivate if previously expired
-                from django.utils import timezone
                 agent.last_interaction_at = timezone.now()
                 agent_fields_to_update.append('last_interaction_at')
 
@@ -2796,6 +2914,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         'agent_name': new_name,
                         'is_active': new_is_active,
                         'charter': new_charter,
+                        'daily_credit_limit': float(new_daily_limit) if new_daily_limit is not None else None,
                     },
                     organization=agent.organization,
                 )

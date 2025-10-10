@@ -1,4 +1,4 @@
-import hashlib, secrets, uuid, os, string, re
+import hashlib, secrets, uuid, os, string, re, datetime
 from decimal import Decimal
 from typing import Optional, Tuple
 
@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.validators import RegexValidator
 from django.db import models, transaction
-from django.db.models import UniqueConstraint
+from django.db.models import UniqueConstraint, Sum
 from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -2110,6 +2110,11 @@ class PersistentAgent(models.Model):
         related_name="persistent_agent"
     )
     is_active = models.BooleanField(default=True, help_text="Whether this agent is currently active")
+    daily_credit_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum task credits this agent may consume per day. Null means unlimited.",
+    )
     # Soft-expiration state and interaction tracking
     class LifeState(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -2218,6 +2223,40 @@ class PersistentAgent(models.Model):
     def __str__(self):
         schedule_display = self.schedule if self.schedule else "No schedule"
         return f"PersistentAgent: {self.name} (Schedule: {schedule_display})"
+
+    def get_daily_credit_limit_value(self) -> Decimal | None:
+        """Return the configured daily task credit limit, or None if unlimited."""
+        limit = self.daily_credit_limit
+        if limit is None:
+            return None
+        return Decimal(limit)
+
+    def get_daily_credit_usage(self, usage_date=None) -> Decimal:
+        """Return the credits consumed by this agent on the given date."""
+        usage_date = usage_date or timezone.localdate()
+        start = datetime.datetime.combine(usage_date, datetime.time.min)
+        if timezone.is_naive(start):
+            start = timezone.make_aware(start)
+        end = start + datetime.timedelta(days=1)
+
+        total = (
+            self.steps.filter(
+                created_at__gte=start,
+                created_at__lt=end,
+                credits_cost__isnull=False,
+            ).aggregate(sum=Sum("credits_cost"))
+        ).get("sum")
+
+        return total if total is not None else Decimal("0")
+
+    def get_daily_credit_remaining(self, usage_date=None) -> Decimal | None:
+        """Return remaining daily credits; None indicates unlimited."""
+        limit = self.get_daily_credit_limit_value()
+        if limit is None:
+            return None
+        used = self.get_daily_credit_usage(usage_date=usage_date)
+        remaining = limit - used
+        return remaining if remaining > Decimal("0") else Decimal("0")
 
     @tracer.start_as_current_span("WHITELIST PersistentAgent Inbound Sender Check")
     def is_sender_whitelisted(self, channel: CommsChannel | str, address: str) -> bool:
@@ -4202,7 +4241,8 @@ class PersistentAgentStep(models.Model):
                 if self.credits_cost is None:
                     self.credits_cost = default_cost
 
-        return super().save(*args, **kwargs)
+        result = super().save(*args, **kwargs)
+        return result
 
 
 class PersistentAgentToolCall(models.Model):

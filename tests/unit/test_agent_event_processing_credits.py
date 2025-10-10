@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
 from api.models import (
@@ -145,6 +145,42 @@ class PersistentAgentCreditGateTests(TestCase):
             ).exists()
         )
 
+    def test_process_agent_events_respects_daily_limit(self):
+        """Processing should exit early when the agent hit its daily limit."""
+        from api.agent.core.event_processing import _process_agent_events_locked
+
+        self.agent.daily_credit_limit = 1
+        self.agent.save(update_fields=["daily_credit_limit"])
+        with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
+            PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Previously consumed",
+                credits_cost=Decimal("1"),
+            )
+
+        fake_state = {
+            "date": timezone.localdate(),
+            "limit": Decimal("1"),
+            "used": Decimal("1"),
+            "remaining": Decimal("0"),
+            "next_reset": timezone.now(),
+        }
+
+        with override_settings(GOBII_PROPRIETARY_MODE=True), \
+             patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
+             patch("api.agent.core.event_processing._get_agent_daily_credit_state", return_value=fake_state), \
+             patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+            _process_agent_events_locked(self.agent.id, _DummySpan())
+            loop_mock.assert_not_called()
+
+        self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                notes="daily_credit_limit_exhausted",
+            ).exists()
+        )
+
     def test_proprietary_mode_unlimited_allows_processing(self):
         # In proprietary mode, if availability is unlimited (-1), we should proceed
         with patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
@@ -272,3 +308,38 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(result, Decimal("0.8"))
         mock_consume.assert_called_once()
         span.set_attribute.assert_any_call("credit_check.consumed_in_loop", True)
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
+    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=Decimal("5"))
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.5"))
+    def test_mid_loop_daily_limit_blocks_tool(
+        self,
+        mock_cost,
+        _mock_available,
+        mock_consume,
+    ):
+        span = MagicMock()
+        self.agent.daily_credit_limit = 1
+        self.agent.save(update_fields=["daily_credit_limit"])
+        with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
+            PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Partial usage",
+                credits_cost=Decimal("0.7"),
+            )
+
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
+
+        self.assertFalse(result)
+        mock_consume.assert_not_called()
+        step = PersistentAgentStep.objects.filter(agent=self.agent).order_by('-created_at').first()
+        self.assertIsNotNone(step)
+        self.assertIn("daily task credit limit", step.description.lower())
+        self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step=step,
+                notes="daily_credit_limit_mid_loop",
+            ).exists()
+        )
+        span.add_event.assert_any_call("Tool skipped - daily credit limit reached")
