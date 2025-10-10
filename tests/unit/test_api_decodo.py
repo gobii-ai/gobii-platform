@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.contrib.messages.storage.fallback import FallbackStorage
 
-from api.models import DecodoCredential, DecodoIPBlock, DecodoIP
+from api.models import DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer
 from api.admin import DecodoIPBlockAdmin
 from api.tasks import sync_ip_block, _fetch_decodo_ip_data, _update_or_create_ip_record
 
@@ -128,6 +128,8 @@ class DecodoSyncTaskTests(TestCase):
         self.assertEqual(ip_record.isp_asn, 12345)
         self.assertEqual(ip_record.city_name, "Test City")
         self.assertEqual(ip_record.country_code, "US")
+        proxy = ProxyServer.objects.get(decodo_ip=ip_record)
+        self.assertTrue(proxy.is_dedicated)
         
         # Test updating the same record
         ip_data["isp"]["isp"] = "Updated ISP"
@@ -136,6 +138,8 @@ class DecodoSyncTaskTests(TestCase):
         
         ip_record.refresh_from_db()
         self.assertEqual(ip_record.isp_name, "Updated ISP")
+        proxy.refresh_from_db()
+        self.assertTrue(proxy.is_dedicated)
         
     @patch('api.tasks.proxy_tasks._fetch_decodo_ip_data')
     @patch('api.tasks.proxy_tasks._update_or_create_ip_record')
