@@ -30,6 +30,7 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
         "REDDIT_PIXEL_ID": "",
         "META_PIXEL_ID": "",
         "MIXPANEL_PROJECT_TOKEN": "",
+        "LINKEDIN_PARTNER_ID": "",
     },
 }
 

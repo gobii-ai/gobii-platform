@@ -771,7 +771,10 @@ META_PIXEL_ID = env(
     "META_PIXEL_ID",
     default=_proprietary_default("analytics", "META_PIXEL_ID"),
 )
-
+LINKEDIN_PARTNER_ID = env(
+    "LINKEDIN_PARTNER_ID",
+    default=_proprietary_default("analytics", "LINKEDIN_PARTNER_ID"),
+)
 
 # Task Credit Settings
 INITIAL_TASK_CREDIT_EXPIRATION_DAYS=env("INITIAL_TASK_CREDIT_EXPIRATION_DAYS", default=30, cast=int)

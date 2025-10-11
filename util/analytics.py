@@ -99,6 +99,7 @@ class AnalyticsEvent(StrEnum):
 
     # Console Events
     CONSOLE_HOME_VIEWED = 'Console Home Viewed'
+    CONSOLE_USAGE_VIEWED = 'Console Usage Viewed'
 
     # Email Events
     EMAIL_OPENED = 'Email Opened'

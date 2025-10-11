@@ -3066,6 +3066,15 @@ class ConsoleDiagnosticsView(ConsoleViewMixin, TemplateView):
 class ConsoleUsageView(ConsoleViewMixin, TemplateView):
     template_name = "console/usage.html"
 
+    def get(self, request, *args, **kwargs):
+        Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.CONSOLE_USAGE_VIEWED,
+            source=AnalyticsSource.WEB,
+        )
+        context = self.get_context_data(**kwargs)
+        return self.render_to_response(context)
+
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
         return HttpResponseNotAllowed(['GET'])
 
