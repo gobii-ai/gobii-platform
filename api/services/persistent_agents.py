@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from agent_namer import AgentNameGenerator
 from agents.services import AIEmployeeTemplateService, AgentService
@@ -28,6 +28,7 @@ class PersistentAgentProvisioningService:
     """Utilities for creating persistent agents from API or console flows."""
 
     DEFAULT_MAX_NAME_ATTEMPTS = 10
+    NAME_ERROR_KEY = "name"
 
     @classmethod
     def generate_unique_name(cls, user, *, max_attempts: int | None = None) -> str:
@@ -75,8 +76,19 @@ class PersistentAgentProvisioningService:
 
         with transaction.atomic():
             browser_agent = BrowserUseAgent(user=user, name=agent_name)
-            browser_agent.full_clean()
-            browser_agent.save()
+            try:
+                browser_agent.full_clean()
+            except ValidationError as exc:
+                raise PersistentAgentProvisioningError(
+                    cls._normalize_validation_error(exc)
+                ) from exc
+
+            try:
+                browser_agent.save()
+            except IntegrityError as exc:
+                raise PersistentAgentProvisioningError(
+                    {"name": ["An agent with this name already exists for the owner."]}
+                ) from exc
 
             persistent_agent = PersistentAgent(
                 user=user,
@@ -98,7 +110,9 @@ class PersistentAgentProvisioningService:
                 persistent_agent.full_clean()
             except ValidationError as exc:
                 # Roll back browser agent if persistent agent validation fails.
-                raise PersistentAgentProvisioningError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages) from exc
+                raise PersistentAgentProvisioningError(
+                    cls._normalize_validation_error(exc)
+                ) from exc
 
             persistent_agent.save()
 
@@ -143,7 +157,7 @@ class PersistentAgentProvisioningService:
                         persistent_agent.full_clean()
                     except ValidationError as exc:
                         raise PersistentAgentProvisioningError(
-                            exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+                            cls._normalize_validation_error(exc)
                         ) from exc
                     persistent_agent.save(update_fields=updates)
 
@@ -153,3 +167,13 @@ class PersistentAgentProvisioningService:
                 applied_template_code=applied_template_code,
                 applied_schedule=applied_schedule,
             )
+
+    @classmethod
+    def _normalize_validation_error(cls, exc: ValidationError) -> dict | list | str:
+        """Convert Django validation errors into serializer-friendly structures."""
+        if hasattr(exc, "message_dict"):
+            message_dict = dict(exc.message_dict)
+            if "__all__" in message_dict and cls.NAME_ERROR_KEY not in message_dict:
+                message_dict[cls.NAME_ERROR_KEY] = message_dict.pop("__all__")
+            return message_dict
+        return exc.messages

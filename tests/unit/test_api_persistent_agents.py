@@ -269,6 +269,25 @@ class PersistentAgentAPITests(TestCase):
         self.assertEqual(agent.user_id, self.user.id)
         self.process_events_mock.assert_called_with(str(agent.id))
 
+    def test_create_agent_duplicate_name_returns_validation_error(self):
+        self._create_agent_via_api({'name': 'Duplicate Agent'})
+
+        response = self.client.post(
+            PERSISTENT_AGENT_BASE_URL,
+            data=json.dumps({
+                'name': 'Duplicate Agent',
+                'charter': 'Automate product updates',
+                'schedule': '0 9 * * 1',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        payload = response.json()
+        self.assertIn('name', payload)
+        self.assertTrue(any('already' in msg.lower() for msg in payload['name']))
+        self.assertEqual(PersistentAgent.objects.count(), 1)
+        self.assertEqual(BrowserUseAgent.objects.count(), 1)
+
     def test_create_agent_with_email_preferred_endpoint(self):
         payload = self._create_agent_via_api({'preferred_contact_endpoint': 'email'})
         agent = PersistentAgent.objects.get(id=payload['id'])

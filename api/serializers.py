@@ -397,6 +397,11 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             try:
                 result = PersistentAgentProvisioningService.provision(**provision_kwargs)
             except PersistentAgentProvisioningError as exc:
+                detail = exc.args[0] if exc.args else str(exc)
+                if isinstance(detail, dict):
+                    raise serializers.ValidationError(detail) from exc
+                if isinstance(detail, list):
+                    raise serializers.ValidationError(detail) from exc
                 raise serializers.ValidationError({'non_field_errors': [str(exc)]}) from exc
 
             agent = result.agent
