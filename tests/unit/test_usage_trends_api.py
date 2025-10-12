@@ -429,16 +429,17 @@ class UsageToolBreakdownAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
-        self.assertEqual(payload["total_count"], 3)
+        self.assertAlmostEqual(payload["total_count"], 4.25)
         self.assertAlmostEqual(payload["total_credits"], 4.25)
+        self.assertEqual(payload.get("total_invocations"), 3)
         self.assertEqual(payload["timezone"], timezone.get_current_timezone_name())
 
         tool_map = {tool["name"]: tool for tool in payload.get("tools", [])}
         self.assertIn("api_call", tool_map)
         self.assertIn("search_tools", tool_map)
-        self.assertEqual(tool_map["api_call"]["count"], 2)
+        self.assertEqual(tool_map["api_call"]["invocations"], 2)
         self.assertAlmostEqual(tool_map["api_call"]["credits"], 3.0)
-        self.assertEqual(tool_map["search_tools"]["count"], 1)
+        self.assertEqual(tool_map["search_tools"]["invocations"], 1)
         self.assertAlmostEqual(tool_map["search_tools"]["credits"], 1.25)
 
     def test_agent_filter_limits_results(self):
@@ -470,11 +471,12 @@ class UsageToolBreakdownAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
-        self.assertEqual(payload["total_count"], 1)
+        self.assertAlmostEqual(payload["total_count"], 2.0)
         self.assertAlmostEqual(payload["total_credits"], 2.0)
+        self.assertEqual(payload.get("total_invocations"), 1)
         self.assertEqual(len(payload.get("tools", [])), 1)
         self.assertEqual(payload["tools"][0]["name"], "api_call")
-        self.assertEqual(payload["tools"][0]["count"], 1)
+        self.assertEqual(payload["tools"][0]["invocations"], 1)
 
     def test_org_context_limits_results(self):
         organization = Organization.objects.create(
