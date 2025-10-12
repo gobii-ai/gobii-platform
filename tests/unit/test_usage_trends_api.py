@@ -536,10 +536,13 @@ class UsageToolBreakdownAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
-        self.assertEqual(payload["total_count"], 1)
-        self.assertAlmostEqual(payload["total_credits"], 4.0)
+        self.assertAlmostEqual(payload["total_count"], 4.0)
+        self.assertAlmostEqual(payload.get("total_credits", 0), 4.0)
+        self.assertEqual(payload.get("total_invocations"), 1)
         self.assertEqual(len(payload.get("tools", [])), 1)
         self.assertEqual(payload["tools"][0]["name"], "api_call")
+        self.assertEqual(payload["tools"][0]["invocations"], 1)
+        self.assertAlmostEqual(payload["tools"][0]["credits"], 4.0)
 
         reset_session = self.client.session
         reset_session["context_type"] = "personal"
@@ -566,14 +569,15 @@ class UsageToolBreakdownAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
-        self.assertEqual(payload["total_count"], 2)
-        self.assertAlmostEqual(payload["total_credits"], 2.0)
+        self.assertAlmostEqual(payload["total_count"], 3.5)
+        self.assertAlmostEqual(payload.get("total_credits", 0), 3.5)
+        self.assertEqual(payload.get("total_invocations"), 2)
         tools = payload.get("tools", [])
         self.assertEqual(len(tools), 1)
         api_tool = tools[0]
         self.assertEqual(api_tool["name"], "api_task")
-        self.assertEqual(api_tool["count"], 2)
-        self.assertAlmostEqual(api_tool["credits"], 2.0)
+        self.assertEqual(api_tool["invocations"], 2)
+        self.assertAlmostEqual(api_tool["credits"], 3.5)
 
 
 @tag("batch_usage_api")

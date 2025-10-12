@@ -634,7 +634,7 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
             filters["step__agent__user"] = request.user
             filters["step__agent__organization__isnull"] = True
 
-        zero_decimal = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
+        zero_decimal = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
 
         persistent_qs = PersistentAgentToolCall.objects.filter(**filters)
         if filtered_agent_ids:
@@ -645,15 +645,47 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
                 # Only API usage was requested; no persistent agent tool calls should be returned.
                 persistent_qs = persistent_qs.none()
 
-        tool_rows = list(
+        tool_rows_query = (
             persistent_qs
             .values("tool_name")
             .annotate(
-                count=Count("tool_name"),
+                invocations=Count("tool_name"),
                 credits=Coalesce(Sum("step__credits_cost"), zero_decimal),
             )
-            .order_by("-credits", "-count")
+            .order_by("-credits", "-invocations")
         )
+        tool_rows: list[dict[str, object]] = []
+        for row in tool_rows_query:
+            tool_rows.append(
+                {
+                    "tool_name": row.get("tool_name") or "",
+                    "invocations": int(row.get("invocations", 0) or 0),
+                    "credits": row.get("credits") or DECIMAL_ZERO,
+                }
+            )
+
+        # Compute total persistent step credits so non-tool work can be surfaced.
+        step_filters = {
+            "created_at__gte": start_dt,
+            "created_at__lte": end_dt,
+        }
+        if organization is not None:
+            step_filters["agent__organization"] = organization
+        else:
+            step_filters["agent__user"] = request.user
+            step_filters["agent__organization__isnull"] = True
+
+        steps_qs = PersistentAgentStep.objects.filter(**step_filters)
+        if filtered_agent_ids:
+            if actual_agent_ids:
+                steps_qs = steps_qs.filter(agent__browser_use_agent_id__in=actual_agent_ids)
+            else:
+                steps_qs = steps_qs.none()
+
+        persistent_step_totals = steps_qs.aggregate(
+            total=Coalesce(Sum("credits_cost"), zero_decimal),
+        )
+        persistent_step_credits = persistent_step_totals.get("total") or DECIMAL_ZERO
 
         # Include API-originated browser tasks (agentless) as their own category.
         api_task_filters = {
@@ -674,23 +706,35 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
         api_tasks_qs = api_tasks_qs.filter(agent_id__isnull=True)
 
         api_task_stats = api_tasks_qs.aggregate(
-            count=Count("id"),
+            invocations=Count("id"),
+            credits=Coalesce(Sum(_per_task_credit_expression()), zero_decimal),
         )
 
-        api_task_count = api_task_stats.get("count", 0) or 0
-        api_task_credits = API_CREDIT_DECIMAL * api_task_count
+        api_task_invocations = api_task_stats.get("invocations", 0) or 0
+        api_task_credits = api_task_stats.get("credits") or DECIMAL_ZERO
 
-        if api_task_count:
+        if api_task_credits > DECIMAL_ZERO:
             tool_rows.append(
                 {
                     "tool_name": "api_task",
-                    "count": api_task_count,
+                    "invocations": int(api_task_invocations),
                     "credits": api_task_credits,
                 }
             )
 
-        total_count = sum(row["count"] for row in tool_rows)
-        total_credits = sum((row["credits"] or Decimal("0")) for row in tool_rows)
+        total_tool_credits = sum((row["credits"] or DECIMAL_ZERO) for row in tool_rows)
+        total_invocations = sum(int(row.get("invocations", 0) or 0) for row in tool_rows)
+
+        residual_credits = persistent_step_credits - total_tool_credits
+        if residual_credits > DECIMAL_ZERO:
+            tool_rows.append(
+                {
+                    "tool_name": "agent_runtime",
+                    "invocations": 0,
+                    "credits": residual_credits,
+                }
+            )
+            total_tool_credits += residual_credits  # keep totals in sync
 
         payload = {
             "range": {
@@ -698,13 +742,14 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
                 "end": end_dt.isoformat(),
             },
             "timezone": tz_name,
-            "total_count": total_count,
-            "total_credits": float(total_credits),
+            "total_count": float(total_tool_credits),
+            "total_credits": float(total_tool_credits),
+            "total_invocations": total_invocations,
             "tools": [
                 {
                     "name": (row["tool_name"] or ""),
-                    "count": row["count"],
-                    "credits": float(row["credits"] or Decimal("0")),
+                    "invocations": int(row["invocations"]),
+                    "credits": float(row["credits"] or DECIMAL_ZERO),
                 }
                 for row in tool_rows
             ],
