@@ -42,6 +42,9 @@ type UsageTrendSectionProps = {
   agentIds: string[]
 }
 
+type TooltipPrimitiveValue = number | string | Date | null | undefined
+type TooltipFormatterValue = TooltipPrimitiveValue | TooltipPrimitiveValue[]
+
 export function UsageTrendSection({
   effectiveRange,
   fallbackRange,
@@ -144,7 +147,10 @@ export function UsageTrendSection({
       ...(palette.length ? { color: palette } : {}),
       tooltip: {
         trigger: 'axis',
-        valueFormatter: (value: number) => creditFormatter.format(value),
+        valueFormatter: (value: TooltipFormatterValue, _dataIndex: number) => {
+          const numericValue = Array.isArray(value) ? value[0] : value
+          return typeof numericValue === 'number' ? creditFormatter.format(numericValue) : `${numericValue ?? ''}`
+        },
       },
       legend: {
         type: 'scroll',
@@ -172,7 +178,7 @@ export function UsageTrendSection({
         type: 'value',
         min: 0,
         axisLabel: {
-          formatter: (value: number) => creditFormatter.format(value),
+          formatter: (value: number | string) => (typeof value === 'number' ? creditFormatter.format(value) : `${value}`),
         },
       },
       series: [
