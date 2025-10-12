@@ -168,18 +168,11 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
 
           const { name, value: rawCredits, percent: rawPercent } = detail
 
-          const rawCount =
-            typeof detail === 'object' && detail !== null && 'data' in detail && detail.data
-              ? (detail.data as { count?: number }).count
-              : undefined
-
           const credits = typeof rawCredits === 'number' ? rawCredits : Number(rawCredits ?? 0)
-          const count = typeof rawCount === 'number' ? rawCount : Number(rawCount ?? 0)
           const percentValue =
             typeof rawPercent === 'number' ? rawPercent : Number(rawPercent ?? 0)
 
           const safeCredits = Number.isFinite(credits) ? credits : 0
-          const safeCount = Number.isFinite(count) ? count : 0
           const safePercent = Number.isFinite(percentValue) ? percentValue : 0
 
           const label =
@@ -190,10 +183,8 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
               : 'Tool'
 
           const formattedCredits = creditFormatter.format(safeCredits)
-          const formattedCount = integerFormatter.format(safeCount)
-          const taskLabel = safeCount === 1 ? 'task' : 'tasks'
 
-          return `${label}<br />${formattedCredits} credits (${safePercent.toFixed(1)}%) · ${formattedCount} ${taskLabel}`
+          return `${label}<br />${formattedCredits} credits (${safePercent.toFixed(1)}%)`
         },
       },
       legend: {
@@ -256,7 +247,6 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
   }, [timezone, toolData])
 
   const totalCredits = toolData?.total_credits ?? processedSegments.reduce((acc, segment) => acc + segment.value, 0)
-  const totalTasks = toolData?.total_count ?? processedSegments.reduce((acc, segment) => acc + segment.count, 0)
 
   return (
     <section className="gobii-card-base flex flex-col gap-4 p-6">
@@ -269,9 +259,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
         </div>
         {toolData ? (
           <div className="rounded-md border border-white/60 bg-white/60 px-3 py-1 text-sm text-slate-600">
-            <span className="font-medium text-slate-900">{creditFormatter.format(totalCredits)}</span> credits ·{' '}
-            <span className="font-medium text-slate-900">{integerFormatter.format(totalTasks)}</span>{' '}
-            {totalTasks === 1 ? 'task' : 'tasks'}
+            <span className="font-medium text-slate-900">{creditFormatter.format(totalCredits)}</span> credits
           </div>
         ) : null}
       </div>

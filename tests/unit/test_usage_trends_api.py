@@ -44,8 +44,7 @@ def _create_api_task(*, user, created_at: datetime, organization=None, credits_c
     }
     if organization is not None:
         task_kwargs["organization"] = organization
-    if credits_cost is not None:
-        task_kwargs["credits_cost"] = credits_cost
+    task_kwargs["credits_cost"] = credits_cost if credits_cost is not None else Decimal("1.0")
 
     task = BrowserUseAgentTask.objects.create(**task_kwargs)
     BrowserUseAgentTask.objects.filter(pk=task.pk).update(created_at=created_at)
@@ -72,6 +71,7 @@ class UsageTrendAPITests(TestCase):
                 user=self.user,
                 agent=agent,
                 status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+                credits_cost=Decimal("1.0"),
             )
             BrowserUseAgentTask.objects.filter(pk=task.pk).update(created_at=dt)
 
@@ -236,6 +236,7 @@ class UsageAgentLeaderboardAPITests(TestCase):
             user=self.user,
             agent=agent,
             status=status,
+            credits_cost=Decimal("1.0"),
         )
         BrowserUseAgentTask.objects.filter(pk=task.pk).update(created_at=dt)
 
@@ -284,19 +285,19 @@ class UsageAgentLeaderboardAPITests(TestCase):
         primary = agent_map[str(self.agent_primary.id)]
         secondary = agent_map[str(self.agent_secondary.id)]
         self.assertIn(API_AGENT_ID, agent_map)
-        self.assertEqual(agent_map[API_AGENT_ID]["tasks_total"], 0)
+        self.assertAlmostEqual(agent_map[API_AGENT_ID]["tasks_total"], 0.0)
         self.assertEqual(primary["persistent_id"], str(self.persistent_primary.id))
         self.assertEqual(secondary["persistent_id"], str(self.persistent_secondary.id))
         self.assertIsNone(agent_map[API_AGENT_ID]["persistent_id"])
 
-        self.assertEqual(primary["tasks_total"], 2)
-        self.assertEqual(primary["success_count"], 1)
-        self.assertEqual(primary["error_count"], 1)
+        self.assertAlmostEqual(primary["tasks_total"], 2.0)
+        self.assertAlmostEqual(primary["success_count"], 1.0)
+        self.assertAlmostEqual(primary["error_count"], 1.0)
         self.assertAlmostEqual(primary["tasks_per_day"], 1.0)
 
-        self.assertEqual(secondary["tasks_total"], 1)
-        self.assertEqual(secondary["success_count"], 1)
-        self.assertEqual(secondary["error_count"], 0)
+        self.assertAlmostEqual(secondary["tasks_total"], 1.0)
+        self.assertAlmostEqual(secondary["success_count"], 1.0)
+        self.assertAlmostEqual(secondary["error_count"], 0.0)
         self.assertAlmostEqual(secondary["tasks_per_day"], 0.5)
 
     def test_persistent_steps_counted_in_leaderboard(self):
@@ -318,9 +319,9 @@ class UsageAgentLeaderboardAPITests(TestCase):
         agent_map = {entry["id"]: entry for entry in payload.get("agents", [])}
 
         primary = agent_map[str(self.agent_primary.id)]
-        self.assertEqual(primary["tasks_total"], 1)
-        self.assertEqual(primary["success_count"], 1)
-        self.assertEqual(primary["error_count"], 0)
+        self.assertAlmostEqual(primary["tasks_total"], 1.0)
+        self.assertAlmostEqual(primary["success_count"], 1.0)
+        self.assertAlmostEqual(primary["error_count"], 0.0)
         self.assertAlmostEqual(primary["tasks_per_day"], 1.0)
 
     def test_api_tasks_included_when_selected(self):
@@ -344,10 +345,10 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertEqual(len(agents), 1)
         api_row = agents[0]
         self.assertEqual(api_row["id"], API_AGENT_ID)
-        self.assertEqual(api_row["tasks_total"], 2)
-        self.assertEqual(api_row["success_count"], 2)
-        self.assertEqual(api_row["error_count"], 0)
-        self.assertAlmostEqual(api_row["tasks_per_day"], 2.0)
+        self.assertAlmostEqual(api_row["tasks_total"], 3.5)
+        self.assertAlmostEqual(api_row["success_count"], 3.5)
+        self.assertAlmostEqual(api_row["error_count"], 0.0)
+        self.assertAlmostEqual(api_row["tasks_per_day"], 3.5)
         self.assertIsNone(api_row["persistent_id"])
 
 @tag("batch_usage_api")
@@ -720,7 +721,7 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["metrics"]["tasks"]["count"], 1)
+        self.assertAlmostEqual(payload["metrics"]["tasks"]["count"], 1.0)
 
     def test_personal_context_excludes_org_tasks(self):
         now = timezone.now()
@@ -748,7 +749,7 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["metrics"]["tasks"]["count"], 1)
+        self.assertAlmostEqual(payload["metrics"]["tasks"]["count"], 1.0)
 
     def test_api_filter_limits_summary(self):
         tz = timezone.get_current_timezone()
@@ -773,8 +774,8 @@ class UsageSummaryAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         metrics = payload["metrics"]["tasks"]
-        self.assertEqual(metrics["count"], 1)
-        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 1.0)
+        self.assertAlmostEqual(metrics["count"], 4.0)
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 4.0)
 
     def test_persistent_steps_contribute_to_summary(self):
         tz = timezone.get_current_timezone()
@@ -806,8 +807,8 @@ class UsageSummaryAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         tasks_metrics = payload["metrics"]["tasks"]
-        self.assertEqual(tasks_metrics["count"], 1)
-        self.assertEqual(tasks_metrics["completed"], 1)
-        self.assertEqual(tasks_metrics["in_progress"], 0)
-        self.assertEqual(tasks_metrics["pending"], 0)
+        self.assertAlmostEqual(tasks_metrics["count"], 2.5)
+        self.assertAlmostEqual(tasks_metrics["completed"], 2.5)
+        self.assertAlmostEqual(tasks_metrics["in_progress"], 0.0)
+        self.assertAlmostEqual(tasks_metrics["pending"], 0.0)
         self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 2.5)

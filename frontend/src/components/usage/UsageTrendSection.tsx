@@ -57,12 +57,12 @@ export function UsageTrendSection({
 
     const lengthInDays = getRangeLengthInDays(baseRange)
     if (lengthInDays <= 1) {
-      return { mode: 'day', detail: 'Tasks per hour' }
+      return { mode: 'day', detail: 'Credits per hour' }
     }
     if (lengthInDays <= 7) {
-      return { mode: 'week', detail: 'Tasks per day' }
+      return { mode: 'week', detail: 'Credits per day' }
     }
-    return { mode: 'month', detail: 'Tasks per day' }
+    return { mode: 'month', detail: 'Credits per day' }
   }, [baseRange])
 
   const trendQueryInput = useMemo<UsageTrendQueryInput | null>(() => {
@@ -79,6 +79,11 @@ export function UsageTrendSection({
   }, [agentIds, baseRange, resolvedMode])
 
   const agentKey = agentIds.length ? agentIds.slice().sort().join(',') : 'all'
+
+  const creditFormatter = useMemo(
+    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
+    [],
+  )
 
   const {
     data: trendData,
@@ -139,12 +144,13 @@ export function UsageTrendSection({
       ...(palette.length ? { color: palette } : {}),
       tooltip: {
         trigger: 'axis',
+        valueFormatter: (value: number) => creditFormatter.format(value),
       },
       legend: {
         type: 'scroll',
         data: [
           ...agentSeries.map((series) => series.name),
-          'Total tasks',
+          'Total credits',
         ],
         top: 0,
       },
@@ -166,13 +172,13 @@ export function UsageTrendSection({
         type: 'value',
         min: 0,
         axisLabel: {
-          formatter: '{value}',
+          formatter: (value: number) => creditFormatter.format(value),
         },
       },
       series: [
         ...agentSeries,
         {
-          name: 'Total tasks',
+          name: 'Total credits',
           type: 'line',
           smooth: true,
           showSymbol: false,
@@ -189,7 +195,7 @@ export function UsageTrendSection({
         },
       ],
     }
-  }, [timezone, trendData])
+  }, [creditFormatter, timezone, trendData])
 
   const hasData = useMemo(() => {
     if (!trendData) {

@@ -13,19 +13,14 @@ import type {
 
 const metricDefinitions: MetricDefinition[] = [
   {
-    id: 'tasks',
-    label: 'Tasks run',
-    baseCaption: 'Counts every agent task created in the selected billing period.',
-  },
-  {
-    id: 'tasks_per_day',
-    label: 'Average tasks per day',
-    baseCaption: 'Average number of tasks created per day in the selected billing period.',
-  },
-  {
     id: 'credits',
     label: 'Credits consumed',
     baseCaption: 'Sum of task credits charged during this billing period.',
+  },
+  {
+    id: 'tasks_per_day',
+    label: 'Average credits per day',
+    baseCaption: 'Average task credits billed per day in the selected billing period.',
   },
   {
     id: 'quota',
@@ -78,13 +73,8 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
     }
   }, [error, isError, setSummaryError])
 
-  const integerFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }), [])
   const creditFormatter = useMemo(
     () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
-    [],
-  )
-  const averageFormatter = useMemo(
-    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }),
     [],
   )
 
@@ -130,17 +120,17 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
           case 'tasks': {
             const completed = resolvedSummary.metrics.tasks.completed
             const active = resolvedSummary.metrics.tasks.in_progress + resolvedSummary.metrics.tasks.pending
-            value = integerFormatter.format(resolvedSummary.metrics.tasks.count)
-            caption = `Completed ${integerFormatter.format(completed)} · Active ${integerFormatter.format(active)}`
+            value = creditFormatter.format(resolvedSummary.metrics.tasks.count)
+            caption = `Completed ${creditFormatter.format(completed)} credits · Active ${creditFormatter.format(active)} credits`
             break
           }
           case 'tasks_per_day': {
             const totalTasks = resolvedSummary.metrics.tasks.count
             if (periodDayCount && periodDayCount > 0) {
               const average = totalTasks / periodDayCount
-              value = averageFormatter.format(average)
+              value = creditFormatter.format(average)
               const pluralSuffix = periodDayCount === 1 ? '' : 's'
-              caption = `${integerFormatter.format(totalTasks)} total across ${periodDayCount} day${pluralSuffix}.`
+              caption = `${creditFormatter.format(totalTasks)} credits across ${periodDayCount} day${pluralSuffix}.`
             } else {
               value = '—'
               caption = 'Unable to determine the period length for this metric.'
@@ -189,7 +179,7 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
         progressClass,
       }
     })
-  }, [averageFormatter, creditFormatter, integerFormatter, isError, isPending, periodDayCount, resolvedSummary])
+  }, [creditFormatter, isError, isPending, periodDayCount, resolvedSummary])
 
   return (
     <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

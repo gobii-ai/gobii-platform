@@ -27,6 +27,7 @@ from console.context_helpers import build_console_context
 API_AGENT_ID = "api"
 API_AGENT_NAME = "API"
 API_CREDIT_DECIMAL = Decimal("1")
+DECIMAL_ZERO = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -142,7 +143,10 @@ def _build_agent_filter(actual_agent_ids: Iterable[uuid.UUID], include_api: bool
 def _per_task_credit_expression() -> Case:
     zero_decimal = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
     return Case(
-        When(agent_id__isnull=True, then=Value(API_CREDIT_DECIMAL, output_field=DecimalField(max_digits=20, decimal_places=6))),
+        When(
+            agent_id__isnull=True,
+            then=Coalesce(F("credits_cost"), Value(API_CREDIT_DECIMAL, output_field=DecimalField(max_digits=20, decimal_places=6))),
+        ),
         default=Coalesce(F("credits_cost"), zero_decimal),
         output_field=DecimalField(max_digits=20, decimal_places=6),
     )
@@ -224,14 +228,18 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         if agent_filter_q is not None:
             tasks_qs = tasks_qs.filter(agent_filter_q)
 
-        status_counts = {status: 0 for status in BrowserUseAgentTask.StatusChoices.values}
-        for row in tasks_qs.values("status").annotate(count=Count("status")):
-            status_counts[row["status"]] = row["count"]
+        zero_value = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
+        status_credit_totals: dict[str, Decimal] = {
+            status: DECIMAL_ZERO for status in BrowserUseAgentTask.StatusChoices.values
+        }
+        credit_annotation = Coalesce(Sum(_per_task_credit_expression()), zero_value)
+        for row in tasks_qs.values("status").annotate(total=credit_annotation):
+            status = row.get("status")
+            if status is None:
+                continue
+            status_credit_totals[status] = row.get("total") or DECIMAL_ZERO
 
-        tasks_total = tasks_qs.count()
-
-        credits_agg = tasks_qs.aggregate(total=Sum(_per_task_credit_expression()))
-        total_credits = credits_agg.get("total") or Decimal("0")
+        task_credit_total = sum(status_credit_totals.values(), DECIMAL_ZERO)
 
         persistent_filters = {
             "created_at__gte": period_start_dt,
@@ -249,18 +257,19 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         elif filtered_agent_ids:
             persistent_steps_qs = PersistentAgentStep.objects.none()
 
-        zero_decimal = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
-        persistent_credits = persistent_steps_qs.aggregate(
-            total=Coalesce(Sum("credits_cost"), zero_decimal),
+        persistent_credit_agg = persistent_steps_qs.aggregate(
+            total=Coalesce(Sum("credits_cost"), zero_value),
         )
-        persistent_total = persistent_steps_qs.count()
-        persistent_credit_total = persistent_credits.get("total") or Decimal("0")
+        persistent_credit_total = persistent_credit_agg.get("total") or DECIMAL_ZERO
 
-        combined_total = tasks_total + persistent_total
-        combined_completed = (
-            status_counts.get(BrowserUseAgentTask.StatusChoices.COMPLETED, 0) + persistent_total
-        )
-        total_credits += persistent_credit_total
+        combined_total = task_credit_total + persistent_credit_total
+        completed_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.COMPLETED, DECIMAL_ZERO)
+        combined_completed = completed_credit + persistent_credit_total
+        in_progress_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.IN_PROGRESS, DECIMAL_ZERO)
+        pending_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.PENDING, DECIMAL_ZERO)
+        failed_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.FAILED, DECIMAL_ZERO)
+        cancelled_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.CANCELLED, DECIMAL_ZERO)
+        total_credits = combined_total
 
         now = timezone.now()
         credit_filters = {
@@ -302,12 +311,12 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             },
             "metrics": {
                 "tasks": {
-                    "count": combined_total,
-                    "completed": combined_completed,
-                    "in_progress": status_counts.get(BrowserUseAgentTask.StatusChoices.IN_PROGRESS, 0),
-                    "pending": status_counts.get(BrowserUseAgentTask.StatusChoices.PENDING, 0),
-                    "failed": status_counts.get(BrowserUseAgentTask.StatusChoices.FAILED, 0),
-                    "cancelled": status_counts.get(BrowserUseAgentTask.StatusChoices.CANCELLED, 0),
+                    "count": float(combined_total),
+                    "completed": float(combined_completed),
+                    "in_progress": float(in_progress_credit),
+                    "pending": float(pending_credit),
+                    "failed": float(failed_credit),
+                    "cancelled": float(cancelled_credit),
                 },
                 "credits": {
                     "total": float(total_credits),
@@ -348,7 +357,6 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
         tz_name = timezone.get_current_timezone_name()
 
         accessible_agents = _get_accessible_agents(request, organization)
-        accessible_agent_ids = {agent.id for agent in accessible_agents}
 
         anchor_end_date = requested_end or timezone.now().date()
         if requested_start and anchor_end_date < requested_start:
@@ -429,7 +437,9 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
             if agent.persistent_agent_id is not None
         }
 
-        def _build_counts(start_dt: datetime, end_dt: datetime) -> dict[str, int]:
+        zero_value = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
+
+        def _build_counts(start_dt: datetime, end_dt: datetime) -> dict[str, float]:
             filters = base_filters | {
                 "created_at__gte": start_dt,
                 "created_at__lt": end_dt,
@@ -441,15 +451,15 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 qs.annotate(bucket=trunc_function("created_at", tzinfo=tz))
                 .values("bucket")
                 .order_by("bucket")
-                .annotate(count=Count("id"))
+                .annotate(total=Coalesce(Sum(_per_task_credit_expression()), zero_value))
             )
-            counts: dict[str, int] = {}
+            counts: dict[str, float] = {}
             for row in rows:
                 bucket = row.get("bucket")
                 if bucket is None:
                     continue
                 bucket_key = bucket.isoformat()
-                counts[bucket_key] = row["count"]
+                counts[bucket_key] = float(row.get("total") or DECIMAL_ZERO)
 
             persistent_filters = persistent_base_filters | {
                 "created_at__gte": start_dt,
@@ -466,18 +476,18 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 steps_qs.annotate(bucket=trunc_function("created_at", tzinfo=tz))
                 .values("bucket")
                 .order_by("bucket")
-                .annotate(count=Count("id"))
+                .annotate(total=Coalesce(Sum("credits_cost"), zero_value))
             )
             for row in step_rows:
                 bucket = row.get("bucket")
                 if bucket is None:
                     continue
                 bucket_key = bucket.isoformat()
-                counts[bucket_key] = counts.get(bucket_key, 0) + row["count"]
+                counts[bucket_key] = counts.get(bucket_key, 0.0) + float(row.get("total") or DECIMAL_ZERO)
 
             return counts
 
-        def _build_agent_counts(start_dt: datetime, end_dt: datetime) -> dict[str, dict[str, int]]:
+        def _build_agent_counts(start_dt: datetime, end_dt: datetime) -> dict[str, dict[str, float]]:
             filters = base_filters | {
                 "created_at__gte": start_dt,
                 "created_at__lt": end_dt,
@@ -489,9 +499,9 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 qs.annotate(bucket=trunc_function("created_at", tzinfo=tz))
                 .values("bucket", "agent_id")
                 .order_by("bucket", "agent_id")
-                .annotate(count=Count("id"))
+                .annotate(total=Coalesce(Sum(_per_task_credit_expression()), zero_value))
             )
-            bucket_map: dict[str, dict[str, int]] = {}
+            bucket_map: dict[str, dict[str, float]] = {}
             for row in rows:
                 bucket = row.get("bucket")
                 if bucket is None:
@@ -500,7 +510,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 agent_key = API_AGENT_ID if agent_id is None else str(agent_id)
                 bucket_key = bucket.isoformat()
                 agent_counts = bucket_map.setdefault(bucket_key, {})
-                agent_counts[agent_key] = row["count"]
+                agent_counts[agent_key] = float(row.get("total") or DECIMAL_ZERO)
 
             persistent_filters = persistent_base_filters | {
                 "created_at__gte": start_dt,
@@ -517,7 +527,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 steps_qs.annotate(bucket=trunc_function("created_at", tzinfo=tz))
                 .values("bucket", "agent_id")
                 .order_by("bucket", "agent_id")
-                .annotate(count=Count("id"))
+                .annotate(total=Coalesce(Sum("credits_cost"), zero_value))
             )
             for row in step_rows:
                 bucket = row.get("bucket")
@@ -529,7 +539,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                     continue
                 bucket_key = bucket.isoformat()
                 agent_counts = bucket_map.setdefault(bucket_key, {})
-                agent_counts[browser_agent_id] = agent_counts.get(browser_agent_id, 0) + row["count"]
+                agent_counts[browser_agent_id] = agent_counts.get(browser_agent_id, 0.0) + float(row.get("total") or DECIMAL_ZERO)
 
             return bucket_map
 
@@ -757,25 +767,33 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
         if agent_filter_q is not None:
             tasks_qs = tasks_qs.filter(agent_filter_q)
 
+        zero_value = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
+
         aggregates = (
             tasks_qs
             .values("agent_id")
             .order_by()
             .annotate(
-                total=Count("id"),
-                success=Count("id", filter=Q(status=BrowserUseAgentTask.StatusChoices.COMPLETED)),
-                error=Count("id", filter=Q(status=BrowserUseAgentTask.StatusChoices.FAILED)),
+                total=Coalesce(Sum(_per_task_credit_expression()), zero_value),
+                success=Coalesce(
+                    Sum(_per_task_credit_expression(), filter=Q(status=BrowserUseAgentTask.StatusChoices.COMPLETED)),
+                    zero_value,
+                ),
+                error=Coalesce(
+                    Sum(_per_task_credit_expression(), filter=Q(status=BrowserUseAgentTask.StatusChoices.FAILED)),
+                    zero_value,
+                ),
             )
         )
 
-        aggregate_map: dict[str, dict[str, int]] = {}
+        aggregate_map: dict[str, dict[str, Decimal]] = {}
         for row in aggregates:
             agent_id = row.get("agent_id")
             key = API_AGENT_ID if agent_id is None else str(agent_id)
             aggregate_map[key] = {
-                "total": row.get("total", 0),
-                "success": row.get("success", 0),
-                "error": row.get("error", 0),
+                "total": row.get("total") or DECIMAL_ZERO,
+                "success": row.get("success") or DECIMAL_ZERO,
+                "error": row.get("error") or DECIMAL_ZERO,
             }
 
         persistent_filters = {
@@ -804,16 +822,16 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
             steps_qs
             .values("agent_id")
             .order_by()
-            .annotate(total=Count("id"))
+            .annotate(total=Coalesce(Sum("credits_cost"), zero_value))
         ):
             persistent_agent_id = row.get("agent_id")
             browser_agent_id = persistent_id_map.get(persistent_agent_id)
             if browser_agent_id is None:
                 continue
-            total = row.get("total", 0) or 0
+            total = row.get("total") or DECIMAL_ZERO
             stats = aggregate_map.setdefault(
                 browser_agent_id,
-                {"total": 0, "success": 0, "error": 0},
+                {"total": DECIMAL_ZERO, "success": DECIMAL_ZERO, "error": DECIMAL_ZERO},
             )
             stats["total"] += total
             stats["success"] += total
@@ -822,7 +840,7 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
 
         leaderboard: list[dict[str, object]] = []
         for agent in active_agents:
-            stats = aggregate_map.get(agent.id, {"total": 0, "success": 0, "error": 0})
+            stats = aggregate_map.get(agent.id, {"total": DECIMAL_ZERO, "success": DECIMAL_ZERO, "error": DECIMAL_ZERO})
             total = stats["total"]
             success = stats["success"]
             error = stats["error"]
@@ -832,10 +850,10 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
                 {
                     "id": str(agent.id),
                     "name": agent.name,
-                    "tasks_total": total,
+                    "tasks_total": float(total),
                     "tasks_per_day": avg_per_day,
-                    "success_count": success,
-                    "error_count": error,
+                    "success_count": float(success),
+                    "error_count": float(error),
                     "persistent_id": str(agent.persistent_agent_id) if agent.persistent_agent_id else None,
                 }
             )
