@@ -13,7 +13,14 @@ from django.views import View
 
 from billing.services import BillingService
 
-from api.models import BrowserUseAgent, BrowserUseAgentTask, Organization, PersistentAgentToolCall, TaskCredit
+from api.models import (
+    BrowserUseAgent,
+    BrowserUseAgentTask,
+    Organization,
+    PersistentAgentStep,
+    PersistentAgentToolCall,
+    TaskCredit,
+)
 from console.context_helpers import build_console_context
 
 
@@ -141,6 +148,27 @@ def _per_task_credit_expression() -> Case:
     )
 
 
+def _resolve_agent_selection(
+    agent_filters_raw: Iterable[str],
+    accessible_agents: list[UsageAgentDescriptor],
+) -> tuple[list[str], list[uuid.UUID], bool, list[UsageAgentDescriptor], list[uuid.UUID]]:
+    accessible_map = {agent.id: agent for agent in accessible_agents}
+    accessible_ids = set(accessible_map.keys())
+    filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_ids)
+    actual_agent_ids, include_api = _split_agent_filter_values(filtered_agent_ids)
+
+    if filtered_agent_ids:
+        selected_agents = [accessible_map[agent_id] for agent_id in filtered_agent_ids]
+    else:
+        selected_agents = accessible_agents
+
+    persistent_agent_ids = [
+        agent.persistent_agent_id for agent in selected_agents if agent.persistent_agent_id is not None
+    ]
+
+    return filtered_agent_ids, actual_agent_ids, include_api, selected_agents, persistent_agent_ids
+
+
 class UsageSummaryAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
@@ -161,7 +189,6 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         agent_filters_raw = request.GET.getlist("agent")
 
         accessible_agents = _get_accessible_agents(request, organization)
-        accessible_agent_ids = {agent.id for agent in accessible_agents}
 
         if requested_start and requested_end and requested_start <= requested_end:
             period_start, period_end = requested_start, requested_end
@@ -184,8 +211,13 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             filters["user"] = request.user
             filters["organization__isnull"] = True
 
-        filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
-        actual_agent_ids, include_api = _split_agent_filter_values(filtered_agent_ids)
+        (
+            filtered_agent_ids,
+            actual_agent_ids,
+            include_api,
+            _selected_agents,
+            persistent_agent_ids,
+        ) = _resolve_agent_selection(agent_filters_raw, accessible_agents)
 
         tasks_qs = BrowserUseAgentTask.objects.filter(**filters)
         agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
@@ -200,6 +232,35 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
 
         credits_agg = tasks_qs.aggregate(total=Sum(_per_task_credit_expression()))
         total_credits = credits_agg.get("total") or Decimal("0")
+
+        persistent_filters = {
+            "created_at__gte": period_start_dt,
+            "created_at__lte": period_end_dt,
+        }
+        if organization is not None:
+            persistent_filters["agent__organization"] = organization
+        else:
+            persistent_filters["agent__user"] = request.user
+            persistent_filters["agent__organization__isnull"] = True
+
+        persistent_steps_qs = PersistentAgentStep.objects.filter(**persistent_filters)
+        if persistent_agent_ids:
+            persistent_steps_qs = persistent_steps_qs.filter(agent_id__in=persistent_agent_ids)
+        elif filtered_agent_ids:
+            persistent_steps_qs = PersistentAgentStep.objects.none()
+
+        zero_decimal = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
+        persistent_credits = persistent_steps_qs.aggregate(
+            total=Coalesce(Sum("credits_cost"), zero_decimal),
+        )
+        persistent_total = persistent_steps_qs.count()
+        persistent_credit_total = persistent_credits.get("total") or Decimal("0")
+
+        combined_total = tasks_total + persistent_total
+        combined_completed = (
+            status_counts.get(BrowserUseAgentTask.StatusChoices.COMPLETED, 0) + persistent_total
+        )
+        total_credits += persistent_credit_total
 
         now = timezone.now()
         credit_filters = {
@@ -241,8 +302,8 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             },
             "metrics": {
                 "tasks": {
-                    "count": tasks_total,
-                    "completed": status_counts.get(BrowserUseAgentTask.StatusChoices.COMPLETED, 0),
+                    "count": combined_total,
+                    "completed": combined_completed,
                     "in_progress": status_counts.get(BrowserUseAgentTask.StatusChoices.IN_PROGRESS, 0),
                     "pending": status_counts.get(BrowserUseAgentTask.StatusChoices.PENDING, 0),
                     "failed": status_counts.get(BrowserUseAgentTask.StatusChoices.FAILED, 0),
@@ -344,17 +405,29 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
             base_filters["user"] = request.user
             base_filters["organization__isnull"] = True
 
-        filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
-        actual_agent_ids, include_api = _split_agent_filter_values(filtered_agent_ids)
+        persistent_base_filters: dict[str, object] = {}
+        if organization is not None:
+            persistent_base_filters["agent__organization"] = organization
+        else:
+            persistent_base_filters["agent__user"] = request.user
+            persistent_base_filters["agent__organization__isnull"] = True
+
+        (
+            filtered_agent_ids,
+            actual_agent_ids,
+            include_api,
+            active_agents,
+            persistent_agent_ids,
+        ) = _resolve_agent_selection(agent_filters_raw, accessible_agents)
 
         agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
 
-        if filtered_agent_ids:
-            active_agents = [agent for agent in accessible_agents if agent.id in filtered_agent_ids]
-        else:
-            active_agents = accessible_agents
-
         trunc_function = TruncHour if step == timedelta(hours=1) else TruncDay
+        persistent_id_map = {
+            agent.persistent_agent_id: agent.id
+            for agent in accessible_agents
+            if agent.persistent_agent_id is not None
+        }
 
         def _build_counts(start_dt: datetime, end_dt: datetime) -> dict[str, int]:
             filters = base_filters | {
@@ -370,7 +443,39 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 .order_by("bucket")
                 .annotate(count=Count("id"))
             )
-            return {row["bucket"].isoformat(): row["count"] for row in rows}
+            counts: dict[str, int] = {}
+            for row in rows:
+                bucket = row.get("bucket")
+                if bucket is None:
+                    continue
+                bucket_key = bucket.isoformat()
+                counts[bucket_key] = row["count"]
+
+            persistent_filters = persistent_base_filters | {
+                "created_at__gte": start_dt,
+                "created_at__lt": end_dt,
+            }
+
+            steps_qs = PersistentAgentStep.objects.filter(**persistent_filters)
+            if persistent_agent_ids:
+                steps_qs = steps_qs.filter(agent_id__in=persistent_agent_ids)
+            elif filtered_agent_ids:
+                steps_qs = PersistentAgentStep.objects.none()
+
+            step_rows = (
+                steps_qs.annotate(bucket=trunc_function("created_at", tzinfo=tz))
+                .values("bucket")
+                .order_by("bucket")
+                .annotate(count=Count("id"))
+            )
+            for row in step_rows:
+                bucket = row.get("bucket")
+                if bucket is None:
+                    continue
+                bucket_key = bucket.isoformat()
+                counts[bucket_key] = counts.get(bucket_key, 0) + row["count"]
+
+            return counts
 
         def _build_agent_counts(start_dt: datetime, end_dt: datetime) -> dict[str, dict[str, int]]:
             filters = base_filters | {
@@ -396,6 +501,36 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 bucket_key = bucket.isoformat()
                 agent_counts = bucket_map.setdefault(bucket_key, {})
                 agent_counts[agent_key] = row["count"]
+
+            persistent_filters = persistent_base_filters | {
+                "created_at__gte": start_dt,
+                "created_at__lt": end_dt,
+            }
+
+            steps_qs = PersistentAgentStep.objects.filter(**persistent_filters)
+            if persistent_agent_ids:
+                steps_qs = steps_qs.filter(agent_id__in=persistent_agent_ids)
+            elif filtered_agent_ids:
+                steps_qs = PersistentAgentStep.objects.none()
+
+            step_rows = (
+                steps_qs.annotate(bucket=trunc_function("created_at", tzinfo=tz))
+                .values("bucket", "agent_id")
+                .order_by("bucket", "agent_id")
+                .annotate(count=Count("id"))
+            )
+            for row in step_rows:
+                bucket = row.get("bucket")
+                if bucket is None:
+                    continue
+                persistent_agent_id = row.get("agent_id")
+                browser_agent_id = persistent_id_map.get(persistent_agent_id)
+                if browser_agent_id is None:
+                    continue
+                bucket_key = bucket.isoformat()
+                agent_counts = bucket_map.setdefault(bucket_key, {})
+                agent_counts[browser_agent_id] = agent_counts.get(browser_agent_id, 0) + row["count"]
+
             return bucket_map
 
         current_counts = _build_counts(current_start_dt, current_end_dt)
@@ -596,17 +731,13 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
         period_end_dt = timezone.make_aware(datetime.combine(period_end, time.max), tz)
 
         accessible_agents = _get_accessible_agents(request, organization)
-        accessible_agent_ids = {agent.id for agent in accessible_agents}
-
-        filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
-        actual_agent_ids, include_api = _split_agent_filter_values(filtered_agent_ids)
-
-        if filtered_agent_ids:
-            active_agent_ids = set(filtered_agent_ids)
-            active_agents = [agent for agent in accessible_agents if agent.id in active_agent_ids]
-        else:
-            active_agent_ids = accessible_agent_ids
-            active_agents = accessible_agents
+        (
+            filtered_agent_ids,
+            actual_agent_ids,
+            include_api,
+            active_agents,
+            persistent_agent_ids,
+        ) = _resolve_agent_selection(agent_filters_raw, accessible_agents)
 
         task_filters = {
             "is_deleted": False,
@@ -646,6 +777,46 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
                 "success": row.get("success", 0),
                 "error": row.get("error", 0),
             }
+
+        persistent_filters = {
+            "created_at__gte": period_start_dt,
+            "created_at__lte": period_end_dt,
+        }
+        if organization is not None:
+            persistent_filters["agent__organization"] = organization
+        else:
+            persistent_filters["agent__user"] = request.user
+            persistent_filters["agent__organization__isnull"] = True
+
+        steps_qs = PersistentAgentStep.objects.filter(**persistent_filters)
+        if persistent_agent_ids:
+            steps_qs = steps_qs.filter(agent_id__in=persistent_agent_ids)
+        elif filtered_agent_ids:
+            steps_qs = PersistentAgentStep.objects.none()
+
+        persistent_id_map = {
+            agent.persistent_agent_id: agent.id
+            for agent in accessible_agents
+            if agent.persistent_agent_id is not None
+        }
+
+        for row in (
+            steps_qs
+            .values("agent_id")
+            .order_by()
+            .annotate(total=Count("id"))
+        ):
+            persistent_agent_id = row.get("agent_id")
+            browser_agent_id = persistent_id_map.get(persistent_agent_id)
+            if browser_agent_id is None:
+                continue
+            total = row.get("total", 0) or 0
+            stats = aggregate_map.setdefault(
+                browser_agent_id,
+                {"total": 0, "success": 0, "error": 0},
+            )
+            stats["total"] += total
+            stats["success"] += total
 
         period_length_days = max((period_end - period_start).days + 1, 1)
 
