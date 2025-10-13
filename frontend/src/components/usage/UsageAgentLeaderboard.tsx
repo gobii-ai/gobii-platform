@@ -131,9 +131,8 @@ function SortableHeader({ column, align = 'left', children }: SortableHeaderProp
 export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds }: UsageAgentLeaderboardProps) {
   const baseRange = effectiveRange ?? fallbackRange
 
-  const integerFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }), [])
-  const decimalFormatter = useMemo(
-    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }),
+  const creditFormatter = useMemo(
+    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
     [],
   )
   const percentFormatter = useMemo(
@@ -219,12 +218,12 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
         enableSorting: true,
         header: ({ column }) => (
           <SortableHeader column={column} align="right">
-            Tasks
+            Credits
           </SortableHeader>
         ),
         cell: ({ getValue }) => {
           const value = Number(getValue<number>())
-          return <span className="whitespace-nowrap text-sm font-semibold text-slate-900">{integerFormatter.format(value)}</span>
+          return <span className="whitespace-nowrap text-sm font-semibold text-slate-900">{creditFormatter.format(value)}</span>
         },
         sortingFn: 'basic',
       },
@@ -234,12 +233,12 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
         enableSorting: true,
         header: ({ column }) => (
           <SortableHeader column={column} align="right">
-            Avg / Day
+            Credits / Day
           </SortableHeader>
         ),
         cell: ({ getValue }) => {
           const value = Number(getValue<number>())
-          return <span className="whitespace-nowrap text-sm text-slate-900">{decimalFormatter.format(value)}</span>
+          return <span className="whitespace-nowrap text-sm text-slate-900">{creditFormatter.format(value)}</span>
         },
         sortingFn: 'basic',
       },
@@ -255,14 +254,14 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
         cell: ({ row }) => {
           const { successCount, errorCount, successRate, tasksTotal } = row.original
           const totalAttempts = successCount + errorCount
-          if (totalAttempts === 0) {
+          if (totalAttempts <= 0) {
             return <span className="text-sm text-slate-500">—</span>
           }
 
-          const ratioLabel = `${integerFormatter.format(successCount)} : ${integerFormatter.format(errorCount)}`
+          const ratioLabel = `${creditFormatter.format(successCount)} : ${creditFormatter.format(errorCount)}`
           const successLabel =
             successRate != null
-              ? `${percentFormatter.format(successRate)} success of ${integerFormatter.format(tasksTotal)} tasks`
+              ? `${percentFormatter.format(successRate)} success of ${creditFormatter.format(tasksTotal)} credits`
               : undefined
 
           return (
@@ -303,7 +302,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
         },
       },
     ]
-  }, [decimalFormatter, integerFormatter, percentFormatter])
+  }, [creditFormatter, percentFormatter])
 
   const table = useReactTable({
     data: rows,

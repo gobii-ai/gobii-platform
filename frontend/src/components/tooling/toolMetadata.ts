@@ -118,6 +118,22 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'agent_runtime',
+    label: 'Agent runtime',
+    iconPaths: [
+      'M12 6v6l4 2',
+      'M4 12a8 8 0 1116 0 8 8 0 01-16 0z',
+    ],
+    iconBgClass: 'bg-slate-100',
+    iconColorClass: 'text-slate-600',
+    detailKind: 'default',
+    derive() {
+      return {
+        caption: 'Internal agent workflow and reasoning',
+      }
+    },
+  },
+  {
     name: 'search_tools',
     aliases: ['search_web', 'web_search', 'search'],
     label: 'Web search',

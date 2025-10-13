@@ -35,7 +35,7 @@ type ChartSegment = {
   key: string
   label: string
   value: number
-  count: number
+  invocations: number
 }
 
 type UsageToolChartProps = {
@@ -48,7 +48,6 @@ type UsageToolChartProps = {
 export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezone }: UsageToolChartProps) {
   const baseRange = effectiveRange ?? fallbackRange
 
-  const integerFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }), [])
   const creditFormatter = useMemo(
     () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
     [],
@@ -87,7 +86,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
 
     const segments = new Map<string, ChartSegment>()
     let otherCredits = 0
-    let otherCount = 0
+    let otherInvocations = 0
 
     for (const entry of toolData.tools) {
       if (!entry) {
@@ -99,17 +98,17 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
       const metadata = getSharedToolMetadata(rawName)
       const shouldSkip = USAGE_SKIP_TOOL_NAMES.has(normalized) || metadata.skip
 
-      const rawCount = Number(entry.count ?? 0)
-      const count = Number.isFinite(rawCount) && rawCount > 0 ? rawCount : 0
+      const rawInvocations = Number(entry.invocations ?? 0)
+      const invocations = Number.isFinite(rawInvocations) && rawInvocations > 0 ? rawInvocations : 0
       const rawCredits = typeof entry.credits === 'number' ? entry.credits : Number(entry.credits ?? 0)
       const credits = Number.isFinite(rawCredits) && rawCredits > 0 ? rawCredits : 0
 
-      if (count <= 0 && credits <= 0) {
+      if (invocations <= 0 && credits <= 0) {
         continue
       }
 
       if (shouldSkip) {
-        otherCount += count
+        otherInvocations += invocations
         otherCredits += credits
         continue
       }
@@ -119,9 +118,9 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
       const existing = segments.get(key)
       if (existing) {
         existing.value += credits
-        existing.count += count
+        existing.invocations += invocations
       } else {
-        segments.set(key, { key, label, value: credits, count })
+        segments.set(key, { key, label, value: credits, invocations })
       }
     }
 
@@ -129,15 +128,15 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
       const existingOther = segments.get('other')
       if (existingOther) {
         existingOther.value += otherCredits
-        existingOther.count += otherCount
+        existingOther.invocations += otherInvocations
       } else {
-        segments.set('other', { key: 'other', label: 'Other', value: otherCredits, count: otherCount })
+        segments.set('other', { key: 'other', label: 'Other', value: otherCredits, invocations: otherInvocations })
       }
     }
 
     return Array.from(segments.values()).sort((a, b) => {
       if (b.value === a.value) {
-        return b.count - a.count
+        return b.invocations - a.invocations
       }
       return b.value - a.value
     })
@@ -151,7 +150,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
     const data = processedSegments.map((segment, index) => ({
       value: segment.value,
       name: segment.label,
-      count: segment.count,
+      invocations: segment.invocations,
       itemStyle: {
         color: toolPalette[index % toolPalette.length],
       },
@@ -168,18 +167,11 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
 
           const { name, value: rawCredits, percent: rawPercent } = detail
 
-          const rawCount =
-            typeof detail === 'object' && detail !== null && 'data' in detail && detail.data
-              ? (detail.data as { count?: number }).count
-              : undefined
-
           const credits = typeof rawCredits === 'number' ? rawCredits : Number(rawCredits ?? 0)
-          const count = typeof rawCount === 'number' ? rawCount : Number(rawCount ?? 0)
           const percentValue =
             typeof rawPercent === 'number' ? rawPercent : Number(rawPercent ?? 0)
 
           const safeCredits = Number.isFinite(credits) ? credits : 0
-          const safeCount = Number.isFinite(count) ? count : 0
           const safePercent = Number.isFinite(percentValue) ? percentValue : 0
 
           const label =
@@ -190,10 +182,8 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
               : 'Tool'
 
           const formattedCredits = creditFormatter.format(safeCredits)
-          const formattedCount = integerFormatter.format(safeCount)
-          const taskLabel = safeCount === 1 ? 'task' : 'tasks'
 
-          return `${label}<br />${formattedCredits} credits (${safePercent.toFixed(1)}%) · ${formattedCount} ${taskLabel}`
+          return `${label}<br />${formattedCredits} credits (${safePercent.toFixed(1)}%)`
         },
       },
       legend: {
@@ -226,7 +216,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
         },
       ],
     }
-  }, [processedSegments, creditFormatter, integerFormatter])
+  }, [processedSegments, creditFormatter])
 
   const isLoading = Boolean(queryInput) && isPending
 
@@ -256,7 +246,6 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
   }, [timezone, toolData])
 
   const totalCredits = toolData?.total_credits ?? processedSegments.reduce((acc, segment) => acc + segment.value, 0)
-  const totalTasks = toolData?.total_count ?? processedSegments.reduce((acc, segment) => acc + segment.count, 0)
 
   return (
     <section className="gobii-card-base flex flex-col gap-4 p-6">
@@ -269,9 +258,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
         </div>
         {toolData ? (
           <div className="rounded-md border border-white/60 bg-white/60 px-3 py-1 text-sm text-slate-600">
-            <span className="font-medium text-slate-900">{creditFormatter.format(totalCredits)}</span> credits ·{' '}
-            <span className="font-medium text-slate-900">{integerFormatter.format(totalTasks)}</span>{' '}
-            {totalTasks === 1 ? 'task' : 'tasks'}
+            <span className="font-medium text-slate-900">{creditFormatter.format(totalCredits)}</span> credits
           </div>
         ) : null}
       </div>

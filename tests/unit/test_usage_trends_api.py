@@ -44,8 +44,7 @@ def _create_api_task(*, user, created_at: datetime, organization=None, credits_c
     }
     if organization is not None:
         task_kwargs["organization"] = organization
-    if credits_cost is not None:
-        task_kwargs["credits_cost"] = credits_cost
+    task_kwargs["credits_cost"] = credits_cost if credits_cost is not None else Decimal("1.0")
 
     task = BrowserUseAgentTask.objects.create(**task_kwargs)
     BrowserUseAgentTask.objects.filter(pk=task.pk).update(created_at=created_at)
@@ -72,12 +71,22 @@ class UsageTrendAPITests(TestCase):
                 user=self.user,
                 agent=agent,
                 status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+                credits_cost=Decimal("1.0"),
             )
             BrowserUseAgentTask.objects.filter(pk=task.pk).update(created_at=dt)
 
     def _create_api_task_at(self, dt: datetime, count: int = 1):
         for _ in range(count):
             _create_api_task(user=self.user, created_at=dt)
+
+    def _create_step_at(self, dt: datetime, *, count: int = 1, agent: PersistentAgent):
+        for _ in range(count):
+            step = PersistentAgentStep.objects.create(
+                agent=agent,
+                description="Test step",
+                credits_cost=Decimal("1.0"),
+            )
+            PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=dt)
 
     def test_week_mode_returns_current_and_previous_counts(self):
         tz = timezone.get_current_timezone()
@@ -144,6 +153,33 @@ class UsageTrendAPITests(TestCase):
         self.assertTrue(any(bucket["current"] == 5 for bucket in buckets))
         self.assertTrue(all(bucket["current"] != 7 for bucket in buckets))
 
+    def test_trend_includes_persistent_steps(self):
+        tz = timezone.get_current_timezone()
+        current_day = timezone.make_aware(datetime(2024, 4, 1, 0, 0, 0), tz)
+
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Trend Persistent",
+            charter="Trend charter",
+            browser_use_agent=self.agent_primary,
+        )
+        self._create_step_at(current_day + timedelta(hours=2), count=4, agent=persistent_agent)
+
+        response = self.client.get(
+            reverse("console_usage_trends"),
+            {
+                "mode": "day",
+                "from": current_day.date().isoformat(),
+                "to": current_day.date().isoformat(),
+                "agent": [str(self.agent_primary.id)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        current_counts = [bucket["current"] for bucket in payload.get("buckets", [])]
+        self.assertIn(4, current_counts)
+
     def test_api_agent_appears_in_trend_data(self):
         tz = timezone.get_current_timezone()
         current_day = timezone.make_aware(datetime(2024, 3, 1, 0, 0, 0), tz)
@@ -200,8 +236,17 @@ class UsageAgentLeaderboardAPITests(TestCase):
             user=self.user,
             agent=agent,
             status=status,
+            credits_cost=Decimal("1.0"),
         )
         BrowserUseAgentTask.objects.filter(pk=task.pk).update(created_at=dt)
+
+    def _create_step(self, *, dt: datetime, agent: PersistentAgent, credits: Decimal = Decimal("1.0")):
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description="Leaderboard step",
+            credits_cost=credits,
+        )
+        PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=dt)
 
     def test_returns_all_agents_with_zero_counts(self):
         response = self.client.get(reverse("console_usage_agents_leaderboard"))
@@ -240,20 +285,44 @@ class UsageAgentLeaderboardAPITests(TestCase):
         primary = agent_map[str(self.agent_primary.id)]
         secondary = agent_map[str(self.agent_secondary.id)]
         self.assertIn(API_AGENT_ID, agent_map)
-        self.assertEqual(agent_map[API_AGENT_ID]["tasks_total"], 0)
+        self.assertAlmostEqual(agent_map[API_AGENT_ID]["tasks_total"], 0.0)
         self.assertEqual(primary["persistent_id"], str(self.persistent_primary.id))
         self.assertEqual(secondary["persistent_id"], str(self.persistent_secondary.id))
         self.assertIsNone(agent_map[API_AGENT_ID]["persistent_id"])
 
-        self.assertEqual(primary["tasks_total"], 2)
-        self.assertEqual(primary["success_count"], 1)
-        self.assertEqual(primary["error_count"], 1)
+        self.assertAlmostEqual(primary["tasks_total"], 2.0)
+        self.assertAlmostEqual(primary["success_count"], 1.0)
+        self.assertAlmostEqual(primary["error_count"], 1.0)
         self.assertAlmostEqual(primary["tasks_per_day"], 1.0)
 
-        self.assertEqual(secondary["tasks_total"], 1)
-        self.assertEqual(secondary["success_count"], 1)
-        self.assertEqual(secondary["error_count"], 0)
+        self.assertAlmostEqual(secondary["tasks_total"], 1.0)
+        self.assertAlmostEqual(secondary["success_count"], 1.0)
+        self.assertAlmostEqual(secondary["error_count"], 0.0)
         self.assertAlmostEqual(secondary["tasks_per_day"], 0.5)
+
+    def test_persistent_steps_counted_in_leaderboard(self):
+        tz = timezone.get_current_timezone()
+        step_dt = timezone.make_aware(datetime(2024, 5, 5, 15, 0, 0), tz)
+
+        self._create_step(dt=step_dt, agent=self.persistent_primary)
+
+        response = self.client.get(
+            reverse("console_usage_agents_leaderboard"),
+            {
+                "from": step_dt.date().isoformat(),
+                "to": step_dt.date().isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agent_map = {entry["id"]: entry for entry in payload.get("agents", [])}
+
+        primary = agent_map[str(self.agent_primary.id)]
+        self.assertAlmostEqual(primary["tasks_total"], 1.0)
+        self.assertAlmostEqual(primary["success_count"], 1.0)
+        self.assertAlmostEqual(primary["error_count"], 0.0)
+        self.assertAlmostEqual(primary["tasks_per_day"], 1.0)
 
     def test_api_tasks_included_when_selected(self):
         tz = timezone.get_current_timezone()
@@ -276,10 +345,10 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertEqual(len(agents), 1)
         api_row = agents[0]
         self.assertEqual(api_row["id"], API_AGENT_ID)
-        self.assertEqual(api_row["tasks_total"], 2)
-        self.assertEqual(api_row["success_count"], 2)
-        self.assertEqual(api_row["error_count"], 0)
-        self.assertAlmostEqual(api_row["tasks_per_day"], 2.0)
+        self.assertAlmostEqual(api_row["tasks_total"], 3.5)
+        self.assertAlmostEqual(api_row["success_count"], 3.5)
+        self.assertAlmostEqual(api_row["error_count"], 0.0)
+        self.assertAlmostEqual(api_row["tasks_per_day"], 3.5)
         self.assertIsNone(api_row["persistent_id"])
 
 @tag("batch_usage_api")
@@ -360,16 +429,17 @@ class UsageToolBreakdownAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
-        self.assertEqual(payload["total_count"], 3)
+        self.assertAlmostEqual(payload["total_count"], 4.25)
         self.assertAlmostEqual(payload["total_credits"], 4.25)
+        self.assertEqual(payload.get("total_invocations"), 3)
         self.assertEqual(payload["timezone"], timezone.get_current_timezone_name())
 
         tool_map = {tool["name"]: tool for tool in payload.get("tools", [])}
         self.assertIn("api_call", tool_map)
         self.assertIn("search_tools", tool_map)
-        self.assertEqual(tool_map["api_call"]["count"], 2)
+        self.assertEqual(tool_map["api_call"]["invocations"], 2)
         self.assertAlmostEqual(tool_map["api_call"]["credits"], 3.0)
-        self.assertEqual(tool_map["search_tools"]["count"], 1)
+        self.assertEqual(tool_map["search_tools"]["invocations"], 1)
         self.assertAlmostEqual(tool_map["search_tools"]["credits"], 1.25)
 
     def test_agent_filter_limits_results(self):
@@ -401,11 +471,12 @@ class UsageToolBreakdownAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
-        self.assertEqual(payload["total_count"], 1)
+        self.assertAlmostEqual(payload["total_count"], 2.0)
         self.assertAlmostEqual(payload["total_credits"], 2.0)
+        self.assertEqual(payload.get("total_invocations"), 1)
         self.assertEqual(len(payload.get("tools", [])), 1)
         self.assertEqual(payload["tools"][0]["name"], "api_call")
-        self.assertEqual(payload["tools"][0]["count"], 1)
+        self.assertEqual(payload["tools"][0]["invocations"], 1)
 
     def test_org_context_limits_results(self):
         organization = Organization.objects.create(
@@ -467,10 +538,13 @@ class UsageToolBreakdownAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
-        self.assertEqual(payload["total_count"], 1)
-        self.assertAlmostEqual(payload["total_credits"], 4.0)
+        self.assertAlmostEqual(payload["total_count"], 4.0)
+        self.assertAlmostEqual(payload.get("total_credits", 0), 4.0)
+        self.assertEqual(payload.get("total_invocations"), 1)
         self.assertEqual(len(payload.get("tools", [])), 1)
         self.assertEqual(payload["tools"][0]["name"], "api_call")
+        self.assertEqual(payload["tools"][0]["invocations"], 1)
+        self.assertAlmostEqual(payload["tools"][0]["credits"], 4.0)
 
         reset_session = self.client.session
         reset_session["context_type"] = "personal"
@@ -497,14 +571,15 @@ class UsageToolBreakdownAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
-        self.assertEqual(payload["total_count"], 2)
-        self.assertAlmostEqual(payload["total_credits"], 2.0)
+        self.assertAlmostEqual(payload["total_count"], 3.5)
+        self.assertAlmostEqual(payload.get("total_credits", 0), 3.5)
+        self.assertEqual(payload.get("total_invocations"), 2)
         tools = payload.get("tools", [])
         self.assertEqual(len(tools), 1)
         api_tool = tools[0]
         self.assertEqual(api_tool["name"], "api_task")
-        self.assertEqual(api_tool["count"], 2)
-        self.assertAlmostEqual(api_tool["credits"], 2.0)
+        self.assertEqual(api_tool["invocations"], 2)
+        self.assertAlmostEqual(api_tool["credits"], 3.5)
 
 
 @tag("batch_usage_api")
@@ -652,7 +727,7 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["metrics"]["tasks"]["count"], 1)
+        self.assertAlmostEqual(payload["metrics"]["tasks"]["count"], 1.0)
 
     def test_personal_context_excludes_org_tasks(self):
         now = timezone.now()
@@ -680,7 +755,7 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["metrics"]["tasks"]["count"], 1)
+        self.assertAlmostEqual(payload["metrics"]["tasks"]["count"], 1.0)
 
     def test_api_filter_limits_summary(self):
         tz = timezone.get_current_timezone()
@@ -705,5 +780,41 @@ class UsageSummaryAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         metrics = payload["metrics"]["tasks"]
-        self.assertEqual(metrics["count"], 1)
-        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 1.0)
+        self.assertAlmostEqual(metrics["count"], 4.0)
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 4.0)
+
+    def test_persistent_steps_contribute_to_summary(self):
+        tz = timezone.get_current_timezone()
+        step_time = timezone.make_aware(datetime(2024, 6, 1, 12, 0, 0), tz)
+
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Summary Persistent",
+            charter="Summary charter",
+            browser_use_agent=self.agent_primary,
+        )
+
+        step = PersistentAgentStep.objects.create(
+            agent=persistent_agent,
+            description="Persistent summary step",
+            credits_cost=Decimal("2.5"),
+        )
+        PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=step_time)
+
+        response = self.client.get(
+            reverse("console_usage_summary"),
+            {
+                "from": step_time.date().isoformat(),
+                "to": step_time.date().isoformat(),
+                "agent": str(self.agent_primary.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        tasks_metrics = payload["metrics"]["tasks"]
+        self.assertAlmostEqual(tasks_metrics["count"], 2.5)
+        self.assertAlmostEqual(tasks_metrics["completed"], 2.5)
+        self.assertAlmostEqual(tasks_metrics["in_progress"], 0.0)
+        self.assertAlmostEqual(tasks_metrics["pending"], 0.0)
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 2.5)
