@@ -231,6 +231,9 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         self.assertIn('data-dedicated-ip-total="1"', html)
+        self.assertIn('name="dedicated_proxy_id"', html)
+        self.assertIn('203.0.113.5', html)
+        self.assertIn('Use shared proxy pool', html)
         self.assertIn('Remove', html)
 
     def test_billing_query_switches_to_org_context(self):

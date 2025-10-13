@@ -34,12 +34,12 @@
   </div>
   {% endif %}
 
-  <!-- Configuration Card -->
-  <div class="gobii-card-base">
-    <div class="p-6 sm:p-8">
-      <form method="post">
-        {% csrf_token %}
-        
+  <!-- Configuration -->
+  <form method="post">
+    {% csrf_token %}
+    <div class="gobii-card-base">
+      <div class="p-6 sm:p-8">
+
         <!-- Grid Layout -->
         <div class="grid sm:grid-cols-12 gap-4 sm:gap-6">
           
@@ -252,41 +252,6 @@
             </div>
           </div>
 
-          <!-- Dedicated IP Summary -->
-          <div class="sm:col-span-12">
-            <div
-              class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border border-gray-200 bg-gray-50/80 rounded-lg p-4"
-              data-dedicated-ip-total="{{ dedicated_ip_total }}"
-            >
-              <div>
-                <p class="text-sm font-medium text-gray-800">Dedicated IPs</p>
-                <p class="text-xs text-gray-500">
-                  {% if dedicated_ip_owner_type == "organization" and agent.organization %}
-                    Reserved for {{ agent.organization.name }}.
-                  {% else %}
-                    Reserved for your account.
-                  {% endif %}
-                </p>
-                {% if dedicated_ip_total == 0 %}
-                  <p class="text-xs text-gray-500 mt-1">Purchase dedicated IPs in Billing to assign them here.</p>
-                {% endif %}
-                {% if not dedicated_ip_multi_assign %}
-                  <p class="text-xs text-amber-600 mt-1">Each dedicated IP can be assigned to only one agent.</p>
-                {% endif %}
-              </div>
-              <div class="flex items-center gap-6">
-                <div class="text-right">
-                  <p class="text-xs uppercase tracking-wide text-gray-500">Total</p>
-                  <p class="text-2xl font-semibold text-gray-800">{{ dedicated_ip_total }}</p>
-                </div>
-                <div class="text-right">
-                  <p class="text-xs uppercase tracking-wide text-gray-500">Available</p>
-                  <p class="text-2xl font-semibold text-gray-800">{{ dedicated_ip_available }}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
           <!-- Assignment -->
           <div class="sm:col-span-3">
             <label for="agent-charter" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
@@ -418,6 +383,78 @@
           </div>
           {% endif %}
 
+
+        <!-- Dedicated IPs -->
+        <div class="sm:col-span-3">
+            <label class="inline-block text-sm font-medium text-gray-800 mt-2.5">
+              Dedicated IPs
+            </label>
+          </div>
+         <div class="sm:col-span-9">
+            <div class="py-2 px-3 text-sm text-gray-600">
+                <div class="p-6 sm:p-8 space-y-4" data-dedicated-ip-total="{{ dedicated_ip_total }}">
+                  <div>
+                    <p class="text-sm text-gray-500">Monitor and assign dedicated IP addresses reserved for this account.</p>
+                  </div>
+                  <div class="grid gap-4 sm:grid-cols-2">
+                    <div class="border border-gray-200 rounded-lg bg-gray-50 p-4">
+                      <p class="text-xs uppercase tracking-wide text-gray-500">Total Reserved</p>
+                      <p class="text-2xl font-semibold text-gray-800 mt-1">{{ dedicated_ip_total }}</p>
+                      <p class="text-xs text-gray-500 mt-3">
+                        {% if dedicated_ip_owner_type == "organization" and agent.organization %}
+                          Dedicated IPs owned by {{ agent.organization.name }}.
+                        {% else %}
+                          Dedicated IPs owned by your account.
+                        {% endif %}
+                      </p>
+                      {% if not dedicated_ip_multi_assign %}
+                        <p class="text-xs text-amber-600 mt-1">Each dedicated IP can be assigned to only one agent at a time.</p>
+                      {% endif %}
+                      {% if dedicated_ip_total == 0 %}
+                        <p class="text-xs text-gray-500 mt-1">Purchase dedicated IPs in Billing to make them available here.</p>
+                      {% endif %}
+                    </div>
+
+                    <div class="border border-gray-200 rounded-lg bg-gray-50 p-4">
+                      <p class="text-xs uppercase tracking-wide text-gray-500">Available to Assign</p>
+                      <p class="text-2xl font-semibold text-gray-800 mt-1">{{ dedicated_ip_available }}</p>
+
+                      {% if dedicated_proxy_options %}
+                        <label for="dedicated-proxy-id" class="inline-block text-sm font-medium text-gray-800 mt-4">
+                          Assigned Dedicated IP
+                        </label>
+                        <select id="dedicated-proxy-id" name="dedicated_proxy_id"
+                                class="mt-1 py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500">
+                          <option value="" {% if not selected_dedicated_proxy_id %}selected{% endif %}>
+                            Use shared proxy pool
+                          </option>
+                          {% for option in dedicated_proxy_options %}
+                            <option value="{{ option.id }}"
+                                    {% if option.selected %}selected{% endif %}
+                                    {% if option.disabled %}disabled{% endif %}>
+                              {{ option.label }}
+                              {% if option.in_use_elsewhere %}
+                                (In use)
+                              {% endif %}
+                            </option>
+                          {% endfor %}
+                        </select>
+                        <p class="mt-1 text-xs text-gray-500">
+                          Selecting a dedicated IP locks this agent to that address. Leave it on "Use shared proxy pool" to continue using shared proxies.
+                        </p>
+                        {% if not dedicated_ip_multi_assign %}
+                          <p class="mt-1 text-xs text-amber-600">IPs already assigned to other agents are disabled.</p>
+                        {% endif %}
+                      {% else %}
+                        <p class="text-xs text-gray-500 mt-4">No dedicated IPs are currently available to assign.</p>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+            </div>
+          </div>
+
+
           <!-- Created Date -->
           <div class="sm:col-span-3">
             <label class="inline-block text-sm font-medium text-gray-800 mt-2.5">
@@ -471,9 +508,10 @@
             Save Changes
           </button>
         </div>
-      </form>
-    </div>
+      </div>
   </div>
+
+  </form>
 
   <!-- Ownership Transfer -->
   <div class="gobii-card-base">

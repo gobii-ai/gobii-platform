@@ -40,6 +40,7 @@ from api.models import (
     UserBilling,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    ProxyServer,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
@@ -2241,15 +2242,64 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['primary_sms'] = primary_sms
 
         owner = agent.organization or agent.user
+        browser_agent = getattr(agent, "browser_use_agent", None)
+        preferred_proxy = browser_agent.preferred_proxy if browser_agent else None
+        multi_assign = is_multi_assign_enabled()
+
         dedicated_total = 0
         dedicated_available = 0
-        if owner:
-            dedicated_total = DedicatedProxyService.allocated_count(owner)
-            dedicated_available = dedicated_total
+        dedicated_options: list[dict[str, object]] = []
 
+        if owner:
+            allocated_qs = (
+                DedicatedProxyService.allocated_proxies(owner)
+                .select_related("dedicated_allocation")
+                .prefetch_related("browser_agents__persistent_agent")
+                .order_by("static_ip", "host", "port")
+            )
+            dedicated_total = allocated_qs.count()
+
+            for proxy in allocated_qs:
+                browser_agents = list(getattr(proxy, "browser_agents").all())
+                assigned_agents = [
+                    ba.persistent_agent
+                    for ba in browser_agents
+                    if getattr(ba, "persistent_agent", None) is not None
+                ]
+                selected = preferred_proxy is not None and proxy.id == preferred_proxy.id
+                in_use_elsewhere = any(
+                    pa.id != agent.id for pa in assigned_agents if pa is not None
+                )
+                label = proxy.static_ip or proxy.host
+                assigned_names = [pa.name for pa in assigned_agents if pa is not None]
+
+                dedicated_options.append(
+                    {
+                        "id": str(proxy.id),
+                        "label": label,
+                        "selected": selected,
+                        "in_use_elsewhere": in_use_elsewhere,
+                        "assigned_names": assigned_names,
+                        "disabled": (not multi_assign and in_use_elsewhere and not selected),
+                    }
+                )
+
+            if multi_assign:
+                dedicated_available = dedicated_total
+            else:
+                dedicated_available = sum(
+                    1
+                    for option in dedicated_options
+                    if not option["in_use_elsewhere"] or option["selected"]
+                )
+
+        context['dedicated_proxy_options'] = dedicated_options
+        context['selected_dedicated_proxy_id'] = (
+            str(preferred_proxy.id) if preferred_proxy else ""
+        )
         context['dedicated_ip_total'] = dedicated_total
         context['dedicated_ip_available'] = dedicated_available
-        context['dedicated_ip_multi_assign'] = is_multi_assign_enabled()
+        context['dedicated_ip_multi_assign'] = multi_assign
         context['dedicated_ip_owner_type'] = (
             'organization' if agent.organization_id else 'user'
         )
@@ -2882,6 +2932,37 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     agent.id,
                 )
 
+        owner = agent.organization or agent.user
+        multi_assign = is_multi_assign_enabled()
+        dedicated_proxy_id = (request.POST.get('dedicated_proxy_id') or '').strip()
+        selected_proxy: ProxyServer | None = None
+
+        if dedicated_proxy_id:
+            if owner is None:
+                messages.error(request, "Dedicated IPs require an account or organization owner.")
+                return redirect('agent_detail', pk=agent.pk)
+            try:
+                selected_proxy = (
+                    DedicatedProxyService.allocated_proxies(owner)
+                    .select_related("dedicated_allocation")
+                    .get(id=dedicated_proxy_id)
+                )
+            except ProxyServer.DoesNotExist:
+                messages.error(request, "Invalid dedicated IP selection.")
+                return redirect('agent_detail', pk=agent.pk)
+            if browser_agent is None:
+                messages.error(
+                    request,
+                    "Unable to assign a dedicated IP because the agent is missing its browser component.",
+                )
+                return redirect('agent_detail', pk=agent.pk)
+            if (
+                not multi_assign
+                and selected_proxy.browser_agents.exclude(persistent_agent=agent).exists()
+            ):
+                messages.error(request, "That dedicated IP is already assigned to another agent.")
+                return redirect('agent_detail', pk=agent.pk)
+
         # Check for uniqueness, excluding the current agent's BrowserUseAgent (if present)
         exclude_pk = browser_agent.id if browser_agent else agent.browser_use_agent_id
         browser_name_conflict = BrowserUseAgent.objects.filter(
@@ -2929,6 +3010,14 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if agent.daily_credit_limit != new_daily_limit:
                     agent.daily_credit_limit = new_daily_limit
                     agent_fields_to_update.append('daily_credit_limit')
+
+                if browser_agent is not None:
+                    current_proxy_id = browser_agent.preferred_proxy_id
+                    new_proxy_id = selected_proxy.id if selected_proxy else None
+                    if current_proxy_id != new_proxy_id:
+                        browser_agent.preferred_proxy = selected_proxy
+                        if 'preferred_proxy' not in browser_agent_fields_to_update:
+                            browser_agent_fields_to_update.append('preferred_proxy')
 
                 # Mark interaction time and reactivate if previously expired
                 agent.last_interaction_at = timezone.now()
