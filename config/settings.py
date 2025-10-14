@@ -519,6 +519,7 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.TokenAuthentication",
     ],
+    "EXCEPTION_HANDLER": "api.exceptions.json_exception_handler",
 }
 SPECTACULAR_SETTINGS = {
     "TITLE": "Gobii API",

@@ -992,10 +992,71 @@ class AutoCreateApiKeyTest(APITestCase):
         
         # Check if the API key is active
         self.assertTrue(api_keys.first().is_active)
-        
+
         # Verify UserQuota was also created
         user_quota = UserQuota.objects.filter(user=new_user)
         self.assertEqual(user_quota.count(), 1)
+
+
+@tag("batch_api_persistent_agents")
+class PersistentAgentActivationTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="activate-user@example.com",
+            email="activate-user@example.com",
+            password="password123",
+        )
+        UserQuota.objects.get_or_create(user=self.user, defaults={"agent_limit": 5})
+        self.raw_key, _ = ApiKey.create_for_user(self.user, name="activate-key")
+        self.client.credentials(HTTP_X_API_KEY=self.raw_key)
+
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Persistent Browser Agent")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Dormant Persistent Agent",
+            charter="Handle dormant tasks",
+            browser_use_agent=self.browser_agent,
+            is_active=False,
+            life_state=PersistentAgent.LifeState.EXPIRED,
+        )
+
+    def test_activate_sets_flags_and_returns_updated(self):
+        url = reverse("api:persistentagent-activate", kwargs={"id": self.agent.id})
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()
+        self.assertEqual(payload["status"], "activated")
+        self.assertTrue(payload["updated"])
+
+        self.agent.refresh_from_db()
+        self.assertTrue(self.agent.is_active)
+        self.assertEqual(self.agent.life_state, PersistentAgent.LifeState.ACTIVE)
+
+
+@tag("batch_api_agents")
+class AgentApiExceptionHandlingTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="exception-user@example.com",
+            email="exception-user@example.com",
+            password="password123",
+        )
+        UserQuota.objects.get_or_create(user=self.user, defaults={"agent_limit": 5})
+        self.raw_key, _ = ApiKey.create_for_user(self.user, name="exception-key")
+        self.client.credentials(HTTP_X_API_KEY=self.raw_key)
+
+    def test_unexpected_error_returns_json(self):
+        url = reverse("api:persistentagent-list")
+
+        with patch("api.views.PersistentAgentViewSet.list", side_effect=RuntimeError("boom")):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertTrue(response["Content-Type"].startswith("application/json"))
+        payload = response.json()
+        self.assertEqual(payload["detail"], "Internal server error.")
+        self.assertIn("error_id", payload)
 
 @tag("batch_api_tasks")
 class BrowserUseAgentTaskQuotaTests(TestCase):

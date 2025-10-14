@@ -18,12 +18,17 @@ from .models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     LinkShortener,
+    PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    CommsChannel,
 )
 from .serializers import (
     BrowserUseAgentSerializer,
     BrowserUseAgentListSerializer,
     BrowserUseAgentTaskSerializer,
     BrowserUseAgentTaskListSerializer,
+    PersistentAgentSerializer,
+    PersistentAgentListSerializer,
 )
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -34,6 +39,18 @@ import logging
 
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from console.agent_chat.timeline import (
+    DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE,
+    build_processing_snapshot,
+    fetch_timeline_window,
+    serialize_message_event,
+    serialize_processing_snapshot,
+)
+from api.agent.comms.adapters import ParsedMessage
+from api.agent.comms.message_service import ingest_inbound_message
+from api.agent.core.schedule_parser import ScheduleParser
+from agents.services import AIEmployeeTemplateService
 
 # Import extend_schema from drf-spectacular with minimal dependencies
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
@@ -49,6 +66,19 @@ class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
     max_page_size = 100
+
+
+class PersistentAgentMessageCreateSerializer(serializers.Serializer):
+    channel = serializers.ChoiceField(choices=[(choice.value, choice.label) for choice in CommsChannel])
+    sender = serializers.CharField(max_length=512)
+    recipient = serializers.CharField(max_length=512, required=False, allow_blank=True, allow_null=True)
+    subject = serializers.CharField(max_length=512, required=False, allow_blank=True, allow_null=True)
+    body = serializers.CharField()
+    metadata = serializers.DictField(required=False)
+
+
+class PersistentAgentSchedulePreviewSerializer(serializers.Serializer):
+    schedule = serializers.CharField(allow_blank=True)
 
 @extend_schema_view(
     list=extend_schema(operation_id='listAgents', tags=['browser-use']),
@@ -621,6 +651,282 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                     {'detail': f'Task is already {task.status} and cannot be cancelled.'},
                     status=status.HTTP_409_CONFLICT
                 )
+
+
+@extend_schema_view(
+    list=extend_schema(operation_id='listPersistentAgents', tags=['persistent-agents']),
+    retrieve=extend_schema(operation_id='getPersistentAgent', tags=['persistent-agents']),
+    create=extend_schema(operation_id='createPersistentAgent', tags=['persistent-agents']),
+    update=extend_schema(operation_id='updatePersistentAgent', tags=['persistent-agents']),
+    partial_update=extend_schema(operation_id='partialUpdatePersistentAgent', tags=['persistent-agents']),
+    destroy=extend_schema(operation_id='deletePersistentAgent', tags=['persistent-agents'])
+)
+class PersistentAgentViewSet(viewsets.ModelViewSet):
+    queryset = PersistentAgent.objects.select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint')
+    serializer_class = PersistentAgentSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+    lookup_field = 'id'
+
+    def _request_organization(self):
+        auth = getattr(self.request, 'auth', None)
+        if isinstance(auth, ApiKey) and getattr(auth, 'organization_id', None):
+            return auth.organization
+        return None
+
+    def _track_agent_event(self, agent: PersistentAgent, event: str, *, organization_event: str | None = None, extra: dict | None = None) -> None:
+        props = {
+            'agent_id': str(agent.id),
+            'agent_name': agent.name,
+        }
+        org = self._request_organization()
+        if org is not None:
+            props['owner_type'] = 'organization'
+            props['organization_id'] = str(org.id)
+        if extra:
+            props.update(extra)
+
+        Analytics.track_event(
+            user_id=self.request.user.id,
+            event=event,
+            source=AnalyticsSource.API,
+            properties=props.copy(),
+        )
+        if organization_event and org is not None:
+            Analytics.track_event(
+                user_id=self.request.user.id,
+                event=organization_event,
+                source=AnalyticsSource.API,
+                properties=props.copy(),
+            )
+
+    def get_queryset(self):
+        org = self._request_organization()
+        if org is not None:
+            return self.queryset.filter(organization=org)
+        return self.queryset.filter(user=self.request.user)
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return PersistentAgentListSerializer
+        return super().get_serializer_class()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['organization'] = self._request_organization()
+        return context
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        props = {}
+        org = self._request_organization()
+        if org is not None:
+            props['owner_type'] = 'organization'
+            props['organization_id'] = str(org.id)
+        Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENTS_LISTED,
+            source=AnalyticsSource.API,
+            properties=props or None,
+        )
+        return response
+
+    def retrieve(self, request, *args, **kwargs):
+        agent = self.get_object()
+        serializer = self.get_serializer(agent)
+        self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_VIEWED)
+        return Response(serializer.data)
+
+    def perform_create(self, serializer):
+        agent = serializer.save()
+        self._track_agent_event(
+            agent,
+            AnalyticsEvent.PERSISTENT_AGENT_CREATED,
+            organization_event=AnalyticsEvent.ORGANIZATION_PERSISTENT_AGENT_CREATED,
+        )
+
+    def perform_update(self, serializer):
+        agent = serializer.save()
+        self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_UPDATED)
+
+    def destroy(self, request, *args, **kwargs):
+        agent = self.get_object()
+        agent.is_active = False
+        agent.life_state = PersistentAgent.LifeState.EXPIRED
+        agent.schedule = None
+        agent.save(update_fields=['is_active', 'life_state', 'schedule'])
+        self._track_agent_event(
+            agent,
+            AnalyticsEvent.PERSISTENT_AGENT_DELETED,
+            organization_event=AnalyticsEvent.ORGANIZATION_PERSISTENT_AGENT_DELETED,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _resolve_agent_recipient(self, agent: PersistentAgent, channel: CommsChannel, explicit: str | None) -> str:
+        if explicit:
+            return explicit
+
+        endpoint = (
+            PersistentAgentCommsEndpoint.objects.filter(owner_agent=agent, channel=channel.value, is_primary=True).first()
+            or PersistentAgentCommsEndpoint.objects.filter(owner_agent=agent, channel=channel.value).order_by('-is_primary', 'created_at').first()
+        )
+        if endpoint is None:
+            raise DRFValidationError({'recipient': [f'Agent has no {channel.value} endpoint.']})
+        return endpoint.address
+
+    @action(detail=True, methods=['get'], url_path='timeline')
+    def timeline(self, request, id=None):
+        agent = self.get_object()
+        direction = (request.query_params.get('direction') or 'initial').lower()
+        if direction not in {'initial', 'older', 'newer'}:
+            raise DRFValidationError({'direction': ['Invalid direction parameter.']})
+
+        cursor = request.query_params.get('cursor') or None
+        try:
+            limit = int(request.query_params.get('limit', TIMELINE_DEFAULT_PAGE_SIZE))
+        except ValueError:
+            raise DRFValidationError({'limit': ['limit must be an integer']})
+        limit = max(1, min(limit, TIMELINE_MAX_PAGE_SIZE))
+
+        window = fetch_timeline_window(agent, cursor=cursor, direction=direction, limit=limit)
+        payload = {
+            'events': window.events,
+            'oldest_cursor': window.oldest_cursor,
+            'newest_cursor': window.newest_cursor,
+            'has_more_older': window.has_more_older,
+            'has_more_newer': window.has_more_newer,
+            'processing_active': window.processing_active,
+            'processing_snapshot': serialize_processing_snapshot(window.processing_snapshot),
+        }
+        return Response(payload)
+
+    @action(detail=True, methods=['post'], url_path='messages')
+    def create_message(self, request, id=None):
+        agent = self.get_object()
+        serializer = PersistentAgentMessageCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+
+        try:
+            channel = CommsChannel(payload['channel'])
+        except ValueError as exc:
+            raise DRFValidationError({'channel': [str(exc)]})
+
+        sender = payload['sender']
+        recipient = self._resolve_agent_recipient(agent, channel, payload.get('recipient'))
+
+        if not agent.is_sender_whitelisted(channel, sender):
+            return Response({'detail': 'Sender is not allowed to message this agent.'}, status=status.HTTP_403_FORBIDDEN)
+
+        raw_payload = {
+            'source': 'persistent-agent-api',
+            'api_user_id': request.user.id,
+            'metadata': payload.get('metadata') or {},
+        }
+        parsed = ParsedMessage(
+            sender=sender,
+            recipient=recipient,
+            subject=payload.get('subject'),
+            body=payload['body'],
+            attachments=[],
+            raw_payload=raw_payload,
+            msg_channel=channel.value,
+        )
+
+        info = ingest_inbound_message(channel, parsed)
+        event = serialize_message_event(info.message)
+
+        channel_event_map = {
+            CommsChannel.EMAIL: AnalyticsEvent.PERSISTENT_AGENT_EMAIL_RECEIVED,
+            CommsChannel.SMS: AnalyticsEvent.PERSISTENT_AGENT_SMS_RECEIVED,
+        }
+        channel_event = channel_event_map.get(channel)
+        if channel_event:
+            self._track_agent_event(agent, channel_event)
+
+        return Response({'event': event}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='processing-status')
+    def processing_status(self, request, id=None):
+        agent = self.get_object()
+        snapshot = build_processing_snapshot(agent)
+        return Response({
+            'processing_active': snapshot.active,
+            'processing_snapshot': serialize_processing_snapshot(snapshot),
+        })
+
+    @action(detail=True, methods=['post'], url_path='activate')
+    def activate(self, request, id=None):
+        agent = self.get_object()
+        updates: set[str] = set()
+        if not agent.is_active:
+            agent.is_active = True
+            updates.add('is_active')
+        if agent.life_state != PersistentAgent.LifeState.ACTIVE:
+            agent.life_state = PersistentAgent.LifeState.ACTIVE
+            updates.add('life_state')
+        if updates:
+            agent.save(update_fields=list(updates))
+            self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_UPDATED)
+        return Response({'status': 'activated', 'updated': bool(updates)})
+
+    @action(detail=True, methods=['post'], url_path='deactivate')
+    def deactivate(self, request, id=None):
+        agent = self.get_object()
+        updates = {}
+        if agent.is_active:
+            agent.is_active = False
+            updates['is_active'] = False
+        if updates:
+            agent.save(update_fields=list(updates.keys()))
+            self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_UPDATED)
+        return Response({'status': 'deactivated', 'updated': bool(updates)})
+
+    @action(detail=True, methods=['post'], url_path='schedule/preview')
+    def schedule_preview(self, request, id=None):
+        self.get_object()
+        serializer = PersistentAgentSchedulePreviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        schedule = (serializer.validated_data.get('schedule') or '').strip()
+
+        if not schedule:
+            return Response({'valid': True, 'disabled': True, 'description': None})
+
+        try:
+            ScheduleParser.parse(schedule)
+        except ValueError as exc:
+            raise DRFValidationError({'schedule': [str(exc)]})
+
+        description = AIEmployeeTemplateService.describe_schedule(schedule)
+        return Response({'valid': True, 'disabled': False, 'description': description})
+
+    @action(detail=True, methods=['get'], url_path='web-tasks')
+    def web_tasks(self, request, id=None):
+        agent = self.get_object()
+        browser_agent = agent.browser_use_agent
+        if browser_agent is None:
+            return Response({'results': [], 'limit': 0})
+
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            valid_statuses = set(BrowserUseAgentTask.StatusChoices.values)
+            if status_filter not in valid_statuses:
+                raise DRFValidationError({'status': ['Invalid status filter.']})
+
+        try:
+            limit_param = request.query_params.get('limit')
+            limit = int(limit_param) if limit_param else 50
+        except ValueError:
+            raise DRFValidationError({'limit': ['limit must be an integer']})
+        limit = max(1, min(limit, 200))
+
+        tasks_qs = BrowserUseAgentTask.objects.alive().filter(agent=browser_agent).order_by('-created_at')
+        if status_filter:
+            tasks_qs = tasks_qs.filter(status=status_filter)
+
+        tasks = list(tasks_qs[:limit])
+        serializer = BrowserUseAgentTaskListSerializer(tasks, many=True)
+        return Response({'results': serializer.data, 'limit': limit})
 
 
 class LinkShortenerRedirectView(View):

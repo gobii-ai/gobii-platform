@@ -5,7 +5,8 @@ from rest_framework.routers import SimpleRouter
 from .views import (
     ping,
     BrowserUseAgentViewSet,
-    BrowserUseAgentTaskViewSet
+    BrowserUseAgentTaskViewSet,
+    PersistentAgentViewSet,
 )
 from .webhooks import (
     sms_webhook,
@@ -20,7 +21,10 @@ app_name = "api"
 
 # Simple router for agents
 router = SimpleRouter()
+# Register the browser-use routes before the generic agents routes so the more
+# specific path does not get shadowed by the base "agents/<pk>/" pattern.
 router.register(r'agents/browser-use', BrowserUseAgentViewSet, basename='browseruseagent')
+router.register(r'agents', PersistentAgentViewSet, basename='persistentagent')
 
 urlpatterns = [
     # Utility endpoints
