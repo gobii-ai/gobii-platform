@@ -184,6 +184,85 @@
         {% endif %}
       </div>
 
+      <div class="gobii-card-base p-6">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-900">Dedicated IPs</h2>
+            <p class="text-sm text-slate-500 mt-1">Add or release static IPs reserved for this organization.</p>
+            <p class="text-xs text-slate-500 mt-1">
+              Each dedicated IP costs ${{ dedicated_ip_unit_price|floatformat:2 }} {{ dedicated_ip_currency }}/month.
+            </p>
+          </div>
+        </div>
+
+        {% if dedicated_ip_allowed %}
+          {% if org_can_manage_billing %}
+            <form method="post" action="{% url 'add_dedicated_ip_quantity' %}" class="mt-4 flex flex-col sm:flex-row sm:items-center sm:gap-3">
+              {% csrf_token %}
+              <div class="flex items-center gap-3">
+                <span class="whitespace-nowrap text-sm font-medium text-slate-700">Add Dedicated IPs</span>
+                {{ dedicated_ip_add_form.quantity }}
+              </div>
+              <button type="submit" class="mt-3 sm:mt-0 inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600">
+                Purchase Dedicated IPs
+              </button>
+            </form>
+          {% else %}
+            <div class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              You do not have permission to modify dedicated IPs for this organization.
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Upgrade to a paid plan to enable dedicated IPs.
+          </div>
+        {% endif %}
+
+        <p class="mt-4 text-sm text-slate-600">
+          Allocated dedicated IPs: <span class="font-semibold text-slate-900">{{ dedicated_ip_total }}</span>
+          {% if dedicated_ip_multi_assign %}
+            (can be shared across agents).
+          {% else %}
+            (one IP per agent).
+          {% endif %}
+        </p>
+        <p class="mt-2 text-sm text-slate-600">
+          Current dedicated IP charges (monthly): <span class="font-semibold text-slate-900">${{ dedicated_ip_total_cost|floatformat:2 }} {{ dedicated_ip_currency }}</span> in addition to your plan price.
+        </p>
+
+        {% if dedicated_ip_proxies %}
+          <div class="mt-4 divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
+            {% for proxy in dedicated_ip_proxies %}
+              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3">
+                <div>
+                  <p class="text-sm font-medium text-slate-900">{{ proxy.static_ip|default:proxy.host }}</p>
+                  <p class="text-xs text-slate-500">{{ proxy.name }}</p>
+                </div>
+                {% if org_can_manage_billing %}
+                  <form method="post" action="{% url 'remove_dedicated_ip' %}" class="flex items-center gap-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="proxy_id" value="{{ proxy.id }}">
+                    <button type="submit" class="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-600 border border-red-100 rounded-md hover:bg-red-50">
+                      Remove
+                    </button>
+                  </form>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+          {% if dedicated_ip_allowed and dedicated_ip_proxies|length > 1 and org_can_manage_billing %}
+            <form method="post" action="{% url 'remove_all_dedicated_ip' %}" class="mt-3">
+              {% csrf_token %}
+              <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-red-600 border border-red-100 rounded-md hover:bg-red-50">
+                Remove all dedicated IPs
+              </button>
+            </form>
+          {% endif %}
+        {% else %}
+          <p class="mt-4 text-xs text-slate-500">No dedicated IPs have been provisioned yet.</p>
+        {% endif %}
+      </div>
+
       <div class="gobii-card-base p-6"
            x-data="billingSettings({ enabled: {{ org_auto_purchase_state.enabled|yesno:'true,false' }}, infinite: {{ org_auto_purchase_state.infinite|yesno:'true,false' }}, maxTasks: {{ org_auto_purchase_state.max_tasks }}, canModify: {{ org_can_manage_billing|yesno:'true,false' }} })"
            x-init="loadSettings()">
