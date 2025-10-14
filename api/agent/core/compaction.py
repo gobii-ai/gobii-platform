@@ -247,7 +247,7 @@ def llm_summarise_comms(
             # GPT-4.1 is currently the only model supporting the `safety_identifier`
             # parameter, which is recommended by OpenAI for traceability.
             if safety_identifier:
-                params["safety_identifier"] = safety_identifier
+                params["safety_identifier"] = str(safety_identifier)
 
         response = run_completion(model=model, messages=prompt, params=params)
         return response.choices[0].message.content.strip()
