@@ -2083,7 +2083,7 @@ class PersistentAgent(models.Model):
         help_text="Owning organization, if any. If null, owned by the creating user."
     )
     name = models.CharField(max_length=255)
-    charter = models.TextField()
+    charter = models.TextField(blank=True)
     short_description = models.CharField(
         max_length=280,
         blank=True,

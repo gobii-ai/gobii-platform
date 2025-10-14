@@ -51,6 +51,19 @@ class PersistentAgentModelTests(TestCase):
         self.assertEqual(agent.name, "test-agent")
         self.assertEqual(agent.user, self.user)
 
+    def test_persistent_agent_blank_charter_allowed(self):
+        """PersistentAgent should allow an empty charter during validation."""
+        browser_agent = create_browser_agent_without_proxy(self.user, "browser-agent-blank-charter")
+        agent = PersistentAgent(
+            user=self.user,
+            name="blank-charter-agent",
+            charter="",
+            browser_use_agent=browser_agent,
+        )
+        agent.full_clean()  # Should not raise
+        agent.save()
+        self.assertEqual(agent.charter, "")
+
     def test_persistent_agent_schedule_validation(self):
         """Test that PersistentAgent schedule validation uses the parser."""
         # Valid schedules

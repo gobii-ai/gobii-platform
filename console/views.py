@@ -1753,7 +1753,8 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                             template_code=template_code,
                         )
                     except PersistentAgentProvisioningError as exc:
-                        raise ValidationError({"__all__": exc.args[0] if exc.args else "Unable to create agent."}) from exc
+                        error_payload = exc.args[0] if exc.args else "Unable to create agent."
+                        raise ValidationError(error_payload) from exc
 
                     persistent_agent = provisioning.agent
                     browser_agent = provisioning.browser_agent
