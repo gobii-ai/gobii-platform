@@ -403,13 +403,6 @@ class TaskCreditConfig(models.Model):
         validators=[MinValueValidator(Decimal("0"))],
         help_text="Default credit cost applied when no tool-specific override exists.",
     )
-    step = models.OneToOneField(
-        "PersistentAgentStep",
-        on_delete=models.CASCADE,
-        related_name="prompt_archive",
-        null=True,
-        blank=True,
-    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

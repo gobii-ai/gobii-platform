@@ -157,6 +157,12 @@ def _archive_rendered_prompt(
             archive_id = archive.id
         except Exception:
             logger.exception("Failed to persist prompt archive metadata for agent %s", agent.id)
+            # Clean up the orphaned file from storage to prevent clutter.
+            try:
+                default_storage.delete(archive_key)
+                logger.info("Deleted orphaned prompt archive from storage: %s", archive_key)
+            except Exception:
+                logger.exception("Failed to delete orphaned prompt archive from storage: %s", archive_key)
         logger.info(
             "Archived prompt for agent %s: key=%s raw_bytes=%d compressed_bytes=%d",
             agent.id,
