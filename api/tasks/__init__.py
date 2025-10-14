@@ -34,6 +34,7 @@ from .subscription_tasks import (
 from .maintenance_tasks import (
     cleanup_temp_files,
     garbage_collect_timed_out_tasks,
+    prune_prompt_archives,
 )
 
 # Soft-expiration task (global sweeper)

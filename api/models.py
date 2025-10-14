@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 
 import ulid
 from django.conf import settings
+from django.core.files.storage import default_storage
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.validators import RegexValidator
 from django.db import models, transaction
@@ -4457,6 +4458,17 @@ class PersistentAgentPromptArchive(models.Model):
             models.Index(fields=["agent", "-rendered_at"], name="pa_prompt_archive_recent_idx"),
             models.Index(fields=["rendered_at"], name="pa_prompt_archive_rendered_idx"),
         ]
+
+    def delete(self, using=None, keep_parents=False):
+        """Remove the archived payload from storage before deleting the row."""
+        storage_key = self.storage_key
+        if storage_key:
+            try:
+                if default_storage.exists(storage_key):
+                    default_storage.delete(storage_key)
+            except Exception:
+                logger.exception("Failed to delete prompt archive payload at %s", storage_key)
+        return super().delete(using=using, keep_parents=keep_parents)
 
     def __str__(self):
         return f"PromptArchive<{self.agent_id}> {self.rendered_at.isoformat()} key={self.storage_key}"
