@@ -403,6 +403,13 @@ class TaskCreditConfig(models.Model):
         validators=[MinValueValidator(Decimal("0"))],
         help_text="Default credit cost applied when no tool-specific override exists.",
     )
+    step = models.OneToOneField(
+        "PersistentAgentStep",
+        on_delete=models.CASCADE,
+        related_name="prompt_archive",
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -4424,6 +4431,42 @@ class PersistentAgentSystemStep(models.Model):
     def __str__(self):
         preview = (self.notes or "").replace("\n", " ")[:60]
         return f"SystemStep<{self.code}> {preview}..."
+
+
+class PersistentAgentPromptArchive(models.Model):
+    """Metadata for archived rendered prompts stored outside the primary DB."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="prompt_archives",
+    )
+    rendered_at = models.DateTimeField(help_text="Timestamp when the prompt was rendered.")
+    storage_key = models.CharField(max_length=512, help_text="Object storage key for the compressed prompt payload.")
+    raw_bytes = models.IntegerField(help_text="Uncompressed payload size in bytes.")
+    compressed_bytes = models.IntegerField(help_text="Compressed payload size in bytes.")
+    tokens_before = models.IntegerField(help_text="Token count before prompt fitting.")
+    tokens_after = models.IntegerField(help_text="Token count after prompt fitting.")
+    tokens_saved = models.IntegerField(help_text="Tokens removed during fitting.")
+    step = models.OneToOneField(
+        "PersistentAgentStep",
+        on_delete=models.CASCADE,
+        related_name="llm_prompt_archive",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-rendered_at"]
+        indexes = [
+            models.Index(fields=["agent", "-rendered_at"], name="pa_prompt_archive_recent_idx"),
+            models.Index(fields=["rendered_at"], name="pa_prompt_archive_rendered_idx"),
+        ]
+
+    def __str__(self):
+        return f"PromptArchive<{self.agent_id}> {self.rendered_at.isoformat()} key={self.storage_key}"
 
 
 class OutboundMessageAttempt(models.Model):

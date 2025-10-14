@@ -40,7 +40,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing._completion_with_failover')
     def test_batch_of_tools_ignores_sleep_when_others_present(self, mock_completion, mock_build_prompt, *_mocks):
         # Minimal prompt context and token usage
-        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
 
         # Construct four tool calls: send_email, update_charter, sqlite_batch, sleep
         def mk_tc(name, args):
@@ -90,7 +90,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     def test_successful_actions_short_circuit_to_sleep(self, mock_completion, mock_build_prompt, *_mocks):
         """A tool batch that opts-in to auto-sleep should end the loop immediately."""
 
-        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
 
         def mk_tc(name, args):
             tc = MagicMock()
@@ -138,7 +138,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     def test_auto_sleep_waits_for_all_tool_calls(self, mock_completion, mock_build_prompt, mock_send_email, mock_spawn_task, *_mocks):
         """Ensure we execute every actionable tool call before honoring auto-sleep."""
 
-        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
 
         def mk_tc(name, args):
             tc = MagicMock()
@@ -194,7 +194,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     def test_auto_sleep_requires_sleep_tool_call(self, mock_completion, mock_build_prompt, *_mocks):
         """Without an explicit sleep tool call, the loop should continue processing."""
 
-        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
 
         def mk_tc(name, args):
             tc = MagicMock()

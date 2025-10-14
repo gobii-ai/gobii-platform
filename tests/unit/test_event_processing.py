@@ -1,10 +1,18 @@
+import json
+import shutil
+import tempfile
 from datetime import timedelta
-from django.test import TestCase, tag, override_settings
-from django.utils import timezone
+from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
-from unittest.mock import patch
+from django.core.files.storage import FileSystemStorage
+from django.test import RequestFactory, TestCase, tag, override_settings
+from django.utils import timezone
+from unittest.mock import patch, MagicMock
 
-from api.agent.core.event_processing import _build_prompt_context
+import zstandard as zstd
+
+from api.agent.core.event_processing import _build_prompt_context, _run_agent_loop, PROMPT_TOKEN_BUDGET
+from api.admin import PersistentAgentPromptArchiveAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
 from api.agent.tools.search_web import execute_search_web as _execute_search_web
 from api.agent.tools.http_request import execute_http_request as _execute_http_request
@@ -17,6 +25,7 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentCronTrigger,
     PersistentAgentSecret,
+    PersistentAgentPromptArchive,
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
@@ -51,6 +60,18 @@ class PromptContextBuilderTests(TestCase):
             channel="email",
             address="user@example.com",
         )
+        self._storage_dir = tempfile.mkdtemp()
+        self._storage = FileSystemStorage(location=self._storage_dir)
+        self._storage_patch = patch('api.agent.core.event_processing.default_storage', self._storage)
+        self._admin_storage_patch = patch('api.admin.default_storage', self._storage)
+        self._print_patch = patch('api.agent.core.event_processing.print')
+        self._storage_patch.start()
+        self._admin_storage_patch.start()
+        self._print_patch.start()
+        self.addCleanup(self._storage_patch.stop)
+        self.addCleanup(self._admin_storage_patch.stop)
+        self.addCleanup(self._print_patch.stop)
+        self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
 
     def test_message_metadata_in_prompt(self):
         """Test that message metadata (from, channel) is included in the prompt."""
@@ -66,7 +87,7 @@ class PromptContextBuilderTests(TestCase):
         # Build the prompt context
         with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
              patch('api.agent.core.event_processing.ensure_comms_compacted'):
-            context, _ = _build_prompt_context(self.agent)
+            context, _, _ = _build_prompt_context(self.agent)
 
         # Find the user message in the context
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -94,13 +115,100 @@ class PromptContextBuilderTests(TestCase):
         """Test that the agent's name is included in the system prompt."""
         with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
              patch('api.agent.core.event_processing.ensure_comms_compacted'):
-            context, _ = _build_prompt_context(self.agent)
+            context, _, _ = _build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
 
         self.assertIsNotNone(system_message)
         self.assertIn(f"You are a persistent AI agent named '{self.agent.name}'.", system_message['content'])
 
+    def test_prompt_archive_saved_to_storage(self):
+        """Prompt archives should be written to object storage as compressed JSON."""
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, prompt_archive_id = _build_prompt_context(self.agent)
+
+        archive_dir = f"persistent_agents/{self.agent.id}/prompt_archives"
+        _, files = self._storage.listdir(archive_dir)
+        self.assertEqual(len(files), 1, "Expected a single prompt archive file")
+        archive_path = f"{archive_dir}/{files[0]}"
+
+        with self._storage.open(archive_path, "rb") as fh:
+            compressed_bytes = fh.read()
+
+        decompressed = zstd.ZstdDecompressor().decompress(compressed_bytes)
+        payload = json.loads(decompressed.decode("utf-8"))
+
+        self.assertEqual(payload["agent_id"], str(self.agent.id))
+        self.assertEqual(payload["token_budget"], PROMPT_TOKEN_BUDGET)
+        self.assertIn("system_prompt", payload)
+        self.assertIn("user_prompt", payload)
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        self.assertEqual(payload["user_prompt"], user_message["content"])
+        self.assertEqual(PersistentAgentPromptArchive.objects.count(), 1)
+        archive_row = PersistentAgentPromptArchive.objects.get(agent=self.agent)
+        self.assertEqual(archive_row.storage_key, archive_path)
+        self.assertEqual(archive_row.raw_bytes, len(decompressed))
+        self.assertEqual(archive_row.compressed_bytes, len(compressed_bytes))
+        self.assertEqual(archive_row.tokens_before, payload["tokens_before"])
+        self.assertEqual(archive_row.tokens_after, payload["tokens_after"])
+        self.assertEqual(archive_row.tokens_saved, payload["tokens_saved"])
+
+        admin_user = User.objects.create_superuser(
+            username="prompt_archive_admin",
+            email="prompt_archive_admin@example.com",
+            password="secret",
+        )
+        request = RequestFactory().get("/")
+        request.user = admin_user
+        admin_view = PersistentAgentPromptArchiveAdmin(PersistentAgentPromptArchive, django_admin.site)
+        response = admin_view.download_view(request, archive_row.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertIn(".json", response["Content-Disposition"])
+        downloaded_bytes = b"".join(response.streaming_content)
+        self.assertEqual(downloaded_bytes, decompressed)
+
+    def test_prompt_archive_links_to_step(self):
+        """Running the agent loop should attach the prompt archive to the first generated step."""
+        response_message = MagicMock()
+        response_message.tool_calls = None
+        response_message.content = "Reasoning output"
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock()
+        response.choices = [response_choice]
+        response.model_extra = {
+            "usage": MagicMock(
+                prompt_tokens=12,
+                completion_tokens=6,
+                total_tokens=18,
+                prompt_tokens_details=MagicMock(cached_tokens=0),
+            )
+        }
+
+        token_usage = {
+            "prompt_tokens": 12,
+            "completion_tokens": 6,
+            "total_tokens": 18,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'), \
+             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]):
+            with patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)):
+                from api.agent.core import event_processing as ep
+                with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+                    _run_agent_loop(self.agent, is_first_run=False)
+
+        archive = PersistentAgentPromptArchive.objects.get(agent=self.agent)
+        self.assertIsNotNone(archive.step, "Prompt archive should be linked to a step")
+        linked_archive = PersistentAgentPromptArchive.objects.get(step=archive.step)
+        self.assertEqual(linked_archive.id, archive.id)
+        self.assertEqual(archive.step.prompt_tokens, token_usage["prompt_tokens"])
 
 @tag("batch_event_processing")
 class CronTriggerTaskTests(TestCase):

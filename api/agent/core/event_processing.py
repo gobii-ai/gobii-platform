@@ -13,11 +13,12 @@ import math
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import List, Tuple, Union, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import litellm
 from litellm import token_counter
 import redis
+import zstandard as zstd
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
@@ -25,6 +26,8 @@ from django.db import transaction, close_old_connections
 from django.db.models import Q
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from tenacity import (
     before_sleep_log,
     retry,
@@ -92,6 +95,7 @@ from ...models import (
     PersistentAgentStepSnapshot,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
+    PersistentAgentPromptArchive,
 )
 from .schedule_parser import ScheduleParser
 from config import settings
@@ -106,6 +110,65 @@ TOOL_CALL_HISTORY_LIMIT = 20
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
+
+
+def _archive_rendered_prompt(
+    agent: PersistentAgent,
+    system_prompt: str,
+    user_prompt: str,
+    tokens_before: int,
+    tokens_after: int,
+    tokens_saved: int,
+) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[UUID]]:
+    """Compress and persist the rendered prompt to object storage."""
+
+    timestamp = datetime.now(timezone.utc)
+    archive_payload = {
+        "agent_id": str(agent.id),
+        "rendered_at": timestamp.isoformat(),
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "token_budget": PROMPT_TOKEN_BUDGET,
+        "tokens_before": tokens_before,
+        "tokens_after": tokens_after,
+        "tokens_saved": tokens_saved,
+    }
+
+    try:
+        payload_bytes = json.dumps(archive_payload).encode("utf-8")
+        compressed = zstd.ZstdCompressor(level=3).compress(payload_bytes)
+        archive_key = (
+            f"persistent_agents/{agent.id}/prompt_archives/"
+            f"{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}_{uuid4().hex}.json.zst"
+        )
+        default_storage.save(archive_key, ContentFile(compressed))
+        archive_id: Optional[UUID] = None
+        try:
+            archive = PersistentAgentPromptArchive.objects.create(
+                agent=agent,
+                rendered_at=timestamp,
+                storage_key=archive_key,
+                raw_bytes=len(payload_bytes),
+                compressed_bytes=len(compressed),
+                tokens_before=tokens_before,
+                tokens_after=tokens_after,
+                tokens_saved=tokens_saved,
+            )
+            archive_id = archive.id
+        except Exception:
+            logger.exception("Failed to persist prompt archive metadata for agent %s", agent.id)
+        logger.info(
+            "Archived prompt for agent %s: key=%s raw_bytes=%d compressed_bytes=%d",
+            agent.id,
+            archive_key,
+            len(payload_bytes),
+            len(compressed),
+        )
+        return archive_key, len(payload_bytes), len(compressed), archive_id
+    except Exception:
+        logger.exception("Failed to archive prompt for agent %s", agent.id)
+        return None, None, None, None
+
 def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[BudgetContext]) -> None:
     """Best-effort attempt to close the budget cycle when the agent goes idle."""
 
@@ -1130,13 +1193,32 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                     except Exception:
                         logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
                     return cumulative_token_usage
-            history, fitted_token_count = _build_prompt_context(
+            history, fitted_token_count, prompt_archive_id = _build_prompt_context(
                 agent,
                 current_iteration=i + 1,
                 max_iterations=MAX_AGENT_LOOP_ITERATIONS,
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
             )
+            prompt_archive_attached = False
+
+            def _attach_prompt_archive(step: PersistentAgentStep) -> None:
+                nonlocal prompt_archive_attached
+                if not prompt_archive_id or prompt_archive_attached:
+                    return
+                try:
+                    updated = PersistentAgentPromptArchive.objects.filter(
+                        id=prompt_archive_id,
+                        step__isnull=True,
+                    ).update(step=step)
+                    if updated:
+                        prompt_archive_attached = True
+                except Exception:
+                    logger.exception(
+                        "Failed to link prompt archive %s to step %s",
+                        prompt_archive_id,
+                        getattr(step, "id", None),
+                    )
             
             # Use the fitted token count from promptree for LLM selection
             # This fixes the bug where we were using joined message token count
@@ -1214,7 +1296,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                             "llm_model": token_usage.get("model"),
                             "llm_provider": token_usage.get("provider"),
                         })
-                    PersistentAgentStep.objects.create(**step_kwargs)
+                    step = PersistentAgentStep.objects.create(**step_kwargs)
+                    _attach_prompt_archive(step)
                 reasoning_only_streak += 1
                 continue
 
@@ -1310,7 +1393,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                                 "llm_model": token_usage.get("model"),
                                 "llm_provider": token_usage.get("provider"),
                             })
-                        PersistentAgentStep.objects.create(**step_kwargs)
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
                         sleep_requested = True
                         logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
                         continue
@@ -1344,6 +1428,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                                 agent=agent,
                                 description=step_text,
                             )
+                            _attach_prompt_archive(step)
                             logger.info(
                                 "Agent %s: added correction step_id=%s to request a retried tool call",
                                 agent.id,
@@ -1444,6 +1529,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                                 "llm_provider": token_usage.get("provider"),
                             })
                         step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
                         PersistentAgentToolCall.objects.create(
                             step=step,
                             tool_name=tool_name,
@@ -1480,6 +1566,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                                 "llm_provider": token_usage.get("provider"),
                             })
                         step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
                         PersistentAgentToolCall.objects.create(
                             step=step,
                             tool_name=tool_name,
@@ -1589,7 +1676,7 @@ def _build_prompt_context(
     max_iterations: int = MAX_AGENT_LOOP_ITERATIONS,
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
-) -> tuple[List[dict], int]:
+) -> tuple[List[dict], int, Optional[UUID]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
 
@@ -1601,8 +1688,10 @@ def _build_prompt_context(
         is_first_run: Whether this is the very first processing cycle for the agent.
 
     Returns:
-        Tuple of (messages, fitted_token_count) where fitted_token_count is the
-        actual token count after promptree fitting for accurate LLM selection.
+        Tuple of (messages, fitted_token_count, prompt_archive_id) where
+        fitted_token_count is the actual token count after promptree fitting for
+        accurate LLM selection and prompt_archive_id references the metadata row
+        for the stored prompt archive (or ``None`` if archiving failed).
     """
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
@@ -1815,6 +1904,24 @@ def _build_prompt_context(
         f"{tokens_after} tokens after fitting (saved {tokens_saved} tokens, "
         f"budget was {PROMPT_TOKEN_BUDGET} tokens)"
     )
+
+    archive_key, archive_raw_bytes, archive_compressed_bytes, archive_id = _archive_rendered_prompt(
+        agent=agent,
+        system_prompt=system_prompt,
+        user_prompt=user_content,
+        tokens_before=tokens_before,
+        tokens_after=tokens_after,
+        tokens_saved=tokens_saved,
+    )
+    if archive_key:
+        span.set_attribute("prompt.archive_key", archive_key)
+        if archive_raw_bytes is not None:
+            span.set_attribute("prompt.archive_bytes_raw", archive_raw_bytes)
+        if archive_compressed_bytes is not None:
+            span.set_attribute("prompt.archive_bytes_compressed", archive_compressed_bytes)
+    else:
+        span.set_attribute("prompt.archive_key", "")
+
     # CRITICAL: DO NOT REMOVE OR MODIFY THESE PRINT STATEMENTS WITHOUT EXTREME CARE
     # Using print() bypasses the 64KB container log truncation limit that affects logger.info()
     # Container runtimes (Docker/Kubernetes) truncate log messages at 64KB, which cuts off
@@ -1841,7 +1948,8 @@ def _build_prompt_context(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
-        tokens_after
+        tokens_after,
+        archive_id,
     )
 
 

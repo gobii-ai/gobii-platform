@@ -16,7 +16,7 @@ from .models import (
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
-    PersistentAgentStep, CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
+    PersistentAgentStep, PersistentAgentPromptArchive, CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ToolCreditCost,
     StripeConfig,
@@ -27,9 +27,10 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
 from django.urls import reverse, path
 from django.utils.html import format_html
-from django.http import HttpResponseRedirect, FileResponse
+from django.http import HttpResponseRedirect, FileResponse, StreamingHttpResponse
 from django.template.response import TemplateResponse
 from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
 from django.db.models import Sum
 from .agent.files.filespace_service import enqueue_import_after_commit
 from .tasks import sync_ip_block, backfill_missing_proxy_records, proxy_health_check_single, garbage_collect_timed_out_tasks
@@ -38,6 +39,8 @@ from config import settings
 
 from djstripe.models import Customer, BankAccount, Card
 from djstripe.admin import StripeModelAdmin  # base admin with actions & changelist_view
+
+import zstandard as zstd
 
 # Replace dj-stripe's default registration
 # 2.10.1 has removed some fields we still want to see, but their own admin still references them
@@ -2454,6 +2457,93 @@ class PersistentAgentStepAdmin(admin.ModelAdmin):
             url = reverse("admin:api_taskcredit_change", args=[obj.task_credit_id])
             return format_html('<a href="{}">{}</a>', url, obj.task_credit_id)
         return "-"
+
+
+@admin.register(PersistentAgentPromptArchive)
+class PersistentAgentPromptArchiveAdmin(admin.ModelAdmin):
+    list_display = (
+        "agent_link",
+        "rendered_at",
+        "tokens_before",
+        "tokens_after",
+        "tokens_saved",
+        "compressed_bytes",
+        "download_link",
+    )
+    readonly_fields = (
+        "agent",
+        "rendered_at",
+        "storage_key",
+        "raw_bytes",
+        "compressed_bytes",
+        "tokens_before",
+        "tokens_after",
+        "tokens_saved",
+        "created_at",
+    )
+    search_fields = ("agent__name", "agent__user__email", "storage_key")
+    list_filter = ("agent",)
+    date_hierarchy = "rendered_at"
+    ordering = ("-rendered_at",)
+    list_select_related = ("agent",)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<uuid:pk>/download/",
+                self.admin_site.admin_view(self.download_view),
+                name="api_persistentagentpromptarchive_download",
+            ),
+        ]
+        return custom_urls + urls
+
+    def agent_link(self, obj):
+        url = reverse("admin:api_persistentagent_change", args=[obj.agent.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.agent.name)
+    agent_link.short_description = "Agent"
+    agent_link.admin_order_field = "agent__name"
+
+    def download_link(self, obj):
+        url = reverse("admin:api_persistentagentpromptarchive_download", args=[obj.pk])
+        return format_html('<a href="{}">Download</a>', url)
+    download_link.short_description = "Prompt"
+
+    def download_view(self, request, pk, *args, **kwargs):
+        archive = self.get_object(request, pk)
+        changelist_url = reverse("admin:api_persistentagentpromptarchive_changelist")
+        if not archive:
+            self.message_user(request, "Prompt archive not found.", level=messages.ERROR)
+            return HttpResponseRedirect(changelist_url)
+        if not default_storage.exists(archive.storage_key):
+            self.message_user(
+                request,
+                "Archived prompt payload is missing from storage.",
+                level=messages.ERROR,
+            )
+            return HttpResponseRedirect(changelist_url)
+
+        filename = archive.storage_key.rsplit("/", 1)[-1] or f"{archive.pk}.json.zst"
+        if filename.endswith(".zst"):
+            download_name = filename[:-4]
+        else:
+            download_name = filename
+        if "." not in download_name:
+            download_name += ".json"
+
+        def content_stream():
+            with default_storage.open(archive.storage_key, "rb") as stored:
+                dctx = zstd.ZstdDecompressor()
+                with dctx.stream_reader(stored) as reader:
+                    while True:
+                        chunk = reader.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+
+        response = StreamingHttpResponse(content_stream(), content_type="application/json")
+        response["Content-Disposition"] = f'attachment; filename="{download_name}"'
+        return response
 
 @admin.register(UserBilling)
 class UserBillingAdmin(admin.ModelAdmin):
