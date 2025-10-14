@@ -23,7 +23,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.text import slugify
 from datetime import timedelta, datetime, timezone as dt_timezone
-from functools import cached_property
+from functools import cached_property, wraps
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
@@ -6639,32 +6639,89 @@ class AgentAllowlistInviteRejectView(TemplateView):
             messages.error(request, f"Error rejecting invitation: {e}")
             
         return redirect("agent_allowlist_invite_reject", token=token)
-@login_required
-@require_POST
-@transaction.atomic
-@tracer.start_as_current_span("BILLING Add Dedicated IP Quantity")
-def add_dedicated_ip_quantity(request):
-    if not stripe_status().enabled:
-        messages.error(request, "Stripe billing is not available in this deployment.")
-        return redirect('billing')
 
+
+def _resolve_billing_owner(request):
     resolved = build_console_context(request)
-    if resolved.current_context.type == "organization" and resolved.current_membership is None:
-        messages.error(request, "You no longer have access to manage this organization.")
-        return redirect('billing')
-    owner = None
-    owner_type = ""
 
-    if resolved.current_context.type == "organization" and resolved.current_membership:
+    if resolved.current_context.type == "organization":
         membership = resolved.current_membership
+        if membership is None:
+            messages.error(request, "You no longer have access to manage this organization.")
+            return redirect('billing')
         if membership.role not in BILLING_MANAGE_ROLES:
             messages.error(request, "You do not have permission to modify billing settings for this organization.")
             return redirect('billing')
-        owner = membership.org
-        owner_type = "organization"
-    else:
-        owner = request.user
-        owner_type = "user"
+        return membership.org, "organization"
+
+    return request.user, "user"
+
+
+def with_billing_owner(view_func):
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        resolved = _resolve_billing_owner(request)
+        if isinstance(resolved, HttpResponse):
+            return resolved
+        owner, owner_type = resolved
+        return view_func(request, owner, owner_type, *args, **kwargs)
+
+    return wrapper
+
+
+def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: int) -> None:
+    """Ensure the Stripe subscription item reflects the desired dedicated IP quantity."""
+    desired_qty = int(desired_qty)
+    subscription = get_active_subscription(owner)
+    if not subscription:
+        raise ValueError("Active subscription not found")
+
+    stripe_settings = get_stripe_settings()
+    dedicated_price_id = (
+        stripe_settings.startup_dedicated_ip_price_id
+        if owner_type == "user"
+        else stripe_settings.org_team_dedicated_ip_price_id
+    )
+    if not dedicated_price_id:
+        raise ValueError("Dedicated IP price not configured")
+
+    subscription_data = stripe.Subscription.retrieve(
+        subscription.id,
+        expand=["items.data.price"],
+    )
+
+    dedicated_item = None
+    for item in subscription_data.get("items", {}).get("data", []) or []:
+        price = item.get("price") or {}
+        if price.get("id") == dedicated_price_id:
+            dedicated_item = item
+            break
+
+    if desired_qty > 0:
+        if dedicated_item is None:
+            stripe.SubscriptionItem.create(
+                subscription=subscription.id,
+                price=dedicated_price_id,
+                quantity=desired_qty,
+            )
+        else:
+            stripe.SubscriptionItem.modify(
+                dedicated_item.get("id"),
+                quantity=desired_qty,
+            )
+    elif dedicated_item is not None:
+        stripe.SubscriptionItem.delete(dedicated_item.get("id"))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+@with_billing_owner
+@tracer.start_as_current_span("BILLING Add Dedicated IP Quantity")
+def add_dedicated_ip_quantity(request, owner, owner_type):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect('billing')
 
     owner_plan_id = None
     if owner_type == "user":
@@ -6683,11 +6740,7 @@ def add_dedicated_ip_quantity(request):
         for field_errors in form.errors.values():
             for error in field_errors:
                 messages.error(request, error)
-        redirect_url = 'billing'
-        if owner_type == "organization":
-            redirect_url = f"{reverse('billing')}?org_id={owner.id}"
-            return redirect(redirect_url)
-        return redirect('billing')
+        return redirect(_billing_redirect(owner, owner_type))
 
     add_quantity = form.cleaned_data["quantity"]
 
@@ -6698,45 +6751,10 @@ def add_dedicated_ip_quantity(request):
         if not customer:
             raise ValueError("Stripe customer not found for owner")
 
-        subscription = get_active_subscription(owner)
-        if not subscription:
-            raise ValueError("Active subscription not found")
-
-        stripe_settings = get_stripe_settings()
-        if owner_type == "user":
-            dedicated_price_id = stripe_settings.startup_dedicated_ip_price_id
-        else:
-            dedicated_price_id = stripe_settings.org_team_dedicated_ip_price_id
-
-        if not dedicated_price_id:
-            raise ValueError("Dedicated IP price not configured")
-
         current_qty = DedicatedProxyService.allocated_count(owner)
         desired_qty = current_qty + int(add_quantity)
 
-        subscription_data = stripe.Subscription.retrieve(
-            subscription.id,
-            expand=["items.data.price"],
-        )
-
-        dedicated_item = None
-        for item in subscription_data.get("items", {}).get("data", []) or []:
-            price = item.get("price") or {}
-            if price.get("id") == dedicated_price_id:
-                dedicated_item = item
-                break
-
-        if dedicated_item is None:
-            stripe.SubscriptionItem.create(
-                subscription=subscription.id,
-                price=dedicated_price_id,
-                quantity=desired_qty,
-            )
-        else:
-            stripe.SubscriptionItem.modify(
-                dedicated_item.get("id"),
-                quantity=desired_qty,
-            )
+        _update_stripe_dedicated_ip_quantity(owner, owner_type, desired_qty)
 
         missing = desired_qty - current_qty
         allocated = 0
@@ -6756,36 +6774,18 @@ def add_dedicated_ip_quantity(request):
         logger.exception("Failed to update dedicated IP quantity", exc_info=True)
         messages.error(request, f"Failed to update dedicated IPs: {exc}")
 
-    redirect_url = reverse('billing')
-    if owner_type == "organization":
-        redirect_url = f"{redirect_url}?org_id={owner.id}"
-        return redirect(redirect_url)
-    return redirect('billing')
+    return redirect(_billing_redirect(owner, owner_type))
 
 
 @login_required
 @require_POST
 @transaction.atomic
+@with_billing_owner
 @tracer.start_as_current_span("BILLING Remove Dedicated IP")
-def remove_dedicated_ip(request):
+def remove_dedicated_ip(request, owner, owner_type):
     if not stripe_status().enabled:
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect('billing')
-
-    resolved = build_console_context(request)
-    owner = None
-    owner_type = ""
-
-    if resolved.current_context.type == "organization" and resolved.current_membership:
-        membership = resolved.current_membership
-        if membership.role not in BILLING_MANAGE_ROLES:
-            messages.error(request, "You do not have permission to modify billing settings for this organization.")
-            return redirect('billing')
-        owner = membership.org
-        owner_type = "organization"
-    else:
-        owner = request.user
-        owner_type = "user"
 
     proxy_id = request.POST.get("proxy_id")
     if not proxy_id:
@@ -6805,46 +6805,7 @@ def remove_dedicated_ip(request):
 
         desired_qty = max(current_qty - 1, 0)
 
-        subscription = get_active_subscription(owner)
-        if not subscription:
-            raise ValueError("Active subscription not found")
-
-        stripe_settings = get_stripe_settings()
-        dedicated_price_id = (
-            stripe_settings.startup_dedicated_ip_price_id
-            if owner_type == "user"
-            else stripe_settings.org_team_dedicated_ip_price_id
-        )
-        if not dedicated_price_id:
-            raise ValueError("Dedicated IP price not configured")
-
-        subscription_data = stripe.Subscription.retrieve(
-            subscription.id,
-            expand=["items.data.price"],
-        )
-
-        dedicated_item = None
-        for item in subscription_data.get("items", {}).get("data", []) or []:
-            price = item.get("price") or {}
-            if price.get("id") == dedicated_price_id:
-                dedicated_item = item
-                break
-
-        if desired_qty > 0:
-            if dedicated_item is None:
-                stripe.SubscriptionItem.create(
-                    subscription=subscription.id,
-                    price=dedicated_price_id,
-                    quantity=desired_qty,
-                )
-            else:
-                stripe.SubscriptionItem.modify(
-                    dedicated_item.get("id"),
-                    quantity=desired_qty,
-                )
-        else:
-            if dedicated_item is not None:
-                stripe.SubscriptionItem.delete(dedicated_item.get("id"))
+        _update_stripe_dedicated_ip_quantity(owner, owner_type, desired_qty)
 
         messages.success(request, "Dedicated IP removed.")
     except Exception as exc:
@@ -6857,26 +6818,12 @@ def remove_dedicated_ip(request):
 @login_required
 @require_POST
 @transaction.atomic
+@with_billing_owner
 @tracer.start_as_current_span("BILLING Remove All Dedicated IPs")
-def remove_all_dedicated_ip(request):
+def remove_all_dedicated_ip(request, owner, owner_type):
     if not stripe_status().enabled:
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect('billing')
-
-    resolved = build_console_context(request)
-    owner = None
-    owner_type = ""
-
-    if resolved.current_context.type == "organization" and resolved.current_membership:
-        membership = resolved.current_membership
-        if membership.role not in BILLING_MANAGE_ROLES:
-            messages.error(request, "You do not have permission to modify billing settings for this organization.")
-            return redirect('billing')
-        owner = membership.org
-        owner_type = "organization"
-    else:
-        owner = request.user
-        owner_type = "user"
 
     try:
         _assign_stripe_api_key()
@@ -6887,26 +6834,7 @@ def remove_all_dedicated_ip(request):
 
         DedicatedProxyService.release_for_owner(owner)
 
-        subscription = get_active_subscription(owner)
-        if not subscription:
-            raise ValueError("Active subscription not found")
-
-        stripe_settings = get_stripe_settings()
-        dedicated_price_id = (
-            stripe_settings.startup_dedicated_ip_price_id
-            if owner_type == "user"
-            else stripe_settings.org_team_dedicated_ip_price_id
-        )
-        if dedicated_price_id:
-            subscription_data = stripe.Subscription.retrieve(
-                subscription.id,
-                expand=["items.data.price"],
-            )
-            for item in subscription_data.get("items", {}).get("data", []) or []:
-                price = item.get("price") or {}
-                if price.get("id") == dedicated_price_id:
-                    stripe.SubscriptionItem.delete(item.get("id"))
-                    break
+        _update_stripe_dedicated_ip_quantity(owner, owner_type, 0)
 
         messages.success(request, "All dedicated IPs removed.")
     except Exception as exc:

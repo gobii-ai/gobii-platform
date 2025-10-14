@@ -1073,7 +1073,7 @@ class DedicatedProxyAllocationManager(models.Manager.from_queryset(DedicatedProx
             raise ValueError("Owner instance is required.")
         if not proxy.is_dedicated:
             raise ValidationError("Proxy must be marked dedicated before assignment.")
-        if getattr(proxy, "dedicated_allocation", None) is not None:
+        if proxy.is_dedicated_allocated:
             raise ValidationError("Proxy already has a dedicated owner.")
 
         filters = DedicatedProxyAllocation._prepare_owner_filters(owner)
