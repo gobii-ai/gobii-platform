@@ -62,7 +62,8 @@ class TestEventProcessingTokenCounting(TestCase):
                         {"role": "system", "content": "System message"},
                         {"role": "user", "content": "User message"}
                     ],
-                    2500  # Fitted token count - in small range, will get Google (GPT-5 not available)
+                    2500,  # Fitted token count - in small range, will get Google (GPT-5 not available)
+                    None,
                 )
                 
                 # Capture what token count gets passed to get_llm_config_with_failover
@@ -119,7 +120,7 @@ class TestEventProcessingTokenCounting(TestCase):
             with patch('api.agent.core.event_processing.get_llm_config_with_failover') as mock_get_config:
                 mock_get_config.return_value = [("anthropic", "anthropic/claude-sonnet-4-20250514", {})]
 
-                messages, fitted_token_count = _build_prompt_context(self.test_agent)
+                messages, fitted_token_count, archive_id = _build_prompt_context(self.test_agent)
 
                 # Verify it was called with token_count=0 for model selection
                 mock_get_config.assert_called_with(

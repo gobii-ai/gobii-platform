@@ -35,7 +35,7 @@ class TestParallelToolCallsExecution(TestCase):
     @patch('api.agent.core.event_processing._completion_with_failover')
     def test_executes_all_tool_calls_in_one_turn(self, mock_completion, mock_build_prompt, *_mocks):
         # Make prompt builder return minimal content and a small token count
-        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000)
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
 
         # Craft a response with two tool calls: sqlite_batch then send_sms
         tc1 = MagicMock()

@@ -4,11 +4,13 @@ import tempfile
 import time
 
 from celery import shared_task
+from django.conf import settings
 from django.core.management import call_command
 from django.utils import timezone
 from datetime import timedelta
 
 from observability import traced
+from api.maintenance.prompt_archives import prune_prompt_archives_for_cutoff
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +111,40 @@ def garbage_collect_timed_out_tasks(self) -> None:
             logger.exception("Error during timed-out task garbage collection: %s", str(e))
             span.set_attribute('error', str(e))
             raise  # Re-raise to trigger Celery retry if configured
+
+
+@shared_task(bind=True, ignore_result=True)
+def prune_prompt_archives(self, retention_days: int | None = None) -> None:
+    """
+    Remove persisted prompt archives older than the configured retention window.
+    """
+    with traced("MAINTENANCE Prune Prompt Archives") as span:
+        try:
+            retention = retention_days or settings.PROMPT_ARCHIVE_RETENTION_DAYS
+            if retention < 0:
+                logger.info("Prompt archive pruning skipped: retention set to %s days", retention)
+                span.add_event("Retention negative; skipping prune")
+                return
+
+            cutoff = timezone.now() - timedelta(days=retention)
+            span.set_attribute("retention_days", retention)
+            span.set_attribute("cutoff", cutoff.isoformat())
+
+            found, deleted = prune_prompt_archives_for_cutoff(cutoff)
+
+            span.set_attribute("archives_found", found)
+            span.set_attribute("archives_deleted", deleted)
+
+            logger.info(
+                "Prompt archive pruning complete: found=%s deleted=%s cutoff=%s",
+                found,
+                deleted,
+                cutoff,
+            )
+        except Exception as exc:
+            span.set_attribute("error", str(exc))
+            logger.exception("Prompt archive pruning failed: %s", exc)
+            raise
 
 
 @shared_task(name="prune_usage_threshold_sent")

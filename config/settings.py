@@ -578,6 +578,13 @@ CELERY_BEAT_SCHEDULE = {
             "routing_key": "celery.single_instance",  # Use single instance routing to prevent overlaps
         },
     },
+    "prune-prompt-archives": {
+        "task": "api.tasks.maintenance_tasks.prune_prompt_archives",
+        "schedule": crontab(minute=15, hour=2),  # Nightly cleanup at 02:15 UTC
+        "options": {
+            "routing_key": "celery.single_instance",
+        },
+    },
 }
 
 # Conditionally enable Twilio sync task only when explicitly enabled
@@ -604,6 +611,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS = env.int("AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS", default=60)
 # Hours of grace after a user downgrades to Free before expiration checks apply
 AGENT_SOFT_EXPIRATION_DOWNGRADE_GRACE_HOURS = env.int("AGENT_SOFT_EXPIRATION_DOWNGRADE_GRACE_HOURS", default=48)
+# Retention window for persisted prompt archives
+PROMPT_ARCHIVE_RETENTION_DAYS = env.int("PROMPT_ARCHIVE_RETENTION_DAYS", default=14)
 
 # Feature flags (django-waffle)
 # Default to explicit management in admin; core features are not gated anymore.

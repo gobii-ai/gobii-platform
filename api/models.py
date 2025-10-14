@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 
 import ulid
 from django.conf import settings
+from django.core.files.storage import default_storage
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.validators import RegexValidator
 from django.db import models, transaction
@@ -4424,6 +4425,53 @@ class PersistentAgentSystemStep(models.Model):
     def __str__(self):
         preview = (self.notes or "").replace("\n", " ")[:60]
         return f"SystemStep<{self.code}> {preview}..."
+
+
+class PersistentAgentPromptArchive(models.Model):
+    """Metadata for archived rendered prompts stored outside the primary DB."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="prompt_archives",
+    )
+    rendered_at = models.DateTimeField(help_text="Timestamp when the prompt was rendered.")
+    storage_key = models.CharField(max_length=512, help_text="Object storage key for the compressed prompt payload.")
+    raw_bytes = models.IntegerField(help_text="Uncompressed payload size in bytes.")
+    compressed_bytes = models.IntegerField(help_text="Compressed payload size in bytes.")
+    tokens_before = models.IntegerField(help_text="Token count before prompt fitting.")
+    tokens_after = models.IntegerField(help_text="Token count after prompt fitting.")
+    tokens_saved = models.IntegerField(help_text="Tokens removed during fitting.")
+    step = models.OneToOneField(
+        "PersistentAgentStep",
+        on_delete=models.CASCADE,
+        related_name="llm_prompt_archive",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-rendered_at"]
+        indexes = [
+            models.Index(fields=["agent", "-rendered_at"], name="pa_prompt_archive_recent_idx"),
+            models.Index(fields=["rendered_at"], name="pa_prompt_archive_rendered_idx"),
+        ]
+
+    def delete(self, using=None, keep_parents=False):
+        """Remove the archived payload from storage before deleting the row."""
+        storage_key = self.storage_key
+        if storage_key:
+            try:
+                if default_storage.exists(storage_key):
+                    default_storage.delete(storage_key)
+            except Exception:
+                logger.exception("Failed to delete prompt archive payload at %s", storage_key)
+        return super().delete(using=using, keep_parents=keep_parents)
+
+    def __str__(self):
+        return f"PromptArchive<{self.agent_id}> {self.rendered_at.isoformat()} key={self.storage_key}"
 
 
 class OutboundMessageAttempt(models.Model):
