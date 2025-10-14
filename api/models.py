@@ -1541,6 +1541,65 @@ class UserBilling(models.Model):
         verbose_name_plural = "User Billing"
 
 
+class UserAttribution(models.Model):
+    """Persist first/last touch attribution details for a user."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="attribution",
+    )
+
+    utm_source_first = models.CharField(max_length=256, blank=True)
+    utm_medium_first = models.CharField(max_length=256, blank=True)
+    utm_campaign_first = models.CharField(max_length=256, blank=True)
+    utm_content_first = models.CharField(max_length=256, blank=True)
+    utm_term_first = models.CharField(max_length=256, blank=True)
+
+    utm_source_last = models.CharField(max_length=256, blank=True)
+    utm_medium_last = models.CharField(max_length=256, blank=True)
+    utm_campaign_last = models.CharField(max_length=256, blank=True)
+    utm_content_last = models.CharField(max_length=256, blank=True)
+    utm_term_last = models.CharField(max_length=256, blank=True)
+
+    landing_code_first = models.CharField(max_length=128, blank=True)
+    landing_code_last = models.CharField(max_length=128, blank=True)
+
+    fbclid = models.CharField(max_length=256, blank=True)
+    fbc = models.CharField(max_length=256, blank=True)
+    gclid_first = models.CharField(max_length=256, blank=True)
+    gclid_last = models.CharField(max_length=256, blank=True)
+    gbraid_first = models.CharField(max_length=256, blank=True)
+    gbraid_last = models.CharField(max_length=256, blank=True)
+    wbraid_first = models.CharField(max_length=256, blank=True)
+    wbraid_last = models.CharField(max_length=256, blank=True)
+    msclkid_first = models.CharField(max_length=256, blank=True)
+    msclkid_last = models.CharField(max_length=256, blank=True)
+    ttclid_first = models.CharField(max_length=256, blank=True)
+    ttclid_last = models.CharField(max_length=256, blank=True)
+
+    first_referrer = models.CharField(max_length=512, blank=True)
+    last_referrer = models.CharField(max_length=512, blank=True)
+    first_landing_path = models.CharField(max_length=512, blank=True)
+    last_landing_path = models.CharField(max_length=512, blank=True)
+
+    segment_anonymous_id = models.CharField(max_length=256, blank=True)
+    ga_client_id = models.CharField(max_length=256, blank=True)
+
+    first_touch_at = models.DateTimeField(null=True, blank=True)
+    last_touch_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "User Attribution"
+        verbose_name_plural = "User Attribution"
+
+    def __str__(self):
+        return f"Attribution for user {self.user_id}"
+
+
 class OrganizationBilling(models.Model):
     """Billing data for an organization (mirrors the user billing fields where applicable)."""
 

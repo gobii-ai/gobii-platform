@@ -3,6 +3,7 @@ import json
 from datetime import timedelta, datetime, timezone as dt_timezone
 from numbers import Number
 from typing import Any, Mapping
+from urllib.parse import unquote
 
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -27,7 +28,7 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 import logging
 import stripe
 
-from api.models import UserBilling, OrganizationBilling
+from api.models import UserBilling, OrganizationBilling, UserAttribution
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
@@ -50,6 +51,8 @@ UTM_MAPPING = {
     'content': 'utm_content',
     'term': 'utm_term'
 }
+
+CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid')
 
 
 def _get_stripe_data_value(container: Any, key: str) -> Any:
@@ -215,14 +218,26 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             'date_joined': user.date_joined.isoformat(),
         }
 
+        def _decode_cookie_value(raw: str | None) -> str:
+            if not raw:
+                return ''
+            try:
+                decoded = unquote(raw)
+            except Exception:
+                decoded = raw
+            return decoded.strip().strip('"')
+
         utm_first_payload: dict[str, str] = {}
         utm_first_cookie = request.COOKIES.get('__utm_first')
         if utm_first_cookie:
             try:
                 utm_first_payload = json.loads(utm_first_cookie)
             except json.JSONDecodeError:
-                logger.exception("Failed to parse __utm_first cookie; Content: %s", utm_first_cookie)
-                utm_first_payload = {}
+                try:
+                    utm_first_payload = json.loads(unquote(utm_first_cookie))
+                except json.JSONDecodeError:
+                    logger.exception("Failed to parse __utm_first cookie; Content: %s", utm_first_cookie)
+                    utm_first_payload = {}
 
         current_touch = {
             utm_key: request.COOKIES.get(utm_key, '')
@@ -240,9 +255,130 @@ def handle_user_signed_up(sender, request, user, **kwargs):
 
         last_touch = {k: v for k, v in current_touch.items() if v}
 
+        click_first_payload: dict[str, str] = {}
+        click_first_cookie = request.COOKIES.get('__click_first')
+        if click_first_cookie:
+            try:
+                click_first_payload = json.loads(click_first_cookie)
+            except json.JSONDecodeError:
+                try:
+                    click_first_payload = json.loads(unquote(click_first_cookie))
+                except json.JSONDecodeError:
+                    logger.exception("Failed to parse __click_first cookie; Content: %s", click_first_cookie)
+                    click_first_payload = {}
+
+        current_click = {
+            key: request.COOKIES.get(key, '')
+            for key in CLICK_ID_PARAMS
+        }
+
+        first_click: dict[str, str] = {}
+        for key in CLICK_ID_PARAMS:
+            preserved = click_first_payload.get(key)
+            current_val = current_click.get(key)
+            if preserved:
+                first_click[key] = preserved
+            elif current_val:
+                first_click[key] = current_val
+
+        last_click = {k: v for k, v in current_click.items() if v}
+
+        landing_first_cookie = _decode_cookie_value(request.COOKIES.get('__landing_first'))
+        landing_last_cookie = _decode_cookie_value(request.COOKIES.get('landing_code'))
+        landing_first = _decode_cookie_value(request.session.get('landing_code_first')) or landing_first_cookie
+        landing_last = _decode_cookie_value(request.session.get('landing_code_last')) or landing_last_cookie or landing_first
+
+        def _parse_session_timestamp(raw_value: str | None) -> datetime | None:
+            if not raw_value:
+                return None
+            parsed = parse_datetime(raw_value)
+            if parsed is None:
+                return None
+            if timezone.is_naive(parsed):
+                parsed = timezone.make_aware(parsed, timezone=dt_timezone.utc)
+            return parsed
+
+        first_touch_at = _parse_session_timestamp(request.session.get('landing_first_seen_at')) or timezone.now()
+        last_touch_at = _parse_session_timestamp(request.session.get('landing_last_seen_at')) or timezone.now()
+
+        fbc_cookie = _decode_cookie_value(request.COOKIES.get('_fbc'))
+        fbclid_cookie = _decode_cookie_value(request.COOKIES.get('fbclid'))
+
+        first_referrer = _decode_cookie_value(request.COOKIES.get('first_referrer')) or (request.META.get('HTTP_REFERER') or '')
+        last_referrer = _decode_cookie_value(request.COOKIES.get('last_referrer')) or (request.META.get('HTTP_REFERER') or first_referrer)
+        first_path = _decode_cookie_value(request.COOKIES.get('first_path')) or request.get_full_path()
+        last_path = _decode_cookie_value(request.COOKIES.get('last_path')) or request.get_full_path()
+
+        segment_anonymous_id = _decode_cookie_value(request.COOKIES.get('ajs_anonymous_id'))
+        ga_client_id = _decode_cookie_value(request.COOKIES.get('_ga'))
+
         traits.update({f'{k}_first': v for k, v in first_touch.items()})
         if last_touch:
             traits.update({f'{k}_last': v for k, v in last_touch.items()})
+        traits.update({f'{k}_first': v for k, v in first_click.items()})
+        if last_click:
+            traits.update({f'{k}_last': v for k, v in last_click.items()})
+        if landing_first:
+            traits['landing_code_first'] = landing_first
+        if landing_last:
+            traits['landing_code_last'] = landing_last
+        if fbc_cookie:
+            traits['fbc'] = fbc_cookie
+        if fbclid_cookie:
+            traits['fbclid'] = fbclid_cookie
+        if first_referrer:
+            traits['first_referrer'] = first_referrer
+        if last_referrer:
+            traits['last_referrer'] = last_referrer
+        if first_path:
+            traits['first_landing_path'] = first_path
+        if last_path:
+            traits['last_landing_path'] = last_path
+        if segment_anonymous_id:
+            traits['segment_anonymous_id'] = segment_anonymous_id
+        if ga_client_id:
+            traits['ga_client_id'] = ga_client_id
+
+        try:
+            UserAttribution.objects.update_or_create(
+                user=user,
+                defaults={
+                    'utm_source_first': first_touch.get('utm_source', ''),
+                    'utm_medium_first': first_touch.get('utm_medium', ''),
+                    'utm_campaign_first': first_touch.get('utm_campaign', ''),
+                    'utm_content_first': first_touch.get('utm_content', ''),
+                    'utm_term_first': first_touch.get('utm_term', ''),
+                    'utm_source_last': last_touch.get('utm_source', ''),
+                    'utm_medium_last': last_touch.get('utm_medium', ''),
+                    'utm_campaign_last': last_touch.get('utm_campaign', ''),
+                    'utm_content_last': last_touch.get('utm_content', ''),
+                    'utm_term_last': last_touch.get('utm_term', ''),
+                    'landing_code_first': landing_first,
+                    'landing_code_last': landing_last,
+                    'fbclid': fbclid_cookie,
+                    'fbc': fbc_cookie,
+                    'gclid_first': first_click.get('gclid', ''),
+                    'gclid_last': last_click.get('gclid', ''),
+                    'gbraid_first': first_click.get('gbraid', ''),
+                    'gbraid_last': last_click.get('gbraid', ''),
+                    'wbraid_first': first_click.get('wbraid', ''),
+                    'wbraid_last': last_click.get('wbraid', ''),
+                    'msclkid_first': first_click.get('msclkid', ''),
+                    'msclkid_last': last_click.get('msclkid', ''),
+                    'ttclid_first': first_click.get('ttclid', ''),
+                    'ttclid_last': last_click.get('ttclid', ''),
+                    'first_referrer': first_referrer,
+                    'last_referrer': last_referrer,
+                    'first_landing_path': first_path,
+                    'last_landing_path': last_path,
+                    'segment_anonymous_id': segment_anonymous_id,
+                    'ga_client_id': ga_client_id,
+                    'first_touch_at': first_touch_at,
+                    'last_touch_at': last_touch_at,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to persist user attribution for user %s", user.id)
 
         Analytics.identify(
             user_id=str(user.id),
@@ -257,13 +393,46 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             'date_joined': user.date_joined.isoformat(),
             **{f'{k}_first': v for k, v in first_touch.items()},
             **{f'{k}_last': v for k, v in last_touch.items()},
+            **{f'{k}_first': v for k, v in first_click.items()},
+            **{f'{k}_last': v for k, v in last_click.items()},
         }
+
+        if landing_first:
+            event_properties['landing_code_first'] = landing_first
+        if landing_last:
+            event_properties['landing_code_last'] = landing_last
+        if fbc_cookie:
+            event_properties['fbc'] = fbc_cookie
+        if fbclid_cookie:
+            event_properties['fbclid'] = fbclid_cookie
+        if first_referrer:
+            event_properties['first_referrer'] = first_referrer
+        if last_referrer:
+            event_properties['last_referrer'] = last_referrer
+        if first_path:
+            event_properties['first_landing_path'] = first_path
+        if last_path:
+            event_properties['last_landing_path'] = last_path
+        if segment_anonymous_id:
+            event_properties['segment_anonymous_id'] = segment_anonymous_id
+        if ga_client_id:
+            event_properties['ga_client_id'] = ga_client_id
 
         campaign_context = {}
         for key, utm_param in UTM_MAPPING.items():
             value = last_touch.get(utm_param) or first_touch.get(utm_param, '')
             if value:
                 campaign_context[key] = value
+
+        for key in CLICK_ID_PARAMS:
+            value = last_click.get(key) or first_click.get(key, '')
+            if value:
+                campaign_context[key] = value
+
+        if landing_last or landing_first:
+            campaign_context['landing_code'] = landing_last or landing_first
+        if last_referrer:
+            campaign_context['referrer'] = last_referrer
 
         Analytics.track(
             user_id=str(user.id),

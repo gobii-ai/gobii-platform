@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +8,7 @@ from django.test import RequestFactory, TestCase, tag
 from django.utils import timezone
 from django.contrib.sessions.middleware import SessionMiddleware
 
+from api.models import UserBilling, Organization, UserAttribution
 from api.models import UserBilling, Organization, ProxyServer, DedicatedProxyAllocation
 from constants.plans import PlanNamesChoices
 from pages.signals import handle_subscription_event, handle_user_signed_up
@@ -43,11 +44,40 @@ class UserSignedUpSignalTests(TestCase):
             "utm_source": "first-source",
             "utm_medium": "first-medium",
         }
+        click_first_payload = {
+            "gclid": "first-gclid",
+            "gbraid": "first-gbraid",
+            "wbraid": "first-wbraid",
+            "msclkid": "first-msclkid",
+            "ttclid": "first-ttclid",
+        }
+        now = timezone.now()
+        later = now + timedelta(minutes=5)
         request.COOKIES = {
             "__utm_first": json.dumps(first_touch_payload),
             "utm_source": "last-source",
             "utm_medium": "last-medium",
+            "__landing_first": "LP-100",
+            "landing_code": "LP-200",
+            "_fbc": "fb.1.123456789.abcdef",
+            "fbclid": "fbclid-xyz",
+            "__click_first": json.dumps(click_first_payload),
+            "gclid": "last-gclid",
+            "gbraid": "last-gbraid",
+            "wbraid": "last-wbraid",
+            "msclkid": "last-msclkid",
+            "ttclid": "last-ttclid",
+            "first_referrer": "https://first.example/",
+            "last_referrer": "https://last.example/",
+            "first_path": "/landing/first/",
+            "last_path": "/pricing/",
+            "ajs_anonymous_id": '"anon-123"',
+            "_ga": "GA1.2.111.222",
         }
+        request.session["landing_code_first"] = "LP-100"
+        request.session["landing_code_last"] = "LP-200"
+        request.session["landing_first_seen_at"] = now.isoformat()
+        request.session["landing_last_seen_at"] = later.isoformat()
 
         handle_user_signed_up(sender=None, request=request, user=self.user)
 
@@ -57,6 +87,20 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(traits["utm_medium_first"], "first-medium")
         self.assertEqual(traits["utm_source_last"], "last-source")
         self.assertEqual(traits["utm_medium_last"], "last-medium")
+        self.assertEqual(traits["landing_code_first"], "LP-100")
+        self.assertEqual(traits["landing_code_last"], "LP-200")
+        self.assertEqual(traits["fbc"], "fb.1.123456789.abcdef")
+        self.assertEqual(traits["fbclid"], "fbclid-xyz")
+        self.assertEqual(traits["gclid_first"], "first-gclid")
+        self.assertEqual(traits["gclid_last"], "last-gclid")
+        self.assertEqual(traits["msclkid_first"], "first-msclkid")
+        self.assertEqual(traits["msclkid_last"], "last-msclkid")
+        self.assertEqual(traits["first_referrer"], "https://first.example/")
+        self.assertEqual(traits["last_referrer"], "https://last.example/")
+        self.assertEqual(traits["first_landing_path"], "/landing/first/")
+        self.assertEqual(traits["last_landing_path"], "/pricing/")
+        self.assertEqual(traits["segment_anonymous_id"], "anon-123")
+        self.assertEqual(traits["ga_client_id"], "GA1.2.111.222")
 
         track_call = mock_track.call_args.kwargs
         properties = track_call["properties"]
@@ -66,6 +110,43 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(properties["utm_source_last"], "last-source")
         self.assertEqual(context_campaign["source"], "last-source")
         self.assertEqual(context_campaign["medium"], "last-medium")
+        self.assertEqual(context_campaign["landing_code"], "LP-200")
+        self.assertEqual(context_campaign["gclid"], "last-gclid")
+        self.assertEqual(context_campaign["referrer"], "https://last.example/")
+        self.assertEqual(properties["landing_code_first"], "LP-100")
+        self.assertEqual(properties["landing_code_last"], "LP-200")
+        self.assertEqual(properties["fbc"], "fb.1.123456789.abcdef")
+        self.assertEqual(properties["fbclid"], "fbclid-xyz")
+        self.assertEqual(properties["gclid_first"], "first-gclid")
+        self.assertEqual(properties["gclid_last"], "last-gclid")
+        self.assertEqual(properties["first_referrer"], "https://first.example/")
+        self.assertEqual(properties["last_referrer"], "https://last.example/")
+        self.assertEqual(properties["first_landing_path"], "/landing/first/")
+        self.assertEqual(properties["last_landing_path"], "/pricing/")
+        self.assertEqual(properties["segment_anonymous_id"], "anon-123")
+        self.assertEqual(properties["ga_client_id"], "GA1.2.111.222")
+
+        attribution = UserAttribution.objects.get(user=self.user)
+        self.assertEqual(attribution.utm_source_first, "first-source")
+        self.assertEqual(attribution.utm_medium_first, "first-medium")
+        self.assertEqual(attribution.utm_source_last, "last-source")
+        self.assertEqual(attribution.utm_medium_last, "last-medium")
+        self.assertEqual(attribution.landing_code_first, "LP-100")
+        self.assertEqual(attribution.landing_code_last, "LP-200")
+        self.assertEqual(attribution.fbc, "fb.1.123456789.abcdef")
+        self.assertEqual(attribution.fbclid, "fbclid-xyz")
+        self.assertIsNotNone(attribution.first_touch_at)
+        self.assertIsNotNone(attribution.last_touch_at)
+        self.assertEqual(attribution.gclid_first, "first-gclid")
+        self.assertEqual(attribution.gclid_last, "last-gclid")
+        self.assertEqual(attribution.msclkid_first, "first-msclkid")
+        self.assertEqual(attribution.msclkid_last, "last-msclkid")
+        self.assertEqual(attribution.first_referrer, "https://first.example/")
+        self.assertEqual(attribution.last_referrer, "https://last.example/")
+        self.assertEqual(attribution.first_landing_path, "/landing/first/")
+        self.assertEqual(attribution.last_landing_path, "/pricing/")
+        self.assertEqual(attribution.segment_anonymous_id, "anon-123")
+        self.assertEqual(attribution.ga_client_id, "GA1.2.111.222")
 
 
 def _build_event_payload(
