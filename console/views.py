@@ -23,11 +23,16 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.text import slugify
 from datetime import timedelta, datetime, timezone as dt_timezone
-from functools import cached_property
+from functools import cached_property, wraps
 import uuid
 
 from agents.services import AgentService, AIEmployeeTemplateService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
+from api.services.dedicated_proxy_service import (
+    DedicatedProxyService,
+    DedicatedProxyUnavailableError,
+    is_multi_assign_enabled,
+)
 from api.agent.short_description import build_listing_description
 
 from api.models import (
@@ -35,6 +40,7 @@ from api.models import (
     UserBilling,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    ProxyServer,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
@@ -61,10 +67,43 @@ from util import sms
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
 from util.sms import find_unused_number, get_user_primary_sms_number
-from util.subscription_helper import get_user_plan, get_active_subscription, allow_user_extra_tasks, \
-    calculate_extra_tasks_used_during_subscription_period, get_user_extra_task_limit, get_or_create_stripe_customer
+from util.subscription_helper import (
+    get_user_plan,
+    get_active_subscription,
+    allow_user_extra_tasks,
+    calculate_extra_tasks_used_during_subscription_period,
+    get_user_extra_task_limit,
+    get_or_create_stripe_customer,
+)
 from config import settings
 from config.stripe_config import get_stripe_settings
+from config.plans import PLAN_CONFIG
+
+
+def _resolve_dedicated_ip_pricing(plan):
+    plan = plan or {}
+    currency = plan.get("currency")
+    unit_price = plan.get("dedicated_ip_price")
+    plan_id = plan.get("id")
+
+    if (unit_price is None) and plan_id:
+        fallback = PLAN_CONFIG.get(str(plan_id).lower())
+        if fallback:
+            if unit_price is None:
+                unit_price = fallback.get("dedicated_ip_price")
+            if not currency:
+                currency = fallback.get("currency", currency)
+
+    if unit_price is None:
+        unit_price = 0
+
+    try:
+        price_decimal = Decimal(str(unit_price))
+    except Exception:
+        price_decimal = Decimal("0")
+
+    normalized_currency = (currency or "USD").upper()
+    return price_decimal, normalized_currency
 
 from .forms import (
     ApiKeyForm,
@@ -78,6 +117,7 @@ from .forms import (
     OrganizationInviteForm,
     OrganizationSeatPurchaseForm,
     OrganizationSeatReductionForm,
+    DedicatedIpAddForm,
 )
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
@@ -1032,6 +1072,29 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 seat_purchase_form = OrganizationSeatPurchaseForm(org=organization)
                 seat_reduction_form = OrganizationSeatReductionForm(org=organization)
 
+                dedicated_total = DedicatedProxyService.allocated_count(organization)
+                dedicated_proxies = list(
+                    DedicatedProxyService.allocated_proxies(organization).select_related("dedicated_allocation")
+                )
+                dedicated_allowed = overview.get('plan', {}).get('id') != PlanNamesChoices.FREE.value
+
+                context.update({
+                    'dedicated_ip_add_form': DedicatedIpAddForm(),
+                    'dedicated_ip_total': dedicated_total,
+                    'dedicated_ip_available': dedicated_total,
+                    'dedicated_ip_proxies': dedicated_proxies,
+                    'dedicated_ip_multi_assign': is_multi_assign_enabled(),
+                    'dedicated_ip_allowed': dedicated_allowed,
+                    'dedicated_ip_error': None,
+                })
+
+                unit_price, price_currency = _resolve_dedicated_ip_pricing(overview.get('plan'))
+                context.update({
+                    'dedicated_ip_unit_price': unit_price,
+                    'dedicated_ip_total_cost': unit_price * Decimal(dedicated_total),
+                    'dedicated_ip_currency': price_currency,
+                })
+
                 granted = Decimal(str(overview['credits']['granted'])) if overview['credits']['granted'] else Decimal('0')
                 used = Decimal(str(overview['credits']['used'])) if overview['credits']['used'] else Decimal('0')
                 usage_pct = 0
@@ -1067,7 +1130,8 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 return render(request, self.template_name, context)
 
         # Personal billing fallback
-        context['subscription_plan'] = get_user_plan(self.request.user)
+        subscription_plan = get_user_plan(self.request.user)
+        context['subscription_plan'] = subscription_plan
         sub = get_active_subscription(self.request.user)
         paid_subscriber = sub is not None
 
@@ -1080,6 +1144,29 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
 
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
+
+        dedicated_plan = subscription_plan
+        dedicated_allowed = (dedicated_plan or {}).get('id') != PlanNamesChoices.FREE.value
+        dedicated_total = DedicatedProxyService.allocated_count(request.user)
+        dedicated_proxies = list(
+            DedicatedProxyService.allocated_proxies(request.user).select_related("dedicated_allocation")
+        )
+        context.update({
+            'dedicated_ip_add_form': DedicatedIpAddForm(),
+            'dedicated_ip_total': dedicated_total,
+            'dedicated_ip_available': dedicated_total,
+            'dedicated_ip_proxies': dedicated_proxies,
+            'dedicated_ip_multi_assign': is_multi_assign_enabled(),
+            'dedicated_ip_allowed': dedicated_allowed,
+            'dedicated_ip_error': None,
+        })
+
+        unit_price, price_currency = _resolve_dedicated_ip_pricing(dedicated_plan)
+        context.update({
+            'dedicated_ip_unit_price': unit_price,
+            'dedicated_ip_total_cost': unit_price * Decimal(dedicated_total),
+            'dedicated_ip_currency': price_currency,
+        })
 
         return render(request, self.template_name, context)
 
@@ -2154,7 +2241,70 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         context['primary_email'] = primary_email
         context['primary_sms'] = primary_sms
-        
+
+        owner = agent.organization or agent.user
+        browser_agent = getattr(agent, "browser_use_agent", None)
+        preferred_proxy = browser_agent.preferred_proxy if browser_agent else None
+        multi_assign = is_multi_assign_enabled()
+
+        dedicated_total = 0
+        dedicated_available = 0
+        dedicated_options: list[dict[str, object]] = []
+
+        if owner:
+            allocated_qs = (
+                DedicatedProxyService.allocated_proxies(owner)
+                .select_related("dedicated_allocation")
+                .prefetch_related("browser_agents__persistent_agent")
+                .order_by("static_ip", "host", "port")
+            )
+            dedicated_total = allocated_qs.count()
+
+            for proxy in allocated_qs:
+                browser_agents = list(getattr(proxy, "browser_agents").all())
+                assigned_agents = [
+                    ba.persistent_agent
+                    for ba in browser_agents
+                    if getattr(ba, "persistent_agent", None) is not None
+                ]
+                selected = preferred_proxy is not None and proxy.id == preferred_proxy.id
+                in_use_elsewhere = any(
+                    pa.id != agent.id for pa in assigned_agents if pa is not None
+                )
+                label = proxy.static_ip or proxy.host
+                assigned_names = [pa.name for pa in assigned_agents if pa is not None]
+
+                dedicated_options.append(
+                    {
+                        "id": str(proxy.id),
+                        "label": label,
+                        "selected": selected,
+                        "in_use_elsewhere": in_use_elsewhere,
+                        "assigned_names": assigned_names,
+                        "disabled": (not multi_assign and in_use_elsewhere and not selected),
+                    }
+                )
+
+            if multi_assign:
+                dedicated_available = dedicated_total
+            else:
+                dedicated_available = sum(
+                    1
+                    for option in dedicated_options
+                    if not option["in_use_elsewhere"] or option["selected"]
+                )
+
+        context['dedicated_proxy_options'] = dedicated_options
+        context['selected_dedicated_proxy_id'] = (
+            str(preferred_proxy.id) if preferred_proxy else ""
+        )
+        context['dedicated_ip_total'] = dedicated_total
+        context['dedicated_ip_available'] = dedicated_available
+        context['dedicated_ip_multi_assign'] = multi_assign
+        context['dedicated_ip_owner_type'] = (
+            'organization' if agent.organization_id else 'user'
+        )
+
         # Always include allowlist configuration (flag removed)
         from api.models import CommsAllowlistEntry
         context['show_allowlist'] = True
@@ -2783,6 +2933,37 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     agent.id,
                 )
 
+        owner = agent.organization or agent.user
+        multi_assign = is_multi_assign_enabled()
+        dedicated_proxy_id = (request.POST.get('dedicated_proxy_id') or '').strip()
+        selected_proxy: ProxyServer | None = None
+
+        if dedicated_proxy_id:
+            if owner is None:
+                messages.error(request, "Dedicated IPs require an account or organization owner.")
+                return redirect('agent_detail', pk=agent.pk)
+            try:
+                selected_proxy = (
+                    DedicatedProxyService.allocated_proxies(owner)
+                    .select_related("dedicated_allocation")
+                    .get(id=dedicated_proxy_id)
+                )
+            except ProxyServer.DoesNotExist:
+                messages.error(request, "Invalid dedicated IP selection.")
+                return redirect('agent_detail', pk=agent.pk)
+            if browser_agent is None:
+                messages.error(
+                    request,
+                    "Unable to assign a dedicated IP because the agent is missing its browser component.",
+                )
+                return redirect('agent_detail', pk=agent.pk)
+            if (
+                not multi_assign
+                and selected_proxy.browser_agents.exclude(persistent_agent=agent).exists()
+            ):
+                messages.error(request, "That dedicated IP is already assigned to another agent.")
+                return redirect('agent_detail', pk=agent.pk)
+
         # Check for uniqueness, excluding the current agent's BrowserUseAgent (if present)
         exclude_pk = browser_agent.id if browser_agent else agent.browser_use_agent_id
         browser_name_conflict = BrowserUseAgent.objects.filter(
@@ -2830,6 +3011,14 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if agent.daily_credit_limit != new_daily_limit:
                     agent.daily_credit_limit = new_daily_limit
                     agent_fields_to_update.append('daily_credit_limit')
+
+                if browser_agent is not None:
+                    current_proxy_id = browser_agent.preferred_proxy_id
+                    new_proxy_id = selected_proxy.id if selected_proxy else None
+                    if current_proxy_id != new_proxy_id:
+                        browser_agent.preferred_proxy = selected_proxy
+                        if 'preferred_proxy' not in browser_agent_fields_to_update:
+                            browser_agent_fields_to_update.append('preferred_proxy')
 
                 # Mark interaction time and reactivate if previously expired
                 agent.last_interaction_at = timezone.now()
@@ -6451,3 +6640,213 @@ class AgentAllowlistInviteRejectView(TemplateView):
             messages.error(request, f"Error rejecting invitation: {e}")
             
         return redirect("agent_allowlist_invite_reject", token=token)
+
+
+def _resolve_billing_owner(request):
+    resolved = build_console_context(request)
+
+    if resolved.current_context.type == "organization":
+        membership = resolved.current_membership
+        if membership is None:
+            messages.error(request, "You no longer have access to manage this organization.")
+            return redirect('billing')
+        if membership.role not in BILLING_MANAGE_ROLES:
+            messages.error(request, "You do not have permission to modify billing settings for this organization.")
+            return redirect('billing')
+        return membership.org, "organization"
+
+    return request.user, "user"
+
+
+def with_billing_owner(view_func):
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        resolved = _resolve_billing_owner(request)
+        if isinstance(resolved, HttpResponse):
+            return resolved
+        owner, owner_type = resolved
+        return view_func(request, owner, owner_type, *args, **kwargs)
+
+    return wrapper
+
+
+def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: int) -> None:
+    """Ensure the Stripe subscription item reflects the desired dedicated IP quantity."""
+    desired_qty = int(desired_qty)
+    subscription = get_active_subscription(owner)
+    if not subscription:
+        raise ValueError("Active subscription not found")
+
+    stripe_settings = get_stripe_settings()
+    dedicated_price_id = (
+        stripe_settings.startup_dedicated_ip_price_id
+        if owner_type == "user"
+        else stripe_settings.org_team_dedicated_ip_price_id
+    )
+    if not dedicated_price_id:
+        raise ValueError("Dedicated IP price not configured")
+
+    subscription_data = stripe.Subscription.retrieve(
+        subscription.id,
+        expand=["items.data.price"],
+    )
+
+    dedicated_item = None
+    for item in subscription_data.get("items", {}).get("data", []) or []:
+        price = item.get("price") or {}
+        if price.get("id") == dedicated_price_id:
+            dedicated_item = item
+            break
+
+    if desired_qty > 0:
+        if dedicated_item is None:
+            stripe.SubscriptionItem.create(
+                subscription=subscription.id,
+                price=dedicated_price_id,
+                quantity=desired_qty,
+            )
+        else:
+            stripe.SubscriptionItem.modify(
+                dedicated_item.get("id"),
+                quantity=desired_qty,
+            )
+    elif dedicated_item is not None:
+        stripe.SubscriptionItem.delete(dedicated_item.get("id"))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+@with_billing_owner
+@tracer.start_as_current_span("BILLING Add Dedicated IP Quantity")
+def add_dedicated_ip_quantity(request, owner, owner_type):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect('billing')
+
+    owner_plan_id = None
+    if owner_type == "user":
+        plan = get_user_plan(owner)
+        owner_plan_id = (plan or {}).get("id")
+    else:
+        billing = getattr(owner, "billing", None)
+        owner_plan_id = getattr(billing, "subscription", PlanNamesChoices.FREE.value) if billing else PlanNamesChoices.FREE.value
+
+    if owner_plan_id in (PlanNamesChoices.FREE.value, PlanNamesChoices.FREE):
+        messages.error(request, "Upgrade to a paid plan to add dedicated IPs.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    form = DedicatedIpAddForm(request.POST)
+    if not form.is_valid():
+        for field_errors in form.errors.values():
+            for error in field_errors:
+                messages.error(request, error)
+        return redirect(_billing_redirect(owner, owner_type))
+
+    add_quantity = form.cleaned_data["quantity"]
+
+    try:
+        _assign_stripe_api_key()
+
+        customer = get_or_create_stripe_customer(owner)
+        if not customer:
+            raise ValueError("Stripe customer not found for owner")
+
+        current_qty = DedicatedProxyService.allocated_count(owner)
+        desired_qty = current_qty + int(add_quantity)
+
+        _update_stripe_dedicated_ip_quantity(owner, owner_type, desired_qty)
+
+        missing = desired_qty - current_qty
+        allocated = 0
+        for _ in range(missing):
+            try:
+                DedicatedProxyService.allocate_proxy(owner)
+                allocated += 1
+            except DedicatedProxyUnavailableError:
+                messages.warning(
+                    request,
+                    "Not enough dedicated IP inventory was available. We've allocated as many as possible.",
+                )
+                break
+
+        messages.success(request, "Dedicated IP quantity updated.")
+    except Exception as exc:
+        logger.exception("Failed to update dedicated IP quantity", exc_info=True)
+        messages.error(request, f"Failed to update dedicated IPs: {exc}")
+
+    return redirect(_billing_redirect(owner, owner_type))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+@with_billing_owner
+@tracer.start_as_current_span("BILLING Remove Dedicated IP")
+def remove_dedicated_ip(request, owner, owner_type):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect('billing')
+
+    proxy_id = request.POST.get("proxy_id")
+    if not proxy_id:
+        messages.error(request, "Missing dedicated IP identifier.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    try:
+        _assign_stripe_api_key()
+        current_qty = DedicatedProxyService.allocated_count(owner)
+        if current_qty <= 0:
+            messages.info(request, "No dedicated IPs to remove.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        if not DedicatedProxyService.release_specific(owner, proxy_id):
+            messages.error(request, "Dedicated IP was already released.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        desired_qty = max(current_qty - 1, 0)
+
+        _update_stripe_dedicated_ip_quantity(owner, owner_type, desired_qty)
+
+        messages.success(request, "Dedicated IP removed.")
+    except Exception as exc:
+        logger.exception("Failed to remove dedicated IP", exc_info=True)
+        messages.error(request, f"Failed to remove dedicated IP: {exc}")
+
+    return redirect(_billing_redirect(owner, owner_type))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+@with_billing_owner
+@tracer.start_as_current_span("BILLING Remove All Dedicated IPs")
+def remove_all_dedicated_ip(request, owner, owner_type):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect('billing')
+
+    try:
+        _assign_stripe_api_key()
+        current_qty = DedicatedProxyService.allocated_count(owner)
+        if current_qty <= 0:
+            messages.info(request, "No dedicated IPs to remove.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        DedicatedProxyService.release_for_owner(owner)
+
+        _update_stripe_dedicated_ip_quantity(owner, owner_type, 0)
+
+        messages.success(request, "All dedicated IPs removed.")
+    except Exception as exc:
+        logger.exception("Failed to remove all dedicated IPs", exc_info=True)
+        messages.error(request, f"Failed to remove dedicated IPs: {exc}")
+
+    return redirect(_billing_redirect(owner, owner_type))
+
+
+def _billing_redirect(owner, owner_type: str) -> str:
+    url = reverse('billing')
+    if owner_type == "organization" and owner is not None:
+        return f"{url}?org_id={owner.id}"
+    return url

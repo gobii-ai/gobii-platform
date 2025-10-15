@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.test import TestCase, Client, tag
+from django.test import TestCase, Client, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from unittest.mock import patch
@@ -274,7 +274,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.context['daily_credit_limit'], Decimal('5'))
         self.assertEqual(response.context['daily_credit_usage'], Decimal('4.3'))
         self.assertTrue(response.context['daily_credit_low'])
-        self.assertContains(response, 'almost out of daily task credits')
+        self.assertIn('almost out of daily task credits', response.content.decode())
 
         response = self.client.post(url, {
             'name': agent.name,
@@ -313,4 +313,123 @@ class ConsoleViewsTest(TestCase):
 
         response = self.client.get(reverse('agents'))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'List Agent is almost out of daily task credits')
+        self.assertIn('List Agent is almost out of daily task credits', response.content.decode())
+
+    @tag("batch_console_agents")
+    def test_agent_detail_allows_selecting_dedicated_ip(self):
+        from api.models import PersistentAgent, BrowserUseAgent, ProxyServer, DedicatedProxyAllocation
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Dedicated Browser'
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Dedicated Agent',
+            charter='Use a dedicated proxy',
+            browser_use_agent=browser_agent,
+        )
+
+        proxy = ProxyServer.objects.create(
+            name='Dedicated Proxy',
+            proxy_type=ProxyServer.ProxyType.HTTP,
+            host='dedicated.example.com',
+            port=8080,
+            username='dedicated',
+            password='secret',
+            static_ip='198.51.100.12',
+            is_active=True,
+            is_dedicated=True,
+        )
+        DedicatedProxyAllocation.objects.assign_to_owner(proxy, self.user)
+
+        url = reverse('agent_detail', kwargs={'pk': agent.id})
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="dedicated_proxy_id"')
+        self.assertContains(response, '198.51.100.12')
+
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '',
+            'dedicated_proxy_id': str(proxy.id),
+        })
+        self.assertEqual(response.status_code, 302)
+
+        browser_agent.refresh_from_db()
+        self.assertEqual(browser_agent.preferred_proxy_id, proxy.id)
+
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '',
+            'dedicated_proxy_id': '',
+        })
+        self.assertEqual(response.status_code, 302)
+
+        browser_agent.refresh_from_db()
+        self.assertIsNone(browser_agent.preferred_proxy_id)
+
+    @override_settings(DEDICATED_IP_ALLOW_MULTI_ASSIGN=False)
+    @tag("batch_console_agents")
+    def test_agent_detail_blocks_duplicate_dedicated_ip_when_multi_assign_disabled(self):
+        from api.models import PersistentAgent, BrowserUseAgent, ProxyServer, DedicatedProxyAllocation
+
+        proxy = ProxyServer.objects.create(
+            name='Dedicated Proxy Single',
+            proxy_type=ProxyServer.ProxyType.HTTP,
+            host='dedicated.single.example.com',
+            port=8081,
+            username='dedicated',
+            password='secret',
+            static_ip='203.0.113.25',
+            is_active=True,
+            is_dedicated=True,
+        )
+        DedicatedProxyAllocation.objects.assign_to_owner(proxy, self.user)
+
+        browser_agent_a = BrowserUseAgent.objects.create(user=self.user, name='Agent A Browser')
+        agent_a = PersistentAgent.objects.create(
+            user=self.user,
+            name='Agent A',
+            charter='Charter A',
+            browser_use_agent=browser_agent_a,
+        )
+
+        browser_agent_b = BrowserUseAgent.objects.create(user=self.user, name='Agent B Browser')
+        agent_b = PersistentAgent.objects.create(
+            user=self.user,
+            name='Agent B',
+            charter='Charter B',
+            browser_use_agent=browser_agent_b,
+        )
+
+        url_a = reverse('agent_detail', kwargs={'pk': agent_a.id})
+        url_b = reverse('agent_detail', kwargs={'pk': agent_b.id})
+
+        response = self.client.post(url_a, {
+            'name': agent_a.name,
+            'charter': agent_a.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '',
+            'dedicated_proxy_id': str(proxy.id),
+        })
+        self.assertEqual(response.status_code, 302)
+        browser_agent_a.refresh_from_db()
+        self.assertEqual(browser_agent_a.preferred_proxy_id, proxy.id)
+
+        response = self.client.post(url_b, {
+            'name': agent_b.name,
+            'charter': agent_b.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '',
+            'dedicated_proxy_id': str(proxy.id),
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        browser_agent_b.refresh_from_db()
+        self.assertIsNone(browser_agent_b.preferred_proxy_id)
+        self.assertContains(response, "already assigned to another agent")

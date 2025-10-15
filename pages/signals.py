@@ -28,6 +28,10 @@ import logging
 import stripe
 
 from api.models import UserBilling, OrganizationBilling
+from api.services.dedicated_proxy_service import (
+    DedicatedProxyService,
+    DedicatedProxyUnavailableError,
+)
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
 from util.subscription_helper import (
@@ -109,6 +113,91 @@ def _coerce_bool(value: Any) -> bool | None:
     if isinstance(value, Number):
         return bool(value)
     return None
+
+
+def _get_subscription_items_data(source: Any) -> list:
+    if isinstance(source, Mapping):
+        items_source = source.get("items")
+    else:
+        items_source = getattr(source, "items", None)
+
+    if isinstance(items_source, Mapping):
+        data = items_source.get("data") or []
+    else:
+        data = getattr(items_source, "data", None) or []
+
+    if data is None:
+        return []
+    return list(data)
+
+
+def _get_quantity_for_price(source_data: Any, price_id: str) -> int:
+    if not price_id:
+        return 0
+
+    for item in _get_subscription_items_data(source_data):
+        if isinstance(item, Mapping):
+            price = item.get("price") or {}
+            item_price_id = price.get("id")
+            quantity = item.get("quantity")
+        else:
+            price = getattr(item, "price", None)
+            item_price_id = getattr(price, "id", None) if price is not None else None
+            quantity = getattr(item, "quantity", None)
+
+        if item_price_id != price_id:
+            continue
+
+        try:
+            return int(quantity or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    return 0
+
+
+def _sync_dedicated_ip_allocations(owner, owner_type: str, source_data: Any, stripe_settings) -> None:
+    if owner is None:
+        return
+
+    if owner_type == "user":
+        price_id = getattr(stripe_settings, "startup_dedicated_ip_price_id", "")
+    else:
+        price_id = getattr(stripe_settings, "org_team_dedicated_ip_price_id", "")
+
+    if not price_id:
+        return
+
+    desired_qty = max(_get_quantity_for_price(source_data, price_id), 0)
+    current_qty = DedicatedProxyService.allocated_proxies(owner).count()
+
+    if desired_qty == current_qty:
+        return
+
+    if desired_qty > current_qty:
+        missing = desired_qty - current_qty
+        allocated = 0
+        for _ in range(missing):
+            try:
+                DedicatedProxyService.allocate_proxy(owner)
+                allocated += 1
+            except DedicatedProxyUnavailableError:
+                logger.warning(
+                    "Insufficient dedicated proxies for owner %s; fulfilled %s of %s requested.",
+                    getattr(owner, "id", None) or owner,
+                    allocated,
+                    missing,
+                )
+                break
+    else:
+        release_limit = current_qty - desired_qty
+        try:
+            DedicatedProxyService.release_for_owner(owner, limit=release_limit)
+        except Exception:
+            logger.exception(
+                "Failed to release surplus dedicated proxies for owner %s",
+                getattr(owner, "id", None) or owner,
+            )
 
 @receiver(user_signed_up)
 def handle_user_signed_up(sender, request, user, **kwargs):
@@ -323,6 +412,14 @@ def handle_subscription_event(event, **kwargs):
         if event_type == "customer.subscription.deleted" or getattr(sub, "status", "") == "canceled":
             downgrade_owner_to_free_plan(owner)
 
+            try:
+                DedicatedProxyService.release_for_owner(owner)
+            except Exception:
+                logger.exception(
+                    "Failed to release dedicated proxies for owner %s during cancellation",
+                    getattr(owner, "id", None) or owner,
+                )
+
             if owner_type == "user":
                 try:
                     Analytics.track_event(
@@ -425,6 +522,8 @@ def handle_subscription_event(event, **kwargs):
             except Exception:
                 plan_value = PlanNamesChoices.FREE.value
 
+            stripe_settings = get_stripe_settings()
+
             if owner_type == "user":
                 mark_user_billing_with_plan(owner, plan_value, update_anchor=False)
                 TaskCreditService.grant_subscription_credits(
@@ -469,7 +568,6 @@ def handle_subscription_event(event, **kwargs):
                 if organization_billing:
                     prev_seats = getattr(organization_billing, "purchased_seats", 0)
 
-                stripe_settings = get_stripe_settings()
                 overage_price_id = stripe_settings.org_team_additional_task_price_id
                 if overage_price_id:
                     items_data = source_data.get("items", {}).get("data", []) or []
@@ -639,7 +737,7 @@ def handle_subscription_event(event, **kwargs):
                         # For cycle starts we want to reset the active monthly block
                         # instead of stacking an extra TaskCredit record.
                         replace_current = source_data.get("billing_reason") in {"subscription_create", "subscription_cycle"}
-                        
+
                         TaskCreditService.grant_subscription_credits_for_organization(
                             owner,
                             seats=seats_to_grant,
@@ -648,3 +746,5 @@ def handle_subscription_event(event, **kwargs):
                             subscription=sub,
                             replace_current=replace_current,
                         )
+
+            _sync_dedicated_ip_allocations(owner, owner_type, source_data, stripe_settings)

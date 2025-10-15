@@ -102,6 +102,7 @@ def build_org_billing_overview(organization) -> dict[str, Any]:
             "name": plan.get("name"),
             "currency": plan.get("currency", "usd"),
             "monthly_price": plan.get("price", 0),
+            "dedicated_ip_price": plan.get("dedicated_ip_price"),
             "credits_per_seat": plan.get("credits_per_seat"),
         },
         "seats": {

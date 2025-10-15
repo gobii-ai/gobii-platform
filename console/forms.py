@@ -19,6 +19,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class DedicatedIpAddForm(forms.Form):
+    quantity = forms.IntegerField(
+        min_value=1,
+        widget=forms.NumberInput(
+            attrs={
+                "class": "py-2 px-2 w-20 border-gray-200 rounded-lg text-sm text-center focus:border-blue-500 focus:ring-blue-500",
+                "inputmode": "numeric",
+                "max": "99",
+            }
+        ),
+        label="Add Dedicated IPs",
+        help_text="Enter how many new dedicated IPs to add.",
+        initial=1,
+    )
+
+
 class ApiKeyForm(forms.ModelForm):
     class Meta:
         model = ApiKey

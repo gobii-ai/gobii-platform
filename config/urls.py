@@ -68,6 +68,9 @@ from console.views import (
     OrganizationSeatScheduleView,
     OrganizationSeatScheduleCancelView,
     OrganizationSeatPortalView,
+    add_dedicated_ip_quantity,
+    remove_dedicated_ip,
+    remove_all_dedicated_ip,
     update_billing_settings,
     get_billing_settings,
     cancel_subscription,
@@ -179,8 +182,10 @@ urlpatterns = [
     path("console/grant-credits/", grant_credits, name="grant_credits"),
 
     path('billing/settings/update/', update_billing_settings, name='update_billing_settings'),
-
     path('billing/settings/cancel-subscription/', cancel_subscription, name='cancel_subscription'),
+    path('billing/dedicated-ip/add/', add_dedicated_ip_quantity, name='add_dedicated_ip_quantity'),
+    path('billing/dedicated-ip/remove/', remove_dedicated_ip, name='remove_dedicated_ip'),
+    path('billing/dedicated-ip/remove-all/', remove_all_dedicated_ip, name='remove_all_dedicated_ip'),
 
     path('api/v1/user/billing-settings/', get_billing_settings, name='get_billing_settings'),
 

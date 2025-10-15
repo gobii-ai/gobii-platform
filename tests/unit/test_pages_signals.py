@@ -8,7 +8,7 @@ from django.test import RequestFactory, TestCase, tag
 from django.utils import timezone
 from django.contrib.sessions.middleware import SessionMiddleware
 
-from api.models import UserBilling, Organization
+from api.models import UserBilling, Organization, ProxyServer, DedicatedProxyAllocation
 from constants.plans import PlanNamesChoices
 from pages.signals import handle_subscription_event, handle_user_signed_up
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
@@ -76,19 +76,25 @@ def _build_event_payload(
     quantity=1,
     billing_reason="subscription_update",
     product="prod_123",
+    extra_items=None,
 ):
+    items_data = [
+        {
+            "plan": {"usage_type": usage_type},
+            "price": {"product": product},
+            "quantity": quantity,
+        }
+    ]
+
+    if extra_items:
+        items_data.extend(extra_items)
+
     payload = {
         "object": "subscription",
         "id": "sub_123",
         "latest_invoice": invoice_id,
         "items": {
-            "data": [
-                {
-                    "plan": {"usage_type": usage_type},
-                    "price": {"product": product},
-                    "quantity": quantity,
-                }
-            ]
+            "data": items_data,
         },
         "status": status,
         "cancel_at": None,
@@ -188,6 +194,112 @@ class SubscriptionSignalTests(TestCase):
 
         mock_logger.assert_called_once()
         self.assertFalse(UserBilling.objects.filter(user=self.user).exists())
+
+    @tag("batch_pages")
+    def test_dedicated_ip_allocation_from_subscription(self):
+        dedicated_item = {
+            "plan": {"usage_type": "licensed"},
+            "price": {"id": "price_dedicated", "product": "prod_dedicated"},
+            "quantity": 2,
+        }
+        payload = _build_event_payload(extra_items=[dedicated_item])
+        payload["items"]["data"][0]["price"]["id"] = "price_startup"
+        payload["items"]["data"][0]["price"]["product"] = "prod_startup"
+        event = _build_djstripe_event(payload)
+
+        sub = self._mock_subscription(current_period_day=15, subscriber=self.user)
+        sub.stripe_data = payload
+
+        custom_settings = SimpleNamespace(
+            org_team_additional_task_price_id="",
+            startup_dedicated_ip_price_id="price_dedicated",
+            startup_dedicated_ip_product_id="prod_dedicated",
+            org_team_dedicated_ip_price_id="",
+            org_team_dedicated_ip_product_id="",
+        )
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.DedicatedProxyService.allocate_proxy") as mock_allocate, \
+            patch("pages.signals.DedicatedProxyService.release_for_owner") as mock_release, \
+            patch("pages.signals.get_stripe_settings", return_value=custom_settings):
+
+            handle_subscription_event(event)
+
+        self.assertEqual(mock_allocate.call_count, 2)
+        mock_release.assert_not_called()
+
+    @tag("batch_pages")
+    def test_dedicated_ip_release_on_quantity_decrease(self):
+        proxy = ProxyServer.objects.create(
+            name="Dedicated",
+            proxy_type=ProxyServer.ProxyType.HTTP,
+            host="dedicated.example.com",
+            port=8080,
+            username="user",
+            password="pass",
+            static_ip="203.0.113.10",
+            is_active=True,
+            is_dedicated=True,
+        )
+        DedicatedProxyAllocation.objects.assign_to_owner(proxy, self.user)
+
+        payload = _build_event_payload()
+        payload["items"]["data"][0]["price"]["id"] = "price_startup"
+        payload["items"]["data"][0]["price"]["product"] = "prod_startup"
+        event = _build_djstripe_event(payload)
+
+        sub = self._mock_subscription(current_period_day=12, subscriber=self.user)
+        sub.stripe_data = payload
+
+        custom_settings = SimpleNamespace(
+            org_team_additional_task_price_id="",
+            startup_dedicated_ip_price_id="price_dedicated",
+            startup_dedicated_ip_product_id="prod_dedicated",
+            org_team_dedicated_ip_price_id="",
+            org_team_dedicated_ip_product_id="",
+        )
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.DedicatedProxyService.allocate_proxy") as mock_allocate, \
+            patch("pages.signals.DedicatedProxyService.release_for_owner") as mock_release, \
+            patch("pages.signals.get_stripe_settings", return_value=custom_settings):
+
+            handle_subscription_event(event)
+
+        mock_allocate.assert_not_called()
+        mock_release.assert_called_once()
+        self.assertEqual(mock_release.call_args.kwargs.get("limit"), 1)
+
+    @tag("batch_pages")
+    def test_dedicated_ip_release_on_cancellation(self):
+        payload = _build_event_payload()
+        event = _build_djstripe_event(payload, event_type="customer.subscription.deleted")
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.status = "canceled"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.DedicatedProxyService.release_for_owner") as mock_release:
+
+            handle_subscription_event(event)
+
+        mock_release.assert_called_once_with(self.user)
 
 
 @tag("batch_pages")
@@ -412,7 +524,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         event = _build_djstripe_event(payload)
 
-        custom_settings = SimpleNamespace(org_team_additional_task_price_id="price_overage")
+        custom_settings = SimpleNamespace(
+            org_team_additional_task_price_id="price_overage",
+            startup_dedicated_ip_price_id="",
+            startup_dedicated_ip_product_id="",
+            org_team_dedicated_ip_price_id="",
+            org_team_dedicated_ip_product_id="",
+        )
 
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.get_stripe_settings", return_value=custom_settings), \
@@ -443,7 +561,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         event = _build_djstripe_event(payload)
 
-        custom_settings = SimpleNamespace(org_team_additional_task_price_id="price_overage")
+        custom_settings = SimpleNamespace(
+            org_team_additional_task_price_id="price_overage",
+            startup_dedicated_ip_price_id="",
+            startup_dedicated_ip_product_id="",
+            org_team_dedicated_ip_price_id="",
+            org_team_dedicated_ip_product_id="",
+        )
 
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.get_stripe_settings", return_value=custom_settings), \
@@ -470,7 +594,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         event = _build_djstripe_event(payload)
 
-        custom_settings = SimpleNamespace(org_team_additional_task_price_id="price_overage")
+        custom_settings = SimpleNamespace(
+            org_team_additional_task_price_id="price_overage",
+            startup_dedicated_ip_price_id="",
+            startup_dedicated_ip_product_id="",
+            org_team_dedicated_ip_price_id="",
+            org_team_dedicated_ip_product_id="",
+        )
 
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.get_stripe_settings", return_value=custom_settings), \
@@ -505,7 +635,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         event = _build_djstripe_event(payload)
 
-        custom_settings = SimpleNamespace(org_team_additional_task_price_id="price_overage")
+        custom_settings = SimpleNamespace(
+            org_team_additional_task_price_id="price_overage",
+            startup_dedicated_ip_price_id="",
+            startup_dedicated_ip_product_id="",
+            org_team_dedicated_ip_price_id="",
+            org_team_dedicated_ip_product_id="",
+        )
 
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.get_stripe_settings", return_value=custom_settings), \

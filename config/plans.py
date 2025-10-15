@@ -28,6 +28,9 @@ PLAN_CONFIG = {
         "monthly_task_credits": 500,
         "api_rate_limit": 600,
         "product_id": "",
+        "dedicated_ip_product_id": "",
+        "dedicated_ip_price_id": "",
+        "dedicated_ip_price": 5,
         "agent_limit": AGENTS_UNLIMITED,
         "name": "Pro",
         "description": "Pro plan with enhanced features and support.",
@@ -44,6 +47,9 @@ PLAN_CONFIG = {
         "product_id": "",
         "seat_price_id": "",
         "overage_price_id": "",
+        "dedicated_ip_product_id": "",
+        "dedicated_ip_price_id": "",
+        "dedicated_ip_price": 5,
         "agent_limit": AGENTS_UNLIMITED,
         "name": "Team",
         "description": "Team plan with collaboration features and priority support.",
@@ -65,11 +71,19 @@ def _refresh_plan_products() -> None:
         return
 
     PLAN_CONFIG["startup"]["product_id"] = stripe_settings.startup_product_id or ""
+    PLAN_CONFIG["startup"]["dedicated_ip_product_id"] = stripe_settings.startup_dedicated_ip_product_id or ""
+    PLAN_CONFIG["startup"]["dedicated_ip_price_id"] = stripe_settings.startup_dedicated_ip_price_id or ""
 
     PLAN_CONFIG["org_team"]["product_id"] = stripe_settings.org_team_product_id or ""
     PLAN_CONFIG["org_team"]["seat_price_id"] = stripe_settings.org_team_price_id or ""
     PLAN_CONFIG["org_team"]["overage_price_id"] = (
         stripe_settings.org_team_additional_task_price_id or ""
+    )
+    PLAN_CONFIG["org_team"]["dedicated_ip_product_id"] = (
+        stripe_settings.org_team_dedicated_ip_product_id or ""
+    )
+    PLAN_CONFIG["org_team"]["dedicated_ip_price_id"] = (
+        stripe_settings.org_team_dedicated_ip_price_id or ""
     )
 
 
