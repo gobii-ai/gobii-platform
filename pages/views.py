@@ -31,6 +31,7 @@ from .utils_markdown import (
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from django.contrib import sitemaps
 from django.urls import reverse
+from django.utils import timezone as dj_timezone
 from django.utils.html import escape
 from opentelemetry import trace
 import logging
@@ -410,6 +411,16 @@ class LandingRedirectView(View):
         params = request.GET.copy()          # QueryDict → mutable
         params['g'] = code  # Always tag with the landing code
 
+        # Persist landing attribution in the session so we can reach it during signup.
+        try:
+            request.session.setdefault('landing_code_first', code)
+            request.session['landing_code_last'] = code
+            request.session.setdefault('landing_first_seen_at', dj_timezone.now().isoformat())
+            request.session['landing_last_seen_at'] = dj_timezone.now().isoformat()
+            request.session.modified = True
+        except Exception:
+            logger.exception("Failed to persist landing attribution in session for code %s", code)
+
         utm_fields = (
             "utm_source",
             "utm_medium",
@@ -429,6 +440,25 @@ class LandingRedirectView(View):
         target_url = f"{reverse('pages:home')}?{query_string}" if query_string else reverse('pages:home')
 
         response = HttpResponseRedirect(target_url)
+
+        # Mirror landing attribution details in cookies (fallback if sessions are disabled).
+        try:
+            cookie_max_age = 60 * 24 * 60 * 60  # 60 days
+            response.set_cookie(
+                'landing_code',
+                code,
+                max_age=cookie_max_age,
+                samesite='Lax',
+            )
+            if '__landing_first' not in request.COOKIES:
+                response.set_cookie(
+                    '__landing_first',
+                    code,
+                    max_age=cookie_max_age,
+                    samesite='Lax',
+                )
+        except Exception:
+            logger.exception("Failed to persist landing attribution cookies for code %s", code)
 
         # Store the fbclid cookie if it exists
         try:

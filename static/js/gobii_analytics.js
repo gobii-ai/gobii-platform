@@ -54,6 +54,9 @@ if (typeof window !== 'undefined') {
 }
 
 const UTM_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid'];
+
+const LANDING_PARAM = 'g';
 
 (function() {
   const params = new URLSearchParams(window.location.search);
@@ -66,6 +69,66 @@ const UTM_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', '
       document.cookie = p + "=" + encodeURIComponent(value) + "; expires=" + d.toUTCString() + "; path=/; SameSite=Lax; domain=" + COOKIE_DOMAIN;
     }
   });
+})();
+
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  const found = {};
+
+  CLICK_ID_PARAMS.forEach((param) => {
+    const value = params.get(param);
+    if (!value) return;
+
+    const expiry = new Date();
+    expiry.setTime(expiry.getTime() + (60*24*60*60*1000));
+    const attrs = `; expires=${expiry.toUTCString()}; path=/; SameSite=Lax; domain=${COOKIE_DOMAIN}`;
+    document.cookie = `${param}=${encodeURIComponent(value)}${attrs}`;
+    found[param] = value;
+  });
+
+  if (Object.keys(found).length === 0) return;
+
+  if (!document.cookie.includes('__click_first=')) {
+    const expiry = new Date();
+    expiry.setTime(expiry.getTime() + (60*24*60*60*1000));
+    const attrs = `; expires=${expiry.toUTCString()}; path=/; SameSite=Lax; domain=${COOKIE_DOMAIN}`;
+    document.cookie = `__click_first=${encodeURIComponent(JSON.stringify(found))}${attrs}`;
+  }
+})();
+
+(function () {
+  const expiry = new Date();
+  expiry.setTime(expiry.getTime() + (60*24*60*60*1000));
+  const attrs = `; expires=${expiry.toUTCString()}; path=/; SameSite=Lax; domain=${COOKIE_DOMAIN}`;
+
+  const currentPath = window.location.pathname + window.location.search;
+  const referrer = document.referrer || '';
+
+  if (!document.cookie.includes('first_referrer=')) {
+    document.cookie = `first_referrer=${encodeURIComponent(referrer)}${attrs}`;
+  }
+  document.cookie = `last_referrer=${encodeURIComponent(referrer)}${attrs}`;
+
+  if (!document.cookie.includes('first_path=')) {
+    document.cookie = `first_path=${encodeURIComponent(currentPath)}${attrs}`;
+  }
+  document.cookie = `last_path=${encodeURIComponent(currentPath)}${attrs}`;
+})();
+
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  const landingCode = params.get(LANDING_PARAM);
+  if (!landingCode) return;
+
+  const d = new Date();
+  d.setTime(d.getTime() + (60*24*60*60*1000));
+  const cookieValue = encodeURIComponent(landingCode);
+  const cookieAttrs = `; expires=${d.toUTCString()}; path=/; SameSite=Lax; domain=${COOKIE_DOMAIN}`;
+  document.cookie = `landing_code=${cookieValue}${cookieAttrs}`;
+
+  if (!document.cookie.includes('__landing_first=')) {
+    document.cookie = `__landing_first=${cookieValue}${cookieAttrs}`;
+  }
 })();
 
 (function () {
