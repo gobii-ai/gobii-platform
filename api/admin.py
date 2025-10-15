@@ -2910,10 +2910,26 @@ class PersistentTokenRangeAdmin(admin.ModelAdmin):
 
 @admin.register(BrowserModelEndpoint)
 class BrowserModelEndpointAdmin(admin.ModelAdmin):
-    list_display = ("key", "provider", "browser_model", "browser_base_url", "enabled", "supports_vision")
+    list_display = (
+        "key",
+        "provider",
+        "browser_model",
+        "browser_base_url",
+        "max_output_tokens",
+        "enabled",
+        "supports_vision",
+    )
     list_filter = ("enabled", "provider", "supports_vision")
     search_fields = ("key", "browser_model", "browser_base_url")
-    fields = ("key", "provider", "enabled", "browser_model", "browser_base_url", "supports_vision")
+    fields = (
+        "key",
+        "provider",
+        "enabled",
+        "browser_model",
+        "browser_base_url",
+        "max_output_tokens",
+        "supports_vision",
+    )
 
 
 class BrowserTierEndpointInline(admin.TabularInline):
