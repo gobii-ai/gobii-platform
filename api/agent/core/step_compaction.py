@@ -426,7 +426,7 @@ def llm_summarise_steps(previous: str, steps: Sequence[StepData], safety_identif
 
         if model.startswith("openai"):
             if safety_identifier:
-                params["safety_identifier"] = safety_identifier
+                params["safety_identifier"] = str(safety_identifier)
 
         resp = run_completion(model=model, messages=prompt, params=params)
         return resp.choices[0].message.content.strip()
