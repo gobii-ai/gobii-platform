@@ -2,6 +2,10 @@
 {% load static %}
 {% load waffle_tags %}
 {% block title %}Pricing - Gobii{% endblock %}
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Compare Gobii's Free, Pro, and Enterprise plans to scale always-on AI employees with transparent pricing.">
+{% endblock %}
 {% block content %}
 <div class="relative">
   <!-- Grid pattern overlay -->
@@ -172,4 +176,3 @@
   </div>
 </div>
 {% endblock %} 
-

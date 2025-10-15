@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% load static %}
 {% block title %}About • {{ settings.PUBLIC_BRAND_NAME }}{% endblock %}
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Meet the team building Gobii's AI employees and learn how we automate web workflows for modern teams.">
+{% endblock %}
 
 {% block content %}
 <section class="py-20 bg-white text-slate-900">

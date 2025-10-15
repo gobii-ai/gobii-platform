@@ -150,3 +150,56 @@ class AIEmployeeDirectoryTests(TestCase):
             response,
             "<meta name=\"description\" content=\"Explore Gobii's directory of pre-trained AI employees. Compare charters, cadences, and integrations to hire the perfect always-on agent for your team.\">",
         )
+
+
+@tag("batch_pages")
+class MarketingMetaTests(TestCase):
+    @tag("batch_pages")
+    def test_terms_meta_description(self):
+        response = self.client.get("/tos/")
+        self.assertContains(
+            response,
+            "<meta name=\"description\" content=\"Review Gobii's Terms of Service covering usage policies, billing, and compliance for our AI employee platform.\">",
+        )
+
+    @tag("batch_pages")
+    def test_privacy_meta_description(self):
+        response = self.client.get("/privacy/")
+        self.assertContains(
+            response,
+            "<meta name=\"description\" content=\"Understand how Gobii collects, uses, and safeguards data across our AI employee platform.\">",
+        )
+
+    @tag("batch_pages")
+    def test_about_meta_description(self):
+        response = self.client.get("/about/")
+        self.assertContains(
+            response,
+            "<meta name=\"description\" content=\"Meet the team building Gobii's AI employees and learn how we automate web workflows for modern teams.\">",
+        )
+
+    @tag("batch_pages")
+    def test_careers_meta_description(self):
+        response = self.client.get("/careers/")
+        self.assertContains(
+            response,
+            "<meta name=\"description\" content=\"Join Gobii to build AI coworkers that browse, research, and automate the web for organizations worldwide.\">",
+        )
+
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_pricing_meta_description(self):
+        response = self.client.get("/pricing/")
+        self.assertContains(
+            response,
+            "<meta name=\"description\" content=\"Compare Gobii's Free, Pro, and Enterprise plans to scale always-on AI employees with transparent pricing.\">",
+        )
+
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_support_meta_description(self):
+        response = self.client.get("/support/")
+        self.assertContains(
+            response,
+            "<meta name=\"description\" content=\"Connect with Gobii's support team via Discord, email, or our help form to keep your AI employees running smoothly.\">",
+        )
