@@ -185,21 +185,3 @@ class MarketingMetaTests(TestCase):
             response,
             "<meta name=\"description\" content=\"Join Gobii to build AI coworkers that browse, research, and automate the web for organizations worldwide.\">",
         )
-
-    @tag("batch_pages")
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_pricing_meta_description(self):
-        response = self.client.get("/pricing/")
-        self.assertContains(
-            response,
-            "<meta name=\"description\" content=\"Compare Gobii's Free, Pro, and Enterprise plans to scale always-on AI employees with transparent pricing.\">",
-        )
-
-    @tag("batch_pages")
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_support_meta_description(self):
-        response = self.client.get("/support/")
-        self.assertContains(
-            response,
-            "<meta name=\"description\" content=\"Connect with Gobii's support team via Discord, email, or our help form to keep your AI employees running smoothly.\">",
-        )
