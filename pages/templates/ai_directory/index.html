@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% load static %}
 {% block title %}AI Employee Directory – Gobii{% endblock %}
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Explore Gobii's directory of pre-trained AI employees. Compare charters, cadences, and integrations to hire the perfect always-on agent for your team.">
+{% endblock %}
 {% block content %}
 <div class="relative bg-gradient-to-b from-white via-indigo-50/30 to-white">
   <section class="max-w-6xl mx-auto px-6 pt-20 pb-12 text-center">
