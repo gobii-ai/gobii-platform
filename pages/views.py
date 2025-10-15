@@ -679,7 +679,8 @@ class AIEmployeeTemplateSitemap(sitemaps.Sitemap):
     def items(self):
         try:
             return list(AIEmployeeTemplateService.get_active_templates())
-        except Exception:  # pragma: no cover - defensive fallback to keep sitemap working
+        except Exception as e:  # pragma: no cover - defensive fallback to keep sitemap working
+            logger.error("Failed to generate AIEmployeeTemplateSitemap items: %s", e, exc_info=True)
             return []
 
     def location(self, template):
