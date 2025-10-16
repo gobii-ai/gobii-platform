@@ -160,3 +160,28 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
 
         second = execute_send_email(self.agent, params)
         self.assertEqual(second.get("status"), "ok")
+
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_duplicate_detects_nonconsecutive_match(self, mock_deliver_email, mock_close_old_connections):
+        first_params = {
+            "to_address": self.email_address,
+            "subject": "Report Reminder",
+            "mobile_first_html": "<p>Version A</p>",
+        }
+        second_params = {
+            "to_address": self.email_address,
+            "subject": "Report Reminder",
+            "mobile_first_html": "<p>Version B</p>",
+        }
+
+        first = execute_send_email(self.agent, first_params)
+        self.assertEqual(first.get("status"), "ok")
+
+        second = execute_send_email(self.agent, second_params)
+        self.assertEqual(second.get("status"), "ok")
+
+        mock_deliver_email.reset_mock()
+        third = execute_send_email(self.agent, first_params)
+        self.assertEqual(third.get("status"), "error")
+        self.assertTrue(third.get("duplicate_detected"))
+        self.assertEqual(mock_deliver_email.call_count, 0)

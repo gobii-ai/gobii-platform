@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from ...models import PersistentAgent, PersistentAgentMessage
 
-CHECK_WINDOW_MINUTES = 30
+CHECK_WINDOW_MINUTES = 10
 DEFAULT_SIMILARITY_THRESHOLD = 0.97
 
 
@@ -35,7 +35,7 @@ class DuplicateDetectionResult:
         else:
             detail = "is highly similar to"
         message = (
-            f"Message blocked: content {detail} a message sent within the last 30 minutes "
+            f"Message blocked: content {detail} a message sent within the last {CHECK_WINDOW_MINUTES} minutes "
             "and may be a duplicate. Please revise before sending again."
         )
         payload: Dict[str, Any] = {
@@ -83,23 +83,20 @@ def detect_recent_duplicate_message(
     if to_address:
         qs = qs.filter(to_endpoint__address=to_address)
 
-    last_message = qs.order_by("-timestamp").first()
-    if not last_message:
-        return None
-
-    previous_body = (last_message.body or "").strip()
     current_body = (body or "").strip()
 
-    if previous_body == current_body:
-        return DuplicateDetectionResult(reason="exact", previous_message=last_message)
+    for previous_message in qs.order_by("-timestamp").iterator():
+        previous_body = (previous_message.body or "").strip()
+        if not previous_body:
+            continue
 
-    if not previous_body or not current_body:
-        return None
+        if previous_body == current_body:
+            return DuplicateDetectionResult(reason="exact", previous_message=previous_message)
 
-    ratio = difflib.SequenceMatcher(None, previous_body, current_body).ratio()
-    if ratio >= similarity_threshold:
-        return DuplicateDetectionResult(
-            reason="similarity", previous_message=last_message, similarity=ratio
-        )
+        ratio = difflib.SequenceMatcher(None, previous_body, current_body).ratio()
+        if ratio >= similarity_threshold:
+            return DuplicateDetectionResult(
+                reason="similarity", previous_message=previous_message, similarity=ratio
+            )
 
     return None

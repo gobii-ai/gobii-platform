@@ -111,15 +111,6 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
             if not agent.is_recipient_whitelisted(CommsChannel.SMS, cc_num):
                 return {"status": "error", "message": f"Group member {cc_num} not allowed for this agent."}
 
-        duplicate = detect_recent_duplicate_message(
-            agent,
-            channel=CommsChannel.SMS,
-            body=body,
-            to_address=to_number,
-        )
-        if duplicate:
-            return duplicate.to_error_response()
-
         to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
             channel=CommsChannel.SMS, address=to_number, defaults={"owner_agent": None}
         )
@@ -132,8 +123,17 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
             )
             cc_endpoint_objects.append(cc_endpoint)
 
-        # Perform link shortening in body if needed
+        # Perform link shortening before duplicate detection so we compare canonical bodies
         body = shorten_links_in_body(body, user=agent.user)
+
+        duplicate = detect_recent_duplicate_message(
+            agent,
+            channel=CommsChannel.SMS,
+            body=body,
+            to_address=to_number,
+        )
+        if duplicate:
+            return duplicate.to_error_response()
 
         message = PersistentAgentMessage.objects.create(
             owner_agent=agent,
