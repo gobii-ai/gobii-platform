@@ -196,6 +196,8 @@ jobs:
             tag: batch_dedicated_proxy_models
           - batch: dedicated_proxy_service
             tag: batch_dedicated_proxy_service
+          - batch: browser_agent_max_tokens
+            tag: batch_browser_agent_max_tokens
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings

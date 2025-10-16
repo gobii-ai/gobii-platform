@@ -1324,6 +1324,11 @@ class BrowserModelEndpoint(models.Model):
 
     browser_model = models.CharField(max_length=256)
     browser_base_url = models.CharField(max_length=256, blank=True, help_text="Base URL for OpenAI-compatible providers (optional)")
+    max_output_tokens = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Optional override of the provider's max output tokens; null disables the override.",
+    )
     supports_vision = models.BooleanField(
         default=False,
         help_text="Indicates the model can process image or multimodal inputs",
