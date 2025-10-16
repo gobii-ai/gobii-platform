@@ -4,11 +4,13 @@
 {% block title %}{{ plan.name }} Plan - Gobii{% endblock %}
 
 {% block head_extras %}
-<script>
- if (window.analytics) {
-   analytics.track('{{ analytics.events.PLAN_INTEREST }}');
- }
-</script>
+  {{ block.super }}
+  <meta name="description" content="Stay in the loop on Gobii's {{ plan.name }} plan and get notified when new AI employee capabilities launch.">
+  <script>
+   if (window.analytics) {
+     analytics.track('{{ analytics.events.PLAN_INTEREST }}');
+   }
+  </script>
 {% endblock %}
 
 {% block content %}

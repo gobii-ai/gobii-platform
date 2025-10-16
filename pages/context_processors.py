@@ -2,6 +2,8 @@ import hashlib
 from hashlib import sha256
 
 from agents.services import AgentService
+from django.conf import settings as django_settings
+from django.http import HttpRequest
 from api.agent.core.llm_config import is_llm_bootstrap_required
 from config import settings
 from config.plans import AGENTS_UNLIMITED
@@ -95,9 +97,14 @@ def environment_info(request):
     Adds environment info to every template so you can write
         {% if environment.is_production %} … {% endif %}
     """
+    release_env = getattr(
+        django_settings,
+        "GOBII_RELEASE_ENV",
+        getattr(settings, "GOBII_RELEASE_ENV", "local"),
+    )
     return {
         'environment': {
-            'is_production': settings.GOBII_RELEASE_ENV == 'prod',
+            'is_production': release_env.lower() in ('prod', 'production'),
         }
     }
 
@@ -137,4 +144,14 @@ def llm_bootstrap(request):
     """Expose whether the platform still requires initial LLM configuration."""
     return {
         'llm_bootstrap_required': is_llm_bootstrap_required()
+    }
+
+
+def canonical_url(request: HttpRequest):
+    """Provide a canonical URL for templates; avoid query strings by using request.path."""
+    canonical = ""
+    if hasattr(request, "build_absolute_uri"):
+        canonical = request.build_absolute_uri(getattr(request, "path", "/"))
+    return {
+        'canonical_url': canonical,
     }

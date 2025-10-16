@@ -671,6 +671,25 @@ class StaticViewSitemap(sitemaps.Sitemap):
     def location(self, item):
         return reverse(item)
 
+
+class AIEmployeeTemplateSitemap(sitemaps.Sitemap):
+    changefreq = "weekly"
+    priority = 0.6
+
+    def items(self):
+        try:
+            return list(AIEmployeeTemplateService.get_active_templates())
+        except Exception as e:  # pragma: no cover - defensive fallback to keep sitemap working
+            logger.error("Failed to generate AIEmployeeTemplateSitemap items: %s", e, exc_info=True)
+            return []
+
+    def location(self, template):
+        return reverse('pages:ai_employee_detail', kwargs={'slug': template.code})
+
+    def lastmod(self, template):
+        return getattr(template, "updated_at", None)
+
+
 class SupportView(TemplateView):
     pass
 

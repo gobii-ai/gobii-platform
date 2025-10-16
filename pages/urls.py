@@ -14,6 +14,7 @@ from .views import (
     CareersView,
     StartupCheckoutView,
     StaticViewSitemap,
+    AIEmployeeTemplateSitemap,
     LandingRedirectView,
     ClearSignupTrackingView,
     AIEmployeeDirectoryView,
@@ -33,6 +34,8 @@ sitemaps = {
 
 if GOBII_PROPRIETARY_MODE:
     sitemaps['blog'] = BlogSitemap
+
+sitemaps['ai_employees'] = AIEmployeeTemplateSitemap
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),

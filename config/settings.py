@@ -267,6 +267,7 @@ TEMPLATES = [
                 "pages.context_processors.show_signup_tracking",
                 "pages.context_processors.analytics",
                 "pages.context_processors.llm_bootstrap",
+                "pages.context_processors.canonical_url",
             ],
             # Manually register project-local template tag libraries
             "libraries": {

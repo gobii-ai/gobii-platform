@@ -41,6 +41,10 @@
   <link rel="manifest" href="{% static 'manifest.json' %}?v=4">
   <meta name="theme-color" content="#0ea5e9">
 
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and canonical_url %}
+  <link rel="canonical" href="{{ canonical_url }}">
+  {% endif %}
+
   {% if settings.GA_MEASUREMENT_ID and not debug %}
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id={{ settings.GA_MEASUREMENT_ID }}"></script>
