@@ -17,6 +17,7 @@ from django.conf import settings
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from ..comms.outbound_delivery import deliver_agent_sms
+from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.text_sanitizer import strip_control_chars
 from ...models import (
     CommsChannel,
@@ -122,8 +123,17 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
             )
             cc_endpoint_objects.append(cc_endpoint)
 
-        # Perform link shortening in body if needed
+        # Perform link shortening before duplicate detection so we compare canonical bodies
         body = shorten_links_in_body(body, user=agent.user)
+
+        duplicate = detect_recent_duplicate_message(
+            agent,
+            channel=CommsChannel.SMS,
+            body=body,
+            to_address=to_number,
+        )
+        if duplicate:
+            return duplicate.to_error_response()
 
         message = PersistentAgentMessage.objects.create(
             owner_agent=agent,
