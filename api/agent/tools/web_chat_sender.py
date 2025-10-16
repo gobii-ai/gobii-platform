@@ -20,6 +20,7 @@ from ...models import (
     parse_web_user_address,
 )
 from ...services.web_sessions import get_active_web_session
+from .outbound_duplicate_guard import detect_recent_duplicate_message
 
 
 def get_send_chat_tool() -> Dict[str, Any]:
@@ -128,6 +129,15 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         user_endpoint,
         PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
     )
+
+    duplicate = detect_recent_duplicate_message(
+        agent,
+        channel=CommsChannel.WEB,
+        body=body,
+        conversation_id=conversation.id,
+    )
+    if duplicate:
+        return duplicate.to_error_response()
 
     message = PersistentAgentMessage.objects.create(
         owner_agent=agent,

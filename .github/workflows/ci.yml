@@ -102,6 +102,8 @@ jobs:
             tag: batch_email_sender_db
           - batch: outbound_delivery
             tag: batch_outbound_delivery
+          - batch: outbound_dedupe
+            tag: batch_outbound_dedupe
           - batch: browser_task_db
             tag: batch_browser_task_db
           - batch: browser_task_followup

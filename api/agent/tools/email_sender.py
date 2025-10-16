@@ -18,6 +18,7 @@ from ...models import (
 from django.conf import settings
 import os
 from ..comms.outbound_delivery import deliver_agent_email
+from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
 from util.text_sanitizer import strip_control_chars
 
@@ -76,6 +77,15 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         # Ensure a healthy DB connection for subsequent ORM ops
         from django.db import close_old_connections
         from django.db.utils import OperationalError
+        duplicate = detect_recent_duplicate_message(
+            agent,
+            channel=CommsChannel.EMAIL,
+            body=mobile_first_html,
+            to_address=to_address,
+        )
+        if duplicate:
+            return duplicate.to_error_response()
+
         close_old_connections()
 
         from_endpoint = (

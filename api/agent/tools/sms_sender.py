@@ -17,6 +17,7 @@ from django.conf import settings
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from ..comms.outbound_delivery import deliver_agent_sms
+from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.text_sanitizer import strip_control_chars
 from ...models import (
     CommsChannel,
@@ -109,6 +110,15 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
         for cc_num in cc_numbers:
             if not agent.is_recipient_whitelisted(CommsChannel.SMS, cc_num):
                 return {"status": "error", "message": f"Group member {cc_num} not allowed for this agent."}
+
+        duplicate = detect_recent_duplicate_message(
+            agent,
+            channel=CommsChannel.SMS,
+            body=body,
+            to_address=to_number,
+        )
+        if duplicate:
+            return duplicate.to_error_response()
 
         to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
             channel=CommsChannel.SMS, address=to_number, defaults={"owner_agent": None}
