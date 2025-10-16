@@ -93,7 +93,7 @@ def detect_recent_duplicate_message(
         if previous_body == current_body:
             return DuplicateDetectionResult(reason="exact", previous_message=previous_message)
 
-        ratio = difflib.SequenceMatcher(None, previous_body, current_body).ratio()
+        ratio = difflib.SequenceMatcher(None, previous_body, current_body, autojunk=True).ratio()
         if ratio >= similarity_threshold:
             return DuplicateDetectionResult(
                 reason="similarity", previous_message=previous_message, similarity=ratio
