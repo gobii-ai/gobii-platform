@@ -2329,7 +2329,8 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int) -> str:
     return (
         f"WARNING: Your previous {streak_label} included zero tool calls. "
         "You MUST include at least one tool call in this response, even if you only call sleep_until_next_trigger. "
-        "If no other action is needed, call sleep_until_next_trigger as your tool call now."
+        "If no other action is needed, call sleep_until_next_trigger as your tool call now. "
+        "Do NOT embed outbound messages inside your content - always call send_email, send_sms, send_chat_message, or send_agent_message instead. "
     )
 
 
@@ -2348,6 +2349,8 @@ def _get_system_instruction(
         "If your charter changes, update your charter using the 'update_charter' tool. BE DETAILED. Update and add detail and nuance any time the user gives you feedback or you can infer intent from the user's communication. BE DETAILED. "
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
         "Use the 'update_schedule' tool to update your cron schedule any time it needs to change. "
+        "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content. "
+        "Instead, ALWAYS call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message) to deliver the message. "
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
         "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISE TIMING --CONFIRM WITH THE USER. "
         "IF RELEVANT, ASK THE USER DETAILS SUCH AS TIMEZONE, etc. "
