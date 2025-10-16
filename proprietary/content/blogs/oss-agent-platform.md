@@ -12,7 +12,7 @@ tags:
   - automation
 ---
 
-<figure style="margin: 0 0 0 5px; text-align: center; float: right; display: block;">
+<figure style="margin: 0 0 0 5px; max-width: 50%; text-align: center; float: right; display: block;">
   <video
     src="https://github.com/user-attachments/assets/b18068c6-695c-4a21-ac08-c298218b7882"
     width="800"
