@@ -718,6 +718,27 @@ class BrowserUseAgentTask(models.Model):
         blank=True,
         help_text="LLM provider used for this step (e.g., 'anthropic', 'openai')",
     )
+    webhook_url = models.URLField(
+        max_length=2048,
+        null=True,
+        blank=True,
+        help_text="Callback URL invoked when the task reaches a terminal state.",
+    )
+    webhook_last_called_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the most recent webhook attempt.",
+    )
+    webhook_last_status_code = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="HTTP status code returned by the most recent webhook attempt.",
+    )
+    webhook_last_error = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Error message captured from the most recent webhook attempt, if any.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

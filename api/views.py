@@ -33,6 +33,7 @@ from .serializers import (
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from .tasks import process_browser_use_task
+from .services.task_webhooks import trigger_task_webhook
 from opentelemetry import baggage, context, trace
 from tasks.services import TaskCreditService
 import logging
@@ -630,6 +631,11 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                 with traced("DB-UPDATE Task"):
                     task.save(update_fields=['status', 'updated_at'])
                     span.add_event('TASK Cancelled', {'agent.id': str(agentId)})
+
+                try:
+                    trigger_task_webhook(task)
+                except Exception:
+                    logger.exception("Unexpected error while triggering webhook for cancelled task %s", task.id)
 
                 cancel_props = Analytics.with_org_properties(
                     {

@@ -257,6 +257,16 @@ class BrowserUseAgentTaskSerializerTests(APITestCase):
         self.assertTrue(serializer.is_valid())
         self.assertIn('wait', serializer.validated_data)
 
+    def test_serializer_accepts_valid_webhook_url(self):
+        serializer = BrowserUseAgentTaskSerializer(data={'prompt': 'Test task', 'webhook': 'https://example.com/hook'})
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data['webhook_url'], 'https://example.com/hook')
+
+    def test_serializer_rejects_invalid_webhook_scheme(self):
+        serializer = BrowserUseAgentTaskSerializer(data={'prompt': 'Test task', 'webhook': 'ftp://example.com/hook'})
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('webhook', serializer.errors)
+
 
 @tag('batch_api_org_keys')
 class OrganizationApiKeyTests(APITestCase):
@@ -526,7 +536,19 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         data = {'prompt': "Test task with too large wait", 'wait': 1400}
         response = self.client.post(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        
+
+    @patch('api.views.process_browser_use_task.delay')
+    def test_create_task_with_webhook_returns_url(self, mock_delay):
+        url = reverse('api:agent-tasks-list', kwargs={'agentId': self.agent1_user1.id})
+        data = {'prompt': '{"detail": "Webhook task"}', 'webhook': 'https://example.com/hook'}
+        response = self.client.post(url, data, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['webhook'], 'https://example.com/hook')
+        task = BrowserUseAgentTask.objects.get(id=response.data['id'])
+        self.assertEqual(task.webhook_url, 'https://example.com/hook')
+        mock_delay.assert_called_once()
+
 
     def test_get_task_result_success(self):
         self.task1_agent1_user1.status = BrowserUseAgentTask.StatusChoices.COMPLETED
@@ -623,6 +645,21 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         task_to_cancel.refresh_from_db()
         self.assertEqual(task_to_cancel.status, BrowserUseAgentTask.StatusChoices.CANCELLED)
         self.assertTrue(task_to_cancel.updated_at > task_to_cancel.created_at)
+
+    @patch('api.views.trigger_task_webhook')
+    def test_cancel_task_triggers_webhook_when_configured(self, mock_trigger):
+        task_to_cancel = BrowserUseAgentTask.objects.create(
+            agent=self.agent1_user1,
+            user=self.user1,
+            status=BrowserUseAgentTask.StatusChoices.PENDING,
+            prompt={'detail': 'Webhook Cancel'},
+            webhook_url='https://example.com/hook',
+        )
+        url = reverse('api:agent-tasks-cancel-task', kwargs={'agentId': self.agent1_user1.id, 'id': task_to_cancel.id})
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_trigger.assert_called_once()
 
     def test_cancel_task_completed_conflict(self):
         task_completed = BrowserUseAgentTask.objects.create(
