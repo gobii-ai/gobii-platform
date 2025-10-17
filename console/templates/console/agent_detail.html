@@ -676,7 +676,7 @@
         <div>
           <h2 class="text-lg font-semibold text-gray-800">Outbound Webhooks</h2>
           <p class="text-sm text-gray-500">
-            Manage webhook endpoints this agent can trigger with the <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">send_webhook_event</code> tool.
+            Manage webhook endpoints this agent can trigger.
           </p>
         </div>
         <button type="button"
@@ -706,7 +706,6 @@
             <tr class="align-top">
               <td class="px-4 py-3 text-sm text-gray-800">
                 <div class="font-medium">{{ webhook.name }}</div>
-                <div class="mt-1 text-xs text-gray-500 font-mono break-all">id={{ webhook.id }}</div>
               </td>
               <td class="px-4 py-3 text-sm text-gray-700">
                 <div class="break-all">{{ webhook.url }}</div>
