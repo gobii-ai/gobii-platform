@@ -48,6 +48,11 @@
         window.lucide.createIcons();
       }
     });
+    document.addEventListener('htmx:afterSwap', function () {
+      if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+      }
+    });
   </script>
 
   {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and canonical_url %}
