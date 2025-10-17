@@ -10,7 +10,6 @@ const COMMUNICATION_TOOL_NAMES = [
   'send_web_message',
   'send_chat_message',
   'send_agent_message',
-  'send_webhook_event',
 ] as const
 
 const BASE_SKIP_TOOL_NAMES = ['sleep', 'sleep_until_next_trigger', 'action', '', null] as const
