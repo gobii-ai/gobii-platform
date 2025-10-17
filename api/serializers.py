@@ -1,5 +1,6 @@
 # gobii_platform/api/serializers.py
 import uuid
+from urllib.parse import urlparse
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
@@ -85,11 +86,49 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
         help_text="Domain-specific secrets for the task. REQUIRED FORMAT: {'https://example.com': {'x_api_key': 'value', 'x_username': 'user'}}. Each domain can have multiple secrets. Secret keys will be available as placeholders in the prompt for the specified domains."
     )
     credits_cost = serializers.DecimalField(max_digits=12, decimal_places=3, min_value="0.001", required=False, allow_null=True)
+    webhook = serializers.URLField(
+        source='webhook_url',
+        required=False,
+        allow_null=True,
+        help_text="HTTP or HTTPS URL invoked when the task finishes.",
+    )
+    webhook_last_called_at = serializers.DateTimeField(read_only=True)
+    webhook_last_status_code = serializers.IntegerField(read_only=True, allow_null=True)
+    webhook_last_error = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
 
     class Meta:
         model = BrowserUseAgentTask
-        fields = ['id', 'agent', 'agent_id', 'organization_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at', 'error_message', 'wait', 'secrets', 'credits_cost']
-        read_only_fields = ('id', 'agent_id', 'organization_id', 'status', 'created_at', 'updated_at', 'error_message')
+        fields = [
+            'id',
+            'agent',
+            'agent_id',
+            'organization_id',
+            'prompt',
+            'output_schema',
+            'status',
+            'created_at',
+            'updated_at',
+            'error_message',
+            'wait',
+            'secrets',
+            'credits_cost',
+            'webhook',
+            'webhook_last_called_at',
+            'webhook_last_status_code',
+            'webhook_last_error',
+        ]
+        read_only_fields = (
+            'id',
+            'agent_id',
+            'organization_id',
+            'status',
+            'created_at',
+            'updated_at',
+            'error_message',
+            'webhook_last_called_at',
+            'webhook_last_status_code',
+            'webhook_last_error',
+        )
         # 'prompt' and 'output_schema' are writable by not being in read_only_fields
         ref_name = "TaskDetail" # Optional: for explicit component naming
 
@@ -97,6 +136,14 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
         # Accept both strings and dictionaries
         if value is not None and not isinstance(value, (dict, str)):
             raise serializers.ValidationError("prompt must be a string or a valid JSON object.")
+        return value
+
+    def validate_webhook(self, value):
+        if value is None:
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme not in ('http', 'https'):
+            raise serializers.ValidationError("webhook must use http or https.")
         return value
         
     def validate_output_schema(self, value):
@@ -187,10 +234,11 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
 class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
     agent_id = serializers.UUIDField(source='agent.id', read_only=True, format='hex_verbose')
+    webhook = serializers.URLField(source='webhook_url', read_only=True, allow_null=True)
 
     class Meta:
         model = BrowserUseAgentTask
-        fields = ['id', 'agent_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at', 'credits_cost']
+        fields = ['id', 'agent_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at', 'credits_cost', 'webhook']
         read_only_fields = fields
         ref_name = "TaskList" # Optional: for explicit component naming
 

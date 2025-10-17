@@ -32,6 +32,7 @@ from ..models import (
     AgentFileSpaceAccess,
     AgentFsNode, PersistentAgent,
 )
+from ..services.task_webhooks import trigger_task_webhook
 from util import EphemeralXvfb, should_use_ephemeral_xvfb
 
 tracer = trace.get_tracer('gobii.utils')
@@ -1581,6 +1582,11 @@ def _process_browser_use_task_core(
                     branch_id=branch_id,
                     depth=depth,
                 )
+
+            try:
+                trigger_task_webhook(task_obj)
+            except Exception:  # noqa: BLE001
+                logger.exception("Unexpected error while triggering webhook for task %s", task_obj.id)
 
 
 @shared_task(bind=True, name="gobii_platform.api.tasks.process_browser_use_task")
