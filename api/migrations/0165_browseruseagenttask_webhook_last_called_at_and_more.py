@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0163_browsermodelendpoint_max_output_tokens'),
+        ('api', '0164_persistentagentwebhook'),
     ]
 
     operations = [
