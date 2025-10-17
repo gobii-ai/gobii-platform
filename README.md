@@ -16,7 +16,21 @@
 
 Gobii is the open-source platform for deploying and managing [browser-use](https://github.com/browser-use/browser-use) agents at scale. While browser-use gives AI agents powerful browser automation capabilities, Gobii provides the infrastructure to run them in production: always-on execution, scheduling, email/API triggers, secret management, and team collaboration. Spin it up with Docker Compose, complete a first-run wizard, and you have self-hosted browser-use agents that work 24/7. Prefer managed hosting? Gobii Cloud at [gobii.ai](https://gobii.ai) delivers the same platform as a service.
 
-https://github.com/user-attachments/assets/b18068c6-695c-4a21-ac08-c298218b7882
+<p align="center">
+  <video
+    src="https://github.com/user-attachments/assets/b18068c6-695c-4a21-ac08-c298218b7882"
+    width="800"
+    controls
+    muted
+    loop
+    playsinline
+    poster="https://github.com/user-attachments/assets/ab12cd34-ef56-7890-gh12-ijkl3456mnop"
+    style="border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.15);max-width:100%;height:auto;"
+  >
+  </video>
+  <br/>
+  <em>Gobii Agent demo in action</em>
+</p>
 
 ## What Makes Gobii Different
 - **Production infrastructure for browser-use**: Turn browser-use agents into always-on services with scheduling, email triggers, API endpoints, and persistent execution.
