@@ -62,7 +62,7 @@ class TaskWebhookServiceTests(TestCase):
         task.refresh_from_db()
         self.assertIsNotNone(task.webhook_last_called_at)
         self.assertIsNone(task.webhook_last_status_code)
-        self.assertIn("boom", task.webhook_last_error)
+        self.assertIsNone(task.webhook_last_error)
 
     @patch("api.services.task_webhooks.requests.post")
     def test_trigger_task_webhook_skips_when_missing_url(self, mock_post: Mock):

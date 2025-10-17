@@ -87,9 +87,9 @@ def trigger_task_webhook(task: BrowserUseAgentTask) -> None:
             )
         else:
             logger.info("Webhook for task %s delivered successfully", task.id)
-    except RequestException as exc:
+    except RequestException:
         logger.warning("Failed to deliver webhook for task %s", task.id, exc_info=True)
-    except Exception as exc:
+    except Exception:
         logger.exception("Unexpected error delivering webhook for task %s", task.id)
 
     # Persist delivery metadata without mutating other fields like status/updated_at.
