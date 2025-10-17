@@ -87,10 +87,7 @@
         </h3>
         <button @click="reset()"
                 class="text-gray-400 transition hover:text-gray-500">
-          <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"/>
-          </svg>
+          <i aria-hidden="true" data-lucide="x" class="h-6 w-6"></i>
         </button>
       </div>
 
@@ -101,17 +98,13 @@
           <div class="mx-auto flex h-12 w-12 flex-shrink-0 items-center
                       justify-center rounded-full bg-indigo-100 sm:mx-0 sm:h-10 sm:w-10">
             <!-- Mail icon -->
-            <svg x-show="channel==='email'" class="h-6 w-6 text-indigo-600"
-                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-            </svg>
+            <span x-show="channel==='email'" aria-hidden="true">
+              <i data-lucide="mail" class="h-6 w-6 text-indigo-600"></i>
+            </span>
             <!-- Phone icon -->
-            <svg x-show="channel==='sms'" class="h-6 w-6 text-indigo-600"
-                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M3 5a2 2 0 012-2h3l2 5-2 1a11 11 0 005 5l1-2 5 2v3a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"/>
-            </svg>
+            <span x-show="channel==='sms'" aria-hidden="true">
+              <i data-lucide="phone" class="h-6 w-6 text-indigo-600"></i>
+            </span>
           </div>
 
           <!-- text -->
@@ -128,10 +121,7 @@
                   <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-3">
                       <div class="flex-shrink-0 text-gray-400">
-                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-                        </svg>
+                        <i aria-hidden="true" data-lucide="mail" class="h-5 w-5"></i>
                       </div>
                       <div>
                         <p class="text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -145,10 +135,7 @@
                     <button @click="navigator.clipboard.writeText(agentEmail); $dispatch('copied-to-clipboard')"
                             class="rounded-md p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
                             title="Copy email address">
-                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
-                      </svg>
+                      <i aria-hidden="true" data-lucide="copy" class="h-4 w-4"></i>
                     </button>
                   </div>
                 </div>
@@ -171,10 +158,7 @@
                   <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-3">
                       <div class="flex-shrink-0 text-gray-400">
-                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M3 5a2 2 0 012-2h3l2 5-2 1a11 11 0 005 5l1-2 5 2v3a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"/>
-                        </svg>
+                        <i aria-hidden="true" data-lucide="phone" class="h-5 w-5"></i>
                       </div>
                       <div>
                         <p class="text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -188,10 +172,7 @@
                     <button @click="navigator.clipboard.writeText(agentPhone); $dispatch('copied-to-clipboard')"
                             class="rounded-md p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
                             title="Copy phone number">
-                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
-                      </svg>
+                      <i aria-hidden="true" data-lucide="copy" class="h-4 w-4"></i>
                     </button>
                   </div>
                 </div>
@@ -215,9 +196,7 @@
                   bg-indigo-600 px-4 py-2 text-base font-medium text-white shadow-sm
                   transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500
                   sm:ml-3 sm:w-auto sm:text-sm">
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-4 3-1-3H5a2 2 0 01-2-2V8a2 2 0 012-2z"/>
-          </svg>
+          <i aria-hidden="true" data-lucide="message-square" class="h-4 w-4"></i>
           Open Web Chat
         </a>
         <!-- email CTA -->
@@ -227,10 +206,7 @@
                   bg-indigo-600 px-4 py-2 text-base font-medium text-white shadow-sm
                   transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500
                   sm:ml-3 sm:w-auto sm:text-sm">
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-          </svg>
+          <i aria-hidden="true" data-lucide="mail" class="h-4 w-4"></i>
           Send Email
         </a>
 
@@ -241,10 +217,7 @@
                   bg-indigo-600 px-4 py-2 text-base font-medium text-white shadow-sm
                   transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500
                   sm:ml-3 sm:w-auto sm:text-sm">
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M3 5a2 2 0 012-2h3l2 5-2 1a11 11 0 005 5l1-2 5 2v3a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"/>
-          </svg>
+          <i aria-hidden="true" data-lucide="phone" class="h-4 w-4"></i>
           Send Text
         </a>
 
