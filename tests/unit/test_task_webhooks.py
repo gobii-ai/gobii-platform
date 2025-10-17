@@ -27,7 +27,7 @@ class TaskWebhookServiceTests(TestCase):
 
     @patch("api.services.task_webhooks.requests.post")
     def test_trigger_task_webhook_success(self, mock_post: Mock):
-        mock_post.return_value = Mock(status_code=202)
+        mock_post.return_value = Mock(status_code=202, text="")
         task = self._create_completed_task()
 
         trigger_task_webhook(task)
@@ -45,6 +45,8 @@ class TaskWebhookServiceTests(TestCase):
                 "result": {'foo': 'bar'},
             },
         )
+        self.assertEqual(called_kwargs["headers"]["User-Agent"], "Gobii-AgentWebhook/1.0")
+        self.assertEqual(called_kwargs["headers"]["Content-Type"], "application/json")
         task.refresh_from_db()
         self.assertIsNotNone(task.webhook_last_called_at)
         self.assertEqual(task.webhook_last_status_code, 202)

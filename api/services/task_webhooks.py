@@ -6,6 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 from requests import RequestException
 
+from api.agent.tools.webhook_sender import USER_AGENT as DEFAULT_WEBHOOK_USER_AGENT
 from api.models import BrowserUseAgentTask, BrowserUseAgentTaskStep
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,10 @@ TERMINAL_STATUSES = {
 }
 
 WEBHOOK_TIMEOUT_SECONDS = 10
+WEBHOOK_HEADERS = {
+    "Content-Type": "application/json",
+    "User-Agent": DEFAULT_WEBHOOK_USER_AGENT,
+}
 
 
 def _build_payload(task: BrowserUseAgentTask) -> Dict[str, Any]:
@@ -64,14 +69,21 @@ def trigger_task_webhook(task: BrowserUseAgentTask) -> None:
     error_message: Optional[str] = None
 
     try:
-        response = requests.post(task.webhook_url, json=payload, timeout=WEBHOOK_TIMEOUT_SECONDS)
+        response = requests.post(
+            task.webhook_url,
+            json=payload,
+            timeout=WEBHOOK_TIMEOUT_SECONDS,
+            headers=WEBHOOK_HEADERS,
+        )
         status_code = response.status_code
         if not 200 <= status_code < 300:
-            error_message = f"Received status {status_code}"
+            response_preview = (response.text or "")[:500]
+            error_message = f"Received status {status_code}: {response_preview}".strip()
             logger.warning(
-                "Webhook for task %s returned non-success status %s",
+                "Webhook for task %s returned non-success status %s (%s)",
                 task.id,
                 status_code,
+                response_preview,
             )
         else:
             logger.info("Webhook for task %s delivered successfully", task.id)
