@@ -4,9 +4,7 @@
       <span class="font-semibold">API Key Created</span>
       <button type="button" class="text-green-600 hover:text-green-800" 
               @click="$el.closest('#api-key-created-{{ key_id }}').remove()">
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-        </svg>
+        <i aria-hidden="true" data-lucide="x" class="h-4 w-4"></i>
       </button>
     </div>
     <p class="mt-1">Copy this key now. You won't be able to see it again!</p>
@@ -15,9 +13,7 @@
       <button type="button" class="ml-2 px-2 bg-green-200 rounded hover:bg-green-300 text-green-800"
               x-data="{copy(text) { navigator.clipboard.writeText(text); }}"
               @click="copy('{{ raw_key }}')">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-        </svg>
+        <i aria-hidden="true" data-lucide="copy" class="h-4 w-4"></i>
       </button>
     </div>
   </div>
