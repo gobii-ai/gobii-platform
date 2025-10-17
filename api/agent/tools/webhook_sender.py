@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 import requests
 from requests import RequestException
+from django.core.exceptions import ValidationError
 
 from ...models import PersistentAgent, PersistentAgentWebhook
 
@@ -85,6 +86,9 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
 
     try:
         webhook = agent.webhooks.get(id=webhook_id)
+    except (ValidationError, ValueError):
+        logger.warning("Agent %s supplied invalid webhook id %s", agent.id, webhook_id)
+        return {"status": "error", "message": "Webhook not found for this agent."}
     except PersistentAgentWebhook.DoesNotExist:
         logger.warning("Agent %s attempted to call unknown webhook %s", agent.id, webhook_id)
         return {"status": "error", "message": "Webhook not found for this agent."}
