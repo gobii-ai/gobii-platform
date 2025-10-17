@@ -44,6 +44,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
+    PersistentAgentWebhook,
     PersistentAgentMessage,
     AgentPeerLink,
     AgentCommPeerState,
@@ -2341,6 +2342,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         ).count()
         context['pending_contact_requests'] = pending_contact_requests
 
+        context['agent_webhooks'] = agent.webhooks.order_by('name')
+
         # Add owner information for display
         context['owner_email'] = agent.user.email
 
@@ -2489,6 +2492,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         peer_action = request.POST.get('peer_link_action')
         if peer_action:
             return self._handle_peer_link_action(request, agent, peer_action)
+
+        webhook_action = request.POST.get('webhook_action')
+        if webhook_action:
+            return self._handle_webhook_action(request, agent, webhook_action)
 
         # Handle AJAX allowlist operations
         # Check both modern header and legacy header for AJAX detection
@@ -3062,6 +3069,76 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             messages.error(request, f"Error updating agent: {e}")
 
         return redirect('agent_detail', pk=agent.pk)
+
+    def _handle_webhook_action(self, request, agent: PersistentAgent, action: str):
+        redirect_response = redirect('agent_detail', pk=agent.pk)
+        normalized_action = (action or "").lower()
+
+        if normalized_action not in {"create", "update", "delete"}:
+            messages.error(request, "Unsupported webhook action.")
+            return redirect_response
+
+        if normalized_action == "delete":
+            webhook_id = request.POST.get("webhook_id")
+            if not webhook_id:
+                messages.error(request, "Missing webhook identifier.")
+                return redirect_response
+            try:
+                webhook = agent.webhooks.get(id=webhook_id)
+            except PersistentAgentWebhook.DoesNotExist:
+                messages.error(request, "Webhook not found or no longer exists.")
+                return redirect_response
+
+            webhook.delete()
+            messages.success(request, "Webhook removed.")
+            return redirect_response
+
+        name = (request.POST.get("webhook_name") or "").strip()
+        url = (request.POST.get("webhook_url") or "").strip()
+        if not name or not url:
+            messages.error(request, "Webhook name and URL are required.")
+            return redirect_response
+
+        if normalized_action == "create":
+            webhook = PersistentAgentWebhook(agent=agent, name=name, url=url)
+        else:
+            webhook_id = request.POST.get("webhook_id")
+            if not webhook_id:
+                messages.error(request, "Missing webhook identifier.")
+                return redirect_response
+            try:
+                webhook = agent.webhooks.get(id=webhook_id)
+            except PersistentAgentWebhook.DoesNotExist:
+                messages.error(request, "Webhook not found or no longer exists.")
+                return redirect_response
+            webhook.name = name
+            webhook.url = url
+
+        try:
+            webhook.full_clean()
+            webhook.save()
+        except ValidationError as exc:
+            error_messages = []
+            if hasattr(exc, "message_dict"):
+                for values in exc.message_dict.values():
+                    error_messages.extend(values)
+            elif hasattr(exc, "messages"):
+                error_messages.extend(exc.messages)
+            else:
+                error_messages.append(str(exc))
+
+            message_text = "; ".join(error_messages) if error_messages else "Invalid data."
+            messages.error(request, f"Unable to save webhook: {message_text}")
+            return redirect_response
+        except IntegrityError:
+            messages.error(request, "A webhook with that name already exists for this agent.")
+            return redirect_response
+
+        if normalized_action == "create":
+            messages.success(request, "Webhook created.")
+        else:
+            messages.success(request, "Webhook updated.")
+        return redirect_response
 
     def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str):
         redirect_response = redirect('agent_detail', pk=agent.pk)

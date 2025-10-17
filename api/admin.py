@@ -22,6 +22,7 @@ from .models import (
     StripeConfig,
     MeteringBatch,
     UsageThresholdSent,
+    PersistentAgentWebhook,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -1477,6 +1478,17 @@ class ProxyHealthCheckResultAdmin(admin.ModelAdmin):
 
 # --- PERSISTENT AGENT MODELS ---
 
+
+class PersistentAgentWebhookInline(admin.TabularInline):
+    """Inline to manage outbound webhooks for an agent."""
+    model = PersistentAgentWebhook
+    extra = 0
+    fields = ("name", "url", "last_triggered_at", "last_response_status", "last_error_message")
+    readonly_fields = ("last_triggered_at", "last_response_status", "last_error_message")
+    verbose_name = "Outbound webhook"
+    verbose_name_plural = "Outbound webhooks"
+
+
 class PersistentAgentCommsEndpointInline(admin.TabularInline):
     """Inline for viewing/editing agent communication endpoints."""
     model = PersistentAgentCommsEndpoint
@@ -1609,7 +1621,12 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         'last_expired_at', 'sleep_email_sent_at',
         'short_description', 'short_description_charter_hash', 'short_description_requested_hash',
     )
-    inlines = [PersistentAgentCommsEndpointInline, CommsAllowlistEntryInline, AgentMessageInline]
+    inlines = [
+        PersistentAgentCommsEndpointInline,
+        PersistentAgentWebhookInline,
+        CommsAllowlistEntryInline,
+        AgentMessageInline,
+    ]
 
     # ------------------------------------------------------------------
     # Performance: annotate message counts so we don't do a COUNT query per row

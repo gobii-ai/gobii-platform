@@ -428,6 +428,51 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'send_webhook_event',
+    label: 'Webhook sent',
+    iconPaths: [
+      'M4 4h16a2 2 0 012 2v6a2 2 0 01-2 2h-5l-4 4v-4H4a2 2 0 01-2-2V6a2 2 0 012-2z',
+      'M8 9h8',
+      'M8 13h5',
+      'M12 4v4',
+    ],
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-600',
+    detailKind: 'default',
+    derive(entry, parameters) {
+      const resultData = parseResultObject(entry.result)
+      const webhookName =
+        coerceString(resultData?.['webhook_name']) || coerceString(parameters?.['webhook_id'])
+      const statusValue = resultData?.['response_status']
+      const status =
+        typeof statusValue === 'number' || typeof statusValue === 'string' ? String(statusValue) : null
+
+      const payload = parameters?.['payload']
+      const payloadKeyCount =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? Object.keys(payload as Record<string, unknown>).length
+          : null
+
+      const summaryParts: string[] = []
+      if (webhookName) {
+        summaryParts.push(webhookName)
+      }
+      if (status) {
+        summaryParts.push(`Status ${status}`)
+      }
+      if (payloadKeyCount) {
+        summaryParts.push(`${payloadKeyCount} field${payloadKeyCount === 1 ? '' : 's'}`)
+      }
+
+      const caption = webhookName ? `Webhook: ${truncate(webhookName, 40)}` : null
+
+      return {
+        caption: caption ?? entry.caption ?? 'Webhook triggered',
+        summary: summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null,
+      }
+    },
+  },
+  {
     name: 'secure_credentials_request',
     label: 'Credentials request',
     iconPaths: [

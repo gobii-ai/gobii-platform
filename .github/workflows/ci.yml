@@ -144,6 +144,8 @@ jobs:
             tag: batch_xvfb
           - batch: websocket
             tag: batch_websocket
+          - batch: agent_webhooks
+            tag: batch_agent_webhooks
           - batch: agent_chat
             tag: batch_agent_chat
           - batch: peer_dm
