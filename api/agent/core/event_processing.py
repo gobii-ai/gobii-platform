@@ -78,6 +78,7 @@ from ..tools.mcp_tools import (
 from ..tools.mcp_manager import get_mcp_manager
 from ..tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
 from ..tools.peer_dm import execute_send_agent_message, get_send_agent_message_tool
+from ..tools.webhook_sender import execute_send_webhook_event, get_send_webhook_tool
 from ...models import (
     AgentCommPeerState,
     AgentPeerLink,
@@ -1465,6 +1466,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         result = execute_send_chat_message(agent, tool_params)
                     elif tool_name == "send_agent_message":
                         result = execute_send_agent_message(agent, tool_params)
+                    elif tool_name == "send_webhook_event":
+                        result = execute_send_webhook_event(agent, tool_params)
                     elif tool_name == "update_schedule":
                         result = execute_update_schedule(agent, tool_params)
                     elif tool_name == "update_charter":
@@ -1812,6 +1815,7 @@ def _build_prompt_context(
     
     # Contacts block - use promptree natively
     _build_contacts_block(agent, important_group, span)
+    _build_webhooks_block(agent, important_group, span)
     
     # Email formatting warning - important behavioral constraint
     important_group.section_text(
@@ -2164,6 +2168,54 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         )
 
 
+def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None:
+    """Add outbound webhook metadata to the prompt."""
+    webhooks = list(agent.webhooks.order_by("name"))
+    span.set_attribute("persistent_agent.webhooks.count", len(webhooks))
+
+    webhooks_group = important_group.group("webhooks", weight=3)
+
+    if not webhooks:
+        webhooks_group.section_text(
+            "webhooks_note",
+            "You do not have any outbound webhooks configured. If you need one, ask the user to add it on the agent settings page.",
+            weight=1,
+            non_shrinkable=True,
+        )
+        return
+
+    lines: list[str] = [
+        "You may trigger ONLY the following outbound webhooks using the `send_webhook_event` tool. "
+        "Craft minimal, accurate JSON payloads tailored to the destination system."
+    ]
+    for hook in webhooks:
+        last_triggered = (
+            hook.last_triggered_at.isoformat() if hook.last_triggered_at else "never"
+        )
+        status_label = (
+            str(hook.last_response_status) if hook.last_response_status is not None else "—"
+        )
+        lines.append(
+            f"- {hook.name} (id={hook.id}) → {hook.url} | last trigger: {last_triggered} | last status: {status_label}"
+        )
+
+    webhooks_group.section_text(
+        "webhook_catalog",
+        "\n".join(lines),
+        weight=2,
+        shrinker="hmt",
+    )
+    webhooks_group.section_text(
+        "webhook_usage_hint",
+        (
+            "When you call `send_webhook_event`, you MUST provide the matching `webhook_id` from this list "
+            "and a well-structured JSON `payload`. Do NOT send secrets, credentials, or personal data unless "
+            "the user explicitly instructs you to do so."
+        ),
+        weight=1,
+        non_shrinkable=True,
+    )
+
 def _add_budget_awareness_sections(
     critical_group,
     *,
@@ -2330,7 +2382,7 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int) -> str:
         f"WARNING: Your previous {streak_label} included zero tool calls. "
         "You MUST include at least one tool call in this response, even if you only call sleep_until_next_trigger. "
         "If no other action is needed, call sleep_until_next_trigger as your tool call now. "
-        "Do NOT embed outbound messages inside your content - always call send_email, send_sms, send_chat_message, or send_agent_message instead. "
+        "Do NOT embed outbound messages inside your content - always call send_email, send_sms, send_chat_message, send_agent_message, or send_webhook_event instead. "
     )
 
 
@@ -2350,7 +2402,7 @@ def _get_system_instruction(
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
         "Use the 'update_schedule' tool to update your cron schedule any time it needs to change. "
         "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content. "
-        "Instead, ALWAYS call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message) to deliver the message. "
+        "Instead, ALWAYS call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message, send_webhook_event) to deliver the message. "
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
         "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISE TIMING --CONFIRM WITH THE USER. "
         "IF RELEVANT, ASK THE USER DETAILS SUCH AS TIMEZONE, etc. "
@@ -2796,6 +2848,9 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_search_tools_tool(),
         get_request_contact_permission_tool(),
     ]
+
+    if agent and agent.webhooks.exists():
+        static_tools.append(get_send_webhook_tool())
 
     # Add peer DM tool only when agent has at least one enabled peer link
     if agent and AgentPeerLink.objects.filter(

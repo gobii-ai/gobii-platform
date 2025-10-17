@@ -3157,6 +3157,55 @@ class PersistentAgentSecret(models.Model):
         return f"Secret '{self.name}' ({self.key}) for {self.agent.name} on {self.domain_pattern}"
 
 
+class PersistentAgentWebhook(models.Model):
+    """Outbound webhook endpoint configured for a persistent agent."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="webhooks",
+    )
+    name = models.CharField(max_length=128)
+    url = models.URLField(max_length=1024)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_triggered_at = models.DateTimeField(null=True, blank=True)
+    last_response_status = models.IntegerField(null=True, blank=True)
+    last_error_message = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "name"],
+                name="uniq_agent_webhook_name",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["agent", "created_at"], name="pa_webhook_agent_created_idx"),
+        ]
+        ordering = ["name"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"{self.name} → {self.url}"
+
+    def clean(self):
+        super().clean()
+        if self.name:
+            self.name = self.name.strip()
+        if self.url:
+            self.url = self.url.strip()
+
+    def record_delivery(self, status_code: int | None, error_message: str | None = None) -> None:
+        """Persist the latest delivery attempt metadata."""
+        self.last_triggered_at = timezone.now()
+        self.last_response_status = status_code
+        self.last_error_message = (error_message or "")[:2000]
+        self.save(
+            update_fields=["last_triggered_at", "last_response_status", "last_error_message", "updated_at"],
+        )
+
+
 class PersistentAgentCommsEndpoint(models.Model):
     """Channel-agnostic communication endpoint (address/number/etc.)."""
 
