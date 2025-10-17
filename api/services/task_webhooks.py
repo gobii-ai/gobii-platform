@@ -88,11 +88,9 @@ def trigger_task_webhook(task: BrowserUseAgentTask) -> None:
         else:
             logger.info("Webhook for task %s delivered successfully", task.id)
     except RequestException as exc:
-        error_message = str(exc)
-        logger.warning("Failed to deliver webhook for task %s: %s", task.id, error_message, exc_info=True)
-    except Exception as exc:  # noqa: BLE001
-        error_message = str(exc)
-        logger.exception("Unexpected error delivering webhook for task %s: %s", task.id, error_message)
+        logger.warning("Failed to deliver webhook for task %s", task.id, exc_info=True)
+    except Exception as exc:
+        logger.exception("Unexpected error delivering webhook for task %s", task.id)
 
     # Persist delivery metadata without mutating other fields like status/updated_at.
     with transaction.atomic():
@@ -101,7 +99,3 @@ def trigger_task_webhook(task: BrowserUseAgentTask) -> None:
             webhook_last_status_code=status_code,
             webhook_last_error=error_message,
         )
-
-    task.webhook_last_called_at = delivered_at
-    task.webhook_last_status_code = status_code
-    task.webhook_last_error = error_message
