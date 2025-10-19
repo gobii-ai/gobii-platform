@@ -2562,6 +2562,93 @@ class PersistentAgent(models.Model):
 
         return self._is_allowed_default(channel_val, addr)
 
+    def sync_sms_allowlist_group(self) -> None:
+        """Ensure the aggregated SMS group mirrors the current allowlist."""
+        from util import sms
+
+        desired_numbers: list[str] = list(
+            self.manual_allowlist.filter(
+                channel=CommsChannel.SMS,
+                is_active=True,
+                allow_outbound=True,
+            )
+            .order_by("address")
+            .values_list("address", flat=True)
+        )
+
+        try:
+            group = self.sms_groups.filter(
+                name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME
+            ).first()
+        except PersistentAgentSmsGroup.DoesNotExist:  # pragma: no cover - queryset handles existence
+            group = None
+
+        if not desired_numbers:
+            if group:
+                if group.members.exists():
+                    group.members.all().delete()
+                if group.is_active:
+                    group.is_active = False
+                    group.save(update_fields=["is_active", "updated_at"])
+            return
+
+        max_members = PersistentAgentSmsGroup.MAX_MEMBERS
+        if len(desired_numbers) > max_members:
+            logger.warning(
+                "Agent %s has %s SMS allowlist entries exceeding max %s; trimming in sync.",
+                self.id,
+                len(desired_numbers),
+                max_members,
+            )
+            desired_numbers = desired_numbers[:max_members]
+
+        if group is None:
+            group = PersistentAgentSmsGroup.objects.create(
+                agent=self,
+                name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME,
+                is_active=True,
+            )
+        else:
+            updates: list[str] = []
+            if group.name != PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME:
+                group.name = PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME
+                updates.append("name")
+            if not group.is_active:
+                group.is_active = True
+                updates.append("is_active")
+            if updates:
+                group.save()
+
+        existing_numbers = set(group.members.values_list("phone_number", flat=True))
+        desired_set = set(desired_numbers)
+
+        removable = existing_numbers - desired_set
+        if removable:
+            group.members.filter(phone_number__in=removable).delete()
+
+        for number in desired_numbers:
+            group.members.get_or_create(
+                phone_number=number,
+                defaults={"display_name": ""},
+            )
+
+        from_endpoint = (
+            self.comms_endpoints.filter(channel=CommsChannel.SMS, is_primary=True).first()
+            or self.comms_endpoints.filter(channel=CommsChannel.SMS).first()
+        )
+        if not from_endpoint or not from_endpoint.address:
+            return
+
+        try:
+            sms.ensure_group_conversation(group, proxy_number=from_endpoint.address)
+        except Exception as exc:  # pragma: no cover - best effort for external service
+            logger.warning(
+                "Failed to sync Twilio conversation for agent %s allowlist group: %s",
+                self.id,
+                exc,
+                exc_info=True,
+            )
+
     def _legacy_owner_only(self, channel_val: str, address: str) -> bool:
         """Original behavior: only owner's email or verified phone allowed."""
         addr_raw = (address or "").strip()
@@ -3296,6 +3383,24 @@ class CommsAllowlistEntry(models.Model):
             self.address = (self.address or "").strip().lower()
         else:
             self.address = (self.address or "").strip()
+
+        if self.channel == CommsChannel.SMS and self.agent_id and self.is_active:
+            sms_entries = CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                channel=CommsChannel.SMS,
+                is_active=True,
+            )
+            if self.pk:
+                sms_entries = sms_entries.exclude(pk=self.pk)
+            sms_count = sms_entries.count()
+            max_members = PersistentAgentSmsGroup.MAX_MEMBERS
+            if sms_count >= max_members:
+                raise ValidationError({
+                    "channel": (
+                        f"You can add up to {max_members} SMS contacts "
+                        "(10 total participants including you and the Gobii agent)."
+                    )
+                })
         
         # Enforce per-agent cap on *active* entries and pending invitations (only when adding a new row)
         if self.is_active and self._state.adding:
@@ -3339,6 +3444,33 @@ class CommsAllowlistEntry(models.Model):
 
     def __str__(self):
         return f"Allow<{self.channel}:{self.address}> for {self.agent_id}"
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        result = super().save(*args, **kwargs)
+        if self.channel == CommsChannel.SMS and self.agent_id:
+            try:
+                self.agent.sync_sms_allowlist_group()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception(
+                    "Failed to sync SMS allowlist group for agent %s after save",
+                    self.agent_id,
+                )
+        return result
+
+    def delete(self, *args, **kwargs):
+        agent = self.agent if hasattr(self, "agent") else None
+        channel = self.channel
+        result = super().delete(*args, **kwargs)
+        if channel == CommsChannel.SMS and agent:
+            try:
+                agent.sync_sms_allowlist_group()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception(
+                    "Failed to sync SMS allowlist group for agent %s after delete",
+                    agent.id,
+                )
+        return result
 
 
 class AgentAllowlistInvite(models.Model):
@@ -3946,6 +4078,7 @@ class PersistentAgentSmsGroup(models.Model):
     MAX_TOTAL_PARTICIPANTS = 10  # Includes the Gobii agent and owner user.
     RESERVED_PARTICIPANTS = 2    # Gobii agent identity + owner user.
     MAX_MEMBERS = MAX_TOTAL_PARTICIPANTS - RESERVED_PARTICIPANTS
+    ALLOWLIST_GROUP_NAME = "Approved SMS contacts"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(

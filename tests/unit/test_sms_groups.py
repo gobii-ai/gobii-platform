@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import RequestFactory, TestCase, tag
 from django.urls import reverse
 
@@ -19,11 +20,9 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentSmsEndpoint,
     PersistentAgentSmsGroup,
-    PersistentAgentSmsGroupMember,
     BrowserUseAgent,
 )
 from api.webhooks import twilio_conversation_webhook
-from console.forms import AgentSmsGroupForm
 
 
 User = get_user_model()
@@ -37,6 +36,14 @@ def _make_browser_agent(user: User, name: str = "BA") -> BrowserUseAgent:
 @tag("batch_sms_groups")
 class AgentSmsGroupTests(TestCase):
     def setUp(self):
+        self.ensure_conv_patcher = patch("util.sms.ensure_group_conversation", return_value="CHALLOW")
+        self.mock_ensure_conv = self.ensure_conv_patcher.start()
+        self.addCleanup(self.ensure_conv_patcher.stop)
+
+        self.contact_cap_patcher = patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=50)
+        self.contact_cap_patcher.start()
+        self.addCleanup(self.contact_cap_patcher.stop)
+
         self.user = User.objects.create_user(
             username="owner@example.com",
             email="owner@example.com",
@@ -63,67 +70,56 @@ class AgentSmsGroupTests(TestCase):
             carrier_name="TestCarrier",
         )
 
-        self.group = PersistentAgentSmsGroup.objects.create(
+    def _add_sms_contact(self, number: str) -> CommsAllowlistEntry:
+        return CommsAllowlistEntry.objects.create(
             agent=self.agent,
-            name="Launch Team",
+            channel=CommsChannel.SMS,
+            address=number,
+            allow_inbound=True,
+            allow_outbound=True,
         )
-        self.members = [
-            PersistentAgentSmsGroupMember.objects.create(
-                group=self.group,
-                phone_number="+15550000001",
-            ),
-            PersistentAgentSmsGroupMember.objects.create(
-                group=self.group,
-                phone_number="+15550000002",
-            ),
-        ]
-
-        for member in self.members:
-            CommsAllowlistEntry.objects.create(
-                agent=self.agent,
-                channel=CommsChannel.SMS,
-                address=member.phone_number,
-            )
 
     @patch("api.agent.tools.sms_sender.deliver_agent_group_sms")
-    @patch("util.sms.ensure_group_conversation", return_value="CHXXXX")
-    def test_execute_send_sms_group_success(self, ensure_conv, deliver_group):
+    def test_execute_send_sms_group_success(self, deliver_group):
+        numbers = ["+15550000001", "+15550000002"]
+        for number in numbers:
+            self._add_sms_contact(number)
+
+        group = self.agent.sms_groups.get(name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME)
+
+        self.mock_ensure_conv.reset_mock()
+        self.mock_ensure_conv.return_value = "CHXXXX"
+
         response = execute_send_sms(
             self.agent,
-            {"group_id": str(self.group.id), "body": "Launch update"},
+            {"group_id": str(group.id), "body": "Launch update"},
         )
 
         self.assertEqual(response["status"], "ok")
-        ensure_conv.assert_called_once_with(self.group, proxy_number=self.sms_endpoint.address)
+        self.mock_ensure_conv.assert_called_with(group, proxy_number=self.sms_endpoint.address)
         self.assertEqual(PersistentAgentMessage.objects.count(), 1)
         message = PersistentAgentMessage.objects.first()
         self.assertIsNotNone(message.conversation)
         self.assertEqual(message.conversation.address, "CHXXXX")
-        deliver_group.assert_called_once_with(message, self.group)
+        deliver_group.assert_called_once_with(message, group)
 
-    def test_group_form_enforces_max_members(self):
+    def test_sms_allowlist_limit_enforced(self):
         max_members = PersistentAgentSmsGroup.MAX_MEMBERS
+        for index in range(max_members):
+            number = f"+1202555{index:04d}"
+            self._add_sms_contact(number)
 
-        allowed_numbers = [f"+1202555{index:04d}" for index in range(1000, 1000 + max_members)]
-        form_allowed = AgentSmsGroupForm(
-            {
-                "name": "Allowed",
-                "participants": "\n".join(allowed_numbers),
-            },
-            agent=self.agent,
-        )
-        self.assertTrue(form_allowed.is_valid(), form_allowed.errors)
+        with self.assertRaises(ValidationError):
+            self._add_sms_contact("+13125550100")
 
-        too_many_numbers = allowed_numbers + ["+13125550100"]
-        form_too_many = AgentSmsGroupForm(
-            {
-                "name": "Too many",
-                "participants": "\n".join(too_many_numbers),
-            },
-            agent=self.agent,
+        group = self.agent.sms_groups.get(name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME)
+        members = list(group.members.order_by("phone_number"))
+        self.assertEqual(len(members), max_members)
+
+        allowlist_numbers = set(
+            self.agent.manual_allowlist.filter(channel=CommsChannel.SMS).values_list("address", flat=True)
         )
-        self.assertFalse(form_too_many.is_valid())
-        self.assertIn(str(max_members), form_too_many.errors["participants"][0])
+        self.assertEqual(allowlist_numbers, {member.phone_number for member in members})
 
     def test_sms_allowlist_permits_org_agents(self):
         org = Organization.objects.create(name="Org", created_by=self.user)
@@ -164,6 +160,14 @@ class TwilioConversationWebhookTests(TestCase):
         self.addCleanup(self.process_events_patcher.stop)
         self.mock_process_events = self.process_events_patcher.start()
 
+        self.ensure_conv_patcher = patch("util.sms.ensure_group_conversation", return_value="CH123")
+        self.mock_ensure_conv = self.ensure_conv_patcher.start()
+        self.addCleanup(self.ensure_conv_patcher.stop)
+
+        self.contact_cap_patcher = patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=50)
+        self.contact_cap_patcher.start()
+        self.addCleanup(self.contact_cap_patcher.stop)
+
         self.factory = RequestFactory()
         self.user = User.objects.create_user(
             username="u@example.com",
@@ -191,15 +195,18 @@ class TwilioConversationWebhookTests(TestCase):
             carrier_name="Carrier",
         )
 
-        self.group = PersistentAgentSmsGroup.objects.create(
+        CommsAllowlistEntry.objects.create(
             agent=self.agent,
-            name="Advisors",
-            twilio_conversation_sid="CH123",
+            channel=CommsChannel.SMS,
+            address="+15550001001",
+            allow_inbound=True,
+            allow_outbound=True,
         )
-        PersistentAgentSmsGroupMember.objects.create(
-            group=self.group,
-            phone_number="+15550001001",
-        )
+
+        self.group = self.agent.sms_groups.get(name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME)
+        if self.group.twilio_conversation_sid != "CH123":
+            self.group.twilio_conversation_sid = "CH123"
+            self.group.save(update_fields=["twilio_conversation_sid", "updated_at"])
 
         PersistentAgentConversation.objects.create(
             channel=CommsChannel.SMS,

@@ -164,17 +164,38 @@ def _send_group_sms(
     agent: PersistentAgent,
     from_endpoint: PersistentAgentCommsEndpoint,
     body: str,
-    group_id: str,
+    group_id: str | None,
 ) -> Dict[str, Any]:
     try:
+        agent.sync_sms_allowlist_group()
+    except Exception:
+        logger.exception("Failed to refresh allowlist group for agent %s", agent.id)
+
+    if group_id:
+        try:
+            group = (
+                PersistentAgentSmsGroup.objects.prefetch_related("members")
+                .get(id=group_id, agent=agent, is_active=True)
+            )
+        except PersistentAgentSmsGroup.DoesNotExist:
+            return {"status": "error", "message": "Group not found or inactive for this agent."}
+    else:
         group = (
             PersistentAgentSmsGroup.objects.prefetch_related("members")
-            .get(id=group_id, agent=agent, is_active=True)
+            .filter(
+                agent=agent,
+                name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME,
+                is_active=True,
+            )
+            .first()
         )
-    except PersistentAgentSmsGroup.DoesNotExist:
-        return {"status": "error", "message": "Group not found or inactive for this agent."}
+        if not group:
+            return {
+                "status": "error",
+                "message": "Add SMS contacts in the allowed contacts section before sending a group text.",
+            }
 
-    members = list(group.members.all())
+    members = list(group.members.order_by("phone_number"))
     if not members:
         return {"status": "error", "message": "Group has no participants to message."}
     max_members = PersistentAgentSmsGroup.MAX_MEMBERS

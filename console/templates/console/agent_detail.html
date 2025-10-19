@@ -156,97 +156,6 @@
             <p class="mt-2 text-xs text-gray-500">The agent's primary SMS address for communication. This cannot be changed.</p>
           </div>
 
-          <div class="sm:col-span-12">
-            <div class="border border-gray-200 rounded-lg p-5 bg-white/60">
-              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                  <h3 class="text-sm font-semibold text-gray-800">Group text contacts</h3>
-                  <p class="text-xs text-gray-500">Create saved groups (US/Canada numbers only) to message up to {{ sms_group_limit }} saved recipients at once (10 total including you and the Gobii agent).</p>
-                </div>
-                <div class="text-xs text-gray-500">
-                  Max {{ sms_group_limit }} saved recipients per group (10 total participants)
-                </div>
-              </div>
-
-              <div class="mt-4 space-y-4">
-                {% if sms_groups %}
-                  <div class="space-y-3">
-                    {% for group in sms_groups %}
-                      {% with members=group.members.all %}
-                      <div class="border border-gray-200 rounded-lg px-4 py-3 bg-white/40">
-                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                          <div>
-                            <p class="text-sm font-medium text-gray-800">{{ group.name }}</p>
-                            <p class="text-xs text-gray-500">{{ members|length }} participant{{ members|length|pluralize }}</p>
-                          </div>
-                          <div class="flex items-center gap-2">
-                            <a href="{% url 'agent_detail' agent.id %}?edit_group={{ group.id }}" class="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100">Edit</a>
-                            <button type="submit" name="delete_group_id" value="{{ group.id }}" class="px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50" onclick="return confirm('Delete group {{ group.name }}?')">Delete</button>
-                          </div>
-                        </div>
-                        <div class="mt-3 flex flex-wrap gap-2 text-xs text-gray-600">
-                          {% for member in members %}
-                            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 text-gray-700">
-                              <svg class="w-3 h-3 text-emerald-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                                <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.656l-6.828-6.829a4 4 0 010-5.655z" clip-rule="evenodd"></path>
-                              </svg>
-                              {{ member.phone_number }}
-                            </span>
-                          {% endfor %}
-                        </div>
-                      </div>
-                      {% endwith %}
-                    {% endfor %}
-                  </div>
-                {% else %}
-                  <p class="text-xs text-gray-500">No groups yet. Use the form below to create your first group text list.</p>
-                {% endif %}
-
-                <div class="border-t border-gray-200 pt-4">
-                  {% if editing_group %}
-                    <p class="text-xs font-medium text-gray-700 mb-2">Editing group “{{ editing_group.name }}”. <a href="{% url 'agent_detail' agent.id %}" class="text-blue-600 hover:text-blue-800">Cancel</a></p>
-                  {% else %}
-                    <p class="text-xs font-medium text-gray-700 mb-2">Add a new group</p>
-                  {% endif %}
-
-                  {% if sms_group_form.non_field_errors %}
-                    <div class="mb-2 text-xs text-red-600">
-                      {% for error in sms_group_form.non_field_errors %}
-                        <p>{{ error }}</p>
-                      {% endfor %}
-                    </div>
-                  {% endif %}
-
-                  <div class="grid sm:grid-cols-2 gap-3">
-                    <div>
-                      <label class="block text-xs font-medium text-gray-700 mb-1" for="{{ sms_group_form.name.id_for_label }}">Group name</label>
-                      {{ sms_group_form.name }}
-                      {% if sms_group_form.name.errors %}
-                        <p class="mt-1 text-xs text-red-600">{{ sms_group_form.name.errors.0 }}</p>
-                      {% endif %}
-                    </div>
-                    <div class="sm:col-span-2">
-                      <label class="block text-xs font-medium text-gray-700 mb-1" for="{{ sms_group_form.participants.id_for_label }}">Phone numbers</label>
-                      {{ sms_group_form.participants }}
-                      <p class="mt-1 text-[11px] text-gray-500">{{ sms_group_form.participants.help_text }}</p>
-                      {% if sms_group_form.participants.errors %}
-                        <p class="mt-1 text-xs text-red-600">{{ sms_group_form.participants.errors.0 }}</p>
-                      {% endif %}
-                    </div>
-                  </div>
-                  {% if editing_group %}
-                    <input type="hidden" name="group_id" value="{{ editing_group.id }}">
-                  {% endif %}
-                  <input type="hidden" name="sms_group_submit" value="1">
-                  <div class="mt-3 flex justify-end">
-                    <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">
-                      Save group
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
           {% endif %}
 
           <!-- Agent Status Section -->
@@ -390,7 +299,8 @@
             
             <p class="text-xs text-gray-500 mb-4">
               By default, the agent owner and organization members can communicate with this agent.
-              You can add additional contacts below. Note: Multi-recipient messaging is limited to email only.
+              You can add additional contacts below. SMS contacts are limited to {{ sms_allowlist_limit }} numbers
+              (10 total participants including you and the Gobii agent).
             </p>
             
             <!-- Allowed contacts entries (always visible now) -->
@@ -404,12 +314,14 @@
                   <div class="flex gap-2">
                     <select id="allowlist-channel" name="channel" class="py-1.5 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
                       <option value="email">Email</option>
-                      <!-- SMS option removed since multi-player agents only support email -->
+                      <option value="sms">SMS</option>
                     </select>
-                    <input type="email" 
+                    <input type="text" 
                            id="allowlist-address"
                            name="address" 
                            placeholder="email@example.com" 
+                           data-email-placeholder="email@example.com"
+                           data-sms-placeholder="+12025550123"
                            class="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
                   </div>
                   <div class="flex gap-4 items-center">
@@ -1041,6 +953,26 @@ document.addEventListener('DOMContentLoaded', function() {
     const movePersonalBtn = document.getElementById('move-personal-btn');
     const ownershipError = document.getElementById('ownership-error');
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+    const allowlistChannel = document.getElementById('allowlist-channel');
+    const allowlistAddress = document.getElementById('allowlist-address');
+
+    const updateAllowlistPlaceholder = () => {
+        if (!allowlistChannel || !allowlistAddress) {
+            return;
+        }
+        if (allowlistChannel.value === 'sms') {
+            allowlistAddress.placeholder = allowlistAddress.dataset.smsPlaceholder || '+12025550123';
+            allowlistAddress.type = 'text';
+        } else {
+            allowlistAddress.placeholder = allowlistAddress.dataset.emailPlaceholder || 'email@example.com';
+            allowlistAddress.type = 'email';
+        }
+    };
+
+    if (allowlistChannel && allowlistAddress) {
+        updateAllowlistPlaceholder();
+        allowlistChannel.addEventListener('change', updateAllowlistPlaceholder);
+    }
 
     async function postReassign(targetOrgId) {
         if (!csrfToken) {
@@ -1114,7 +1046,8 @@ document.addEventListener('DOMContentLoaded', function() {
 // Function to add allowlist entry
 function addAllowlistEntry() {
     const channel = document.getElementById('allowlist-channel').value;
-    const address = document.getElementById('allowlist-address').value;
+    const addressInput = document.getElementById('allowlist-address');
+    const address = addressInput ? addressInput.value.trim() : '';
     const errorDiv = document.getElementById('allowlist-error');
     
     // Check if required elements exist
@@ -1124,7 +1057,10 @@ function addAllowlistEntry() {
     }
     
     if (!address) {
-        errorDiv.textContent = 'Please enter an email address';
+        const message = channel === 'sms'
+            ? 'Please enter a phone number in +1 format.'
+            : 'Please enter an email address.';
+        errorDiv.textContent = message;
         errorDiv.classList.remove('hidden');
         return;
     }
