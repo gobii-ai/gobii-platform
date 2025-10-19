@@ -48,6 +48,8 @@ jobs:
             tag: smtp
           - batch: sms
             tag: batch_sms
+          - batch: sms_groups
+            tag: batch_sms_groups
           - batch: email_body
             tag: batch_email_body
           - batch: email_allowlist

@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, tag
 from django.urls import reverse
 
 from django.conf import settings
@@ -33,6 +33,7 @@ def _make_browser_agent(user: User, name: str = "BA") -> BrowserUseAgent:
         return BrowserUseAgent.objects.create(user=user, name=name)
 
 
+@tag("batch_sms_groups")
 class AgentSmsGroupTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -131,6 +132,7 @@ class AgentSmsGroupTests(TestCase):
         self.assertTrue(entry.is_active)
 
 
+@tag("batch_sms_groups")
 class TwilioConversationWebhookTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
