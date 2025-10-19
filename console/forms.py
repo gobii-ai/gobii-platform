@@ -169,13 +169,18 @@ class AgentSmsGroupForm(forms.Form):
                 "placeholder": "+12025550123\n+12025550124",
             }
         ),
-        help_text=_("Enter up to 10 US/Canada numbers in +1 E.164 format, one per line."),
+        help_text=_(
+            "Enter up to %(max_members)s US/Canada numbers in +1 E.164 format (10 total including you and the Gobii agent), one per line."
+        )
     )
 
     def __init__(self, *args, agent: PersistentAgent, instance: PersistentAgentSmsGroup | None = None, **kwargs):
         self.agent = agent
         self.instance = instance
         super().__init__(*args, **kwargs)
+
+        max_members = PersistentAgentSmsGroup.MAX_MEMBERS
+        self.fields["participants"].help_text = self.fields["participants"].help_text % {"max_members": max_members}
 
         if instance is not None:
             self.fields["name"].initial = instance.name
@@ -203,6 +208,7 @@ class AgentSmsGroupForm(forms.Form):
             raise forms.ValidationError("Add at least two phone numbers.")
 
         formatted: list[str] = []
+        max_members = PersistentAgentSmsGroup.MAX_MEMBERS
         for token in tokens:
             try:
                 number = validate_and_format_e164(token)
@@ -217,8 +223,14 @@ class AgentSmsGroupForm(forms.Form):
 
         if len(formatted) < 2:
             raise forms.ValidationError("Group texting requires at least two participants.")
-        if len(formatted) > 10:
-            raise forms.ValidationError("Groups can include at most 10 participants.")
+        if len(formatted) > max_members:
+            raise forms.ValidationError(
+                _(
+                    "Groups can include at most %(max_members)s saved recipients "
+                    "(10 total including you and the Gobii agent)."
+                )
+                % {"max_members": max_members}
+            )
 
         self._cleaned_participants = formatted
         return "\n".join(formatted)

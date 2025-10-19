@@ -3943,6 +3943,10 @@ class PersistentAgentSmsEndpoint(models.Model):
 class PersistentAgentSmsGroup(models.Model):
     """Saved set of recipients for group SMS conversations."""
 
+    MAX_TOTAL_PARTICIPANTS = 10  # Includes the Gobii agent and owner user.
+    RESERVED_PARTICIPANTS = 2    # Gobii agent identity + owner user.
+    MAX_MEMBERS = MAX_TOTAL_PARTICIPANTS - RESERVED_PARTICIPANTS
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
         "PersistentAgent",
@@ -4004,15 +4008,20 @@ class PersistentAgentSmsGroupMember(models.Model):
             raise ValidationError({"phone_number": "Phone number must be full E.164."})
         self.phone_number = number
 
-        # Enforce group size <= 10 participants
+        # Enforce group size limit (accounts for Gobii agent + owner user)
         if self.group_id:
             existing = (
                 PersistentAgentSmsGroupMember.objects.filter(group=self.group)
                 .exclude(pk=self.pk)
                 .count()
             )
-            if existing >= 10:
-                raise ValidationError({"group": "Groups may include at most 10 participants."})
+            if existing >= PersistentAgentSmsGroup.MAX_MEMBERS:
+                raise ValidationError({
+                    "group": (
+                        f"Groups may include at most {PersistentAgentSmsGroup.MAX_MEMBERS} saved members "
+                        f"(10 total participants including you and the Gobii agent)."
+                    )
+                })
 
     def __str__(self) -> str:
         return f"SmsGroupMember<{self.group_id}:{self.phone_number}>"

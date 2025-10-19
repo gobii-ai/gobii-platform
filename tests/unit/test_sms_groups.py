@@ -23,6 +23,7 @@ from api.models import (
     BrowserUseAgent,
 )
 from api.webhooks import twilio_conversation_webhook
+from console.forms import AgentSmsGroupForm
 
 
 User = get_user_model()
@@ -100,6 +101,30 @@ class AgentSmsGroupTests(TestCase):
         self.assertEqual(message.conversation.address, "CHXXXX")
         deliver_group.assert_called_once_with(message, self.group)
 
+    def test_group_form_enforces_max_members(self):
+        max_members = PersistentAgentSmsGroup.MAX_MEMBERS
+
+        allowed_numbers = [f"+1202555{index:04d}" for index in range(1000, 1000 + max_members)]
+        form_allowed = AgentSmsGroupForm(
+            {
+                "name": "Allowed",
+                "participants": "\n".join(allowed_numbers),
+            },
+            agent=self.agent,
+        )
+        self.assertTrue(form_allowed.is_valid(), form_allowed.errors)
+
+        too_many_numbers = allowed_numbers + ["+13125550100"]
+        form_too_many = AgentSmsGroupForm(
+            {
+                "name": "Too many",
+                "participants": "\n".join(too_many_numbers),
+            },
+            agent=self.agent,
+        )
+        self.assertFalse(form_too_many.is_valid())
+        self.assertIn(str(max_members), form_too_many.errors["participants"][0])
+
     def test_sms_allowlist_permits_org_agents(self):
         org = Organization.objects.create(name="Org", created_by=self.user)
         billing = getattr(org, "billing", None)
@@ -135,6 +160,10 @@ class AgentSmsGroupTests(TestCase):
 @tag("batch_sms_groups")
 class TwilioConversationWebhookTests(TestCase):
     def setUp(self):
+        self.process_events_patcher = patch("api.agent.tasks.process_agent_events_task.delay")
+        self.addCleanup(self.process_events_patcher.stop)
+        self.mock_process_events = self.process_events_patcher.start()
+
         self.factory = RequestFactory()
         self.user = User.objects.create_user(
             username="u@example.com",

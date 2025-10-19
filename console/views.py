@@ -2367,7 +2367,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             .order_by("name")
         )
         context['sms_groups'] = sms_groups
-        context['sms_group_limit'] = 10
+        context['sms_group_limit'] = PersistentAgentSmsGroup.MAX_MEMBERS
         if 'sms_group_form' not in context:
             edit_group_id = self.request.GET.get('edit_group')
             if edit_group_id:

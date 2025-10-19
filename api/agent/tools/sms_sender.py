@@ -177,8 +177,15 @@ def _send_group_sms(
     members = list(group.members.all())
     if not members:
         return {"status": "error", "message": "Group has no participants to message."}
-    if len(members) > 10:
-        return {"status": "error", "message": "Group texting supports at most 10 participants."}
+    max_members = PersistentAgentSmsGroup.MAX_MEMBERS
+    if len(members) > max_members:
+        return {
+            "status": "error",
+            "message": (
+                f"Group texting supports at most {max_members} saved recipients "
+                "(10 total including you and the Gobii agent)."
+            ),
+        }
 
     # Ensure every participant is whitelisted for outbound SMS
     for member in members:
