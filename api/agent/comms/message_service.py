@@ -29,6 +29,7 @@ from ...models import (
     PersistentAgentConversationParticipant,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
+    PersistentAgentSmsGroup,
     CommsChannel,
     DeliveryStatus,
     build_web_agent_address,
@@ -56,15 +57,38 @@ def _get_or_create_endpoint(channel: str, address: str) -> PersistentAgentCommsE
     return ep
 
 
-def _get_or_create_conversation(channel: str, address: str, owner_agent=None) -> PersistentAgentConversation:
+def _get_or_create_conversation(
+    channel: str,
+    address: str,
+    owner_agent=None,
+    *,
+    sms_group: PersistentAgentSmsGroup | None = None,
+    display_name: str | None = None,
+) -> PersistentAgentConversation:
+    defaults: dict[str, Any] = {"owner_agent": owner_agent}
+    if sms_group is not None:
+        defaults["sms_group"] = sms_group
+    if display_name:
+        defaults["display_name"] = display_name
+
     conv, created = PersistentAgentConversation.objects.get_or_create(
         channel=channel,
         address=address,
-        defaults={"owner_agent": owner_agent},
+        defaults=defaults,
     )
+
+    updates: list[str] = []
     if owner_agent and conv.owner_agent_id is None:
         conv.owner_agent = owner_agent
-        conv.save(update_fields=["owner_agent"])
+        updates.append("owner_agent")
+    if sms_group is not None and conv.sms_group_id != sms_group.id:
+        conv.sms_group = sms_group
+        updates.append("sms_group")
+    if display_name and conv.display_name != display_name:
+        conv.display_name = display_name
+        updates.append("display_name")
+    if updates:
+        conv.save(update_fields=updates)
     return conv
 
 
@@ -286,7 +310,23 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
     with traced("AGENT MSG Ingest", channel=channel_val) as span:
         from_ep = _get_or_create_endpoint(channel_val, parsed.sender)
         to_ep = _get_or_create_endpoint(channel_val, parsed.recipient)
-        conv = _get_or_create_conversation(channel_val, parsed.sender, owner_agent=to_ep.owner_agent)
+
+        sms_group_obj: PersistentAgentSmsGroup | None = None
+        sms_group_id = getattr(parsed, "sms_group_id", None)
+        if sms_group_id:
+            try:
+                sms_group_obj = PersistentAgentSmsGroup.objects.get(id=sms_group_id)
+            except PersistentAgentSmsGroup.DoesNotExist:
+                sms_group_obj = None
+
+        conversation_address = getattr(parsed, "conversation_address", None) or parsed.sender
+        conv = _get_or_create_conversation(
+            channel_val,
+            conversation_address,
+            owner_agent=to_ep.owner_agent,
+            sms_group=sms_group_obj,
+            display_name=sms_group_obj.name if sms_group_obj else None,
+        )
 
         _ensure_participant(conv, from_ep, PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL)
         _ensure_participant(conv, to_ep, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
@@ -480,6 +520,20 @@ def get_agent_id_from_address(channel: CommsChannel | str, address: str) -> UUID
 
     """
     channel_val = channel.value if isinstance(channel, CommsChannel) else channel
+    try:
+        conversation = (
+            PersistentAgentConversation.objects.select_related("owner_agent", "sms_group__agent")
+            .filter(channel=channel_val, address=address)
+            .first()
+        )
+        if conversation:
+            if conversation.owner_agent_id:
+                return conversation.owner_agent_id
+            if conversation.sms_group_id and conversation.sms_group and conversation.sms_group.agent_id:
+                return conversation.sms_group.agent_id
+    except Exception:
+        logging.exception("Failed looking up conversation for address %s", address)
+
     try:
         endpoint = PersistentAgentCommsEndpoint.objects.get(channel=channel_val, address=address)
         return endpoint.owner_agent_id

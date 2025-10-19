@@ -46,6 +46,8 @@ from api.models import (
     PersistentAgentEmailEndpoint,
     PersistentAgentWebhook,
     PersistentAgentMessage,
+    PersistentAgentSmsGroup,
+    PersistentAgentSmsGroupMember,
     AgentPeerLink,
     AgentCommPeerState,
     PersistentAgentConversationParticipant,
@@ -119,6 +121,7 @@ from .forms import (
     OrganizationSeatPurchaseForm,
     OrganizationSeatReductionForm,
     DedicatedIpAddForm,
+    AgentSmsGroupForm,
 )
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
@@ -2351,12 +2354,35 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         try:
             from api.models import UserPhoneNumber
             owner_phone = UserPhoneNumber.objects.filter(
-                user=agent.user, 
+                user=agent.user,
                 is_verified=True
             ).first()
             context['owner_phone'] = owner_phone.phone_number if owner_phone else None
-        except:
+        except Exception:
             context['owner_phone'] = None
+
+        sms_groups = (
+            agent.sms_groups.filter(is_active=True)
+            .prefetch_related("members")
+            .order_by("name")
+        )
+        context['sms_groups'] = sms_groups
+        context['sms_group_limit'] = 10
+        if 'sms_group_form' not in context:
+            edit_group_id = self.request.GET.get('edit_group')
+            if edit_group_id:
+                try:
+                    edit_group = sms_groups.get(pk=edit_group_id)
+                    context['sms_group_form'] = AgentSmsGroupForm(agent=agent, instance=edit_group)
+                    context['editing_group'] = edit_group
+                except PersistentAgentSmsGroup.DoesNotExist:
+                    context['sms_group_form'] = AgentSmsGroupForm(agent=agent)
+            else:
+                context['sms_group_form'] = AgentSmsGroupForm(agent=agent)
+        else:
+            form = context['sms_group_form']
+            if getattr(form, 'instance', None):
+                context['editing_group'] = form.instance
 
         # Provide organizations current user can reassign this agent into (owner/admin only)
         try:
@@ -2488,6 +2514,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
     def post(self, request, *args, **kwargs):
         """Handle agent configuration updates and allowlist management."""
         agent = self.get_object()
+        self.object = agent
+
+        if request.POST.get('delete_group_id') or request.POST.get('sms_group_submit'):
+            return self._handle_sms_group_post(request, agent)
         
         peer_action = request.POST.get('peer_link_action')
         if peer_action:
@@ -3139,6 +3169,59 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         else:
             messages.success(request, "Webhook updated.")
         return redirect_response
+
+    def _handle_sms_group_post(self, request, agent: PersistentAgent):
+        delete_group_id = request.POST.get('delete_group_id')
+        if delete_group_id:
+            group = get_object_or_404(agent.sms_groups, pk=delete_group_id)
+            group.is_active = False
+            group.save(update_fields=["is_active", "updated_at"])
+            group.members.all().delete()
+            messages.success(request, f"Group '{group.name}' deleted.")
+            return redirect('agent_detail', pk=agent.pk)
+
+        group_id = request.POST.get('group_id')
+        instance = None
+        if group_id:
+            instance = get_object_or_404(agent.sms_groups, pk=group_id)
+
+        form = AgentSmsGroupForm(request.POST, agent=agent, instance=instance)
+        if form.is_valid():
+            group = form.save()
+            self._try_sync_sms_group(agent, group)
+            action = "updated" if instance else "created"
+            messages.success(request, f"Group '{group.name}' {action} successfully.")
+            return redirect('agent_detail', pk=agent.pk)
+
+        context = self.get_context_data(sms_group_form=form)
+        return self.render_to_response(context)
+
+    def _try_sync_sms_group(self, agent: PersistentAgent, group: PersistentAgentSmsGroup) -> None:
+        from_endpoint = (
+            agent.comms_endpoints.filter(channel=CommsChannel.SMS, is_primary=True).first()
+            or agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
+        )
+
+        if not from_endpoint:
+            messages.warning(
+                self.request,
+                "Group saved, but this agent does not yet have an SMS number to sync with Twilio.",
+            )
+            return
+
+        try:
+            sms.ensure_group_conversation(group, proxy_number=from_endpoint.address)
+        except Exception as exc:
+            logger.warning(
+                "Unable to sync Twilio conversation for group %s: %s",
+                group.id,
+                exc,
+                exc_info=True,
+            )
+            messages.warning(
+                self.request,
+                "Group saved, but updating the Twilio conversation failed. It will resync on the next group message.",
+            )
 
     def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str):
         redirect_response = redirect('agent_detail', pk=agent.pk)

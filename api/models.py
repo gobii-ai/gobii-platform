@@ -2557,11 +2557,6 @@ class PersistentAgent(models.Model):
 
         # Block SMS for multi-player agents (org-owned only)
         # until group SMS functionality is implemented
-        if channel_val == CommsChannel.SMS:
-            if self.organization_id is not None:
-                # Org-owned agents can only use email (group SMS not yet supported)
-                return False
-
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
             return self._is_in_manual_allowlist(channel_val, addr, direction="outbound")
 
@@ -3302,21 +3297,6 @@ class CommsAllowlistEntry(models.Model):
         else:
             self.address = (self.address or "").strip()
         
-        # Restrict multi-player agents to email-only allowlists
-        # Multi-player = org-owned agents OR agents with manual whitelist policy
-        if self.channel == CommsChannel.SMS:
-            # Check if agent is org-owned or uses manual whitelist (multi-player scenarios)
-            if self.agent.organization_id is not None:
-                raise ValidationError({
-                    "channel": "Organization agents only support email addresses in allowlists. "
-                               "Group SMS functionality is not yet available."
-                })
-            elif self.agent.whitelist_policy == PersistentAgent.WhitelistPolicy.MANUAL:
-                raise ValidationError({
-                    "channel": "Multi-player agents only support email addresses in allowlists. "
-                               "Group SMS functionality is not yet available."
-                })
-
         # Enforce per-agent cap on *active* entries and pending invitations (only when adding a new row)
         if self.is_active and self._state.adding:
             # Get the plan-based limit for this agent's owner
@@ -3960,6 +3940,84 @@ class PersistentAgentSmsEndpoint(models.Model):
         return f"SmsEndpoint<{self.endpoint.address}>"
 
 
+class PersistentAgentSmsGroup(models.Model):
+    """Saved set of recipients for group SMS conversations."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="sms_groups",
+    )
+    name = models.CharField(max_length=128, help_text="Label shown in the console for this group.")
+    twilio_conversation_sid = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Backing Twilio Conversation SID for this group, if provisioned.",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("agent", "name")
+        indexes = [
+            models.Index(fields=["agent", "is_active"], name="pa_sms_group_agent_idx"),
+        ]
+        ordering = ["name"]
+
+    def clean(self):
+        super().clean()
+        self.name = (self.name or "").strip()
+        if not self.name:
+            raise ValidationError({"name": "Group name cannot be empty."})
+
+    def __str__(self) -> str:
+        return f"SmsGroup<{self.agent_id}:{self.name}>"
+
+
+class PersistentAgentSmsGroupMember(models.Model):
+    """Individual recipient within a saved SMS group."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    group = models.ForeignKey(
+        PersistentAgentSmsGroup,
+        on_delete=models.CASCADE,
+        related_name="members",
+    )
+    phone_number = models.CharField(max_length=32)
+    display_name = models.CharField(max_length=128, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("group", "phone_number")
+        indexes = [
+            models.Index(fields=["group"], name="pa_sms_group_member_group_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        number = (self.phone_number or "").strip()
+        if not number.startswith("+1"):
+            raise ValidationError({"phone_number": "Only US/Canada (+1) numbers are supported for group SMS."})
+        if len(number) < 12:
+            raise ValidationError({"phone_number": "Phone number must be full E.164."})
+        self.phone_number = number
+
+        # Enforce group size <= 10 participants
+        if self.group_id:
+            existing = (
+                PersistentAgentSmsGroupMember.objects.filter(group=self.group)
+                .exclude(pk=self.pk)
+                .count()
+            )
+            if existing >= 10:
+                raise ValidationError({"group": "Groups may include at most 10 participants."})
+
+    def __str__(self) -> str:
+        return f"SmsGroupMember<{self.group_id}:{self.phone_number}>"
+
+
 class PersistentAgentConversation(models.Model):
     """A logical conversation / thread across any channel."""
 
@@ -3986,11 +4044,20 @@ class PersistentAgentConversation(models.Model):
         related_name="conversation",
         help_text="Peer link associated with this direct message thread, when applicable.",
     )
+    sms_group = models.ForeignKey(
+        PersistentAgentSmsGroup,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+        help_text="When set, this conversation maps to a saved SMS group.",
+    )
 
     class Meta:
         indexes = [
             models.Index(fields=["channel", "address"], name="pa_conv_channel_addr_idx"),
             models.Index(fields=["is_peer_dm"], name="pa_conv_peer_dm_idx"),
+            models.Index(fields=["sms_group"], name="pa_conv_sms_group_idx"),
         ]
         ordering = ["-id"]
 
@@ -4006,6 +4073,10 @@ class PersistentAgentConversation(models.Model):
         if self.peer_link_id and not self.is_peer_dm:
             # Automatically mark DM conversations when linked.
             self.is_peer_dm = True
+        if self.sms_group_id and self.channel != CommsChannel.SMS:
+            raise ValidationError({
+                "sms_group": "SMS groups can only be associated with SMS conversations."
+            })
 
     def save(self, *args, **kwargs):
         if not kwargs.get("raw"):

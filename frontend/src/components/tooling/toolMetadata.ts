@@ -330,20 +330,30 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const toNumber = coerceString(parameters?.['to_number'])
       const body = coerceString(parameters?.['body'])
 
-      const caption = body ? truncate(body, 56) : toNumber ? `SMS to ${truncate(toNumber, 42)}` : null
-      const summaryParts: string[] = []
-      if (toNumber) {
-        summaryParts.push(`To ${toNumber}`)
-      }
-
-      const ccRaw = parameters?.['cc_numbers']
-      const ccList = Array.isArray(ccRaw)
-        ? (ccRaw as unknown[])
+      const groupId = coerceString(parameters?.['group_id'])
+      const participantRaw = parameters?.['participant_numbers']
+      const participants = Array.isArray(participantRaw)
+        ? (participantRaw as unknown[])
             .map((value) => coerceString(value))
             .filter((value): value is string => Boolean(value))
         : []
-      if (ccList.length) {
-        summaryParts.push(`CC ${ccList.join(', ')}`)
+
+      const caption = body
+        ? truncate(body, 56)
+        : groupId
+        ? `SMS group ${truncate(groupId, 42)}`
+        : toNumber
+        ? `SMS to ${truncate(toNumber, 42)}`
+        : null
+
+      const summaryParts: string[] = []
+      if (groupId) {
+        summaryParts.push(`Group ${truncate(groupId, 24)}`)
+      }
+      if (participants.length) {
+        summaryParts.push(`Recipients ${participants.join(', ')}`)
+      } else if (toNumber) {
+        summaryParts.push(`To ${toNumber}`)
       }
 
       return {

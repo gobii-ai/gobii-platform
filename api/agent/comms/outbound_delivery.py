@@ -7,7 +7,14 @@ from django.utils import timezone
 from anymail.message import AnymailMessage
 from anymail.exceptions import AnymailAPIError
 
-from api.models import PersistentAgentMessage, OutboundMessageAttempt, DeliveryStatus, CommsChannel, AgentEmailAccount
+from api.models import (
+    PersistentAgentMessage,
+    OutboundMessageAttempt,
+    DeliveryStatus,
+    CommsChannel,
+    AgentEmailAccount,
+    PersistentAgentSmsGroup,
+)
 from opentelemetry.trace import get_current_span
 from opentelemetry import trace
 from django.template.loader import render_to_string
@@ -654,8 +661,9 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         message.latest_status = DeliveryStatus.SENT
         message.latest_sent_at = now
+        message.latest_error_code = ""
         message.latest_error_message = ""
-        message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
+        message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_code", "latest_error_message"])
 
         logger.info("Successfully sent agent email message %s via Postmark.", message.id)
         success_props = Analytics.with_org_properties(
@@ -843,3 +851,128 @@ def deliver_agent_sms(message: PersistentAgentMessage):
     message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
 
     return send_result
+
+
+def deliver_agent_group_sms(message: PersistentAgentMessage, group: PersistentAgentSmsGroup):
+    """Send a group SMS/MMS via Twilio Conversations and record the attempt."""
+
+    if message.from_endpoint is None:
+        raise ValueError("Group SMS requires a from_endpoint on the message")
+
+    proxy_number = message.from_endpoint.address
+    if not proxy_number:
+        raise ValueError("Agent SMS endpoint is missing its address")
+
+    message.latest_status = DeliveryStatus.SENDING
+    message.save(update_fields=["latest_status"])
+
+    attempt = OutboundMessageAttempt.objects.create(
+        message=message,
+        provider="twilio_conversations",
+        status=DeliveryStatus.SENDING,
+    )
+
+    original_body = message.body or ""
+    plaintext_body = _convert_sms_body_to_plaintext(original_body)
+
+    media_payload = _build_conversation_media_payload(message)
+
+    logger.info(
+        "Prepared group SMS body for message %s. Plaintext length: %d, media_count=%d",
+        message.id,
+        len(plaintext_body),
+        len(media_payload) if media_payload else 0,
+    )
+
+    send_result = False
+
+    try:
+        sms.ensure_group_conversation(group, proxy_number=proxy_number)
+        provider_message_id = sms.send_group_conversation_message(
+            group,
+            author_identity=f"agent-{group.agent_id}",
+            body=plaintext_body,
+            media=media_payload,
+        )
+
+        now = timezone.now()
+        attempt.status = DeliveryStatus.SENT
+        attempt.provider_message_id = provider_message_id or ""
+        attempt.sent_at = now
+        attempt.save(update_fields=["status", "provider_message_id", "sent_at"])
+
+        message.latest_status = DeliveryStatus.SENT
+        message.latest_sent_at = now
+        message.latest_error_message = ""
+        message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
+
+        member_count = group.members.count()
+        Analytics.track_event(
+            user_id=message.owner_agent.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SMS_SENT,
+            source=AnalyticsSource.AGENT,
+            properties=Analytics.with_org_properties(
+                {
+                    "agent_id": str(message.owner_agent_id),
+                    "message_id": str(message.id),
+                    "sms_id": provider_message_id,
+                    "from_address": proxy_number,
+                    "conversation_sid": group.twilio_conversation_sid,
+                    "is_group": True,
+                    "recipient_count": member_count,
+                },
+                organization=getattr(message.owner_agent, "organization", None),
+            ).copy(),
+        )
+
+        send_result = True
+    except Exception as exc:  # pragma: no cover - relies on external service
+        logger.exception(
+            "Failed to send group SMS for message %s via Twilio Conversations: %s",
+            message.id,
+            exc,
+        )
+        attempt.status = DeliveryStatus.FAILED
+        attempt.error_message = str(exc)
+        attempt.save(update_fields=["status", "error_message"])
+
+        message.latest_status = DeliveryStatus.FAILED
+        message.latest_error_code = ""
+        message.latest_error_message = str(exc)
+        message.save(update_fields=["latest_status", "latest_error_code", "latest_error_message"])
+
+        Analytics.track_event(
+            user_id=message.owner_agent.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SMS_FAILED,
+            source=AnalyticsSource.AGENT,
+            properties=Analytics.with_org_properties(
+                {
+                    "agent_id": str(message.owner_agent_id),
+                    "message_id": str(message.id),
+                    "conversation_sid": group.twilio_conversation_sid,
+                },
+                organization=getattr(message.owner_agent, "organization", None),
+            ).copy(),
+        )
+
+    return send_result
+
+
+def _build_conversation_media_payload(message: PersistentAgentMessage) -> list[dict]:
+    attachments = list(message.attachments.all())
+    media_payload: list[dict] = []
+    for attachment in attachments:
+        try:
+            url = attachment.file.url
+        except Exception:
+            url = ""
+        if not url:
+            continue
+        media_payload.append(
+            {
+                "content_type": attachment.content_type or "application/octet-stream",
+                "filename": attachment.filename or "attachment",
+                "media": url,
+            }
+        )
+    return media_payload

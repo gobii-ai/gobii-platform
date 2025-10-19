@@ -10,6 +10,7 @@ from email.utils import getaddresses
 from api.agent.comms import (
     ingest_inbound_message,
     TwilioSmsAdapter,
+    TwilioConversationAdapter,
     PostmarkEmailAdapter,
     MailgunEmailAdapter,
 )
@@ -20,6 +21,7 @@ from api.models import (
     OutboundMessageAttempt,
     DeliveryStatus,
     PipedreamConnectSession,
+    PersistentAgentSmsGroup,
 )
 from opentelemetry import trace
 import json
@@ -227,6 +229,61 @@ def sms_status_webhook(request):
     except Exception as e:
         logger.error(f"Error processing Twilio status webhook: {e}", exc_info=True)
         return HttpResponse(status=500)
+
+
+@csrf_exempt
+@require_POST
+@tracer.start_as_current_span("COMM twilio_conversation_webhook")
+def twilio_conversation_webhook(request):
+    """Handle Twilio Conversations message events for group SMS."""
+
+    api_key = request.GET.get("t", "").strip()
+    if not api_key:
+        logger.warning("Twilio Conversations webhook missing 't' parameter")
+        return HttpResponse(status=400)
+
+    if api_key != settings.TWILIO_INCOMING_WEBHOOK_TOKEN:
+        logger.warning("Twilio Conversations webhook provided invalid API key")
+        return HttpResponse(status=403)
+
+    event_type = request.POST.get("EventType")
+    if event_type != "onMessageAdded":
+        # We only persist message events; acknowledge others.
+        return HttpResponse(status=200)
+
+    conversation_sid = request.POST.get("ConversationSid", "").strip()
+    if not conversation_sid:
+        return HttpResponse(status=400)
+
+    try:
+        group = PersistentAgentSmsGroup.objects.select_related("agent__user").get(
+            twilio_conversation_sid=conversation_sid,
+            is_active=True,
+        )
+    except PersistentAgentSmsGroup.DoesNotExist:
+        logger.info("Ignoring Twilio conversation %s with no linked SMS group", conversation_sid)
+        return HttpResponse(status=200)
+
+    author = request.POST.get("Author", "")
+    agent_identity = f"agent-{group.agent_id}"
+    if author == agent_identity:
+        # Ignore echoes of messages we originated.
+        return HttpResponse(status=200)
+
+    parsed = TwilioConversationAdapter.parse_request(request)
+    parsed.sms_group_id = str(group.id)
+    parsed.raw_payload["sms_group_id"] = str(group.id)
+
+    # Ensure recipient is populated so the inbound message links to agent endpoint
+    if not parsed.recipient:
+        try:
+            parsed.recipient = group.agent.comms_endpoints.filter(channel=CommsChannel.SMS, is_primary=True).values_list("address", flat=True).first() or ""
+        except Exception:
+            parsed.recipient = ""
+
+    ingest_inbound_message(CommsChannel.SMS, parsed)
+
+    return HttpResponse(status=200)
 
 
 def _handle_inbound_email(

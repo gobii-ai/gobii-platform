@@ -1,13 +1,23 @@
 from django import forms
 from django.contrib.auth import get_user_model
 from django.db.utils import IntegrityError
+from django.db import transaction
 
-from api.models import ApiKey, PersistentAgent, Organization, OrganizationMembership, OrganizationInvite
+from api.models import (
+    ApiKey,
+    PersistentAgent,
+    Organization,
+    OrganizationMembership,
+    OrganizationInvite,
+    PersistentAgentSmsGroup,
+    PersistentAgentSmsGroupMember,
+)
 from api.models import UserPhoneNumber
 from django.core.validators import RegexValidator
 from django.utils import timezone
 from django import forms
 from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
 
 from constants.regex import E164_PHONE_REGEX
 from constants.phone_countries import SUPPORTED_REGION_CODES
@@ -15,6 +25,7 @@ from util.phone import validate_and_format_e164
 from api.models import CommsChannel
 from util import sms
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +147,109 @@ class UserPhoneNumberForm(forms.Form):
         if self.user and UserPhoneNumber.objects.filter(phone_number=e164).exclude(user=self.user).exists():
             raise forms.ValidationError("This phone number is already in use by another account.")
         return e164
+
+
+class AgentSmsGroupForm(forms.Form):
+    name = forms.CharField(
+        label="Group name",
+        max_length=128,
+        widget=forms.TextInput(
+            attrs={
+                "class": "block w-full px-4 py-2 text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500",
+                "placeholder": "Project launch team",
+            }
+        ),
+    )
+    participants = forms.CharField(
+        label="Phone numbers",
+        widget=forms.Textarea(
+            attrs={
+                "rows": 4,
+                "class": "block w-full px-4 py-2 text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500",
+                "placeholder": "+12025550123\n+12025550124",
+            }
+        ),
+        help_text=_("Enter up to 10 US/Canada numbers in +1 E.164 format, one per line."),
+    )
+
+    def __init__(self, *args, agent: PersistentAgent, instance: PersistentAgentSmsGroup | None = None, **kwargs):
+        self.agent = agent
+        self.instance = instance
+        super().__init__(*args, **kwargs)
+
+        if instance is not None:
+            self.fields["name"].initial = instance.name
+            numbers = list(instance.members.order_by("phone_number").values_list("phone_number", flat=True))
+            self.fields["participants"].initial = "\n".join(numbers)
+
+    def clean_name(self) -> str:
+        name = (self.cleaned_data.get("name") or "").strip()
+        if not name:
+            raise forms.ValidationError("Group name cannot be empty.")
+
+        existing = self.agent.sms_groups.filter(name__iexact=name)
+        if self.instance is not None:
+            existing = existing.exclude(pk=self.instance.pk)
+        if existing.exists():
+            raise forms.ValidationError("A group with this name already exists.")
+
+        return name
+
+    def clean_participants(self) -> str:
+        raw_value = self.cleaned_data.get("participants") or ""
+        tokens = [token.strip() for token in re.split(r"[,\n]+", raw_value) if token.strip()]
+
+        if not tokens:
+            raise forms.ValidationError("Add at least two phone numbers.")
+
+        formatted: list[str] = []
+        for token in tokens:
+            try:
+                number = validate_and_format_e164(token)
+            except ValidationError as exc:
+                raise forms.ValidationError(exc.messages) from exc
+
+            if not number.startswith("+1"):
+                raise forms.ValidationError("Group texting is limited to US/Canada (+1) numbers.")
+
+            if number not in formatted:
+                formatted.append(number)
+
+        if len(formatted) < 2:
+            raise forms.ValidationError("Group texting requires at least two participants.")
+        if len(formatted) > 10:
+            raise forms.ValidationError("Groups can include at most 10 participants.")
+
+        self._cleaned_participants = formatted
+        return "\n".join(formatted)
+
+    @transaction.atomic
+    def save(self) -> PersistentAgentSmsGroup:
+        if not hasattr(self, "_cleaned_participants"):
+            raise ValueError("Call is_valid() before save().")
+
+        participants: list[str] = getattr(self, "_cleaned_participants")
+
+        group = self.instance or PersistentAgentSmsGroup(agent=self.agent)
+        group.name = self.cleaned_data["name"]
+        group.is_active = True
+        group.save()
+
+        existing_numbers = set(group.members.values_list("phone_number", flat=True))
+        desired_numbers = set(participants)
+
+        removable = existing_numbers - desired_numbers
+        if removable:
+            group.members.filter(phone_number__in=removable).delete()
+
+        for number in participants:
+            PersistentAgentSmsGroupMember.objects.update_or_create(
+                group=group,
+                phone_number=number,
+                defaults={"display_name": ""},
+            )
+
+        return group
 
 class StyledRadioSelect(forms.RadioSelect):
     """Custom RadioSelect widget with Preline styling."""

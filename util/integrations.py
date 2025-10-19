@@ -48,6 +48,13 @@ def twilio_verify_available() -> bool:
     return bool(getattr(settings, "TWILIO_ENABLED", False) and getattr(settings, "TWILIO_VERIFY_CONFIGURED", False))
 
 
+def twilio_conversations_available() -> bool:
+    return bool(
+        getattr(settings, "TWILIO_ENABLED", False)
+        and getattr(settings, "TWILIO_CONVERSATIONS_CONFIGURED", False)
+    )
+
+
 def postmark_simulation_active() -> bool:
     if postmark_status().enabled:
         return False

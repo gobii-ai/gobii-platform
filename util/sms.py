@@ -4,10 +4,20 @@ import logging
 import random
 from typing import Optional
 from opentelemetry import trace
-from api.models import SmsNumber, PersistentAgentCommsEndpoint, CommsChannel, UserPhoneNumber
+from api.models import (
+    SmsNumber,
+    PersistentAgentCommsEndpoint,
+    CommsChannel,
+    UserPhoneNumber,
+    PersistentAgentSmsGroup,
+)
 from config import settings
 from config.settings import TWILIO_MESSAGING_SERVICE_SID
-from util.integrations import twilio_status, twilio_verify_available
+from util.integrations import (
+    twilio_status,
+    twilio_verify_available,
+    twilio_conversations_available,
+)
 from observability import traced
 from twilio.base.exceptions import TwilioRestException
 
@@ -230,3 +240,185 @@ def sms_twilio_purchase_numbers(number: str) -> bool:
         return False
 
     return True
+
+
+def _get_conversations_service(client: Optional[Client]):
+    if client is None:
+        return None
+    service_sid = settings.TWILIO_CONVERSATIONS_SERVICE_SID
+    if not service_sid:
+        logger.warning("Twilio conversations service SID missing; cannot manage conversations")
+        return None
+    return client.conversations.v1.services(service_sid)
+
+
+def ensure_group_conversation(group: PersistentAgentSmsGroup, proxy_number: str) -> str:
+    """Ensure a Twilio Conversation exists for *group* and sync participants."""
+
+    if not twilio_conversations_available():
+        raise RuntimeError("Twilio Conversations not configured")
+
+    client = _get_client()
+    service = _get_conversations_service(client)
+
+    if client is None or service is None:
+        raise RuntimeError("Twilio client unavailable for Conversations")
+
+    friendly_name = f"{group.agent.name} – {group.name}" if group.agent_id else group.name
+    unique_name = f"agent-{group.agent_id}-group-{group.id}"
+
+    conversation_resource = None
+    if group.twilio_conversation_sid:
+        try:
+            conversation_resource = service.conversations(group.twilio_conversation_sid)
+            conversation_resource.fetch()
+        except TwilioRestException as exc:  # pragma: no cover - network dependent
+            logger.warning(
+                "Twilio conversation %s unavailable (%s); recreating",
+                group.twilio_conversation_sid,
+                exc,
+            )
+            group.twilio_conversation_sid = ""
+
+    if not group.twilio_conversation_sid:
+        try:
+            created = service.conversations.create(
+                friendly_name=friendly_name[:64],
+                unique_name=unique_name,
+                messaging_service_sid=settings.TWILIO_MESSAGING_SERVICE_SID or None,
+            )
+        except TwilioRestException as exc:  # pragma: no cover - network dependent
+            logger.error("Failed creating Twilio Conversation for group %s: %s", group.id, exc)
+            raise
+        group.twilio_conversation_sid = created.sid
+        group.save(update_fields=["twilio_conversation_sid", "updated_at"])
+        conversation_resource = service.conversations(created.sid)
+    else:
+        conversation_resource = service.conversations(group.twilio_conversation_sid)
+
+    _ensure_agent_identity_participant(conversation_resource, group)
+    _sync_group_sms_participants(conversation_resource, group, proxy_number)
+
+    return group.twilio_conversation_sid
+
+
+def _ensure_agent_identity_participant(conversation, group: PersistentAgentSmsGroup) -> None:
+    identity = f"agent-{group.agent_id}"
+    try:
+        participants = conversation.participants.list()
+    except TwilioRestException as exc:  # pragma: no cover - network dependent
+        logger.warning("Failed listing participants for conversation %s: %s", conversation.sid, exc)
+        return
+
+    for participant in participants:
+        if getattr(participant, "identity", None) == identity:
+            return
+
+    try:
+        conversation.participants.create(identity=identity)
+        logger.info(
+            "Added identity participant %s to conversation %s",
+            identity,
+            conversation.sid,
+        )
+    except TwilioRestException as exc:  # pragma: no cover - network dependent
+        logger.warning(
+            "Failed adding identity participant for conversation %s: %s",
+            conversation.sid,
+            exc,
+        )
+
+
+def _sync_group_sms_participants(conversation, group: PersistentAgentSmsGroup, proxy_number: str) -> None:
+    desired_numbers = {member.phone_number.strip() for member in group.members.all()}
+
+    try:
+        participants = conversation.participants.list()
+    except TwilioRestException as exc:  # pragma: no cover - network dependent
+        logger.warning("Failed listing participants for conversation %s: %s", conversation.sid, exc)
+        participants = []
+
+    current_sms_participants: dict[str, str] = {}
+    for participant in participants:
+        binding = getattr(participant, "messaging_binding", {}) or {}
+        address = binding.get("address")
+        if address:
+            current_sms_participants[address] = participant.sid
+
+    # Remove participants no longer desired
+    for address, participant_sid in current_sms_participants.items():
+        if address not in desired_numbers:
+            try:
+                conversation.participants(participant_sid).delete()
+                logger.info(
+                    "Removed SMS participant %s from conversation %s",
+                    address,
+                    conversation.sid,
+                )
+            except TwilioRestException as exc:  # pragma: no cover - network dependent
+                logger.warning(
+                    "Failed removing participant %s from conversation %s: %s",
+                    address,
+                    conversation.sid,
+                    exc,
+                )
+
+    # Add missing numbers
+    for address in desired_numbers:
+        if address in current_sms_participants:
+            continue
+        try:
+            conversation.participants.create(
+                messaging_binding_address=address,
+                messaging_binding_proxy_address=proxy_number,
+            )
+            logger.info(
+                "Added SMS participant %s to conversation %s",
+                address,
+                conversation.sid,
+            )
+        except TwilioRestException as exc:  # pragma: no cover - network dependent
+            if getattr(exc, "code", None) == 50404:
+                logger.info(
+                    "Participant %s already exists in conversation %s",
+                    address,
+                    conversation.sid,
+                )
+                continue
+            logger.warning(
+                "Failed adding participant %s to conversation %s: %s",
+                address,
+                conversation.sid,
+                exc,
+            )
+
+
+def send_group_conversation_message(
+    group: PersistentAgentSmsGroup,
+    author_identity: str,
+    body: str,
+    media: Optional[list[dict]] = None,
+) -> str:
+    if not twilio_conversations_available():
+        raise RuntimeError("Twilio Conversations not configured")
+
+    client = _get_client()
+    service = _get_conversations_service(client)
+    if client is None or service is None or not group.twilio_conversation_sid:
+        raise RuntimeError("Twilio Conversations unavailable for sending")
+
+    conversation = service.conversations(group.twilio_conversation_sid)
+    try:
+        message = conversation.messages.create(
+            author=author_identity,
+            body=body,
+            media=media or None,
+        )
+        return message.sid
+    except TwilioRestException as exc:  # pragma: no cover - network dependent
+        logger.error(
+            "Failed sending conversation message for group %s: %s",
+            group.id,
+            exc,
+        )
+        raise

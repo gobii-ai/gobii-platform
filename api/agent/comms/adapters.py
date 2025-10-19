@@ -90,6 +90,8 @@ class ParsedMessage:
     attachments: List[Any]
     raw_payload: MutableMapping[str, Any]
     msg_channel: CommsChannel
+    conversation_address: Optional[str] = None
+    sms_group_id: Optional[str] = None
 
 
 class SmsAdapter:
@@ -137,6 +139,41 @@ class TwilioSmsAdapter(SmsAdapter):
             attachments=attachments,
             raw_payload=data.dict(),
             msg_channel=CommsChannel.SMS,
+        )
+
+
+class TwilioConversationAdapter(SmsAdapter):
+    """Adapter that normalizes Twilio Conversations webhook payloads."""
+
+    @staticmethod
+    @tracer.start_as_current_span("TWILIO Conversation Parse")
+    def parse_request(request: HttpRequest) -> ParsedMessage:
+        data = request.POST
+
+        try:
+            media_count = int(data.get("MediaCount", 0))
+        except (TypeError, ValueError):
+            media_count = 0
+
+        attachments: List[str] = []
+        for i in range(media_count):
+            media_url = data.get(f"MediaUrl{i}")
+            if media_url:
+                attachments.append(media_url)
+
+        sender = data.get("MessagingBinding.Address") or data.get("Author", "")
+        recipient = data.get("MessagingBinding.ProxyAddress") or ""
+        conversation_sid = data.get("ConversationSid", "")
+
+        return ParsedMessage(
+            sender=sender or "",
+            recipient=recipient,
+            subject=None,
+            body=data.get("Body", ""),
+            attachments=attachments,
+            raw_payload=data.dict(),
+            msg_channel=CommsChannel.SMS,
+            conversation_address=conversation_sid or None,
         )
 
 

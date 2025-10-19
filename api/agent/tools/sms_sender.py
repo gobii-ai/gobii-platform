@@ -16,15 +16,21 @@ from django.urls.base import reverse
 from django.conf import settings
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from ..comms.outbound_delivery import deliver_agent_sms
+from ..comms.outbound_delivery import deliver_agent_sms, deliver_agent_group_sms
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.text_sanitizer import strip_control_chars
+from ..comms.message_service import _get_or_create_conversation, _ensure_participant
 from ...models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
-    PersistentAgentMessage, LinkShortener,
+    PersistentAgentConversationParticipant,
+    PersistentAgentMessage,
+    PersistentAgentSmsGroup,
+    PersistentAgentSmsEndpoint,
+    LinkShortener,
 )
+from util import sms
 from opentelemetry import trace
 from urlextract import URLExtract
 
@@ -37,21 +43,21 @@ def get_send_sms_tool() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "send_sms",
-            "description": "Sends an SMS message to a recipient or group.",
+            "description": "Sends an SMS message to a single recipient or a saved group conversation.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "to_number": {"type": "string", "description": "Primary E.164 phone number."},
-                    "cc_numbers": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "Additional E.164 phone numbers for group SMS (optional)"
+                    "to_number": {
+                        "type": "string",
+                        "description": "Primary E.164 phone number for a 1:1 message.",
                     },
-                    "body": {"type": "string", "description": "SMS content."},
+                    "group_id": {
+                        "type": "string",
+                        "description": "Identifier of a saved SMS group configured for this agent.",
+                    },
+                    "body": {"type": "string", "description": "SMS or MMS content."},
                 },
-                "required": ["to_number", "body"],
+                "required": ["body"],
             },
         },
     }
@@ -60,105 +66,209 @@ def get_send_sms_tool() -> Dict[str, Any]:
 @tracer.start_as_current_span("SMS Sender - execute_send_sms")
 def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute SMS sending for a persistent agent."""
-    to_number = params.get("to_number")
     body = strip_control_chars(params.get("body"))
-    cc_numbers = params.get("cc_numbers", [])  # Optional list for group SMS
-    
-    # Temporary restriction on group SMS until Twilio Conversations API is implemented
-    if cc_numbers:
-        return {
-            "status": "error",
-            "message": "Group SMS is not currently supported. Please use email for multi-recipient messages."
-        }
-    
-    if not all([to_number, body]):
-        return {"status": "error", "message": "Missing required parameters: to_number or body"}
+    to_number = params.get("to_number")
+    group_id = params.get("group_id")
+
+    if not body:
+        return {"status": "error", "message": "Missing required parameter: body"}
+
+    if group_id and to_number:
+        return {"status": "error", "message": "Provide either to_number for 1:1 SMS or group_id for a group message, not both."}
+
+    if not group_id and not to_number:
+        return {"status": "error", "message": "Provide a to_number for 1:1 SMS or a group_id for group texting."}
 
     if len(body) > settings.SMS_MAX_BODY_LENGTH:
         return {
             "status": "error",
-            "message": f"SMS body exceeds maximum length of {settings.SMS_MAX_BODY_LENGTH} characters. Please shorten it, or split it into multiple messages."
+            "message": f"SMS body exceeds maximum length of {settings.SMS_MAX_BODY_LENGTH} characters. Please shorten it, or split it into multiple messages.",
         }
 
-    # Log SMS attempt
-    body_preview = body[:100] + "..." if len(body) > 100 else body
-    group_info = f" (group with {len(cc_numbers)} others)" if cc_numbers else ""
+    from_endpoint = (
+        PersistentAgentCommsEndpoint.objects.filter(
+            owner_agent=agent, channel=CommsChannel.SMS, is_primary=True
+        ).first()
+        or PersistentAgentCommsEndpoint.objects.filter(
+            owner_agent=agent, channel=CommsChannel.SMS
+        ).first()
+    )
+    if not from_endpoint:
+        return {"status": "error", "message": "Agent has no configured SMS endpoint to send from."}
+
     logger.info(
-        "Agent %s sending SMS to %s%s, body: %s",
-        agent.id, to_number, group_info, body_preview
+        "Agent %s preparing SMS via endpoint %s (group_id=%s, to=%s)",
+        agent.id,
+        from_endpoint.address,
+        group_id,
+        to_number,
     )
 
     try:
-        from_endpoint = (
-            PersistentAgentCommsEndpoint.objects.filter(
-                owner_agent=agent, channel=CommsChannel.SMS, is_primary=True
-            ).first()
-            or PersistentAgentCommsEndpoint.objects.filter(
-                owner_agent=agent, channel=CommsChannel.SMS
-            ).first()
+        if group_id:
+            return _send_group_sms(agent, from_endpoint, body, group_id)
+        return _send_single_sms(agent, from_endpoint, body, to_number)
+    except Exception as exc:  # pragma: no cover - safety net
+        logger.exception("Failed sending SMS for agent %s", agent.id)
+        return {"status": "error", "message": f"Failed to send SMS: {exc}"}
+
+
+def _send_single_sms(
+    agent: PersistentAgent,
+    from_endpoint: PersistentAgentCommsEndpoint,
+    body: str,
+    to_number: str,
+) -> Dict[str, Any]:
+    if not to_number:
+        return {"status": "error", "message": "to_number is required for single-recipient SMS."}
+
+    if not agent.is_recipient_whitelisted(CommsChannel.SMS, to_number):
+        return {"status": "error", "message": "Recipient number not allowed for this agent."}
+
+    to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=CommsChannel.SMS,
+        address=to_number,
+        defaults={"owner_agent": None},
+    )
+
+    body = shorten_links_in_body(body, user=agent.user)
+
+    duplicate = detect_recent_duplicate_message(
+        agent,
+        channel=CommsChannel.SMS,
+        body=body,
+        to_address=to_number,
+    )
+    if duplicate:
+        return duplicate.to_error_response()
+
+    message = PersistentAgentMessage.objects.create(
+        owner_agent=agent,
+        from_endpoint=from_endpoint,
+        to_endpoint=to_endpoint,
+        is_outbound=True,
+        body=body,
+        raw_payload={},
+    )
+
+    deliver_agent_sms(message)
+
+    return {
+        "status": "ok",
+        "message": f"SMS queued for {to_number}.",
+        "auto_sleep_ok": True,
+    }
+
+
+def _send_group_sms(
+    agent: PersistentAgent,
+    from_endpoint: PersistentAgentCommsEndpoint,
+    body: str,
+    group_id: str,
+) -> Dict[str, Any]:
+    try:
+        group = (
+            PersistentAgentSmsGroup.objects.prefetch_related("members")
+            .get(id=group_id, agent=agent, is_active=True)
         )
-        if not from_endpoint:
-            return {"status": "error", "message": "Agent has no configured SMS endpoint to send from."}
+    except PersistentAgentSmsGroup.DoesNotExist:
+        return {"status": "error", "message": "Group not found or inactive for this agent."}
 
-        if not agent.is_recipient_whitelisted(CommsChannel.SMS, to_number):
-            # Check if this is a multi-player agent to provide a more specific error
-            if agent.organization_id is not None or agent.whitelist_policy == PersistentAgent.WhitelistPolicy.MANUAL:
-                return {"status": "error", "message": "Multi-player agents only support email communication. SMS is not available for organization or allowlist-based agents."}
-            return {"status": "error", "message": "Recipient number not allowed for this agent."}
-        
-        # Check whitelist for CC numbers
-        for cc_num in cc_numbers:
-            if not agent.is_recipient_whitelisted(CommsChannel.SMS, cc_num):
-                return {"status": "error", "message": f"Group member {cc_num} not allowed for this agent."}
+    members = list(group.members.all())
+    if not members:
+        return {"status": "error", "message": "Group has no participants to message."}
+    if len(members) > 10:
+        return {"status": "error", "message": "Group texting supports at most 10 participants."}
 
-        to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-            channel=CommsChannel.SMS, address=to_number, defaults={"owner_agent": None}
-        )
-        
-        # Create CC endpoints for group SMS
-        cc_endpoint_objects = []
-        for cc_num in cc_numbers:
-            cc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                channel=CommsChannel.SMS, address=cc_num, defaults={"owner_agent": None}
-            )
-            cc_endpoint_objects.append(cc_endpoint)
+    # Ensure every participant is whitelisted for outbound SMS
+    for member in members:
+        if not agent.is_recipient_whitelisted(CommsChannel.SMS, member.phone_number):
+            return {
+                "status": "error",
+                "message": f"Group member {member.phone_number} is not allowed for this agent.",
+            }
 
-        # Perform link shortening before duplicate detection so we compare canonical bodies
-        body = shorten_links_in_body(body, user=agent.user)
-
-        duplicate = detect_recent_duplicate_message(
-            agent,
-            channel=CommsChannel.SMS,
-            body=body,
-            to_address=to_number,
-        )
-        if duplicate:
-            return duplicate.to_error_response()
-
-        message = PersistentAgentMessage.objects.create(
-            owner_agent=agent,
-            from_endpoint=from_endpoint,
-            to_endpoint=to_endpoint,
-            is_outbound=True,
-            body=body,
-            raw_payload={},
-        )
-        
-        # Add CC endpoints for group messaging
-        if cc_endpoint_objects:
-            message.cc_endpoints.set(cc_endpoint_objects)
-
-        deliver_agent_sms(message)
-
+    # Ensure proxy endpoint supports MMS (required for group messaging)
+    try:
+        sms_meta = from_endpoint.sms_meta
+    except AttributeError:
+        sms_meta = None
+    except PersistentAgentSmsEndpoint.DoesNotExist:
+        sms_meta = None
+    if not sms_meta or not getattr(sms_meta, "supports_mms", False):
         return {
-            "status": "ok",
-            "message": f"SMS queued for {to_number}.",
-            "auto_sleep_ok": True,
+            "status": "error",
+            "message": "Agent's SMS number must support MMS to send group texts.",
         }
 
-    except Exception as e:
-        logger.exception("Failed to create PersistentAgentMessage for agent %s", agent.id)
-        return {"status": "error", "message": f"Failed to send SMS: {e}"}
+    body = shorten_links_in_body(body, user=agent.user)
+
+    duplicate = detect_recent_duplicate_message(
+        agent,
+        channel=CommsChannel.SMS,
+        body=body,
+        to_address=str(group.id),
+    )
+    if duplicate:
+        return duplicate.to_error_response()
+
+    # Ensure the Twilio conversation exists and is up to date
+    try:
+        conversation_sid = sms.ensure_group_conversation(group, proxy_number=from_endpoint.address)
+    except Exception as exc:
+        logger.exception("Failed to ensure Twilio conversation for group %s", group.id)
+        return {"status": "error", "message": f"Unable to prepare group conversation: {exc}"}
+
+    conversation = _get_or_create_conversation(
+        CommsChannel.SMS,
+        conversation_sid,
+        owner_agent=agent,
+        sms_group=group,
+        display_name=group.name,
+    )
+
+    # Ensure participants are tracked for the conversation timeline
+    _ensure_participant(
+        conversation,
+        from_endpoint,
+        PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+    )
+
+    member_endpoints: list[PersistentAgentCommsEndpoint] = []
+    for member in members:
+        endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.SMS,
+            address=member.phone_number,
+            defaults={"owner_agent": None},
+        )
+        member_endpoints.append(endpoint)
+        _ensure_participant(
+            conversation,
+            endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+        )
+
+    message = PersistentAgentMessage.objects.create(
+        owner_agent=agent,
+        from_endpoint=from_endpoint,
+        conversation=conversation,
+        is_outbound=True,
+        body=body,
+        raw_payload={
+            "sms_group_id": str(group.id),
+            "sms_group_name": group.name,
+            "participant_numbers": [member.phone_number for member in members],
+        },
+    )
+
+    deliver_agent_group_sms(message, group)
+
+    participant_list = ", ".join(m.phone_number for m in members)
+    return {
+        "status": "ok",
+        "message": f"Group SMS queued to {len(members)} participants: {participant_list}.",
+        "auto_sleep_ok": True,
+    }
 
 @tracer.start_as_current_span("SMS Sender - shorten_links_in_body")
 def shorten_links_in_body(body: str, user: User | None = None) -> str:
