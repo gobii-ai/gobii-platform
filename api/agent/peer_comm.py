@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from django.db import transaction
@@ -14,6 +14,7 @@ from waffle import flag_is_active
 
 from observability import traced
 
+from api.agent.tools.outbound_duplicate_guard import detect_recent_duplicate_message
 from api.models import (
     AgentCommPeerState,
     AgentPeerLink,
@@ -34,6 +35,14 @@ class PeerMessagingError(Exception):
         super().__init__(message)
         self.status = status
         self.retry_at = retry_at
+
+
+class PeerMessagingDuplicateError(PeerMessagingError):
+    """Raised when a peer DM is rejected as a recent duplicate."""
+
+    def __init__(self, message: str, *, payload: Dict[str, Any]):
+        super().__init__(message, status=payload.get("status", "error"))
+        self.duplicate_response = payload
 
 
 @dataclass
@@ -128,6 +137,18 @@ class PeerMessagingService:
                         retry_at=retry_at,
                     )
 
+            conversation = self._ensure_conversation()
+
+            duplicate = detect_recent_duplicate_message(
+                self.agent,
+                channel=self.CHANNEL,
+                body=normalized_body,
+                conversation_id=conversation.id,
+            )
+            if duplicate:
+                payload = duplicate.to_error_response()
+                raise PeerMessagingDuplicateError(payload["message"], payload=payload)
+
             # Out of credits? schedule follow-up and exit
             if state.credits_remaining <= 0:
                 logger.info(
@@ -151,7 +172,6 @@ class PeerMessagingService:
             if state.credits_remaining == 0:
                 self._schedule_follow_up(self.agent.id, state.window_reset_at)
 
-            conversation = self._ensure_conversation()
             from_endpoint = self._ensure_peer_endpoint(self.agent)
             self._ensure_peer_endpoint(self.peer_agent)
 

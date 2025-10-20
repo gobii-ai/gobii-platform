@@ -5,7 +5,12 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
 
-from api.agent.peer_comm import PeerMessagingError, PeerMessagingService, PeerSendResult
+from api.agent.peer_comm import (
+    PeerMessagingDuplicateError,
+    PeerMessagingError,
+    PeerMessagingService,
+    PeerSendResult,
+)
 from api.models import (
     AgentCommPeerState,
     AgentPeerLink,
@@ -109,6 +114,37 @@ class PeerMessagingServiceTests(TestCase):
         # Only original outbound + inbound messages should exist
         self.assertEqual(
             PersistentAgentMessage.objects.filter(owner_agent=self.agent_a, is_outbound=True).count(),
+            1,
+        )
+
+    def test_duplicate_message_blocked(self):
+        with patch('api.agent.tasks.process_agent_events_task') as task_mock, patch(
+            'api.agent.peer_comm.transaction.on_commit', lambda cb: cb()
+        ):
+            task_mock.delay = MagicMock()
+            self.service.send_message("Hello Beta")
+
+        state = AgentCommPeerState.objects.get(link=self.link, channel=CommsChannel.OTHER)
+        state.last_message_at = timezone.now() - timedelta(seconds=10)
+        state.save(update_fields=['last_message_at'])
+
+        with self.assertRaises(PeerMessagingError) as err_ctx, patch(
+            'api.agent.tasks.process_agent_events_task'
+        ) as task_mock, patch('api.agent.peer_comm.transaction.on_commit', lambda cb: cb()):
+            task_mock.delay = MagicMock()
+            self.service.send_message("Hello Beta")
+
+        self.assertIsInstance(err_ctx.exception, PeerMessagingDuplicateError)
+        self.assertTrue(err_ctx.exception.duplicate_response.get("duplicate_detected"))
+
+        state.refresh_from_db()
+        self.assertEqual(state.credits_remaining, 1)
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent_a, is_outbound=True).count(),
+            1,
+        )
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent_b, is_outbound=False).count(),
             1,
         )
 

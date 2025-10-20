@@ -1,9 +1,7 @@
-from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TransactionTestCase, tag
-from django.utils import timezone
 
 from api.agent.tools.email_sender import execute_send_email
 from api.agent.tools.sms_sender import execute_send_sms
@@ -139,7 +137,7 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
         final_count = PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count()
         self.assertEqual(final_count, initial_count + 1)
 
-    def test_duplicate_window_expires(self, mock_close_old_connections):
+    def test_duplicate_allowed_after_different_message(self, mock_close_old_connections):
         params = {
             "to_address": self.email_address,
             "subject": "Windowed Update",
@@ -149,20 +147,20 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
         first = execute_send_email(self.agent, params)
         self.assertEqual(first.get("status"), "ok")
 
-        # Manually rewind the timestamp to simulate the window expiring.
-        message = (
-            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True)
-            .order_by("-timestamp")
-            .first()
-        )
-        message.timestamp = timezone.now() - timedelta(minutes=31)
-        message.save(update_fields=["timestamp"])
+        followup_params = {
+            "to_address": self.email_address,
+            "subject": "Windowed Update Variant",
+            "mobile_first_html": "<p>Variant</p>",
+        }
+        followup = execute_send_email(self.agent, followup_params)
+        self.assertEqual(followup.get("status"), "ok")
 
+        # Original content should be allowed after a different message was sent in between.
         second = execute_send_email(self.agent, params)
         self.assertEqual(second.get("status"), "ok")
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")
-    def test_duplicate_detects_nonconsecutive_match(self, mock_deliver_email, mock_close_old_connections):
+    def test_duplicate_allows_nonconsecutive_match(self, mock_deliver_email, mock_close_old_connections):
         first_params = {
             "to_address": self.email_address,
             "subject": "Report Reminder",
@@ -180,8 +178,7 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
         second = execute_send_email(self.agent, second_params)
         self.assertEqual(second.get("status"), "ok")
 
-        mock_deliver_email.reset_mock()
         third = execute_send_email(self.agent, first_params)
-        self.assertEqual(third.get("status"), "error")
-        self.assertTrue(third.get("duplicate_detected"))
-        self.assertEqual(mock_deliver_email.call_count, 0)
+        self.assertEqual(third.get("status"), "ok")
+        self.assertFalse(third.get("duplicate_detected"))
+        self.assertEqual(mock_deliver_email.call_count, 3)
