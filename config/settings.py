@@ -253,6 +253,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "middleware.utm_capture.UTMTrackingMiddleware",
     "django.middleware.common.CommonMiddleware",
     "setup.middleware.FirstRunSetupMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
