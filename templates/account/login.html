@@ -14,7 +14,7 @@
     <p class="mt-2 text-center text-sm text-gray-500">
       Don't have an account yet?
       {% with request.session.utm_querystring as utm_qs %}
-      <a href="{{ account_signup_url }}{% if utm_qs %}?{{ utm_qs }}{% endif %}" class="text-blue-600 hover:underline">Sign up here</a>
+      <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="text-blue-600 hover:underline">Sign up here</a>
       {% endwith %}
     </p>
 

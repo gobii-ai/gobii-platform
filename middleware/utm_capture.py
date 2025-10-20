@@ -121,18 +121,17 @@ class UTMTrackingMiddleware:
 
     def _build_querystring(self, session) -> str:
         combined: Dict[str, str] = {}
+        combined.update(session.get(self.SESSION_UTM_FIRST) or {})
         combined.update(session.get(self.SESSION_UTM_LAST) or {})
-        if not combined:
-            combined.update(session.get(self.SESSION_UTM_FIRST) or {})
 
-        click_values = session.get(self.SESSION_CLICK_LAST) or {}
-        if not click_values:
-            click_values = session.get(self.SESSION_CLICK_FIRST) or {}
+        click_values = session.get(self.SESSION_CLICK_FIRST) or {}
+        click_values.update(session.get(self.SESSION_CLICK_LAST) or {})
         combined.update(click_values)
 
         fbclid = session.get(self.SESSION_FBCLID_LAST) or session.get(
             self.SESSION_FBCLID_FIRST
         )
+
         if fbclid:
             combined["fbclid"] = fbclid
 
