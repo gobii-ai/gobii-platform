@@ -2576,6 +2576,19 @@ class PersistentAgent(models.Model):
             .values_list("address", flat=True)
         )
 
+        owner_number: str | None = None
+        try:
+            owner_phone = (
+                UserPhoneNumber.objects.filter(user=self.user, is_verified=True)
+                .order_by("-is_primary", "-verified_at", "-created_at")
+                .first()
+            )
+        except Exception:
+            owner_phone = None
+
+        if owner_phone and owner_phone.phone_number:
+            owner_number = owner_phone.phone_number.strip()
+
         try:
             group = self.sms_groups.filter(
                 name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME
@@ -2601,6 +2614,9 @@ class PersistentAgent(models.Model):
                 max_members,
             )
             desired_numbers = desired_numbers[:max_members]
+
+        if owner_number and owner_number not in desired_numbers:
+            desired_numbers.append(owner_number)
 
         if group is None:
             group = PersistentAgentSmsGroup.objects.create(

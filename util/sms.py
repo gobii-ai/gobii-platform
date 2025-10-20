@@ -412,7 +412,6 @@ def send_group_conversation_message(
         message = conversation.messages.create(
             author=author_identity,
             body=body,
-            media=media or None,
         )
         return message.sid
     except TwilioRestException as exc:  # pragma: no cover - network dependent

@@ -2105,6 +2105,10 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
 
     # Add the creator of the agent as a contact explicitly
     allowed_lines = []
+    try:
+        agent.sync_sms_allowlist_group()
+    except Exception:  # pragma: no cover - defensive safeguard
+        logger.exception("Failed syncing SMS allowlist group for agent %s while building context", agent.id)
     if agent.user and agent.user.email:
         allowed_lines.append("As the creator of this agent, you can always contact the user at and receive messages from:")
         allowed_lines.append(f"- email: {agent.user.email} (creator)")
@@ -2133,6 +2137,21 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         for entry in allowed_contacts:
             name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
             allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str} - (" + ("inbound" if entry.allow_inbound else "") + ("/" if entry.allow_inbound and entry.allow_outbound else "") + ("outbound" if entry.allow_outbound else "") + ")")
+
+    from api.models import PersistentAgentSmsGroup
+    sms_group = (
+        agent.sms_groups.filter(
+            name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME,
+            is_active=True,
+        )
+        .prefetch_related("members")
+        .first()
+    )
+
+    if sms_group and sms_group.members.exists():
+        allowed_lines.append("")
+        allowed_lines.append("Group SMS conversation details (use these for the send_sms tool when contacting multiple recipients):")
+        allowed_lines.append(f"- sms_group_id: {sms_group.id}")
 
     allowed_lines.append("You MUST NOT contact anyone not explicitly listed in this section or in recent conversations.")
     allowed_lines.append("IF YOU NEED TO CONTACT SOMEONE NEW, USE THE 'request_contact_permission' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE DETAILS.")

@@ -76,9 +76,6 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
     if group_id and to_number:
         return {"status": "error", "message": "Provide either to_number for 1:1 SMS or group_id for a group message, not both."}
 
-    if not group_id and not to_number:
-        return {"status": "error", "message": "Provide a to_number for 1:1 SMS or a group_id for group texting."}
-
     if len(body) > settings.SMS_MAX_BODY_LENGTH:
         return {
             "status": "error",
@@ -107,6 +104,11 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
     try:
         if group_id:
             return _send_group_sms(agent, from_endpoint, body, group_id)
+        if not to_number:
+            return {
+                "status": "error",
+                "message": "Provide a to_number for 1:1 SMS or use the sms_group_id provided in your context for group texting.",
+            }
         return _send_single_sms(agent, from_endpoint, body, to_number)
     except Exception as exc:  # pragma: no cover - safety net
         logger.exception("Failed sending SMS for agent %s", agent.id)
@@ -159,41 +161,24 @@ def _send_single_sms(
         "auto_sleep_ok": True,
     }
 
-
 def _send_group_sms(
     agent: PersistentAgent,
     from_endpoint: PersistentAgentCommsEndpoint,
     body: str,
-    group_id: str | None,
+    group_id: str,
 ) -> Dict[str, Any]:
     try:
         agent.sync_sms_allowlist_group()
     except Exception:
         logger.exception("Failed to refresh allowlist group for agent %s", agent.id)
 
-    if group_id:
-        try:
-            group = (
-                PersistentAgentSmsGroup.objects.prefetch_related("members")
-                .get(id=group_id, agent=agent, is_active=True)
-            )
-        except PersistentAgentSmsGroup.DoesNotExist:
-            return {"status": "error", "message": "Group not found or inactive for this agent."}
-    else:
+    try:
         group = (
             PersistentAgentSmsGroup.objects.prefetch_related("members")
-            .filter(
-                agent=agent,
-                name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME,
-                is_active=True,
-            )
-            .first()
+            .get(id=group_id, agent=agent, is_active=True)
         )
-        if not group:
-            return {
-                "status": "error",
-                "message": "Add SMS contacts in the allowed contacts section before sending a group text.",
-            }
+    except PersistentAgentSmsGroup.DoesNotExist:
+        return {"status": "error", "message": "Group not found or inactive for this agent."}
 
     members = list(group.members.order_by("phone_number"))
     if not members:

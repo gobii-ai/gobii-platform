@@ -21,8 +21,10 @@ from api.models import (
     PersistentAgentSmsEndpoint,
     PersistentAgentSmsGroup,
     BrowserUseAgent,
+    UserPhoneNumber,
 )
 from api.webhooks import twilio_conversation_webhook
+from django.utils import timezone
 
 
 User = get_user_model()
@@ -58,6 +60,16 @@ class AgentSmsGroupTests(TestCase):
         )
         self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
         self.agent.save(update_fields=["whitelist_policy"])
+
+        self.owner_number = "+15550000050"
+        UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number=self.owner_number,
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+
         self.sms_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.SMS,
@@ -102,6 +114,7 @@ class AgentSmsGroupTests(TestCase):
         self.assertIsNotNone(message.conversation)
         self.assertEqual(message.conversation.address, "CHXXXX")
         deliver_group.assert_called_once_with(message, group)
+        self.assertIn(self.owner_number, message.raw_payload["participant_numbers"])
 
     def test_sms_allowlist_limit_enforced(self):
         max_members = PersistentAgentSmsGroup.MAX_MEMBERS
@@ -114,12 +127,14 @@ class AgentSmsGroupTests(TestCase):
 
         group = self.agent.sms_groups.get(name=PersistentAgentSmsGroup.ALLOWLIST_GROUP_NAME)
         members = list(group.members.order_by("phone_number"))
-        self.assertEqual(len(members), max_members)
+        self.assertEqual(len(members), max_members + 1)
 
         allowlist_numbers = set(
             self.agent.manual_allowlist.filter(channel=CommsChannel.SMS).values_list("address", flat=True)
         )
-        self.assertEqual(allowlist_numbers, {member.phone_number for member in members})
+        expected_numbers = set(allowlist_numbers)
+        expected_numbers.add(self.owner_number)
+        self.assertEqual(expected_numbers, {member.phone_number for member in members})
 
     def test_sms_allowlist_permits_org_agents(self):
         org = Organization.objects.create(name="Org", created_by=self.user)
@@ -183,6 +198,16 @@ class TwilioConversationWebhookTests(TestCase):
         )
         self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
         self.agent.save(update_fields=["whitelist_policy"])
+
+        self.owner_number = "+15550002000"
+        UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number=self.owner_number,
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+
         self.sms_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.SMS,
