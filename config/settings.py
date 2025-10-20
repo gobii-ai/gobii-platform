@@ -6,6 +6,7 @@ from pathlib import Path
 import environ, os
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlparse
 from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 
@@ -138,8 +139,6 @@ CSRF_TRUSTED_ORIGINS = env.list(
     else _COMMUNITY_DEFAULT_TRUSTED_ORIGINS,
 )
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
 USE_X_FORWARDED_HOST = True
 SITE_ID = 1
 
@@ -151,6 +150,23 @@ PUBLIC_SITE_URL = env(
     "PUBLIC_SITE_URL",
     default=_proprietary_default("brand", "PUBLIC_SITE_URL", fallback="http://localhost:8000"),
 )
+
+
+def _cookie_secure_default(site_url: str) -> bool:
+    parsed = urlparse((site_url or "").strip())
+    scheme = parsed.scheme.lower()
+    if scheme == "https":
+        return True
+    if scheme == "http":
+        return False
+    if not scheme and parsed.netloc:
+        return False
+    return not DEBUG
+
+
+_SECURE_COOKIE_DEFAULT = _cookie_secure_default(PUBLIC_SITE_URL)
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=_SECURE_COOKIE_DEFAULT)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=_SECURE_COOKIE_DEFAULT)
 PUBLIC_CONTACT_EMAIL = env(
     "PUBLIC_CONTACT_EMAIL",
     default=_proprietary_default("brand", "PUBLIC_CONTACT_EMAIL"),
