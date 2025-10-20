@@ -10,14 +10,10 @@
     <div class="flex items-center gap-2 flex-1">
       <!-- Icon for context type -->
       <template x-if="currentContext.type === 'personal'">
-        <svg class="w-4 h-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-        </svg>
+        <i aria-hidden="true" data-lucide="user-round" class="w-4 h-4 text-gray-500"></i>
       </template>
       <template x-if="currentContext.type === 'organization'">
-        <svg class="w-4 h-4 text-gray-500 overflow-visible" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 7a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-        </svg>
+        <i aria-hidden="true" data-lucide="users" class="w-4 h-4 text-gray-500"></i>
       </template>
       
       <!-- Context Name -->
@@ -25,11 +21,7 @@
     </div>
     
     <!-- Dropdown Arrow -->
-    <svg class="w-4 h-4 text-gray-400 transition-transform duration-200" 
-         :class="{'rotate-180': open}"
-         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-    </svg>
+    <i aria-hidden="true" data-lucide="chevron-down" class="w-4 h-4 text-gray-400 transition-transform duration-200" :class="{'rotate-180': open}"></i>
   </button>
   
   <!-- Dropdown Menu -->
@@ -49,16 +41,10 @@
       <button @click="switchContext('personal', '{{ user.id }}', '{{ user.get_full_name|default:user.username }}')"
               class="w-full flex items-center gap-3 px-2 py-2 text-sm rounded-md hover:bg-blue-50 transition-colors"
               :class="{'bg-blue-50 text-blue-600': currentContext.type === 'personal'}">
-        <svg class="w-4 h-4 flex-shrink-0" 
-             :class="{'text-blue-600': currentContext.type === 'personal', 'text-gray-500': currentContext.type !== 'personal'}"
-             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-        </svg>
+        <i aria-hidden="true" data-lucide="user-round" class="w-4 h-4 flex-shrink-0" :class="{'text-blue-600': currentContext.type === 'personal', 'text-gray-500': currentContext.type !== 'personal'}"></i>
         <span class="flex-1 text-left">{{ user.get_full_name|default:user.username }}</span>
         <template x-if="currentContext.type === 'personal'">
-          <svg class="w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-          </svg>
+          <i aria-hidden="true" data-lucide="check" class="w-4 h-4 text-blue-600"></i>
         </template>
       </button>
     </div>
@@ -72,19 +58,13 @@
       <button @click="switchContext('organization', '{{ membership.org.id }}', '{{ membership.org.name }}')"
               class="w-full flex items-center gap-3 px-2 py-2 text-sm rounded-md hover:bg-blue-50 transition-colors"
               :class="{'bg-blue-50 text-blue-600': currentContext.type === 'organization' && currentContext.id === '{{ membership.org.id }}'}">
-        <svg class="w-4 h-4 flex-shrink-0 overflow-visible"
-             :class="{'text-blue-600': currentContext.type === 'organization' && currentContext.id === '{{ membership.org.id }}', 'text-gray-500': !(currentContext.type === 'organization' && currentContext.id === '{{ membership.org.id }}')}"
-             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 7a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-        </svg>
+        <i aria-hidden="true" data-lucide="users" class="w-4 h-4 flex-shrink-0" :class="{'text-blue-600': currentContext.type === 'organization' && currentContext.id === '{{ membership.org.id }}', 'text-gray-500': !(currentContext.type === 'organization' && currentContext.id === '{{ membership.org.id }}')}"></i>
         <div class="flex-1 text-left">
           <div class="font-medium">{{ membership.org.name }}</div>
           <div class="text-xs text-gray-500">{{ membership.get_role_display }}</div>
         </div>
         <template x-if="currentContext.type === 'organization' && currentContext.id === '{{ membership.org.id }}'">
-          <svg class="w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-          </svg>
+          <i aria-hidden="true" data-lucide="check" class="w-4 h-4 text-blue-600"></i>
         </template>
       </button>
       {% endfor %}
@@ -97,9 +77,7 @@
       {% flag "organizations" %}
       <a href="{% url 'organizations' %}" 
          class="flex items-center gap-3 px-2 py-2 text-sm text-gray-700 rounded-md hover:bg-gray-50 transition-colors">
-        <svg class="w-4 h-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-        </svg>
+        <i aria-hidden="true" data-lucide="plus" class="w-4 h-4 text-gray-500"></i>
         <span>Create or Join Organization</span>
       </a>
       {% endflag %}
