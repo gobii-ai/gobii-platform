@@ -43,18 +43,12 @@
     <div class="flex items-center justify-between h-[52px]">
       <button @click="isExpanded = !isExpanded" 
               class="flex-1 flex items-center gap-2 px-4 text-sm font-medium text-gray-700 hover:text-blue-600 transition-colors h-full">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-        </svg>
+        <i aria-hidden="true" data-lucide="book-open" class="w-5 h-5"></i>
         API Menu
       </button>
       <button @click="isExpanded = !isExpanded" 
               class="flex items-center justify-center w-10 h-10 mr-4 sm:mr-6 lg:mr-8 text-gray-700 hover:text-blue-600 rounded-lg transition-colors">
-        <svg class="w-6 h-6 transition-transform duration-200" 
-             :class="{'rotate-180': isExpanded}"
-             fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-        </svg>
+        <i aria-hidden="true" data-lucide="chevron-down" class="w-6 h-6 transition-transform duration-200" :class="{'rotate-180': isExpanded}"></i>
       </button>
     </div>
     
@@ -120,18 +114,14 @@
         <div class="mt-2 pt-2 mx-4 border-t border-gray-200">
           {% if prev_page %}
             <a href="{{ prev_page.url }}" class="flex items-center py-2 text-sm text-gray-600 hover:text-blue-600 transition-colors">
-              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-              </svg>
+              <i aria-hidden="true" data-lucide="arrow-left" class="w-4 h-4 mr-2"></i>
               <span class="truncate">{{ prev_page.title }}</span>
             </a>
           {% endif %}
           {% if next_page %}
             <a href="{{ next_page.url }}" class="flex items-center py-2 text-sm text-gray-600 hover:text-blue-600 transition-colors">
               <span class="truncate flex-1">{{ next_page.title }}</span>
-              <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-              </svg>
+              <i aria-hidden="true" data-lucide="arrow-right" class="w-4 h-4 ml-2"></i>
             </a>
           {% endif %}
         </div>
@@ -187,17 +177,13 @@
       <nav class="space-y-1">
       {% if prev_page %}
         <a href="{{ prev_page.url }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors text-slate-700 hover:bg-white/80 hover:text-blue-600 mb-1">
-          <svg xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0 size-4 me-2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-          </svg>
+          <i aria-hidden="true" data-lucide="arrow-left" class="flex-shrink-0 size-4 me-2 text-gray-400"></i>
           <span class="truncate" title="{{ prev_page.title }}">{{ prev_page.title }}</span>
         </a>
       {% endif %}
       {% if next_page %}
         <a href="{{ next_page.url }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors text-slate-700 hover:bg-white/80 hover:text-blue-600">
-          <svg xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0 size-4 me-2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-          </svg>
+          <i aria-hidden="true" data-lucide="arrow-right" class="flex-shrink-0 size-4 me-2 text-gray-400"></i>
           <span class="truncate" title="{{ next_page.title }}">{{ next_page.title }}</span>
         </a>
       {% endif %}
@@ -255,15 +241,11 @@
           </p>
           <div class="flex flex-col sm:flex-row gap-3">
             <a href="{% url 'schema-swagger-ui' %}" target="_blank" class="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
+              <i aria-hidden="true" data-lucide="file-text" class="h-5 w-5 mr-2"></i>
               Swagger UI
             </a>
             <a href="{% url 'schema-redoc' %}" target="_blank" class="inline-flex items-center justify-center bg-white hover:bg-gray-50 text-blue-600 border border-blue-200 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-              </svg>
+              <i aria-hidden="true" data-lucide="book-open" class="h-5 w-5 mr-2"></i>
               ReDoc
             </a>
           </div>
