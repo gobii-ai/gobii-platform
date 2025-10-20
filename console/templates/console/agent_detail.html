@@ -10,9 +10,7 @@
         <h1 class="text-2xl font-semibold text-gray-800">Agent Configuration</h1>
         <p class="text-sm text-gray-500 mt-1">Manage your agent settings and preferences</p>
         <a href="{% url 'agents' %}" class="group flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
-          <svg class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-          </svg>
+          <i aria-hidden="true" data-lucide="arrow-left" class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform"></i>
           Back to Agents
         </a>
       </div>
@@ -22,9 +20,7 @@
   {% if pending_transfer_invite %}
   <div class="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl shadow-md px-5 py-4 flex flex-col gap-2">
     <div class="flex items-center gap-2 text-sm font-semibold">
-      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11a.75.75 0 00-1.5 0v4.5a.75.75 0 001.5 0V7zm-.75 6a1 1 0 100 2 1 1 0 000-2z" clip-rule="evenodd" />
-      </svg>
+      <i aria-hidden="true" data-lucide="info" class="w-4 h-4"></i>
       Transfer pending
     </div>
     <p class="text-sm leading-5">
@@ -49,10 +45,7 @@
               Agent Name
             </label>
             <div class="hs-tooltip inline-block">
-              <svg class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
-              </svg>
+              <i aria-hidden="true" data-lucide="circle-help" class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400"></i>
               <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-40 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
                 Display name for your agent
               </span>
@@ -72,10 +65,7 @@
               Ownership
             </label>
             <div class="hs-tooltip inline-block">
-              <svg class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
-              </svg>
+              <i aria-hidden="true" data-lucide="circle-help" class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400"></i>
               <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-56 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
                 Assign this agent to one of your organizations. Requires owner/admin role.
               </span>
@@ -166,16 +156,12 @@
           
           <div class="sm:col-span-9">
             <div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg bg-gray-50/50">
-              <div class="flex items-center gap-3">
-                <div class="flex items-center justify-center w-10 h-10 rounded-full {% if agent.is_active %}bg-green-100{% else %}bg-gray-100{% endif %}">
+                <div class="flex items-center gap-3">
+                  <div class="flex items-center justify-center w-10 h-10 rounded-full {% if agent.is_active %}bg-green-100{% else %}bg-gray-100{% endif %}">
                   {% if agent.is_active %}
-                    <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
+                    <i aria-hidden="true" data-lucide="check-circle-2" class="w-5 h-5 text-green-600"></i>
                   {% else %}
-                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/>
-                    </svg>
+                    <i aria-hidden="true" data-lucide="x-circle" class="w-5 h-5 text-gray-500"></i>
                   {% endif %}
                 </div>
                 <div>
@@ -204,10 +190,7 @@
               Daily Task Credits
             </label>
             <div class="hs-tooltip inline-block">
-              <svg class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
-              </svg>
+              <i aria-hidden="true" data-lucide="circle-help" class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400"></i>
               <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-56 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
                 Track and control how many task credits this agent may use each day.
               </span>
@@ -258,10 +241,7 @@
               Assignment
             </label>
             <div class="hs-tooltip inline-block">
-              <svg class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
-              </svg>
+              <i aria-hidden="true" data-lucide="circle-help" class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400"></i>
               <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-40 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
                 Describe what you want your agent to do
               </span>
@@ -282,10 +262,7 @@
               Allowed Contacts
             </label>
             <div class="hs-tooltip inline-block">
-              <svg class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
-              </svg>
+              <i aria-hidden="true" data-lucide="circle-help" class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400"></i>
               <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-48 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
                 Controls who can message this agent and who the agent may contact
               </span>
@@ -353,9 +330,7 @@
               <div class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg mb-3">
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">
-                    <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
+                    <i aria-hidden="true" data-lucide="alert-triangle" class="w-5 h-5 text-yellow-600"></i>
                     <span class="text-sm font-medium text-yellow-800">
                       {{ pending_contact_requests }} Contact Request{{ pending_contact_requests|pluralize }} Pending
                     </span>
@@ -480,31 +455,22 @@
              target="_blank"
              rel="noopener noreferrer"
              class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-4 3-1-3H5a2 2 0 01-2-2V8a2 2 0 012-2z"/>
-            </svg>
+            <i aria-hidden="true" data-lucide="message-square" class="w-4 h-4"></i>
             Open Web Chat
           </a>
           <a href="{% url 'agent_secrets' agent.id %}"
              class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1721 9z"/>
-            </svg>
+            <i aria-hidden="true" data-lucide="key-round" class="w-4 h-4"></i>
             Manage Secrets
           </a>
           <a href="{% url 'agent_email_settings' agent.id %}"
              class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v2m0 16v2m10-10h-2M4 12H2m15.364 6.364l-1.414-1.414M6.05 6.05L4.636 4.636m12.728 0l-1.414 1.414M6.05 17.95l-1.414 1.414" />
-            </svg>
+            <i aria-hidden="true" data-lucide="mail" class="w-4 h-4"></i>
             Manage Email
           </a>
           <button type="submit" 
                   class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
+            <i aria-hidden="true" data-lucide="check" class="w-4 h-4"></i>
             Save Changes
           </button>
         </div>
@@ -593,9 +559,7 @@
           </div>
           <div>
             <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors" {% if not peer_link_candidates %}disabled{% endif %}>
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-              </svg>
+              <i aria-hidden="true" data-lucide="plus" class="w-4 h-4"></i>
               Create Link
             </button>
           </div>
@@ -773,9 +737,7 @@
         <!-- Warning Icon -->
         <div class="flex-shrink-0">
           <div class="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 border-4 border-red-50">
-            <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"/>
-            </svg>
+            <i aria-hidden="true" data-lucide="shield-alert" class="w-6 h-6 text-red-600"></i>
           </div>
         </div>
         
@@ -791,9 +753,7 @@
                   hx-target="body" 
                   hx-swap="none"
                   class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-            </svg>
+            <i aria-hidden="true" data-lucide="trash-2" class="w-4 h-4"></i>
             Delete Agent
           </button>
         </div>
