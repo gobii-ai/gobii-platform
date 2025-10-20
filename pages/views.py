@@ -136,9 +136,7 @@ class HomePage(TemplateView):
         context["rich_examples"] = RICH_EXAMPLES
 
         # Featured AI employee templates for homepage
-        homepage_templates = AIEmployeeTemplateService.get_active_templates().filter(
-            show_on_homepage=True
-        ).order_by('priority')[:3]
+        homepage_templates = AIEmployeeTemplateService.get_active_templates().order_by('priority')
 
         templates_list = list(homepage_templates)
         tool_names = set()
