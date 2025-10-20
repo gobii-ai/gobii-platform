@@ -1,11 +1,11 @@
 {% extends "allauth/layouts/entrance.html" %}
 {% load socialaccount social_extras %}
 {% load account %}
-{% url 'account_signup' as account_signup_url %}
 
 {% block title %}Sign in{% endblock %}
 
 {% block body_inner %}
+{% url 'account_signup' as account_signup_url %}
 <div class="bg-white max-w-md w-full sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-2xs mb-20">
   <div class="p-8">
 
