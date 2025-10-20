@@ -409,9 +409,11 @@
     }
   </style>
 
-  {% if show_signup_tracking and settings.GOBII_PROPRIETARY_MODE %}
+  {% if show_signup_tracking and environment.is_production and settings.GOBII_PROPRIETARY_MODE %}
     <script>
       (function () {
+
+        {% if settings.REDDIT_PIXEL_ID %}
         /* Avoid ReferenceError if the pixel hasn’t loaded yet */
         if (typeof window.rdt === 'function') {
           rdt('track', 'SignUp', {
@@ -420,11 +422,14 @@
             conversionId: "reg-{{ user.id }}",
           });
         }
+        {% endif %}
 
+        {% if settings.GA_MEASUREMENT_ID %}
         if (typeof window.gtag === 'function') {
           const utmParams = window.getUTMParams ? window.getUTMParams() : {};
           gtag('event', 'sign_up', { method: 'email', ...utmParams });
         }
+        {% endif %}
 
         {% if settings.LINKEDIN_SIGNUP_CONVERSION_ID  %}
         if (typeof window.lintrk === 'function') {
