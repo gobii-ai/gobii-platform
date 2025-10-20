@@ -12,7 +12,6 @@ from uuid import UUID
 
 from ...models import PersistentAgent, PersistentAgentMessage
 
-RECENT_MESSAGE_LIMIT = 1
 DEFAULT_SIMILARITY_THRESHOLD = 0.97
 
 
@@ -30,13 +29,8 @@ class DuplicateDetectionResult:
             detail = "matches"
         else:
             detail = "is highly similar to"
-        window_detail = (
-            "the previous message"
-            if RECENT_MESSAGE_LIMIT == 1
-            else f"one of the last {RECENT_MESSAGE_LIMIT} messages"
-        )
         message = (
-            f"Message blocked: content {detail} {window_detail} and may be a duplicate. "
+            f"Message blocked: content {detail} the previous message and may be a duplicate. "
             "Please revise before sending again."
         )
         payload: Dict[str, Any] = {

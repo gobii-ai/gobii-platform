@@ -87,8 +87,6 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
         result = service.send_message(message)
     except PeerMessagingDuplicateError as exc:
         response = dict(exc.duplicate_response)
-        if exc.retry_at:
-            response.setdefault("retry_at_iso", exc.retry_at.isoformat())
         return response
     except PeerMessagingError as exc:
         response: Dict[str, Any] = {
@@ -96,7 +94,7 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
             "message": str(exc),
         }
         if exc.retry_at:
-            response.setdefault("retry_at_iso", exc.retry_at.isoformat())
+            response["retry_at_iso"] = exc.retry_at.isoformat()
         return response
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception(
