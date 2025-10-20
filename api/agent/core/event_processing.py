@@ -1677,6 +1677,33 @@ def _get_active_peer_dm_context(agent: PersistentAgent):
         "peer_agent": latest_peer_message.peer_agent,
     }
 
+def _get_recent_proactive_context(agent: PersistentAgent) -> dict | None:
+    """Return metadata for a recent proactive trigger, if present."""
+    lookback = dj_timezone.now() - timedelta(hours=6)
+    system_step = (
+        PersistentAgentSystemStep.objects.filter(
+            step__agent=agent,
+            code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+            step__created_at__gte=lookback,
+        )
+        .select_related("step")
+        .order_by("-step__created_at")
+        .first()
+    )
+    if not system_step:
+        return None
+
+    context: dict = {}
+    notes = system_step.notes or ""
+    if notes:
+        try:
+            context = json.loads(notes)
+        except Exception:
+            context = {"raw_notes": notes}
+
+    context.setdefault("triggered_at", system_step.step.created_at.isoformat())
+    context.setdefault("step_id", str(system_step.step_id))
+    return context
 
 @tracer.start_as_current_span("Build Prompt Context")
 def _build_prompt_context(
@@ -1740,10 +1767,12 @@ def _build_prompt_context(
     
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
+    proactive_context = _get_recent_proactive_context(agent)
     system_prompt = _get_system_instruction(
         agent,
         is_first_run=is_first_run,
         peer_dm_context=peer_dm_context,
+        proactive_context=proactive_context,
     )
     
     # Build the user content sections using promptree
@@ -1796,6 +1825,63 @@ def _build_prompt_context(
     
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
+
+    if proactive_context:
+        lines: list[str] = []
+        summary = proactive_context.get("summary")
+        if summary:
+            lines.append(f"Proactive focus: {summary}")
+        recent_inbound = proactive_context.get("recent_inbound")
+        if isinstance(recent_inbound, dict):
+            sender = recent_inbound.get("sender")
+            received_at = recent_inbound.get("timestamp")
+            preview = recent_inbound.get("preview")
+            parts = ["Recent inbound message awaiting follow-up:"]
+            if sender:
+                parts.append(f"From: {sender}")
+            if received_at:
+                parts.append(f"Received at: {received_at}")
+            if preview:
+                parts.append(f"Content preview: {preview}")
+            lines.append(" ".join(parts))
+        hints = proactive_context.get("hints") or []
+        if isinstance(hints, list):
+            for hint in hints:
+                if not isinstance(hint, str):
+                    continue
+                lines.append(f"- {hint}")
+        open_tasks = proactive_context.get("open_tasks") or []
+        if isinstance(open_tasks, list) and open_tasks:
+            lines.append("Open web tasks to consider:")
+            for task_info in open_tasks:
+                if not isinstance(task_info, dict):
+                    continue
+                prompt_preview = task_info.get("prompt")
+                task_id = task_info.get("id")
+                status = task_info.get("status")
+                task_line_parts = []
+                if task_id:
+                    task_line_parts.append(f"id={task_id}")
+                if status:
+                    task_line_parts.append(f"status={status}")
+                if prompt_preview:
+                    task_line_parts.append(f"prompt={prompt_preview}")
+                if task_line_parts:
+                    lines.append("  • " + " | ".join(task_line_parts))
+        pending_secrets = proactive_context.get("pending_secrets") or []
+        if isinstance(pending_secrets, list) and pending_secrets:
+            lines.append("Pending credential requests still waiting on the user:")
+            for secret_name in pending_secrets:
+                if isinstance(secret_name, str):
+                    lines.append(f"  • {secret_name}")
+
+        if lines:
+            important_group.section_text(
+                "proactive_context",
+                "\n".join(lines),
+                weight=6,
+                non_shrinkable=True,
+            )
     
     # Schedule block
     schedule_str = agent.schedule if agent.schedule else "No schedule configured"
@@ -2391,6 +2477,7 @@ def _get_system_instruction(
     *,
     is_first_run: bool = False,
     peer_dm_context: dict | None = None,
+    proactive_context: dict | None = None,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
@@ -2526,6 +2613,15 @@ def _get_system_instruction(
             " Only loop in a human when the other agent requests human input, when you need additional context or approval,"
             " or when there is a materially important development that the human must know. Otherwise, keep the exchange between agents."
         )
+
+    if proactive_context:
+        summary = proactive_context.get("summary") if isinstance(proactive_context, dict) else None
+        summary_text = f" Focus: {summary}" if isinstance(summary, str) and summary else ""
+        base_prompt = (
+            "You intentionally initiated this cycle proactively to help the user. Offer a concrete way to extend your support, avoid generic check-ins, "
+            "and reference the reasons listed in the proactive context. Acknowledge that you reached out on your own so the user understands why you are contacting them now."
+            f"{summary_text}\n\n"
+        ) + base_prompt
 
     if is_first_run:
         try:

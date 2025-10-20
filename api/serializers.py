@@ -272,6 +272,10 @@ class PersistentAgentListSerializer(serializers.ModelSerializer):
             'organization_id',
             'browser_use_agent_id',
             'preferred_contact_endpoint_id',
+            'proactive_opt_in',
+            'proactive_min_interval_minutes',
+            'proactive_max_daily',
+            'proactive_last_trigger_at',
         ]
         read_only_fields = fields
         ref_name = "PersistentAgentList"
@@ -342,6 +346,10 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'browser_use_agent_id',
             'preferred_contact_endpoint_id',
             'preferred_contact_endpoint',
+            'proactive_opt_in',
+            'proactive_min_interval_minutes',
+            'proactive_max_daily',
+            'proactive_last_trigger_at',
             'template_code',
         ]
         read_only_fields = (
@@ -354,6 +362,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'organization_id',
             'browser_use_agent_id',
             'preferred_contact_endpoint_id',
+            'proactive_last_trigger_at',
         )
         ref_name = "PersistentAgentDetail"
 

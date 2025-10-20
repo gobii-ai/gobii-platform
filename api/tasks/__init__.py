@@ -43,6 +43,9 @@ from .soft_expiration_task import soft_expire_inactive_agents_task
 # Billing rollup / Stripe metering
 from .billing_rollup import rollup_and_meter_usage_task
 
+# Proactive agent scheduler
+from .proactive_agents import schedule_proactive_agents_task  # noqa: F401
+
 # Ensure persistent-agent task modules (IMAP polling, event processing) are imported
 # so Celery autodiscovery picks them up when it imports api.tasks.
 # Without this, tasks under `api.agent.tasks.*` may not register on the worker

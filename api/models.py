@@ -2438,6 +2438,23 @@ class PersistentAgent(models.Model):
         related_name="preferred_by_agents",
         help_text="Communication endpoint (email/SMS/etc.) the agent should use by default to reach its owner user."
     )
+    proactive_opt_in = models.BooleanField(
+        default=False,
+        help_text="Enable Gobii to proactively start conversations offering related help for this agent.",
+    )
+    proactive_min_interval_minutes = models.PositiveIntegerField(
+        default=360,
+        help_text="Minimum number of minutes between proactive outreach attempts for this agent.",
+    )
+    proactive_max_daily = models.PositiveIntegerField(
+        default=1,
+        help_text="Maximum proactive outreach attempts per calendar day for this agent.",
+    )
+    proactive_last_trigger_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the most recent proactive outreach trigger.",
+    )
     # NOTE: Enabled MCP tools are now tracked in PersistentAgentEnabledTool.
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2448,6 +2465,8 @@ class PersistentAgent(models.Model):
             models.Index(fields=['schedule'], name='pa_schedule_idx'),
             models.Index(fields=['life_state', 'is_active'], name='pa_life_active_idx'),
             models.Index(fields=['last_interaction_at'], name='pa_last_interact_idx'),
+            models.Index(fields=['proactive_opt_in', 'is_active'], name='pa_proactive_opt_idx'),
+            models.Index(fields=['proactive_last_trigger_at'], name='pa_proactive_last_idx'),
         ]
         constraints = [
             # Unique per user when no organization is set
@@ -4716,6 +4735,7 @@ class PersistentAgentSystemStep(models.Model):
         CREDENTIALS_PROVIDED = "CREDENTIALS_PROVIDED", "Credentials Provided"
         CONTACTS_APPROVED = "CONTACTS_APPROVED", "Contacts Approved"
         LLM_CONFIGURATION_REQUIRED = "LLM_CONFIGURATION_REQUIRED", "LLM Configuration Required"
+        PROACTIVE_TRIGGER = "PROACTIVE_TRIGGER", "Proactive Trigger"
         # Add more system-generated step codes here as needed.
 
     step = models.OneToOneField(
