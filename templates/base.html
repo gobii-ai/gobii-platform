@@ -433,7 +433,7 @@
 
         {% if settings.LINKEDIN_SIGNUP_CONVERSION_ID  %}
         if (typeof window.lintrk === 'function') {
-          window.lintrk('track', { conversion_id: 24241410 });
+          window.lintrk('track', { conversion_id: {{ settings.LINKEDIN_SIGNUP_CONVERSION_ID  }} });
         }
         {% endif %}
       })();
