@@ -198,6 +198,8 @@ jobs:
             tag: batch_usage_api
           - batch: dedicated_proxy_models
             tag: batch_dedicated_proxy_models
+          - batch: setup_cookies
+            tag: batch_setup_cookies
           - batch: dedicated_proxy_service
             tag: batch_dedicated_proxy_service
           - batch: browser_agent_max_tokens

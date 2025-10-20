@@ -1,5 +1,6 @@
 # gobii_platform/api/serializers.py
 import uuid
+from decimal import Decimal
 from urllib.parse import urlparse
 
 from django.core.exceptions import ValidationError as DjangoValidationError
