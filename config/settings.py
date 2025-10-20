@@ -6,6 +6,7 @@ from pathlib import Path
 import environ, os
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlparse
 from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 
@@ -152,10 +153,13 @@ PUBLIC_SITE_URL = env(
 
 
 def _cookie_secure_default(site_url: str) -> bool:
-    normalized = (site_url or "").strip().lower()
-    if normalized.startswith("https://"):
+    parsed = urlparse((site_url or "").strip())
+    scheme = parsed.scheme.lower()
+    if scheme == "https":
         return True
-    if normalized.startswith("http://"):
+    if scheme == "http":
+        return False
+    if not scheme and parsed.netloc:
         return False
     return not DEBUG
 

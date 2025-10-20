@@ -10,3 +10,6 @@ class CookieSecurityInferenceTests(SimpleTestCase):
 
     def test_cookie_secure_default_for_https_site_url(self):
         self.assertTrue(project_settings._cookie_secure_default("https://example.com"))
+
+    def test_cookie_secure_default_for_protocol_relative_url(self):
+        self.assertFalse(project_settings._cookie_secure_default("//example.com"))
