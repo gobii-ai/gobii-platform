@@ -804,6 +804,11 @@ LINKEDIN_PARTNER_ID = env(
     default=_proprietary_default("analytics", "LINKEDIN_PARTNER_ID"),
 )
 
+LINKEDIN_SIGNUP_CONVERSION_ID = env(
+    "LINKEDIN_SIGNUP_CONVERSION_ID",
+    default=_proprietary_default("analytics", "LINKEDIN_SIGNUP_CONVERSION_ID"),
+)
+
 # Task Credit Settings
 INITIAL_TASK_CREDIT_EXPIRATION_DAYS=env("INITIAL_TASK_CREDIT_EXPIRATION_DAYS", default=30, cast=int)
 
