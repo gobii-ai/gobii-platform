@@ -255,6 +255,17 @@ def handle_user_signed_up(sender, request, user, **kwargs):
 
         last_touch = {k: v for k, v in current_touch.items() if v}
 
+        session_first_touch = request.session.get("utm_first_touch") or {}
+        session_last_touch = request.session.get("utm_last_touch") or {}
+        if session_first_touch:
+            for key, value in session_first_touch.items():
+                if value and key not in first_touch:
+                    first_touch[key] = value
+        if session_last_touch:
+            merged_last_touch = {k: v for k, v in session_last_touch.items() if v}
+            merged_last_touch.update(last_touch)
+            last_touch = merged_last_touch
+
         click_first_payload: dict[str, str] = {}
         click_first_cookie = request.COOKIES.get('__click_first')
         if click_first_cookie:
@@ -283,6 +294,17 @@ def handle_user_signed_up(sender, request, user, **kwargs):
 
         last_click = {k: v for k, v in current_click.items() if v}
 
+        session_click_first = request.session.get("click_ids_first") or {}
+        session_click_last = request.session.get("click_ids_last") or {}
+        if session_click_first:
+            for key, value in session_click_first.items():
+                if value and key not in first_click:
+                    first_click[key] = value
+        if session_click_last:
+            merged_last_click = {k: v for k, v in session_click_last.items() if v}
+            merged_last_click.update(last_click)
+            last_click = merged_last_click
+
         landing_first_cookie = _decode_cookie_value(request.COOKIES.get('__landing_first'))
         landing_last_cookie = _decode_cookie_value(request.COOKIES.get('landing_code'))
         landing_first = _decode_cookie_value(request.session.get('landing_code_first')) or landing_first_cookie
@@ -303,6 +325,9 @@ def handle_user_signed_up(sender, request, user, **kwargs):
 
         fbc_cookie = _decode_cookie_value(request.COOKIES.get('_fbc'))
         fbclid_cookie = _decode_cookie_value(request.COOKIES.get('fbclid'))
+        fbclid_session = request.session.get("fbclid_last") or request.session.get("fbclid_first")
+        if not fbclid_cookie and fbclid_session:
+            fbclid_cookie = fbclid_session
 
         first_referrer = _decode_cookie_value(request.COOKIES.get('first_referrer')) or (request.META.get('HTTP_REFERER') or '')
         last_referrer = _decode_cookie_value(request.COOKIES.get('last_referrer')) or (request.META.get('HTTP_REFERER') or first_referrer)

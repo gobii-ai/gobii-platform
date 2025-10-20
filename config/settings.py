@@ -253,6 +253,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "middleware.utm_capture.UTMTrackingMiddleware",
     "django.middleware.common.CommonMiddleware",
     "setup.middleware.FirstRunSetupMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -801,6 +802,11 @@ META_PIXEL_ID = env(
 LINKEDIN_PARTNER_ID = env(
     "LINKEDIN_PARTNER_ID",
     default=_proprietary_default("analytics", "LINKEDIN_PARTNER_ID"),
+)
+
+LINKEDIN_SIGNUP_CONVERSION_ID = env(
+    "LINKEDIN_SIGNUP_CONVERSION_ID",
+    default=_proprietary_default("analytics", "LINKEDIN_SIGNUP_CONVERSION_ID"),
 )
 
 # Task Credit Settings

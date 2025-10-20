@@ -1,5 +1,6 @@
 {% load static %}
 {% load i18n %}
+{% url 'account_login' as account_login_url %}
 
 <!-- Unified Header -->
 <header class="sticky top-0 z-30 bg-white/80 backdrop-blur hs-header">
@@ -115,10 +116,12 @@
             </div>
           </div>
         {% else %}
-          <a href="{% url 'account_login' %}" class="text-slate-700 hover:text-blue-600">Login</a>
-          <a href="{% url 'account_login' %}" class="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 shadow">
-            Get started
-          </a>
+          {% with request.session.utm_querystring as utm_qs %}
+            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="text-slate-700 hover:text-blue-600">Login</a>
+            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 shadow">
+              Get started
+            </a>
+          {% endwith %}
         {% endif %}
 
         <!-- Social Icons (always visible) -->
@@ -260,10 +263,12 @@
           </div>
         {% else %}
           <div class="mt-4 pt-4 border-t border-gray-200 space-y-3">
-            <a href="{% url 'account_login' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Login</a>
-            <a href="{% url 'account_login' %}" class="block text-center bg-blue-600 text-white hover:bg-blue-700 rounded-lg py-2.5 px-3 transition-colors">
+            {% with request.session.utm_querystring as utm_qs %}
+            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Login</a>
+            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="block text-center bg-blue-600 text-white hover:bg-blue-700 rounded-lg py-2.5 px-3 transition-colors">
               Get started
             </a>
+            {% endwith %}
           </div>
         {% endif %}
         

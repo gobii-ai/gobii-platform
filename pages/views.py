@@ -5,7 +5,7 @@ from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
 from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_cookie
-from django.shortcuts import redirect
+from django.shortcuts import redirect, resolve_url
 from django.http import HttpResponseRedirect
 from django.db.models import F, Q
 from .models import LandingPage
@@ -37,6 +37,16 @@ from opentelemetry import trace
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+
+
+def _login_url_with_utms(request) -> str:
+    """Append stored UTM query params to the login URL when available."""
+    base_url = resolve_url(settings.LOGIN_URL)
+    utm_qs = request.session.get("utm_querystring") or ""
+    if utm_qs:
+        separator = "&" if "?" in base_url else "?"
+        return f"{base_url}{separator}{utm_qs}"
+    return base_url
 
 
 def _prepare_stripe_or_404() -> None:
@@ -136,9 +146,7 @@ class HomePage(TemplateView):
         context["rich_examples"] = RICH_EXAMPLES
 
         # Featured AI employee templates for homepage
-        homepage_templates = AIEmployeeTemplateService.get_active_templates().filter(
-            show_on_homepage=True
-        ).order_by('priority')[:3]
+        homepage_templates = AIEmployeeTemplateService.get_active_templates().order_by('priority')
 
         templates_list = list(homepage_templates)
         tool_names = set()
@@ -230,7 +238,7 @@ class HomeAgentSpawnView(TemplateView):
                 # User needs to log in first, then continue to contact form
                 return redirect_to_login(
                     next=reverse('agent_create_contact'),
-                    login_url=settings.LOGIN_URL
+                    login_url=_login_url_with_utms(request),
                 )
         
         # If form is invalid, re-render home page with errors
@@ -370,7 +378,7 @@ class AIEmployeeHireView(View):
 
         return redirect_to_login(
             next=reverse('agent_create_contact'),
-            login_url=settings.LOGIN_URL,
+            login_url=_login_url_with_utms(request),
         )
 
 
