@@ -5,7 +5,11 @@ import logging
 from typing import Any, Dict
 from uuid import UUID
 
-from ..peer_comm import PeerMessagingError, PeerMessagingService
+from ..peer_comm import (
+    PeerMessagingDuplicateError,
+    PeerMessagingError,
+    PeerMessagingService,
+)
 from ...models import PersistentAgent
 
 logger = logging.getLogger(__name__)
@@ -81,13 +85,18 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
 
     try:
         result = service.send_message(message)
+    except PeerMessagingDuplicateError as exc:
+        response = dict(exc.duplicate_response)
+        if exc.retry_at:
+            response.setdefault("retry_at_iso", exc.retry_at.isoformat())
+        return response
     except PeerMessagingError as exc:
         response: Dict[str, Any] = {
             "status": exc.status,
             "message": str(exc),
         }
         if exc.retry_at:
-            response["retry_at_iso"] = exc.retry_at.isoformat()
+            response.setdefault("retry_at_iso", exc.retry_at.isoformat())
         return response
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception(
