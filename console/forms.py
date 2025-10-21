@@ -168,7 +168,6 @@ class MCPServerConfigForm(forms.Form):
     command = forms.CharField(max_length=255, required=False, help_text="Executable to launch (leave blank for HTTP servers).")
     url = forms.CharField(max_length=512, required=False, help_text="HTTP/S URL for remote MCP servers.")
     command_args = forms.JSONField(required=False, initial=list, empty_value=list, help_text="JSON array of command arguments, e.g. ['-y', '@pkg@1.0.0'].")
-    prefetch_apps = forms.JSONField(required=False, initial=list, empty_value=list, help_text="JSON array of app slugs for discovery (Pipedream only).")
     metadata = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="Additional JSON metadata (optional).")
     environment = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="JSON object of environment variables.")
     headers = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="JSON object of HTTP headers.")
@@ -184,7 +183,6 @@ class MCPServerConfigForm(forms.Form):
             initial.setdefault('command', instance.command)
             initial.setdefault('url', instance.url)
             initial.setdefault('command_args', instance.command_args or [])
-            initial.setdefault('prefetch_apps', instance.prefetch_apps or [])
             initial.setdefault('metadata', instance.metadata or {})
             initial.setdefault('environment', instance.environment or {})
             initial.setdefault('headers', instance.headers or {})
@@ -213,12 +211,6 @@ class MCPServerConfigForm(forms.Form):
         value = self.cleaned_data.get('command_args') or []
         if not isinstance(value, list):
             raise forms.ValidationError("Command arguments must be a JSON array.")
-        return value
-
-    def clean_prefetch_apps(self):
-        value = self.cleaned_data.get('prefetch_apps') or []
-        if not isinstance(value, list):
-            raise forms.ValidationError("Prefetch apps must be a JSON array.")
         return value
 
     def clean_metadata(self):
