@@ -3314,11 +3314,15 @@ class ConsoleUsageView(ConsoleViewMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
-class MCPServerManagementView(ConsoleViewMixin, TemplateView):
-    template_name = "console/mcp_servers.html"
+class MCPServerOwnerMixin:
+    """Shared owner resolution logic for MCP server management views."""
+
+    owner_scope: str | None = None
+    owner_user = None
+    owner_org = None
 
     def dispatch(self, request, *args, **kwargs):
-        self._owner_scope, self._owner_user, self._owner_org = self._resolve_owner()
+        self.owner_scope, self.owner_user, self.owner_org = self._resolve_owner()
         return super().dispatch(request, *args, **kwargs)
 
     def _resolve_owner(self):
@@ -3330,46 +3334,113 @@ class MCPServerManagementView(ConsoleViewMixin, TemplateView):
             return ('organization', None, membership.org)
         return ('user', self.request.user, None)
 
-    def get_queryset(self):
-        if self._owner_scope == 'organization':
+    def get_mcp_servers_queryset(self):
+        if self.owner_scope == 'organization':
             return MCPServerConfig.objects.filter(
                 scope=MCPServerConfig.Scope.ORGANIZATION,
-                organization=self._owner_org,
+                organization=self.owner_org,
             ).order_by('display_name')
         return MCPServerConfig.objects.filter(
             scope=MCPServerConfig.Scope.USER,
-            user=self._owner_user,
+            user=self.owner_user,
         ).order_by('display_name')
+
+    def get_owner_label(self):
+        if self.owner_scope == 'organization' and self.owner_org:
+            return self.owner_org.name
+        return self.request.user.get_full_name() or self.request.user.username
+
+
+class MCPServerManagementView(MCPServerOwnerMixin, ConsoleViewMixin, TemplateView):
+    template_name = "console/mcp_servers.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        servers = self.get_queryset()
-        form = kwargs.get('form') or MCPServerConfigForm()
-        owner_label = self._owner_org.name if self._owner_scope == 'organization' else (self.request.user.get_full_name() or self.request.user.username)
-
+        servers = self.get_mcp_servers_queryset()
         context.update(
             {
                 'servers': servers,
-                'form': form,
-                'owner_scope': self._owner_scope,
-                'owner_label': owner_label,
+                'owner_scope': self.owner_scope,
+                'owner_label': self.get_owner_label(),
             }
         )
         return context
 
+
+class MCPServerConfigTableView(MCPServerOwnerMixin, ConsoleViewMixin, ListView):
+    model = MCPServerConfig
+    template_name = "console/partials/_mcp_server_table_body.html"
+    context_object_name = "servers"
+
+    def get_queryset(self):
+        return self.get_mcp_servers_queryset()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                'owner_scope': self.owner_scope,
+                'owner_label': self.get_owner_label(),
+            }
+        )
+        return context
+
+
+class MCPServerConfigCreateModalView(MCPServerOwnerMixin, ConsoleViewMixin, View):
+    def get(self, request, *args, **kwargs):
+        form = MCPServerConfigForm()
+        return render(
+            request,
+            "console/partials/_mcp_server_modal.html",
+            {
+                "form": form,
+                "owner_scope": self.owner_scope,
+                "owner_label": self.get_owner_label(),
+            },
+        )
+
+
+class MCPServerConfigCreateView(MCPServerOwnerMixin, ConsoleViewMixin, View):
     def post(self, request, *args, **kwargs):
         form = MCPServerConfigForm(request.POST)
         if form.is_valid():
             try:
-                form.save(user=self._owner_user, organization=self._owner_org)
+                server = form.save(user=self.owner_user, organization=self.owner_org)
                 get_mcp_manager().initialize(force=True)
+                if request.htmx:
+                    response = render(
+                        request,
+                        "console/partials/_mcp_server_success.html",
+                        {
+                            "server": server,
+                            "owner_label": self.get_owner_label(),
+                        },
+                    )
+                    response["HX-Trigger"] = "{\"refreshMcpServersTable\": null}"
+                    return response
+
                 messages.success(request, "MCP server saved.")
                 return redirect('console-mcp-servers')
             except IntegrityError:
                 form.add_error('name', "A server with that identifier already exists.")
             except ValidationError as exc:
                 form.add_error(None, exc)
-        return self.render_to_response(self.get_context_data(form=form))
+
+        if request.htmx:
+            response = render(request, "console/partials/_mcp_server_form.html", {"form": form})
+            response["HX-Retarget"] = "#create-mcp-server-form"
+            response["HX-Reswap"] = "outerHTML"
+            return response
+
+        error_message = "Please correct the errors below and try again."
+        first_error = next(iter(form.errors.values()), None)
+        if first_error:
+            error_message = first_error[0]
+        messages.error(request, error_message)
+        return redirect('console-mcp-servers')
 
 
 class MCPServerConfigUpdateView(ConsoleViewMixin, TemplateView):

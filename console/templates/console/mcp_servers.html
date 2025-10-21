@@ -1,104 +1,42 @@
 {% extends "console_page.html" %}
 
 {% block console_content %}
-<div class="space-y-6">
-  <div class="gobii-card-base">
-    <div class="p-6 sm:p-8 space-y-3">
-      <h1 class="text-2xl font-semibold text-gray-800">Advanced MCP Servers</h1>
-      <p class="text-sm text-gray-600">
-        Configure custom MCP servers available to {{ owner_label }}.
-      </p>
-    </div>
-  </div>
+<div x-data="{}" class="space-y-6">
+  <div id="mcp-server-result"></div>
 
   <div class="gobii-card-base">
-    <div class="p-6 sm:p-8 space-y-4">
-      <div class="flex items-center justify-between">
-        <div>
-          <h2 class="text-lg font-semibold text-gray-800">Configured Servers</h2>
-          <p class="text-sm text-gray-500">Edit existing servers or disable them temporarily.</p>
-        </div>
+    <div class="px-6 py-4 border-b border-gray-200/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="space-y-2">
+        <h1 class="text-2xl font-semibold text-gray-800">Advanced MCP Servers</h1>
+        <p class="text-sm text-gray-600">Configure custom MCP servers available to {{ owner_label }}.</p>
       </div>
-
-      {% if servers %}
-        <div class="divide-y divide-gray-200 border border-gray-200 rounded-xl overflow-hidden">
-          {% for server in servers %}
-            <div class="p-4 sm:p-5 bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <h3 class="text-base font-medium text-gray-900">{{ server.display_name }}</h3>
-                <p class="text-xs uppercase tracking-wide text-gray-500 mt-1 flex items-center gap-2">
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold {% if server.is_active %}bg-green-100 text-green-700{% else %}bg-gray-200 text-gray-700{% endif %}">
-                    {% if server.is_active %}
-                      Active
-                    {% else %}
-                      Inactive
-                    {% endif %}
-                  </span>
-                  <span class="text-gray-400">•</span>
-                  <span class="text-gray-600">{{ server.command|default:"HTTP" }}</span>
-                </p>
-                {% if server.description %}
-                  <p class="text-sm text-gray-600 mt-2">{{ server.description }}</p>
-                {% endif %}
-              </div>
-              <div class="flex items-center gap-3">
-                <a href="{% url 'console-mcp-server-edit' server.id %}"
-                   class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
-                  Edit
-                </a>
-                <form method="post" action="{% url 'console-mcp-server-delete' server.id %}" onsubmit="return confirm('Delete this MCP server? This will remove access for any linked agents.');">
-                  {% csrf_token %}
-                  <button type="submit" class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-red-200 text-red-600 hover:bg-red-50">
-                    Delete
-                  </button>
-                </form>
-              </div>
-            </div>
-          {% endfor %}
-        </div>
-      {% else %}
-        <p class="text-sm text-gray-500">No custom MCP servers configured yet.</p>
-      {% endif %}
+      <a hx-get="{% url 'console-mcp-server-create-modal' %}"
+         hx-target="#modal-container"
+         hx-swap="innerHTML"
+         class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-all">
+        Add MCP Server
+      </a>
     </div>
-  </div>
 
-  <div class="gobii-card-base">
-    <div class="p-6 sm:p-8 space-y-4">
-      <div>
-        <h2 class="text-lg font-semibold text-gray-800">Add New MCP Server</h2>
-        <p class="text-sm text-gray-500">Provide connection details below. JSON fields accept standard JSON objects or arrays.</p>
-      </div>
-
-      <form method="post" class="space-y-4">
-        {% csrf_token %}
-        {% if form.non_field_errors %}
-          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {% for error in form.non_field_errors %}{{ error }}<br>{% endfor %}
-          </div>
-        {% endif %}
-
-        <div class="grid sm:grid-cols-2 gap-4">
-          {% for field in form %}
-            <div class="space-y-1">
-              <label class="block text-sm font-medium text-gray-700" for="{{ field.id_for_label }}">{{ field.label }}</label>
-              {{ field }}
-              {% if field.help_text %}
-                <p class="text-xs text-gray-500">{{ field.help_text }}</p>
-              {% endif %}
-              {% for error in field.errors %}
-                <p class="text-xs text-red-600">{{ error }}</p>
-              {% endfor %}
-            </div>
-          {% endfor %}
-        </div>
-
-        <div class="flex justify-end gap-3">
-          <a href="{% url 'console-home' %}" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Cancel</a>
-          <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-            Save Server
-          </button>
-        </div>
-      </form>
+    <div class="overflow-x-auto">
+      <table class="w-full divide-y divide-gray-200/70">
+        <thead class="bg-gray-50/50">
+          <tr>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Connection</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Updated</th>
+            <th scope="col" class="px-3 md:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="mcp-server-table-body"
+               class="divide-y divide-gray-200/70"
+               hx-get="{% url 'console-mcp-server-table' %}"
+               hx-trigger="refreshMcpServersTable from:body"
+               hx-swap="innerHTML">
+          {% include "console/partials/_mcp_server_table_body.html" with servers=servers owner_scope=owner_scope owner_label=owner_label %}
+        </tbody>
+      </table>
     </div>
   </div>
 </div>

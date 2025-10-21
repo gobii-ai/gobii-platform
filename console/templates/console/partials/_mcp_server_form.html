@@ -1,0 +1,53 @@
+<form
+  id="create-mcp-server-form"
+  hx-post="{% url 'console-mcp-server-create' %}"
+  hx-target="#mcp-server-result"
+  hx-swap="innerHTML"
+  hx-on::after-request="
+      const triggerHeader = event.detail.xhr ? event.detail.xhr.getResponseHeader('HX-Trigger') : null;
+      if (event.detail.successful && triggerHeader && triggerHeader.includes('refreshMcpServersTable')) {
+        window.dispatchEvent(
+          new CustomEvent('close-modal', { detail: { id: 'create-mcp-server-modal' } })
+        );
+      }
+  "
+  class="space-y-5"
+>
+  {% csrf_token %}
+
+  {% if form.non_field_errors %}
+    <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      {% for error in form.non_field_errors %}
+        <p>{{ error }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="grid sm:grid-cols-2 gap-4">
+    {% for field in form %}
+      {% if field.name == 'is_active' %}
+        <div class="sm:col-span-2">
+          <label class="flex items-center gap-2 text-sm font-medium text-gray-700">
+            {{ field }}
+            <span>Active</span>
+          </label>
+          <p class="text-xs text-gray-500 mt-1">Inactive servers remain configured but hidden from agents.</p>
+          {% for error in field.errors %}
+            <p class="text-xs text-red-600 mt-1">{{ error }}</p>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="space-y-1 {% if field.name == 'description' or field.name == 'command_args' or field.name == 'metadata' or field.name == 'environment' or field.name == 'headers' %}sm:col-span-2{% endif %}">
+          <label class="block text-sm font-medium text-gray-700" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}
+            <p class="text-xs text-gray-500">{{ field.help_text }}</p>
+          {% endif %}
+          {% for error in field.errors %}
+            <p class="text-xs text-red-600">{{ error }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</form>
