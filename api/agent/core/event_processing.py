@@ -1825,63 +1825,6 @@ def _build_prompt_context(
     
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
-
-    if proactive_context:
-        lines: list[str] = []
-        summary = proactive_context.get("summary")
-        if summary:
-            lines.append(f"Proactive focus: {summary}")
-        recent_inbound = proactive_context.get("recent_inbound")
-        if isinstance(recent_inbound, dict):
-            sender = recent_inbound.get("sender")
-            received_at = recent_inbound.get("timestamp")
-            preview = recent_inbound.get("preview")
-            parts = ["Recent inbound message awaiting follow-up:"]
-            if sender:
-                parts.append(f"From: {sender}")
-            if received_at:
-                parts.append(f"Received at: {received_at}")
-            if preview:
-                parts.append(f"Content preview: {preview}")
-            lines.append(" ".join(parts))
-        hints = proactive_context.get("hints") or []
-        if isinstance(hints, list):
-            for hint in hints:
-                if not isinstance(hint, str):
-                    continue
-                lines.append(f"- {hint}")
-        open_tasks = proactive_context.get("open_tasks") or []
-        if isinstance(open_tasks, list) and open_tasks:
-            lines.append("Open web tasks to consider:")
-            for task_info in open_tasks:
-                if not isinstance(task_info, dict):
-                    continue
-                prompt_preview = task_info.get("prompt")
-                task_id = task_info.get("id")
-                status = task_info.get("status")
-                task_line_parts = []
-                if task_id:
-                    task_line_parts.append(f"id={task_id}")
-                if status:
-                    task_line_parts.append(f"status={status}")
-                if prompt_preview:
-                    task_line_parts.append(f"prompt={prompt_preview}")
-                if task_line_parts:
-                    lines.append("  • " + " | ".join(task_line_parts))
-        pending_secrets = proactive_context.get("pending_secrets") or []
-        if isinstance(pending_secrets, list) and pending_secrets:
-            lines.append("Pending credential requests still waiting on the user:")
-            for secret_name in pending_secrets:
-                if isinstance(secret_name, str):
-                    lines.append(f"  • {secret_name}")
-
-        if lines:
-            important_group.section_text(
-                "proactive_context",
-                "\n".join(lines),
-                weight=6,
-                non_shrinkable=True,
-            )
     
     # Schedule block
     schedule_str = agent.schedule if agent.schedule else "No schedule configured"
