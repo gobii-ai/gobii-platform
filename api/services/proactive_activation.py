@@ -59,7 +59,7 @@ class ProactiveActivationService:
             if not cls._acquire_user_gate(redis_client, agent.user_id, effective_min_interval):
                 continue
 
-            metadata = cls._build_metadata(agent, now)
+            metadata = cls._build_metadata(now)
 
             try:
                 result = cls._record_trigger(agent, now, metadata)
@@ -134,70 +134,10 @@ class ProactiveActivationService:
         return now - anchor >= cls.MIN_ACTIVITY_COOLDOWN
 
     @staticmethod
-    def _build_metadata(agent: PersistentAgent, now: datetime) -> dict:
-        """Collect lightweight context to guide proactive outreach."""
-        hints: List[str] = []
-
-        recent_inbound = (
-            PersistentAgentMessage.objects.filter(
-                owner_agent=agent,
-                is_outbound=False,
-            )
-            .order_by("-timestamp")
-            .first()
-        )
-
-        recent_inbound_payload = None
-        if recent_inbound:
-            preview = (recent_inbound.body or "")[:160].replace("\n", " ")
-            hints.append("Follow up on the most recent user message if it still needs action.")
-            recent_inbound_payload = {
-                "sender": getattr(recent_inbound.from_endpoint, "address", None),
-                "timestamp": recent_inbound.timestamp.isoformat(),
-                "preview": preview,
-            }
-
-        open_tasks_qs = BrowserUseAgentTask.objects.filter(
-            agent=agent.browser_use_agent,
-            status__in=[
-                BrowserUseAgentTask.StatusChoices.PENDING,
-                BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
-            ],
-        ).order_by("-updated_at")[:5]
-        open_tasks: List[dict] = [
-            {
-                "id": str(task.id),
-                "status": task.status,
-                "prompt": (task.prompt or "")[:120].replace("\n", " "),
-            }
-            for task in open_tasks_qs
-        ]
-        if open_tasks:
-            hints.append("Review active web tasks and update the user on progress or next steps.")
-
-        pending_secrets_qs = PersistentAgentSecret.objects.filter(agent=agent, requested=True).values_list("name", flat=True)
-        pending_secrets = list(pending_secrets_qs[:5])
-        if pending_secrets:
-            hints.append("Remind the user about pending credential requests if they block progress.")
-
-        summary_parts: List[str] = []
-        if recent_inbound_payload:
-            summary_parts.append("recent inbound message awaiting response")
-        if open_tasks:
-            summary_parts.append("active browser tasks in progress")
-        if pending_secrets:
-            summary_parts.append("credentials waiting on the user")
-        summary = ", ".join(summary_parts) if summary_parts else "check in context and offer related help"
-
+    def _build_metadata(now: datetime) -> dict:
         metadata = {
             "triggered_at": now.isoformat(),
-            "summary": summary,
-            "hints": hints,
-            "recent_inbound": recent_inbound_payload,
-            "open_tasks": open_tasks,
-            "pending_secrets": pending_secrets,
         }
-
         return metadata
 
     @classmethod
@@ -220,6 +160,25 @@ class ProactiveActivationService:
         # Refresh agent instance so callers get updated timestamp
         agent.proactive_last_trigger_at = now
         return ProactiveTriggerResult(agent=agent, step=step, metadata=metadata)
+
+    @classmethod
+    def force_trigger(
+        cls,
+        agent: PersistentAgent,
+        *,
+        initiated_by: str | None = None,
+        reason: str | None = None,
+    ) -> ProactiveTriggerResult:
+        """Trigger proactive outreach for an agent without cooldown checks."""
+        now = timezone.now()
+        metadata = cls._build_metadata(now)
+        metadata["force_trigger"] = True
+        if initiated_by:
+            metadata["initiated_by"] = initiated_by
+        if reason:
+            metadata["force_reason"] = reason[:512]
+
+        return cls._record_trigger(agent, now, metadata)
 
     @staticmethod
     def _get_redis_client():

@@ -10,6 +10,7 @@ from django.db.models.expressions import OuterRef, Exists
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
+from api.services.proactive_activation import ProactiveActivationService
 from .admin_forms import TestSmsForm, GrantPlanCreditsForm, GrantCreditsByUserIdsForm, AgentEmailAccountForm, StripeConfigForm
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
@@ -1673,6 +1674,11 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 name='api_persistentagent_simulate_sms',
             ),
             path(
+                '<path:object_id>/force-proactive/',
+                self.admin_site.admin_view(self.force_proactive_view),
+                name='api_persistentagent_force_proactive',
+            ),
+            path(
                 'trigger-processing/',
                 self.admin_site.admin_view(self.trigger_processing_view),
                 name='api_persistentagent_trigger_processing',
@@ -1755,9 +1761,15 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         if obj and obj.pk:
             simulate_email_url = reverse("admin:api_persistentagent_simulate_email", args=[obj.pk])
             simulate_sms_url = reverse("admin:api_persistentagent_simulate_sms", args=[obj.pk])
-            buttons = f'<a class="button" href="{simulate_email_url}">Simulate Email</a>'
-            buttons += f'&nbsp;<a class="button" href="{simulate_sms_url}">Simulate SMS</a>'
-            return format_html(buttons)
+            force_proactive_url = reverse("admin:api_persistentagent_force_proactive", args=[obj.pk])
+            return format_html(
+                '<a class="button" href="{}">Simulate Email</a>&nbsp;'
+                '<a class="button" href="{}">Simulate SMS</a>&nbsp;'
+                '<a class="button" href="{}">Force Proactive Outreach</a>',
+                simulate_email_url,
+                simulate_sms_url,
+                force_proactive_url,
+            )
         return "Save agent to see actions"
 
     def trigger_processing_view(self, request):
@@ -1829,6 +1841,54 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             )
 
         return HttpResponseRedirect(changelist_url)
+
+    def force_proactive_view(self, request, object_id):
+        """Force a proactive outreach cycle for a specific agent."""
+        try:
+            agent = PersistentAgent.objects.get(pk=object_id)
+        except PersistentAgent.DoesNotExist:
+            self.message_user(request, "Agent not found", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_persistentagent_changelist"))
+
+        if request.method == "POST":
+            reason_value = (request.POST.get("reason") or "").strip()
+            initiated_by = request.user.email or request.user.get_username()
+            try:
+                ProactiveActivationService.force_trigger(
+                    agent,
+                    initiated_by=initiated_by,
+                    reason=reason_value or None,
+                )
+                process_agent_events_task.delay(str(agent.pk))
+            except Exception:
+                logging.exception("Failed to force proactive trigger for persistent agent %s", agent.pk)
+                self.message_user(
+                    request,
+                    "Failed to trigger proactive outreach. Check logs for details.",
+                    level=messages.ERROR,
+                )
+            else:
+                self.message_user(
+                    request,
+                    "Forced proactive outreach queued for this agent.",
+                    level=messages.SUCCESS,
+                )
+                return HttpResponseRedirect(reverse("admin:api_persistentagent_change", args=[object_id]))
+        else:
+            reason_value = ""
+
+        context = {
+            "title": "Force Proactive Outreach",
+            "agent": agent,
+            "reason": reason_value,
+            "opts": self.model._meta,
+            "original": agent,
+        }
+        return TemplateResponse(
+            request,
+            "admin/persistentagent_force_proactive.html",
+            context,
+        )
 
     def simulate_email_view(self, request, object_id):
         """Handle email simulation for an agent."""

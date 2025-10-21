@@ -1,0 +1,36 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' 'api' %}">API</a>
+    &rsaquo; <a href="{% url 'admin:api_persistentagent_changelist' %}">{% trans 'Persistent Agents' %}</a>
+    &rsaquo; Force Proactive Outreach
+  </div>
+{% endblock %}
+
+{% block content %}
+  <h1>Force Proactive Outreach</h1>
+  <p>
+    Trigger an immediate proactive outreach cycle for
+    <strong>{{ agent.name }}</strong> (ID: {{ agent.id }}).
+    This bypasses cooldown and opt-in checks and should only be used for testing.
+  </p>
+  {% if not agent.is_active %}
+    <p class="warning">Warning: This agent is currently inactive. Forcing outreach may still queue processing.</p>
+  {% endif %}
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      <div class="form-row">
+        <label for="id_reason"><strong>Reason (optional)</strong></label>
+        <textarea name="reason" id="id_reason" rows="4" cols="60" placeholder="Why are you forcing outreach?">{{ reason }}</textarea>
+      </div>
+    </fieldset>
+    <div class="submit-row">
+      <a class="button" href="{% url 'admin:api_persistentagent_change' agent.pk %}">Cancel</a>
+      <button type="submit" class="button default">Force Outreach</button>
+    </div>
+  </form>
+{% endblock %}
