@@ -1,7 +1,9 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
+from django.utils import timezone
 from api.models import PersistentAgent, PersistentAgentSystemStep, UserQuota
 from api.services.proactive_activation import ProactiveActivationService
 from api.tasks.proactive_agents import schedule_proactive_agents_task
@@ -90,3 +92,49 @@ class ProactiveActivationServiceTests(TestCase):
         processed = schedule_proactive_agents_task(batch_size=3)
         self.assertEqual(processed, 1)
         mock_delay.assert_called_once_with(str(self.agent_a.id))
+
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_respects_minimum_weekly_interval(self, mock_redis_client):
+        mock_redis_client.return_value = _FakeRedis()
+        self.agent_b.proactive_opt_in = False
+        self.agent_b.save(update_fields=["proactive_opt_in"])
+
+        self.agent_a.proactive_last_trigger_at = timezone.now() - timedelta(days=6)
+        self.agent_a.last_interaction_at = timezone.now() - timedelta(days=10)
+        self.agent_a.save(update_fields=["proactive_last_trigger_at", "last_interaction_at"])
+
+        triggered = ProactiveActivationService.trigger_agents(batch_size=5)
+        self.assertEqual(triggered, [])
+
+        mock_redis_client.return_value = _FakeRedis()
+        self.agent_a.refresh_from_db()
+        self.agent_a.proactive_last_trigger_at = timezone.now() - timedelta(days=8)
+        self.agent_a.save(update_fields=["proactive_last_trigger_at"])
+
+        triggered_after_cooldown = ProactiveActivationService.trigger_agents(batch_size=5)
+        self.assertEqual(len(triggered_after_cooldown), 1)
+        self.assertEqual(triggered_after_cooldown[0].id, self.agent_a.id)
+
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_waits_three_days_since_last_interaction(self, mock_redis_client):
+        mock_redis_client.return_value = _FakeRedis()
+        self.agent_b.proactive_opt_in = False
+        self.agent_b.save(update_fields=["proactive_opt_in"])
+
+        now = timezone.now()
+
+        self.agent_a.proactive_last_trigger_at = None
+        self.agent_a.last_interaction_at = now - timedelta(days=2)
+        self.agent_a.save(update_fields=["proactive_last_trigger_at", "last_interaction_at"])
+
+        triggered = ProactiveActivationService.trigger_agents(batch_size=5)
+        self.assertEqual(triggered, [])
+
+        mock_redis_client.return_value = _FakeRedis()
+        self.agent_a.refresh_from_db()
+        self.agent_a.last_interaction_at = now - timedelta(days=4)
+        self.agent_a.save(update_fields=["last_interaction_at"])
+
+        triggered_after_wait = ProactiveActivationService.trigger_agents(batch_size=5)
+        self.assertEqual(len(triggered_after_wait), 1)
+        self.assertEqual(triggered_after_wait[0].id, self.agent_a.id)

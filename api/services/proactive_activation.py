@@ -34,6 +34,8 @@ class ProactiveActivationService:
     DEFAULT_BATCH_SIZE = 10
     SCAN_LIMIT = 50
     USER_COOLDOWN_FALLBACK_MINUTES = 360
+    MIN_TRIGGER_INTERVAL_MINUTES = 7 * 24 * 60  # At most once per week
+    MIN_ACTIVITY_COOLDOWN = timedelta(days=3)  # Wait at least three days since last interaction
 
     @classmethod
     def trigger_agents(cls, *, batch_size: int | None = None) -> List[PersistentAgent]:
@@ -49,9 +51,12 @@ class ProactiveActivationService:
         for agent in candidates:
             if agent.user_id in seen_users:
                 continue
-            if not cls._min_interval_satisfied(agent, now):
+            if not cls._recent_activity_cooldown_satisfied(agent, now):
                 continue
-            if not cls._acquire_user_gate(redis_client, agent.user_id, agent.proactive_min_interval_minutes):
+            effective_min_interval = cls._effective_min_interval_minutes(agent)
+            if not cls._min_interval_satisfied(agent, now, effective_min_interval):
+                continue
+            if not cls._acquire_user_gate(redis_client, agent.user_id, effective_min_interval):
                 continue
 
             metadata = cls._build_metadata(agent, now)
@@ -66,7 +71,7 @@ class ProactiveActivationService:
             triggered_results.append(result)
             seen_users.add(agent.user_id)
 
-            cls._set_user_gate(redis_client, agent.user_id, agent.proactive_min_interval_minutes)
+            cls._set_user_gate(redis_client, agent.user_id, effective_min_interval)
 
             if len(triggered_results) >= batch:
                 break
@@ -103,17 +108,30 @@ class ProactiveActivationService:
 
         return list(qs)
 
-    @staticmethod
-    def _min_interval_satisfied(agent: PersistentAgent, now: datetime) -> bool:
-        """Check per-agent cooldown window."""
+    @classmethod
+    def _effective_min_interval_minutes(cls, agent: PersistentAgent) -> int:
+        """Apply global guardrails to per-agent interval settings."""
         minutes = int(agent.proactive_min_interval_minutes or 0)
-        if minutes <= 0:
+        return max(minutes, cls.MIN_TRIGGER_INTERVAL_MINUTES)
+
+    @staticmethod
+    def _min_interval_satisfied(agent: PersistentAgent, now: datetime, required_minutes: int) -> bool:
+        """Check per-agent cooldown window."""
+        if required_minutes <= 0:
             return True
         last = agent.proactive_last_trigger_at
         if not last:
             return True
         delta = now - last
-        return delta >= timedelta(minutes=minutes)
+        return delta >= timedelta(minutes=required_minutes)
+
+    @classmethod
+    def _recent_activity_cooldown_satisfied(cls, agent: PersistentAgent, now: datetime) -> bool:
+        """Ensure we allow a quiet period after the last human interaction."""
+        anchor = agent.last_interaction_at or agent.created_at
+        if not anchor:
+            return True
+        return now - anchor >= cls.MIN_ACTIVITY_COOLDOWN
 
     @staticmethod
     def _build_metadata(agent: PersistentAgent, now: datetime) -> dict:
