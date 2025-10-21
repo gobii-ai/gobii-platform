@@ -9,14 +9,7 @@ from django.db.models import Count, F, Q
 from django.utils import timezone
 
 from config.redis_client import get_redis_client
-from api.models import (
-    BrowserUseAgentTask,
-    PersistentAgent,
-    PersistentAgentMessage,
-    PersistentAgentSecret,
-    PersistentAgentStep,
-    PersistentAgentSystemStep,
-)
+from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep
 
 logger = logging.getLogger(__name__)
 
@@ -194,12 +187,11 @@ class ProactiveActivationService:
         if redis_client is None:
             return True
         key = cls._user_gate_key(user_id)
+        ttl_minutes = max(int(min_interval_minutes or 0), cls.USER_COOLDOWN_FALLBACK_MINUTES)
+        ttl_seconds = ttl_minutes * 60
         try:
-            exists = redis_client.exists(key)
-            if exists:
-                return False
-            # Do not set the gate until after we successfully record the trigger
-            return True
+            acquired = redis_client.set(key, "1", ex=ttl_seconds, nx=True)
+            return bool(acquired)
         except Exception:
             logger.exception("Redis gate check failed for user %s", user_id)
             return True

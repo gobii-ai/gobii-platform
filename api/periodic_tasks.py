@@ -64,7 +64,7 @@ def add_dynamic_schedules():
     # Proactive agent activation sweep
     beat_schedule["proactive-agent-scan"] = {
         "task": "api.tasks.schedule_proactive_agents",
-        "schedule": crontab(minute="*/30"),
+        "schedule": crontab(hour="*", minute = 21), # 21 minutes after every hour
         "args": [],
     }
 
