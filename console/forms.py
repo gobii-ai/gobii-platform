@@ -191,7 +191,11 @@ class MCPServerConfigForm(forms.Form):
 
         self.fields['name'].widget = forms.HiddenInput()
         self.fields['name'].widget.attrs.update({'x-model': 'slug', 'x-bind:value': 'slug'})
-        self.fields['display_name'].widget.attrs.update({'x-model': 'displayName', 'x-on:input': 'slug = slugify($event.target.value)'})
+
+        display_widget = self.fields['display_name'].widget
+        display_widget.attrs.setdefault('x-model', 'displayName')
+        if instance is None:
+            display_widget.attrs.setdefault('x-on:input', 'slug = slugify($event.target.value)')
 
         for name, field in self.fields.items():
             widget = field.widget
@@ -262,7 +266,8 @@ class MCPServerConfigForm(forms.Form):
         config.command = self.cleaned_data.get('command', '')
         config.command_args = self.cleaned_data.get('command_args') or []
         config.url = self.cleaned_data.get('url', '')
-        config.prefetch_apps = self.cleaned_data.get('prefetch_apps') or []
+        if 'prefetch_apps' in self.cleaned_data:
+            config.prefetch_apps = self.cleaned_data.get('prefetch_apps') or []
         config.metadata = self.cleaned_data.get('metadata') or {}
         config.is_active = bool(self.cleaned_data.get('is_active'))
         config.environment = self.cleaned_data.get('environment') or {}

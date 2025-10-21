@@ -16,7 +16,13 @@
             <p class="font-mono text-xs text-gray-500 break-all">Args: {{ server.command_args|join:' ' }}</p>
           {% endif %}
         {% elif server.url %}
-          <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700">HTTP</span>
+          {% with url_lower=server.url|lower %}
+            {% if url_lower|slice:":5" == "https" %}
+              <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700">HTTPS</span>
+            {% else %}
+              <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700">HTTP</span>
+            {% endif %}
+          {% endwith %}
           <p class="font-mono text-xs text-gray-600 break-all">{{ server.url }}</p>
         {% else %}
           <p class="text-xs text-gray-500">No connection settings provided.</p>
