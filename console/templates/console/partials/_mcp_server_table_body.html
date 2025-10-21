@@ -41,14 +41,11 @@
                   class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
             Edit
           </button>
-          <form method="post" action="{% url 'console-mcp-server-delete' server.id %}"
-                onsubmit="return confirm('Delete this MCP server? This will remove access for any linked agents.');">
-            {% csrf_token %}
-            <button type="submit"
-                    class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg border border-red-200 text-red-600 hover:bg-red-50">
-              Delete
-            </button>
-          </form>
+          <button type="button"
+                  class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                  @click="$dispatch('open-modal', { id: 'delete-mcp-server-modal', url: '{% url 'console-mcp-server-delete' server.id %}' })">
+            Delete
+          </button>
         </div>
       </td>
     </tr>

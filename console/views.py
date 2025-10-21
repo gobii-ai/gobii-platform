@@ -3568,7 +3568,9 @@ class MCPServerConfigUpdateView(ConsoleViewMixin, TemplateView):
 
 
 class MCPServerConfigDeleteView(ConsoleViewMixin, View):
-    def post(self, request, *args, **kwargs):
+    http_method_names = ['post', 'delete']
+
+    def _get_config(self, request, *args, **kwargs) -> MCPServerConfig:
         config = get_object_or_404(MCPServerConfig, pk=kwargs.get('pk'))
         if config.scope == MCPServerConfig.Scope.PLATFORM:
             raise Http404
@@ -3586,10 +3588,38 @@ class MCPServerConfigDeleteView(ConsoleViewMixin, View):
             ):
                 raise PermissionDenied
 
+        return config
+
+    def _delete_config(self, config: MCPServerConfig) -> str:
+        server_name = config.display_name
         config.delete()
         get_mcp_manager().initialize(force=True)
+        return server_name
+
+    def _delete_response(self, request, server_name: str):
+        if request.htmx:
+            response = render(
+                request,
+                "console/partials/_mcp_server_success.html",
+                {
+                    "message": f"MCP server '{server_name}' was deleted."
+                },
+            )
+            response["HX-Trigger"] = '{"refreshMcpServersTable": null}'
+            return response
+
         messages.success(request, "MCP server deleted.")
         return redirect('console-mcp-servers')
+
+    def post(self, request, *args, **kwargs):
+        config = self._get_config(request, *args, **kwargs)
+        server_name = self._delete_config(config)
+        return self._delete_response(request, server_name)
+
+    def delete(self, request, *args, **kwargs):
+        config = self._get_config(request, *args, **kwargs)
+        server_name = self._delete_config(config)
+        return self._delete_response(request, server_name)
 
 
 class PersistentAgentChatShellView(AgentDetailView):
