@@ -2,6 +2,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import List, Sequence
 
 from django.db import transaction
@@ -10,6 +11,7 @@ from django.utils import timezone
 
 from config.redis_client import get_redis_client
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +48,17 @@ class ProactiveActivationService:
                 continue
             if not cls._recent_activity_cooldown_satisfied(agent, now):
                 continue
+            has_credit, credit_remaining = cls._has_required_daily_credit(agent)
+            if not has_credit:
+                logger.debug("Skipping proactive trigger for agent %s due to insufficient daily credits", agent.id)
+                continue
             effective_min_interval = cls._effective_min_interval_minutes(agent)
             if not cls._min_interval_satisfied(agent, now, effective_min_interval):
                 continue
             if not cls._acquire_user_gate(redis_client, agent.user_id, effective_min_interval):
                 continue
 
-            metadata = cls._build_metadata(now)
+            metadata = cls._build_metadata(now, remaining_credits=credit_remaining)
 
             try:
                 result = cls._record_trigger(agent, now, metadata)
@@ -125,11 +131,73 @@ class ProactiveActivationService:
         return now - anchor >= cls.MIN_ACTIVITY_COOLDOWN
 
     @staticmethod
-    def _build_metadata(now: datetime) -> dict:
+    def _daily_credit_remaining(agent: PersistentAgent) -> Decimal | None:
+        """Return remaining daily task credits for the agent (None means unlimited)."""
+        try:
+            return agent.get_daily_credit_remaining()
+        except Exception:
+            logger.exception("Failed to compute daily credit remaining for agent %s", agent.id)
+            return Decimal("0")
+
+    @classmethod
+    def _has_required_daily_credit(cls, agent: PersistentAgent) -> tuple[bool, Decimal | None]:
+        """Check that the agent has at least one remaining task credit."""
+        remaining = cls._daily_credit_remaining(agent)
+        if remaining is None:
+            return True, None
+        try:
+            return remaining >= Decimal("1"), remaining
+        except (TypeError, InvalidOperation):
+            logger.warning("Invalid daily credit remaining value for agent %s; skipping proactive trigger.", agent.id)
+            return False, Decimal("0")
+
+    @staticmethod
+    def _build_metadata(now: datetime, *, remaining_credits: Decimal | None = None) -> dict:
         metadata = {
             "triggered_at": now.isoformat(),
         }
+        if remaining_credits is not None:
+            try:
+                metadata["daily_credit_remaining"] = float(remaining_credits)
+            except (TypeError, InvalidOperation):
+                logger.debug("Unable to serialize daily credit remaining value for proactive trigger metadata.")
         return metadata
+
+    @classmethod
+    def _enqueue_analytics_event(cls, agent: PersistentAgent, metadata: dict) -> None:
+        """Record an analytics event after the proactive trigger transaction commits."""
+        try:
+            trigger_mode = "forced" if metadata.get("force_trigger") else "scheduled"
+            daily_remaining = metadata.get("daily_credit_remaining")
+            properties = {
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "trigger_mode": trigger_mode,
+                "triggered_at": metadata.get("triggered_at"),
+                "proactive_min_interval_minutes": agent.proactive_min_interval_minutes,
+                "proactive_max_daily": agent.proactive_max_daily,
+                "daily_credit_limit": agent.daily_credit_limit,
+            }
+            if metadata.get("force_trigger") is not None:
+                properties["force_trigger"] = bool(metadata.get("force_trigger"))
+            if daily_remaining is not None:
+                properties["daily_credit_remaining"] = daily_remaining
+            if metadata.get("initiated_by"):
+                properties["initiated_by"] = metadata["initiated_by"]
+            if metadata.get("force_reason"):
+                properties["force_reason"] = metadata["force_reason"]
+
+            def _track():
+                Analytics.track_event(
+                    user_id=agent.user_id,
+                    event=AnalyticsEvent.PERSISTENT_AGENT_PROACTIVE_TRIGGERED,
+                    source=AnalyticsSource.AGENT,
+                    properties=properties,
+                )
+
+            transaction.on_commit(_track)
+        except Exception:
+            logger.exception("Failed to enqueue analytics event for proactive trigger agent %s", agent.id)
 
     @classmethod
     def _record_trigger(cls, agent: PersistentAgent, now: datetime, metadata: dict) -> ProactiveTriggerResult:
@@ -150,6 +218,7 @@ class ProactiveActivationService:
 
         # Refresh agent instance so callers get updated timestamp
         agent.proactive_last_trigger_at = now
+        cls._enqueue_analytics_event(agent, metadata)
         return ProactiveTriggerResult(agent=agent, step=step, metadata=metadata)
 
     @classmethod
@@ -162,7 +231,8 @@ class ProactiveActivationService:
     ) -> ProactiveTriggerResult:
         """Trigger proactive outreach for an agent without cooldown checks."""
         now = timezone.now()
-        metadata = cls._build_metadata(now)
+        remaining = cls._daily_credit_remaining(agent)
+        metadata = cls._build_metadata(now, remaining_credits=remaining)
         metadata["force_trigger"] = True
         if initiated_by:
             metadata["initiated_by"] = initiated_by

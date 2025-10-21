@@ -1,13 +1,16 @@
 from datetime import timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
-from api.models import PersistentAgent, PersistentAgentSystemStep, UserQuota
+
+from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep, UserQuota
 from api.services.proactive_activation import ProactiveActivationService
 from api.tasks.proactive_agents import schedule_proactive_agents_task
 from tests.unit.test_api_persistent_agents import create_browser_agent_without_proxy
+from util.analytics import AnalyticsEvent
 
 
 class _FakeRedis:
@@ -31,6 +34,7 @@ class _FakeRedis:
         self._store.pop(key, None)
 
 
+@override_settings(GOBII_RELEASE_ENV="prod")
 @tag("batch_api_persistent_agents", "batch_api_tasks")
 class ProactiveActivationServiceTests(TestCase):
     def setUp(self):
@@ -91,6 +95,40 @@ class ProactiveActivationServiceTests(TestCase):
         triggered_again = ProactiveActivationService.trigger_agents(batch_size=5)
         self.assertEqual(len(triggered_again), 0)
 
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_skips_agents_without_daily_credit(self, mock_redis_client):
+        mock_redis_client.return_value = _FakeRedis()
+
+        self.agent_a.daily_credit_limit = 1
+        self.agent_a.save(update_fields=["daily_credit_limit"])
+
+        PersistentAgentStep.objects.create(
+            agent=self.agent_a,
+            description="Consumed credit",
+            credits_cost=Decimal("1"),
+        )
+
+        triggered = ProactiveActivationService.trigger_agents(batch_size=5)
+        self.assertEqual(len(triggered), 1)
+        self.assertEqual(triggered[0].id, self.agent_b.id)
+
+    @patch("api.services.proactive_activation.Analytics.track_event")
+    @patch("api.services.proactive_activation.transaction.on_commit", side_effect=lambda fn: fn())
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_emits_analytics_event_on_trigger(self, mock_redis_client, _mock_on_commit, mock_track_event):
+        mock_redis_client.return_value = _FakeRedis()
+
+        triggered = ProactiveActivationService.trigger_agents(batch_size=5)
+        self.assertEqual(len(triggered), 1)
+
+        self.assertTrue(mock_track_event.called)
+        _, kwargs = mock_track_event.call_args
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_PROACTIVE_TRIGGERED)
+        properties = kwargs["properties"]
+        self.assertEqual(properties["agent_id"], str(triggered[0].id))
+        self.assertEqual(properties["trigger_mode"], "scheduled")
+
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("api.services.proactive_activation.ProactiveActivationService.trigger_agents")
     def test_schedule_task_enqueues_processing(self, mock_trigger, mock_delay):
@@ -98,6 +136,13 @@ class ProactiveActivationServiceTests(TestCase):
         processed = schedule_proactive_agents_task(batch_size=3)
         self.assertEqual(processed, 1)
         mock_delay.assert_called_once_with(str(self.agent_a.id))
+
+    @override_settings(GOBII_RELEASE_ENV="staging")
+    @patch("api.services.proactive_activation.ProactiveActivationService.trigger_agents")
+    def test_schedule_task_skips_outside_production(self, mock_trigger):
+        processed = schedule_proactive_agents_task(batch_size=3)
+        self.assertEqual(processed, 0)
+        mock_trigger.assert_not_called()
 
     @patch("api.services.proactive_activation.get_redis_client")
     def test_respects_minimum_weekly_interval(self, mock_redis_client):
