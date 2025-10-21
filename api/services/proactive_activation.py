@@ -8,6 +8,7 @@ from typing import List, Sequence
 from django.db import transaction
 from django.db.models import Count, F, Q
 from django.utils import timezone
+from waffle import get_waffle_flag_model
 
 from config.redis_client import get_redis_client
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep
@@ -28,6 +29,7 @@ class ProactiveActivationService:
 
     DEFAULT_BATCH_SIZE = 10
     SCAN_LIMIT = 50
+    ROLLOUT_FLAG_NAME = "proactive_agent_rollout"
     USER_COOLDOWN_FALLBACK_MINUTES = 360
     MIN_TRIGGER_INTERVAL_MINUTES = 7 * 24 * 60  # At most once per week
     MIN_ACTIVITY_COOLDOWN = timedelta(days=3)  # Wait at least three days since last interaction
@@ -45,6 +47,13 @@ class ProactiveActivationService:
 
         for agent in candidates:
             if agent.user_id in seen_users:
+                continue
+            if not cls._is_rollout_enabled_for_agent(agent):
+                logger.debug(
+                    "Skipping proactive trigger for agent %s because rollout flag '%s' is inactive",
+                    agent.id,
+                    cls.ROLLOUT_FLAG_NAME,
+                )
                 continue
             if not cls._recent_activity_cooldown_satisfied(agent, now):
                 continue
@@ -277,3 +286,32 @@ class ProactiveActivationService:
     @staticmethod
     def _user_gate_key(user_id) -> str:
         return f"proactive:user:{user_id}"
+
+    @classmethod
+    def _is_rollout_enabled_for_agent(cls, agent: PersistentAgent) -> bool:
+        """Return True when the rollout flag permits proactive outreach for this agent."""
+        if not agent.user_id:
+            return False
+
+        try:
+            flag = get_waffle_flag_model().get(cls.ROLLOUT_FLAG_NAME)
+        except Exception:
+            logger.exception(
+                "Failed loading waffle flag '%s' when evaluating rollout eligibility for agent %s",
+                cls.ROLLOUT_FLAG_NAME,
+                agent.id,
+            )
+            return False
+
+        try:
+            is_enabled = flag.is_active_for_user(agent.user)
+        except Exception:
+            logger.exception(
+                "Error while evaluating waffle flag '%s' for user %s (agent %s)",
+                cls.ROLLOUT_FLAG_NAME,
+                agent.user_id,
+                agent.id,
+            )
+            return False
+
+        return bool(is_enabled)

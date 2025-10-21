@@ -78,8 +78,9 @@ class ProactiveActivationServiceTests(TestCase):
         self.agent_a.refresh_from_db()
         self.agent_b.refresh_from_db()
 
+    @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
     @patch("api.services.proactive_activation.get_redis_client")
-    def test_only_one_agent_per_user_selected(self, mock_redis_client):
+    def test_only_one_agent_per_user_selected(self, mock_redis_client, _mock_flag):
         mock_redis_client.return_value = _FakeRedis()
 
         triggered = ProactiveActivationService.trigger_agents(batch_size=5)
@@ -95,8 +96,9 @@ class ProactiveActivationServiceTests(TestCase):
         triggered_again = ProactiveActivationService.trigger_agents(batch_size=5)
         self.assertEqual(len(triggered_again), 0)
 
+    @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
     @patch("api.services.proactive_activation.get_redis_client")
-    def test_skips_agents_without_daily_credit(self, mock_redis_client):
+    def test_skips_agents_without_daily_credit(self, mock_redis_client, _mock_flag):
         mock_redis_client.return_value = _FakeRedis()
 
         self.agent_a.daily_credit_limit = 1
@@ -112,10 +114,11 @@ class ProactiveActivationServiceTests(TestCase):
         self.assertEqual(len(triggered), 1)
         self.assertEqual(triggered[0].id, self.agent_b.id)
 
+    @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
     @patch("api.services.proactive_activation.Analytics.track_event")
     @patch("api.services.proactive_activation.transaction.on_commit", side_effect=lambda fn: fn())
     @patch("api.services.proactive_activation.get_redis_client")
-    def test_emits_analytics_event_on_trigger(self, mock_redis_client, _mock_on_commit, mock_track_event):
+    def test_emits_analytics_event_on_trigger(self, mock_redis_client, _mock_on_commit, mock_track_event, _mock_flag):
         mock_redis_client.return_value = _FakeRedis()
 
         triggered = ProactiveActivationService.trigger_agents(batch_size=5)
@@ -144,8 +147,9 @@ class ProactiveActivationServiceTests(TestCase):
         self.assertEqual(processed, 0)
         mock_trigger.assert_not_called()
 
+    @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
     @patch("api.services.proactive_activation.get_redis_client")
-    def test_respects_minimum_weekly_interval(self, mock_redis_client):
+    def test_respects_minimum_weekly_interval(self, mock_redis_client, _mock_flag):
         mock_redis_client.return_value = _FakeRedis()
         self.agent_b.proactive_opt_in = False
         self.agent_b.save(update_fields=["proactive_opt_in"])
@@ -166,8 +170,9 @@ class ProactiveActivationServiceTests(TestCase):
         self.assertEqual(len(triggered_after_cooldown), 1)
         self.assertEqual(triggered_after_cooldown[0].id, self.agent_a.id)
 
+    @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
     @patch("api.services.proactive_activation.get_redis_client")
-    def test_waits_three_days_since_last_interaction(self, mock_redis_client):
+    def test_waits_three_days_since_last_interaction(self, mock_redis_client, _mock_flag):
         mock_redis_client.return_value = _FakeRedis()
         self.agent_b.proactive_opt_in = False
         self.agent_b.save(update_fields=["proactive_opt_in"])
@@ -189,3 +194,15 @@ class ProactiveActivationServiceTests(TestCase):
         triggered_after_wait = ProactiveActivationService.trigger_agents(batch_size=5)
         self.assertEqual(len(triggered_after_wait), 1)
         self.assertEqual(triggered_after_wait[0].id, self.agent_a.id)
+
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_rollout_flag_blocks_agents(self, mock_redis_client):
+        mock_redis_client.return_value = _FakeRedis()
+
+        with patch(
+            "api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent",
+            return_value=False,
+        ):
+            triggered = ProactiveActivationService.trigger_agents(batch_size=5)
+
+        self.assertEqual(triggered, [])
