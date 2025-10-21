@@ -3,6 +3,10 @@
     <svg class="h-5 w-5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
     </svg>
-    <p>MCP server <span class="font-semibold">{{ server.display_name }}</span> is ready for {{ owner_label }}.</p>
+    {% if message %}
+      <p>{{ message }}</p>
+    {% else %}
+      <p>MCP server <span class="font-semibold">{{ server.display_name }}</span> is ready for {{ owner_label }}.</p>
+    {% endif %}
   </div>
 </div>

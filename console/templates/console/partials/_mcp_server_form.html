@@ -1,12 +1,14 @@
+{% url 'console-mcp-server-create' as default_form_action %}
+{% with modal_id=modal_id|default:'create-mcp-server-modal' form_id=form_id|default:'create-mcp-server-form' form_action=form_action|default:default_form_action form_target=form_target|default:'#mcp-server-result' %}
 <form
-  id="create-mcp-server-form"
-  hx-post="{% url 'console-mcp-server-create' %}"
-  hx-target="#mcp-server-result"
+  id="{{ form_id }}"
+  hx-post="{{ form_action }}"
+  hx-target="{{ form_target }}"
   hx-swap="innerHTML"
   hx-on::after-request="
       const triggerHeader = event.detail.xhr ? event.detail.xhr.getResponseHeader('HX-Trigger') : null;
       if (event.detail.successful && triggerHeader && triggerHeader.includes('refreshMcpServersTable')) {
-        window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: 'create-mcp-server-modal' } }));
+        window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: '{{ modal_id }}' } }));
       }
   "
   x-data="{
@@ -31,6 +33,7 @@
   }"
   class="space-y-6"
 >
+
   {% csrf_token %}
   {{ form.name }}
 
@@ -180,3 +183,4 @@
     {% endwith %}
   </div>
 </form>
+{% endwith %}

@@ -1,8 +1,10 @@
 {% extends "partials/_generic_modal.html" %}
 
-{% block modal_id %}create-mcp-server-modal{% endblock %}
-{% block modal_event_id %}create-mcp-server-modal{% endblock %}
-{% block modal_event_id_close %}create-mcp-server-modal{% endblock %}
+{% with modal_id=modal_id|default:'create-mcp-server-modal' form_id=form_id|default:'create-mcp-server-form' modal_title=modal_title|default:'Add MCP Server' modal_intro=modal_intro|default:'' modal_submit_label=modal_submit_label|default:'Save Server' %}
+
+{% block modal_id %}{{ modal_id }}{% endblock %}
+{% block modal_event_id %}{{ modal_id }}{% endblock %}
+{% block modal_event_id_close %}{{ modal_id }}{% endblock %}
 {% block modal_size_class %}sm:max-w-3xl{% endblock %}
 
 {% block modal_icon_bg %}bg-blue-100{% endblock %}
@@ -15,25 +17,31 @@
 
 {% block modal_body_title %}
 <div class="flex flex-col gap-1">
-  <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title-body">Add MCP Server</h3>
-  <p class="text-sm text-gray-500">Connect a new MCP integration for {{ owner_label }}.</p>
+  <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title-body">{{ modal_title }}</h3>
+  {% if modal_intro %}
+    <p class="text-sm text-gray-500">{{ modal_intro }}</p>
+  {% else %}
+    <p class="text-sm text-gray-500">Connect a new MCP integration for {{ owner_label }}.</p>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block modal_body %}
-{% include "console/partials/_mcp_server_form.html" %}
-<div x-init="$nextTick(() => { $dispatch('open-modal', { id: 'create-mcp-server-modal' }); $el.remove(); })"></div>
+{% include "console/partials/_mcp_server_form.html" with form=form modal_id=modal_id form_id=form_id form_action=form_action form_target=form_target %}
+<div x-init="$nextTick(() => { $dispatch('open-modal', { id: '{{ modal_id }}' }); $el.remove(); })"></div>
 {% endblock %}
 
 {% block modal_footer %}
 <button type="submit"
-        form="create-mcp-server-form"
+        form="{{ form_id }}"
         class="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm">
-  Save Server
+  {{ modal_submit_label }}
 </button>
 <button type="button"
-        x-on:click="$dispatch('close-modal', { id: 'create-mcp-server-modal' })"
+        x-on:click="$dispatch('close-modal', { id: '{{ modal_id }}' })"
         class="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
   Cancel
 </button>
 {% endblock %}
+
+{% endwith %}

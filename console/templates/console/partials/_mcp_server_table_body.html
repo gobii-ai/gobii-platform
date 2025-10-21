@@ -34,10 +34,13 @@
       </td>
       <td class="px-3 md:px-6 py-4 align-top text-right">
         <div class="flex flex-col sm:flex-row sm:justify-end gap-2">
-          <a href="{% url 'console-mcp-server-edit' server.id %}"
-             class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+          <button type="button"
+                  hx-get="{% url 'console-mcp-server-edit' server.id %}"
+                  hx-target="#modal-container"
+                  hx-swap="innerHTML"
+                  class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
             Edit
-          </a>
+          </button>
           <form method="post" action="{% url 'console-mcp-server-delete' server.id %}"
                 onsubmit="return confirm('Delete this MCP server? This will remove access for any linked agents.');">
             {% csrf_token %}

@@ -3390,20 +3390,40 @@ class MCPServerConfigTableView(MCPServerOwnerMixin, ConsoleViewMixin, ListView):
 
 
 class MCPServerConfigCreateModalView(MCPServerOwnerMixin, ConsoleViewMixin, View):
+    def _modal_context(self, form: MCPServerConfigForm):
+        owner_label = self.get_owner_label()
+        return {
+            "form": form,
+            "owner_scope": self.owner_scope,
+            "owner_label": owner_label,
+            "modal_id": "create-mcp-server-modal",
+            "form_id": "create-mcp-server-form",
+            "form_action": reverse("console-mcp-server-create"),
+            "form_target": "#mcp-server-result",
+            "modal_title": "Add MCP Server",
+            "modal_intro": f"Connect a new MCP integration for {owner_label}.",
+            "modal_submit_label": "Save Server",
+        }
+
     def get(self, request, *args, **kwargs):
         form = MCPServerConfigForm()
         return render(
             request,
             "console/partials/_mcp_server_modal.html",
-            {
-                "form": form,
-                "owner_scope": self.owner_scope,
-                "owner_label": self.get_owner_label(),
-            },
+            self._modal_context(form),
         )
 
 
 class MCPServerConfigCreateView(MCPServerOwnerMixin, ConsoleViewMixin, View):
+    def _form_context(self, form: MCPServerConfigForm) -> dict[str, object]:
+        return {
+            "form": form,
+            "modal_id": "create-mcp-server-modal",
+            "form_id": "create-mcp-server-form",
+            "form_action": reverse("console-mcp-server-create"),
+            "form_target": "#mcp-server-result",
+        }
+
     def post(self, request, *args, **kwargs):
         form = MCPServerConfigForm(request.POST)
         if form.is_valid():
@@ -3430,8 +3450,9 @@ class MCPServerConfigCreateView(MCPServerOwnerMixin, ConsoleViewMixin, View):
                 form.add_error(None, exc)
 
         if request.htmx:
-            response = render(request, "console/partials/_mcp_server_form.html", {"form": form})
-            response["HX-Retarget"] = "#create-mcp-server-form"
+            context = self._form_context(form)
+            response = render(request, "console/partials/_mcp_server_form.html", context)
+            response["HX-Retarget"] = f"#{context['form_id']}"
             response["HX-Reswap"] = "outerHTML"
             return response
 
@@ -3469,22 +3490,80 @@ class MCPServerConfigUpdateView(ConsoleViewMixin, TemplateView):
                 raise PermissionDenied
         return config
 
+    def _get_owner_label(self) -> str:
+        if self.config.scope == MCPServerConfig.Scope.ORGANIZATION and self.config.organization:
+            return self.config.organization.name
+        if self.config.scope == MCPServerConfig.Scope.USER and self.config.user:
+            return self.config.user.get_full_name() or self.config.user.username
+        return "platform"
+
+    def _modal_context(self, form: MCPServerConfigForm) -> dict[str, object]:
+        modal_id = f"edit-mcp-server-modal-{self.config.id}"
+        form_id = f"edit-mcp-server-form-{self.config.id}"
+        return {
+            "form": form,
+            "config": self.config,
+            "owner_scope": self.config.scope,
+            "owner_label": self._get_owner_label(),
+            "modal_id": modal_id,
+            "form_id": form_id,
+            "form_action": reverse("console-mcp-server-edit", kwargs={"pk": self.config.pk}),
+            "form_target": "#mcp-server-result",
+            "modal_title": "Edit MCP Server",
+            "modal_intro": f"Update settings for {self.config.display_name}.",
+            "modal_submit_label": "Save Changes",
+        }
+
+    def get(self, request, *args, **kwargs):
+        if request.htmx:
+            form = MCPServerConfigForm(instance=self.config)
+            return render(
+                request,
+                "console/partials/_mcp_server_modal.html",
+                self._modal_context(form),
+            )
+        return super().get(request, *args, **kwargs)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['config'] = self.config
         context['form'] = kwargs.get('form') or MCPServerConfigForm(instance=self.config)
+        context['owner_label'] = self._get_owner_label()
         return context
 
     def post(self, request, *args, **kwargs):
         form = MCPServerConfigForm(request.POST, instance=self.config)
         if form.is_valid():
             try:
-                form.save()
+                updated_server = form.save()
                 get_mcp_manager().initialize(force=True)
+                if request.htmx:
+                    response = render(
+                        request,
+                        "console/partials/_mcp_server_success.html",
+                        {
+                            "server": updated_server,
+                            "owner_label": self._get_owner_label(),
+                            "message": f"MCP server '{updated_server.display_name}' was updated.",
+                        },
+                    )
+                    response["HX-Trigger"] = "{\"refreshMcpServersTable\": null}"
+                    return response
+
                 messages.success(request, "MCP server updated.")
                 return redirect('console-mcp-servers')
             except ValidationError as exc:
                 form.add_error(None, exc)
+            except IntegrityError:
+                form.add_error('name', "A server with that identifier already exists.")
+
+        if request.htmx:
+            context = self._modal_context(form)
+            response = render(request, "console/partials/_mcp_server_form.html", context)
+            response["HX-Retarget"] = f"#{context['form_id']}"
+            response["HX-Reswap"] = "outerHTML"
+            return response
+
         return self.render_to_response(self.get_context_data(form=form))
 
 
