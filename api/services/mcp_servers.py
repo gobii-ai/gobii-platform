@@ -117,14 +117,15 @@ def update_agent_personal_servers(agent: PersistentAgent, desired_ids: List[str]
     if not desired_set and not existing_set:
         return
 
-    valid_ids = set(
-        MCPServerConfig.objects.filter(
+    valid_ids = {
+        str(server_id)
+        for server_id in MCPServerConfig.objects.filter(
             scope=MCPServerConfig.Scope.USER,
             user=agent.user,
             is_active=True,
             id__in=desired_set,
         ).values_list('id', flat=True)
-    )
+    }
 
     invalid = desired_set - valid_ids
     if invalid:
