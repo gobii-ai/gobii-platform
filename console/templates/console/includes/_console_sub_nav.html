@@ -11,55 +11,37 @@
   {% endflag %}
 
   <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Console Menu</h3>
-  <nav class="space-y-1" x-data="navigationMenu()">
+  <nav id="console-submenu" class="space-y-1" x-data="navigationMenu()">
     <a href="{% url 'console-home' %}" 
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-home' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"
-           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-      </svg>
+      <i aria-hidden="true" data-lucide="house" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
       Dashboard
     </a>
     <a href="{% url 'agents' %}"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'agents' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'agents' %}text-blue-600{% else %}text-gray-500{% endif %}"
-           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-      </svg>
+      <i aria-hidden="true" data-lucide="zap" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'agents' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
       Agents
     </a>
     <a href="{% url 'tasks' %}"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'tasks' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'tasks' %}text-blue-600{% else %}text-gray-500{% endif %}"
-           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-      </svg>
+      <i aria-hidden="true" data-lucide="clipboard" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'tasks' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
       Tasks
     </a>
     <a href="{% url 'api_keys' %}"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"
-           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-      </svg>
+      <i aria-hidden="true" data-lucide="key-round" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
       API Keys
     </a>
     {% if current_context.type == 'organization' and current_context.id %}
       <a href="{% url 'organization_detail' org_id=current_context.id %}"
          class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'organization_detail' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-        <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'organization_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"
-             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 21h16.5M4.5 21V4.875A.375.375 0 0 1 4.875 4.5h14.25a.375.375 0 0 1 .375.375V21M9 7.5h6M9 10.5h6M9 13.5h6M9 16.5h6" />
-        </svg>
+        <i aria-hidden="true" data-lucide="building-2" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'organization_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
         Organization
       </a>
     {% else %}
       <a href="{% url 'profile' %}"
          class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'profile' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-        <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'profile' %}text-blue-600{% else %}text-gray-500{% endif %}"
-             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 7.5A3.75 3.75 0 1 1 12 3.75 3.75 3.75 0 0 1 15.75 7.5zM4.5 20.25a7.5 7.5 0 0 1 15 0" />
-        </svg>
+        <i aria-hidden="true" data-lucide="user-round" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'profile' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
         Profile
       </a>
     {% endif %}
@@ -67,38 +49,13 @@
       <a href="{% url 'billing' %}"
          x-show="showBilling"
          class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-        <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'billing' %}text-blue-600{% else %}text-gray-500{% endif %}"
-             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M2 7a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V7z"
-          />
-          <!-- dividing stripe -->
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M2 10h20"
-          />
-          <!-- detail lines -->
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M6 16h2m4 0h6"
-          />
-        </svg>
-      Billing
-    </a>
+        <i aria-hidden="true" data-lucide="credit-card" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'billing' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
+        Billing
+      </a>
     {% endif %}
     <a href="{% url 'usage' %}"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'usage' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <svg aria-hidden="true" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'usage' %}text-blue-600{% else %}text-gray-500{% endif %}"
-           xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 18h16M6 16l3-7 4 4 3-5 2 3" />
-      </svg>
+      <i aria-hidden="true" data-lucide="chart-bar" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'usage' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
       Usage
     </a>
     <!-- Add other console-specific links here -->

@@ -19,9 +19,7 @@
                     placeholder="Search tasks..."
                     value="{{ request.GET.search|default:'' }}"
                     class="pl-10 pr-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm w-full sm:w-64">
-                <svg class="absolute left-3 top-2.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
+                <i aria-hidden="true" data-lucide="search" class="absolute left-3 top-2.5 h-5 w-5 text-gray-400"></i>
                 <button type="submit" class="hidden">Search</button>
             </form>
 
@@ -40,9 +38,7 @@
                     <option value="failed" {% if request.GET.status == 'failed' %}selected{% endif %}>Failed</option>
                     <option value="cancelled" {% if request.GET.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
                 </select>
-                <svg class="absolute right-3 top-3 h-4 w-4 text-gray-500 pointer-events-none" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
+                <i aria-hidden="true" data-lucide="chevron-down" class="absolute right-3 top-3 h-4 w-4 text-gray-500 pointer-events-none"></i>
             </div>
             <form id="filter-form" method="get" class="hidden"></form>
         </div>
@@ -98,9 +94,7 @@
                 {% empty %}
                 <tr>
                     <td colspan="5" class="px-6 py-10 text-center text-gray-500">
-                        <svg class="mx-auto h-12 w-12 text-gray-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                        </svg>
+                        <i aria-hidden="true" data-lucide="clipboard-list" class="mx-auto h-12 w-12 text-gray-300"></i>
                         <p class="mt-2 text-sm">No tasks found</p>
                         <p class="mt-1 text-sm text-gray-400">Tasks you create will appear here</p>
                     </td>
@@ -139,9 +133,7 @@
                     <a href="?page={{ tasks.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}"
                        class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
                         <span class="sr-only">Previous</span>
-                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                            <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
-                        </svg>
+                        <i aria-hidden="true" data-lucide="chevron-left" class="h-5 w-5"></i>
                     </a>
                     {% endif %}
 
@@ -162,9 +154,7 @@
                     <a href="?page={{ tasks.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.status %}&status={{ request.GET.status }}{% endif %}"
                        class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
                         <span class="sr-only">Next</span>
-                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                            <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-                        </svg>
+                        <i aria-hidden="true" data-lucide="chevron-right" class="h-5 w-5"></i>
                     </a>
                     {% endif %}
                 </nav>
