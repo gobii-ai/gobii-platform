@@ -64,8 +64,6 @@ class ProactiveActivationService:
             triggered_results.append(result)
             seen_users.add(agent.user_id)
 
-            cls._set_user_gate(redis_client, agent.user_id, effective_min_interval)
-
             if len(triggered_results) >= batch:
                 break
 
@@ -96,7 +94,7 @@ class ProactiveActivationService:
             .filter(
                 Q(proactive_max_daily__lte=0) | Q(proactive_today__lt=F("proactive_max_daily"))
             )
-            .order_by("proactive_last_trigger_at", "last_interaction_at", "created_at")[: cls.SCAN_LIMIT]
+            .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")[: cls.SCAN_LIMIT]
         )
 
         return list(qs)
@@ -195,17 +193,6 @@ class ProactiveActivationService:
         except Exception:
             logger.exception("Redis gate check failed for user %s", user_id)
             return True
-
-    @classmethod
-    def _set_user_gate(cls, redis_client, user_id, min_interval_minutes: int) -> None:
-        if redis_client is None:
-            return
-        key = cls._user_gate_key(user_id)
-        ttl_minutes = max(int(min_interval_minutes or 0), cls.USER_COOLDOWN_FALLBACK_MINUTES)
-        try:
-            redis_client.set(key, "1", ex=ttl_minutes * 60)
-        except Exception:
-            logger.exception("Failed setting proactive gate for user %s", user_id)
 
     @classmethod
     def _release_user_gate(cls, redis_client, user_id) -> None:
