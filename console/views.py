@@ -110,6 +110,7 @@ from .forms import (
     ApiKeyForm,
     PersistentAgentForm,
     PersistentAgentContactForm,
+    MCPServerConfigForm,
     UserProfileForm,
     UserPhoneNumberForm,
     PhoneVerifyForm,
@@ -133,16 +134,17 @@ from constants.stripe import (
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
 from opentelemetry import trace, baggage, context
-from api.agent.tools.mcp_manager import enable_mcp_tool
+from api.agent.tools.mcp_manager import enable_mcp_tool, get_mcp_manager
 from api.agent.tasks import process_agent_events_task
 from api.services.persistent_agents import (
     PersistentAgentProvisioningError,
     PersistentAgentProvisioningService,
 )
+from api.services import mcp_servers as mcp_server_service
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
-from api.models import CommsAllowlistEntry, AgentAllowlistInvite, AgentTransferInvite, OrganizationMembership
+from api.models import CommsAllowlistEntry, AgentAllowlistInvite, AgentTransferInvite, OrganizationMembership, MCPServerConfig
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
@@ -2423,6 +2425,12 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'window_hours': 6,
         }
 
+        server_overview = mcp_server_service.agent_server_overview(agent)
+        context['inherited_mcp_servers'] = [s for s in server_overview if s.get('inherited')]
+        personal_servers = [s for s in server_overview if s.get('scope') == MCPServerConfig.Scope.USER]
+        context['personal_mcp_servers'] = personal_servers
+        context['show_personal_mcp_form'] = agent.organization_id is None and bool(personal_servers)
+
         # Daily task credit usage overview for progress UI
         try:
             today = timezone.localdate()
@@ -2496,6 +2504,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         webhook_action = request.POST.get('webhook_action')
         if webhook_action:
             return self._handle_webhook_action(request, agent, webhook_action)
+
+        if request.POST.get('mcp_server_action') == 'update_personal':
+            return self._handle_mcp_server_update(request, agent)
 
         # Handle AJAX allowlist operations
         # Check both modern header and legacy header for AJAX detection
@@ -3140,6 +3151,19 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             messages.success(request, "Webhook updated.")
         return redirect_response
 
+    def _handle_mcp_server_update(self, request, agent: PersistentAgent):
+        if agent.organization_id:
+            messages.error(request, "Personal MCP servers can only be configured for your own agents.")
+            return redirect('agent_detail', pk=agent.pk)
+
+        server_ids = request.POST.getlist('personal_servers')
+        try:
+            mcp_server_service.update_agent_personal_servers(agent, server_ids)
+            messages.success(request, "Personal MCP server access updated.")
+        except ValueError as exc:
+            messages.error(request, str(exc))
+        return redirect('agent_detail', pk=agent.pk)
+
     def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str):
         redirect_response = redirect('agent_detail', pk=agent.pk)
 
@@ -3288,6 +3312,134 @@ class ConsoleUsageView(ConsoleViewMixin, TemplateView):
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
         return HttpResponseNotAllowed(['GET'])
+
+
+class MCPServerManagementView(ConsoleViewMixin, TemplateView):
+    template_name = "console/mcp_servers.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self._owner_scope, self._owner_user, self._owner_org = self._resolve_owner()
+        return super().dispatch(request, *args, **kwargs)
+
+    def _resolve_owner(self):
+        context = build_console_context(self.request)
+        if context.current_context.type == 'organization':
+            membership = context.current_membership
+            if membership is None or not context.can_manage_org_agents:
+                raise PermissionDenied("You do not have permission to manage organization MCP servers.")
+            return ('organization', None, membership.org)
+        return ('user', self.request.user, None)
+
+    def get_queryset(self):
+        if self._owner_scope == 'organization':
+            return MCPServerConfig.objects.filter(
+                scope=MCPServerConfig.Scope.ORGANIZATION,
+                organization=self._owner_org,
+            ).order_by('display_name')
+        return MCPServerConfig.objects.filter(
+            scope=MCPServerConfig.Scope.USER,
+            user=self._owner_user,
+        ).order_by('display_name')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        servers = self.get_queryset()
+        form = kwargs.get('form') or MCPServerConfigForm()
+        owner_label = self._owner_org.name if self._owner_scope == 'organization' else (self.request.user.get_full_name() or self.request.user.username)
+
+        context.update(
+            {
+                'servers': servers,
+                'form': form,
+                'owner_scope': self._owner_scope,
+                'owner_label': owner_label,
+            }
+        )
+        return context
+
+    def post(self, request, *args, **kwargs):
+        form = MCPServerConfigForm(request.POST)
+        if form.is_valid():
+            try:
+                form.save(user=self._owner_user, organization=self._owner_org)
+                get_mcp_manager().initialize(force=True)
+                messages.success(request, "MCP server saved.")
+                return redirect('console-mcp-servers')
+            except IntegrityError:
+                form.add_error('name', "A server with that identifier already exists.")
+            except ValidationError as exc:
+                form.add_error(None, exc)
+        return self.render_to_response(self.get_context_data(form=form))
+
+
+class MCPServerConfigUpdateView(ConsoleViewMixin, TemplateView):
+    template_name = "console/mcp_server_edit.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.config = self._get_config(kwargs.get('pk'))
+        return super().dispatch(request, *args, **kwargs)
+
+    def _get_config(self, pk):
+        config = get_object_or_404(MCPServerConfig, pk=pk)
+        if config.scope == MCPServerConfig.Scope.PLATFORM:
+            raise Http404
+        context = build_console_context(self.request)
+        if config.scope == MCPServerConfig.Scope.USER:
+            if config.user_id != self.request.user.id:
+                raise PermissionDenied
+        elif config.scope == MCPServerConfig.Scope.ORGANIZATION:
+            membership = context.current_membership
+            if (
+                context.current_context.type != 'organization'
+                or membership is None
+                or str(membership.org_id) != str(config.organization_id)
+                or not context.can_manage_org_agents
+            ):
+                raise PermissionDenied
+        return config
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['config'] = self.config
+        context['form'] = kwargs.get('form') or MCPServerConfigForm(instance=self.config)
+        return context
+
+    def post(self, request, *args, **kwargs):
+        form = MCPServerConfigForm(request.POST, instance=self.config)
+        if form.is_valid():
+            try:
+                form.save()
+                get_mcp_manager().initialize(force=True)
+                messages.success(request, "MCP server updated.")
+                return redirect('console-mcp-servers')
+            except ValidationError as exc:
+                form.add_error(None, exc)
+        return self.render_to_response(self.get_context_data(form=form))
+
+
+class MCPServerConfigDeleteView(ConsoleViewMixin, View):
+    def post(self, request, *args, **kwargs):
+        config = get_object_or_404(MCPServerConfig, pk=kwargs.get('pk'))
+        if config.scope == MCPServerConfig.Scope.PLATFORM:
+            raise Http404
+        context = build_console_context(request)
+        if config.scope == MCPServerConfig.Scope.USER:
+            if config.user_id != request.user.id:
+                raise PermissionDenied
+        else:
+            membership = context.current_membership
+            if (
+                context.current_context.type != 'organization'
+                or membership is None
+                or str(membership.org_id) != str(config.organization_id)
+                or not context.can_manage_org_agents
+            ):
+                raise PermissionDenied
+
+        config.delete()
+        get_mcp_manager().initialize(force=True)
+        messages.success(request, "MCP server deleted.")
+        return redirect('console-mcp-servers')
 
 
 class PersistentAgentChatShellView(AgentDetailView):

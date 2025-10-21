@@ -11,6 +11,7 @@ from .models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
     CommsChannel,
+    MCPServerConfig,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
 )
@@ -306,6 +307,111 @@ class PreferredEndpointInputField(serializers.Field):
         return None
 
 
+class MCPServerConfigSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(read_only=True, format='hex_verbose')
+    environment = serializers.DictField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+    )
+    headers = serializers.DictField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+    )
+    command_args = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+    )
+    prefetch_apps = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+    )
+    metadata = serializers.DictField(required=False, allow_empty=True)
+
+    class Meta:
+        model = MCPServerConfig
+        fields = [
+            'id',
+            'scope',
+            'name',
+            'display_name',
+            'description',
+            'command',
+            'command_args',
+            'url',
+            'prefetch_apps',
+            'metadata',
+            'environment',
+            'headers',
+            'is_active',
+            'organization',
+            'user',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = (
+            'id',
+            'scope',
+            'organization',
+            'user',
+            'created_at',
+            'updated_at',
+        )
+
+    def validate(self, attrs):
+        command = attrs.get('command', getattr(self.instance, 'command', ''))
+        url = attrs.get('url', getattr(self.instance, 'url', ''))
+        if not command and not url:
+            raise serializers.ValidationError('Either command or url must be provided for an MCP server.')
+        return attrs
+
+    def create(self, validated_data):
+        env = validated_data.pop('environment', None)
+        headers = validated_data.pop('headers', None)
+        validated_data.setdefault('command_args', [])
+        validated_data.setdefault('prefetch_apps', [])
+        if validated_data.get('metadata') is None:
+            validated_data['metadata'] = {}
+
+        config = super().create(validated_data)
+        changed = False
+        if env is not None:
+            config.environment = env
+            changed = True
+        if headers is not None:
+            config.headers = headers
+            changed = True
+        if changed:
+            config.save(update_fields=['env_json_encrypted', 'headers_json_encrypted', 'updated_at'])
+        return config
+
+    def update(self, instance, validated_data):
+        env = validated_data.pop('environment', None)
+        headers = validated_data.pop('headers', None)
+        if 'command_args' in validated_data and validated_data['command_args'] is None:
+            validated_data['command_args'] = []
+        if 'prefetch_apps' in validated_data and validated_data['prefetch_apps'] is None:
+            validated_data['prefetch_apps'] = []
+        if 'metadata' in validated_data and validated_data['metadata'] is None:
+            validated_data['metadata'] = {}
+
+        config = super().update(instance, validated_data)
+        updated_fields = []
+        if env is not None:
+            config.environment = env
+            updated_fields.append('env_json_encrypted')
+        if headers is not None:
+            config.headers = headers
+            updated_fields.append('headers_json_encrypted')
+        if updated_fields:
+            updated_fields.append('updated_at')
+            config.save(update_fields=updated_fields)
+        return config
+
+
 class PersistentAgentSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
     user_id = serializers.UUIDField(source='user.id', read_only=True, format='hex_verbose')
@@ -323,6 +429,14 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         write_only=True,
     )
     template_code = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
+    enabled_personal_server_ids = serializers.ListField(
+        child=serializers.UUIDField(format='hex_verbose'),
+        required=False,
+        write_only=True,
+        allow_empty=True,
+    )
+    available_mcp_servers = serializers.SerializerMethodField(read_only=True)
+    personal_mcp_server_ids = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = PersistentAgent
@@ -347,6 +461,9 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'proactive_opt_in',
             'proactive_last_trigger_at',
             'template_code',
+            'enabled_personal_server_ids',
+            'available_mcp_servers',
+            'personal_mcp_server_ids',
         ]
         read_only_fields = (
             'id',
@@ -359,6 +476,8 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'browser_use_agent_id',
             'preferred_contact_endpoint_id',
             'proactive_last_trigger_at',
+            'available_mcp_servers',
+            'personal_mcp_server_ids',
         )
         ref_name = "PersistentAgentDetail"
 
@@ -371,6 +490,38 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         if value.owner_agent_id and (instance is None or value.owner_agent_id != instance.id):
             raise serializers.ValidationError("Contact endpoint belongs to a different agent.")
         return value
+
+    def get_available_mcp_servers(self, obj: PersistentAgent) -> list[dict]:
+        from .services import mcp_servers as server_service
+
+        return server_service.agent_server_overview(obj)
+
+    def get_personal_mcp_server_ids(self, obj: PersistentAgent) -> list[str]:
+        from .services import mcp_servers as server_service
+
+        return server_service.agent_enabled_personal_server_ids(obj)
+
+    def create(self, validated_data):
+        personal_servers = validated_data.pop('enabled_personal_server_ids', None)
+        agent = super().create(validated_data)
+        if personal_servers is not None:
+            self._apply_personal_servers(agent, personal_servers)
+        return agent
+
+    def update(self, instance, validated_data):
+        personal_servers = validated_data.pop('enabled_personal_server_ids', None)
+        agent = super().update(instance, validated_data)
+        if personal_servers is not None:
+            self._apply_personal_servers(agent, personal_servers)
+        return agent
+
+    def _apply_personal_servers(self, agent: PersistentAgent, server_ids):
+        from .services import mcp_servers as server_service
+
+        try:
+            server_service.update_agent_personal_servers(agent, [str(s) for s in server_ids])
+        except ValueError as exc:
+            raise serializers.ValidationError({'enabled_personal_server_ids': [str(exc)]})
 
     def _resolve_preferred_endpoint_channel(self, agent, channel_key: str):
         try:

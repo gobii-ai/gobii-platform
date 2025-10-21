@@ -1,0 +1,52 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="space-y-6">
+  <div class="gobii-card-base">
+    <div class="p-6 sm:p-8 space-y-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-gray-800">Edit MCP Server</h1>
+        <p class="text-sm text-gray-600">Update configuration for <strong>{{ config.display_name }}</strong>.</p>
+      </div>
+
+      <form method="post" class="space-y-4">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {% for error in form.non_field_errors %}{{ error }}<br>{% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="grid sm:grid-cols-2 gap-4">
+          {% for field in form %}
+            <div class="space-y-1">
+              <label class="block text-sm font-medium text-gray-700" for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}
+                <p class="text-xs text-gray-500">{{ field.help_text }}</p>
+              {% endif %}
+              {% for error in field.errors %}
+                <p class="text-xs text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+
+        <div class="flex items-center justify-between">
+          <a href="{% url 'console-mcp-servers' %}" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Back</a>
+          <div class="flex gap-3">
+            <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">Save Changes</button>
+          </div>
+        </div>
+      </form>
+
+      <form method="post" action="{% url 'console-mcp-server-delete' config.id %}" class="pt-4 border-t border-gray-200" onsubmit="return confirm('Delete this MCP server? This will remove access for any linked agents.');">
+        {% csrf_token %}
+        <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-red-200 text-red-600 hover:bg-red-50">
+          Delete Server
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import asyncio
 from django.test import TestCase, tag
 
-from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, MCPServer
+from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, MCPServerRuntime
 from api.models import PersistentAgent, BrowserUseAgent
 
 
@@ -69,12 +69,21 @@ class TestMCPToolBlacklist(TestCase):
                 async def list_tools(self):
                     return mock_tools
             
-            # Create a mock server
-            server = MCPServer(
+            server = MCPServerRuntime(
+                config_id="cfg-bright",
                 name="brightdata",
                 display_name="Bright Data",
                 description="Test server",
-                command="test"
+                command="test",
+                args=[],
+                url=None,
+                env={},
+                headers={},
+                prefetch_apps=[],
+                scope="platform",
+                organization_id=None,
+                user_id=None,
+                updated_at=None,
             )
             
             # Fetch tools
@@ -155,9 +164,10 @@ class TestMCPToolBlacklist(TestCase):
             
             # Mock the global manager instance and available tools
             with patch.object(_mcp_manager, '_initialized', True):
-                with patch.object(_mcp_manager, 'get_all_available_tools') as mock_get_tools:
+                with patch.object(_mcp_manager, 'get_tools_for_agent') as mock_get_tools:
                     mock_get_tools.return_value = [
                         MCPToolInfo(
+                            "11111111-1111-1111-1111-111111111114",
                             full_name="mcp_brightdata_scrape_as_markdown",
                             server_name="brightdata",
                             tool_name="scrape_as_markdown",

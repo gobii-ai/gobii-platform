@@ -7,8 +7,45 @@ from django.contrib.auth import get_user_model
 from django.contrib.sites.models import Site
 from django.utils import timezone
 
-from api.models import PersistentAgent, BrowserUseAgent, PipedreamConnectSession
+from api.models import (
+    PersistentAgent,
+    BrowserUseAgent,
+    PipedreamConnectSession,
+    MCPServerConfig,
+    PersistentAgentEnabledTool,
+)
 from api.integrations.pipedream_connect import create_connect_session
+from api.agent.tools.mcp_manager import MCPServerRuntime
+
+
+def _get_or_create_pipedream_config():
+    defaults = {
+        "display_name": "Pipedream",
+        "description": "Test Pipedream server",
+        "command": "",
+        "command_args": [],
+        "url": "https://remote.mcp.pipedream.net",
+        "prefetch_apps": [],
+        "metadata": {},
+        "is_active": True,
+    }
+    config, created = MCPServerConfig.objects.get_or_create(
+        scope=MCPServerConfig.Scope.PLATFORM,
+        name="pipedream",
+        defaults=defaults,
+    )
+    if created:
+        return config
+    updated = False
+    if not config.url:
+        config.url = defaults["url"]
+        updated = True
+    if config.command:
+        config.command = ""
+        updated = True
+    if updated:
+        config.save(update_fields=["url", "command"])
+    return config
 
 
 def _create_browser_agent(user):
@@ -70,16 +107,37 @@ class PipedreamGreenhouseConnectTests(TestCase):
         agent = PersistentAgent.objects.create(user=user, name="agent-gh", charter="c", browser_use_agent=bua)
 
         # Prepare manager and discovered tool (Pipedream unprefixed)
-        from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, enable_mcp_tool
+        from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo
         mgr = MCPToolManager()
         mgr._initialized = True
-        tool = MCPToolInfo("greenhouse-create-candidate", "pipedream", "greenhouse-create-candidate", "desc", {})
-        mgr._tools_cache = {"pipedream": [tool]}
-
-        # Enable tool for agent
-        with patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools') as mock_all:
-            mock_all.return_value = [tool]
-            enable_mcp_tool(agent, "greenhouse-create-candidate")
+        config = _get_or_create_pipedream_config()
+        runtime = MCPServerRuntime(
+            config_id=str(config.id),
+            name=config.name,
+            display_name=config.display_name,
+            description=config.description,
+            command=config.command or None,
+            args=list(config.command_args or []),
+            url=config.url or "",
+            env=config.environment or {},
+            headers=config.headers or {},
+            prefetch_apps=list(config.prefetch_apps or []),
+            scope=config.scope,
+            organization_id=str(config.organization_id) if config.organization_id else None,
+            user_id=str(config.user_id) if config.user_id else None,
+            updated_at=config.updated_at,
+        )
+        tool = MCPToolInfo(str(config.id), "greenhouse-create-candidate", "pipedream", "greenhouse-create-candidate", "desc", {})
+        mgr._server_cache = {runtime.config_id: runtime}
+        mgr._tools_cache = {runtime.config_id: [tool]}
+        mgr._clients = {runtime.config_id: MagicMock()}
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="greenhouse-create-candidate",
+            tool_server="pipedream",
+            tool_name="greenhouse-create-candidate",
+            server_config_id=runtime.config_id,
+        )
 
         # Fake result containing Pipedream's connect link for greenhouse
         r = MagicMock()
@@ -115,7 +173,7 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
     @patch('fastmcp.client.transports.StreamableHttpTransport')
     def test_discovery_initial_app_slug_greenhouse(self, mock_transport, mock_client_cls, mock_loop):
         """When prefetch is set to greenhouse only, headers use app=greenhouse."""
-        from api.agent.tools.mcp_manager import MCPToolManager, MCPServer
+        from api.agent.tools.mcp_manager import MCPToolManager
 
         mgr = MCPToolManager()
 
@@ -143,17 +201,25 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
                     PIPEDREAM_ENVIRONMENT="development",
                     PIPEDREAM_PREFETCH_APPS="greenhouse",
                 ):
-                    # Construct server similar to configured pipedream server
-                    server = MCPServer(
-                        name="pipedream",
-                        display_name="Pipedream",
-                        description="Remote",
-                        url="https://remote.mcp.pipedream.net",
-                        env={},
-                        headers={},
-                        enabled=True,
+                    config = _get_or_create_pipedream_config()
+                    runtime = MCPServerRuntime(
+                        config_id=str(config.id),
+                        name=config.name,
+                        display_name=config.display_name,
+                        description=config.description,
+                        command=config.command or None,
+                        args=list(config.command_args or []),
+                        url=config.url or "",
+                        env=config.environment or {},
+                        headers=config.headers or {},
+                        prefetch_apps=["greenhouse"],
+                        scope=config.scope,
+                        organization_id=str(config.organization_id) if config.organization_id else None,
+                        user_id=str(config.user_id) if config.user_id else None,
+                        updated_at=config.updated_at,
                     )
-                    mgr._register_server(server)
+                    mgr._server_cache = {runtime.config_id: runtime}
+                    mgr._register_server(runtime)
 
         self.assertEqual(seen_app.get('app'), 'greenhouse')
         # Transport should be initialized with headers including x-pd-app-slug

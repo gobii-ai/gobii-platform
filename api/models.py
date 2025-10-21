@@ -1,4 +1,4 @@
-import hashlib, secrets, uuid, os, string, re, datetime
+import hashlib, secrets, uuid, os, string, re, datetime, json
 from decimal import Decimal
 from typing import Optional, Tuple
 
@@ -3008,6 +3008,164 @@ class PersistentAgent(models.Model):
             return self.__class__.objects.filter(pk=self.pk).delete()
 
 
+class MCPServerConfig(models.Model):
+    """Configurable MCP server definition scoped to platform, org, or user."""
+
+    class Scope(models.TextChoices):
+        PLATFORM = "platform", "Platform"
+        ORGANIZATION = "organization", "Organization"
+        USER = "user", "User"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    scope = models.CharField(max_length=32, choices=Scope.choices)
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="mcp_server_configs",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="mcp_server_configs",
+    )
+    name = models.SlugField(max_length=64)
+    display_name = models.CharField(max_length=128)
+    description = models.TextField(blank=True)
+    command = models.CharField(max_length=255, blank=True)
+    command_args = models.JSONField(default=list, blank=True)
+    url = models.CharField(max_length=512, blank=True)
+    prefetch_apps = models.JSONField(default=list, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    env_json_encrypted = models.BinaryField(null=True, blank=True)
+    headers_json_encrypted = models.BinaryField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["scope", "is_active"], name="mcp_server_scope_active_idx"),
+            models.Index(fields=["organization", "name"], name="mcp_server_org_name_idx"),
+            models.Index(fields=["user", "name"], name="mcp_server_user_name_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scope", "name"],
+                name="unique_platform_mcp_server_name",
+                condition=Q(scope="platform"),
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "name"],
+                name="unique_org_mcp_server_name",
+                condition=Q(scope="organization"),
+            ),
+            models.UniqueConstraint(
+                fields=["user", "name"],
+                name="unique_user_mcp_server_name",
+                condition=Q(scope="user"),
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        owner = self.organization or self.user or "platform"
+        return f"MCPServerConfig<{self.name} scope={self.scope} owner={owner}>"
+
+    def clean(self):
+        """Validate scope ownership and transport requirements."""
+        super().clean()
+        if self.scope == self.Scope.PLATFORM:
+            if self.organization_id or self.user_id:
+                raise ValidationError("Platform-scoped MCP servers cannot be linked to users or organizations")
+        elif self.scope == self.Scope.ORGANIZATION:
+            if not self.organization_id or self.user_id:
+                raise ValidationError("Organization-scoped MCP servers must reference an organization only")
+        elif self.scope == self.Scope.USER:
+            if not self.user_id or self.organization_id:
+                raise ValidationError("User-scoped MCP servers must reference a user only")
+        else:
+            raise ValidationError({"scope": "Invalid MCP server scope"})
+
+        if not self.command and not self.url:
+            raise ValidationError("MCP servers require either a command or a URL")
+
+    # Secret-backed fields -------------------------------------------------
+    def _decrypt_json(self, payload: bytes | None) -> dict[str, str]:
+        if not payload:
+            return {}
+        try:
+            from .encryption import SecretsEncryption
+
+            raw = SecretsEncryption.decrypt_value(payload)
+            return json.loads(raw)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("Failed to decrypt MCP server secrets %s: %s", self.id, exc)
+            return {}
+
+    def _encrypt_json(self, value: dict[str, str] | None) -> bytes | None:
+        if not value:
+            return None
+        try:
+            from .encryption import SecretsEncryption
+
+            return SecretsEncryption.encrypt_value(json.dumps(value))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("Failed to encrypt MCP server secrets %s: %s", self.id or "<new>", exc)
+            raise
+
+    @property
+    def environment(self) -> dict[str, str]:
+        return self._decrypt_json(self.env_json_encrypted)
+
+    @environment.setter
+    def environment(self, value: dict[str, str] | None) -> None:
+        self.env_json_encrypted = self._encrypt_json(value)
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return self._decrypt_json(self.headers_json_encrypted)
+
+    @headers.setter
+    def headers(self, value: dict[str, str] | None) -> None:
+        self.headers_json_encrypted = self._encrypt_json(value)
+
+
+class PersistentAgentMCPServer(models.Model):
+    """Explicit mapping for personal MCP servers enabled on an agent."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="personal_mcp_servers",
+    )
+    server_config = models.ForeignKey(
+        MCPServerConfig,
+        on_delete=models.CASCADE,
+        related_name="agent_assignments",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "server_config"],
+                name="unique_agent_personal_server",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["agent", "server_config"], name="agent_personal_server_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.server_config.scope != MCPServerConfig.Scope.USER:
+            raise ValidationError("Only user-scoped MCP servers can be manually assigned to agents")
+
+
 class PersistentAgentEnabledTool(models.Model):
     """Normalized record of a tool enabled for a persistent agent.
 
@@ -3026,6 +3184,13 @@ class PersistentAgentEnabledTool(models.Model):
     # Optional denormalization to aid analytics/routing
     tool_server = models.CharField(max_length=64, blank=True)
     tool_name = models.CharField(max_length=128, blank=True)
+    server_config = models.ForeignKey(
+        MCPServerConfig,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="enabled_tools",
+    )
 
     enabled_at = models.DateTimeField(auto_now_add=True)
     last_used_at = models.DateTimeField(null=True, blank=True, db_index=True)

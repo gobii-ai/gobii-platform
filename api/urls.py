@@ -6,6 +6,7 @@ from .views import (
     ping,
     BrowserUseAgentViewSet,
     BrowserUseAgentTaskViewSet,
+    MCPServerConfigViewSet,
     PersistentAgentViewSet,
 )
 from .webhooks import (
@@ -25,6 +26,7 @@ router = SimpleRouter()
 # specific path does not get shadowed by the base "agents/<pk>/" pattern.
 router.register(r'agents/browser-use', BrowserUseAgentViewSet, basename='browseruseagent')
 router.register(r'agents', PersistentAgentViewSet, basename='persistentagent')
+router.register(r'mcp-servers', MCPServerConfigViewSet, basename='mcpserverconfig')
 
 urlpatterns = [
     # Utility endpoints

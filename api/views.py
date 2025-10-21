@@ -1,6 +1,7 @@
 from rest_framework import status, viewsets, serializers, mixins
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
@@ -18,6 +19,9 @@ from .models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     LinkShortener,
+    MCPServerConfig,
+    Organization,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     CommsChannel,
@@ -29,6 +33,7 @@ from .serializers import (
     BrowserUseAgentTaskListSerializer,
     PersistentAgentSerializer,
     PersistentAgentListSerializer,
+    MCPServerConfigSerializer,
 )
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -52,6 +57,7 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.core.schedule_parser import ScheduleParser
 from agents.services import AIEmployeeTemplateService
+from api.agent.tools.mcp_manager import get_mcp_manager
 
 # Import extend_schema from drf-spectacular with minimal dependencies
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
@@ -60,6 +66,107 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
 
+class MCPServerConfigViewSet(viewsets.ModelViewSet):
+    serializer_class = MCPServerConfigSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        org = self._get_organization_context()
+        if org is not None:
+            self._ensure_org_access(org)
+            return MCPServerConfig.objects.filter(
+                scope=MCPServerConfig.Scope.ORGANIZATION,
+                organization=org,
+            ).order_by('display_name')
+
+        return MCPServerConfig.objects.filter(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.request.user,
+        ).order_by('display_name')
+
+    def perform_create(self, serializer):
+        org = self._get_organization_context()
+        if org is not None:
+            self._ensure_org_access(org)
+            serializer.save(
+                scope=MCPServerConfig.Scope.ORGANIZATION,
+                organization=org,
+                user=None,
+            )
+        else:
+            serializer.save(
+                scope=MCPServerConfig.Scope.USER,
+                user=self.request.user,
+                organization=None,
+            )
+
+        self._refresh_manager()
+
+    def perform_update(self, serializer):
+        instance: MCPServerConfig = serializer.instance
+        if instance.scope == MCPServerConfig.Scope.ORGANIZATION:
+            self._ensure_org_access(instance.organization)
+        elif instance.scope == MCPServerConfig.Scope.PLATFORM:
+            raise PermissionDenied("Platform MCP servers are managed by Gobii and cannot be modified.")
+
+        serializer.save()
+        self._refresh_manager()
+
+    def perform_destroy(self, instance):
+        if instance.scope == MCPServerConfig.Scope.PLATFORM:
+            raise PermissionDenied("Platform MCP servers are managed by Gobii and cannot be deleted.")
+
+        if instance.scope == MCPServerConfig.Scope.ORGANIZATION:
+            self._ensure_org_access(instance.organization)
+
+        instance.delete()
+        self._refresh_manager()
+
+    def _refresh_manager(self):
+        try:
+            manager = get_mcp_manager()
+            manager.initialize(force=True)
+        except Exception:
+            logger.exception("Failed to refresh MCP manager after config change")
+
+    def _get_organization_context(self) -> Organization | None:
+        auth_org = self._request_organization()
+        if auth_org is not None:
+            return auth_org
+
+        org_id = self.request.query_params.get('organization_id')
+        if not org_id and hasattr(self.request, 'data'):
+            org_id = self.request.data.get('organization_id')
+        if not org_id:
+            return None
+
+        try:
+            return Organization.objects.get(id=org_id)
+        except Organization.DoesNotExist as exc:
+            raise Http404 from exc
+
+    def _request_organization(self):
+        auth = getattr(self.request, 'auth', None)
+        if isinstance(auth, ApiKey) and getattr(auth, 'organization_id', None):
+            return auth.organization
+        return None
+
+    def _ensure_org_access(self, org: Organization) -> None:
+        auth_org = self._request_organization()
+        if auth_org and auth_org.id == org.id:
+            return
+
+        if not OrganizationMembership.objects.filter(
+            org=org,
+            user=self.request.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            role__in=[
+                OrganizationMembership.OrgRole.OWNER,
+                OrganizationMembership.OrgRole.ADMIN,
+            ],
+        ).exists():
+            raise PermissionDenied("You do not have permission to manage MCP servers for this organization.")
 
 
 # Standard Pagination (can be customized or moved to settings)
