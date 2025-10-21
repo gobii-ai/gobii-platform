@@ -72,7 +72,7 @@
               <span class="text-xs font-normal text-gray-400">Optional</span>
             </summary>
             <div class="mt-3 space-y-1">
-              <label class="block text-sm font-medium text-gray-700" for="{{ form.command.id_for_label }}">Command</label>
+              <label class="sr-only" for="{{ form.command.id_for_label }}">Command</label>
               {{ form.command }}
               {% if form.command.help_text %}
                 <p class="text-xs text-gray-500">{{ form.command.help_text }}</p>
@@ -89,7 +89,7 @@
               <span class="text-xs font-normal text-gray-400">Optional</span>
             </summary>
             <div class="mt-3 space-y-1">
-              <label class="block text-sm font-medium text-gray-700" for="{{ form.url.id_for_label }}">URL</label>
+              <label class="sr-only" for="{{ form.url.id_for_label }}">URL</label>
               {{ form.url }}
               {% if form.url.help_text %}
                 <p class="text-xs text-gray-500">{{ form.url.help_text }}</p>
@@ -107,7 +107,7 @@
               <span class="text-xs font-normal text-gray-400">Optional</span>
             </summary>
             <div class="mt-3 space-y-1">
-              <label class="block text-sm font-medium text-gray-700" for="{{ form.command_args.id_for_label }}">Command Arguments</label>
+              <label class="sr-only" for="{{ form.command_args.id_for_label }}">Command Arguments</label>
               {{ form.command_args }}
               {% if form.command_args.help_text %}
                 <p class="text-xs text-gray-500">{{ form.command_args.help_text }}</p>
@@ -126,7 +126,7 @@
               <span class="text-xs font-normal text-gray-400">Optional</span>
             </summary>
             <div class="mt-3 space-y-1">
-              <label class="block text-sm font-medium text-gray-700" for="{{ form.metadata.id_for_label }}">Metadata</label>
+              <label class="sr-only" for="{{ form.metadata.id_for_label }}">Metadata</label>
               {{ form.metadata }}
               {% if form.metadata.help_text %}
                 <p class="text-xs text-gray-500">{{ form.metadata.help_text }}</p>
@@ -145,7 +145,7 @@
               <span class="text-xs font-normal text-gray-400">Optional</span>
             </summary>
             <div class="mt-3 space-y-1">
-              <label class="block text-sm font-medium text-gray-700" for="{{ form.environment.id_for_label }}">Environment</label>
+              <label class="sr-only" for="{{ form.environment.id_for_label }}">Environment</label>
               {{ form.environment }}
               {% if form.environment.help_text %}
                 <p class="text-xs text-gray-500">{{ form.environment.help_text }}</p>
@@ -164,7 +164,7 @@
               <span class="text-xs font-normal text-gray-400">Optional</span>
             </summary>
             <div class="mt-3 space-y-1">
-              <label class="block text-sm font-medium text-gray-700" for="{{ form.headers.id_for_label }}">Headers</label>
+              <label class="sr-only" for="{{ form.headers.id_for_label }}">Headers</label>
               {{ form.headers }}
               {% if form.headers.help_text %}
                 <p class="text-xs text-gray-500">{{ form.headers.help_text }}</p>
