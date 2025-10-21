@@ -13,6 +13,7 @@ from api.models import (
 from api.models import UserPhoneNumber
 from django.core.validators import RegexValidator
 from django.utils import timezone
+from django.utils.text import slugify
 from django import forms
 from django.core.exceptions import ValidationError
 
@@ -162,9 +163,9 @@ class MCPServerConfigForm(forms.Form):
     name = forms.SlugField(
         max_length=64,
         help_text="Short identifier used by agents (lowercase letters, numbers, and hyphens).",
+        required=False,
     )
     display_name = forms.CharField(max_length=128)
-    description = forms.CharField(widget=forms.Textarea(attrs={'rows': 3}), required=False)
     command = forms.CharField(max_length=255, required=False, help_text="Executable to launch (leave blank for HTTP servers).")
     url = forms.CharField(max_length=512, required=False, help_text="HTTP/S URL for remote MCP servers.")
     command_args = forms.JSONField(required=False, initial=list, empty_value=list, help_text="JSON array of command arguments, e.g. ['-y', '@pkg@1.0.0'].")
@@ -179,7 +180,6 @@ class MCPServerConfigForm(forms.Form):
         if instance is not None:
             initial.setdefault('name', instance.name)
             initial.setdefault('display_name', instance.display_name)
-            initial.setdefault('description', instance.description)
             initial.setdefault('command', instance.command)
             initial.setdefault('url', instance.url)
             initial.setdefault('command_args', instance.command_args or [])
@@ -189,8 +189,14 @@ class MCPServerConfigForm(forms.Form):
             initial.setdefault('is_active', instance.is_active)
         super().__init__(*args, **kwargs)
 
+        self.fields['name'].widget = forms.HiddenInput()
+        self.fields['name'].widget.attrs.update({'x-model': 'slug', 'x-bind:value': 'slug'})
+        self.fields['display_name'].widget.attrs.update({'x-model': 'displayName', 'x-on:input': 'slug = slugify($event.target.value)'})
+
         for name, field in self.fields.items():
             widget = field.widget
+            if isinstance(widget, forms.HiddenInput):
+                continue
             if isinstance(widget, forms.CheckboxInput):
                 widget.attrs.update({'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'})
             elif isinstance(widget, forms.Textarea):
@@ -205,6 +211,14 @@ class MCPServerConfigForm(forms.Form):
         url = (cleaned.get('url') or '').strip()
         if not command and not url:
             raise forms.ValidationError("Provide either a command or a URL for the MCP server.")
+
+        name = (cleaned.get('name') or '').strip()
+        display_name = (cleaned.get('display_name') or '').strip()
+        if not name and display_name:
+            generated = slugify(display_name)
+            cleaned['name'] = generated[:64]
+        if not cleaned.get('name'):
+            raise forms.ValidationError("Unable to generate an identifier. Add a display name with letters or numbers.")
         return cleaned
 
     def clean_command_args(self):
@@ -245,7 +259,6 @@ class MCPServerConfigForm(forms.Form):
 
         config.name = self.cleaned_data['name']
         config.display_name = self.cleaned_data['display_name']
-        config.description = self.cleaned_data.get('description', '')
         config.command = self.cleaned_data.get('command', '')
         config.command_args = self.cleaned_data.get('command_args') or []
         config.url = self.cleaned_data.get('url', '')
