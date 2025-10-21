@@ -2615,10 +2615,11 @@ def _get_system_instruction(
         )
 
     if proactive_context:
-        base_prompt = (
-            "You intentionally initiated this cycle proactively to help the user. Offer a concrete way to extend your support, avoid generic check-ins, "
-            "and reference the reasons listed in the proactive context. Acknowledge that you reached out on your own so the user understands why you are contacting them now.\n\n"
-        ) + base_prompt
+        base_prompt += (
+            " You intentionally initiated this cycle proactively to help the user."
+            " Offer a concrete way to extend your support or help with related tasks and avoid generic check-ins."
+            " Acknowledge that you reached out on your own so the user understands why you are contacting them now."
+        )
 
     if is_first_run:
         try:
