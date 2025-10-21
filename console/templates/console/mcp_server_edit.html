@@ -141,8 +141,16 @@
           {% with value=form.environment.value|stringformat:"s" %}
           <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.environment.errors or value and value != '{}' %}open{% endif %}>
             <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
-              Environment
-              <span class="text-xs font-normal text-gray-400">Optional</span>
+              <span>Environment</span>
+              <span class="flex items-center gap-2">
+                <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                  <svg class="h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-1.125 0h11.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125H5.625A1.125 1.125 0 014.5 19.875v-8.25c0-.621.504-1.125 1.125-1.125z" />
+                  </svg>
+                  Encrypted
+                </span>
+                <span class="text-xs font-normal text-gray-400">Optional</span>
+              </span>
             </summary>
             <div class="mt-3 space-y-1">
               <label class="sr-only" for="{{ form.environment.id_for_label }}">Environment</label>
@@ -160,8 +168,16 @@
           {% with value=form.headers.value|stringformat:"s" %}
           <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.headers.errors or value and value != '{}' %}open{% endif %}>
             <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
-              Headers
-              <span class="text-xs font-normal text-gray-400">Optional</span>
+              <span>Headers</span>
+              <span class="flex items-center gap-2">
+                <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                  <svg class="h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-1.125 0h11.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125H5.625A1.125 1.125 0 014.5 19.875v-8.25c0-.621.504-1.125 1.125-1.125z" />
+                  </svg>
+                  Encrypted
+                </span>
+                <span class="text-xs font-normal text-gray-400">Optional</span>
+              </span>
             </summary>
             <div class="mt-3 space-y-1">
               <label class="sr-only" for="{{ form.headers.id_for_label }}">Headers</label>
