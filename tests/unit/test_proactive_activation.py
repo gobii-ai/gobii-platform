@@ -67,6 +67,12 @@ class ProactiveActivationServiceTests(TestCase):
             proactive_min_interval_minutes=0,
             proactive_max_daily=2,
         )
+        stale_timestamp = timezone.now() - timedelta(days=4)
+        PersistentAgent.objects.filter(pk__in=[self.agent_a.pk, self.agent_b.pk]).update(
+            last_interaction_at=stale_timestamp
+        )
+        self.agent_a.refresh_from_db()
+        self.agent_b.refresh_from_db()
 
     @patch("api.services.proactive_activation.get_redis_client")
     def test_only_one_agent_per_user_selected(self, mock_redis_client):
