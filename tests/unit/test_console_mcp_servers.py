@@ -102,3 +102,30 @@ class MCPServerConfigFormTests(TestCase):
         self.assertEqual(updated.command, "")
         self.assertEqual(updated.command_args, [])
         self.assertEqual(updated.url, "https://example.com/mcp")
+
+    def test_environment_and_metadata_ignored_for_user_scope(self):
+        user = get_user_model().objects.create_user(
+            username="env-user",
+            email="env@example.com",
+            password="test-pass-123",
+        )
+
+        form = MCPServerConfigForm(
+            data={
+                "display_name": "Secure Server",
+                "name": "",
+                "command": "",
+                "command_args": "[]",
+                "url": "https://secure.example.com/mcp",
+                "metadata": '{"timer": "30"}',
+                "environment": '{"API_KEY": "secret"}',
+                "headers": "{}",
+                "is_active": "on",
+            },
+            allow_commands=False,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        config = form.save(user=user)
+        self.assertEqual(config.environment, {})
+        self.assertEqual(config.metadata, {})

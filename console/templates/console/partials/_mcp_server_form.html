@@ -67,13 +67,12 @@
     </div>
   </div>
 
-  <div class="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-    {% if form.allow_commands %}
-      Provide either a command or a URL. Expand the sections below to configure connection details and advanced options.
-    {% else %}
-      Provide the HTTPS URL for the MCP server. Command-based integrations are managed by Gobii.
-    {% endif %}
-  </div>
+
+  {% if form.allow_commands %}
+    <div class="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+        Provide either a command or a URL. Expand the sections below to configure connection details and advanced options.
+    </div>
+  {% endif %}
 
   <div class="space-y-3">
     {% if form.allow_commands %}
@@ -98,7 +97,6 @@
     <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.url.value or form.url.errors %}open{% endif %}>
       <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
         URL
-        <span class="text-xs font-normal text-gray-400">Optional</span>
       </summary>
       <div class="mt-3 space-y-1">
         <label class="sr-only" for="{{ form.url.id_for_label }}">URL</label>
@@ -133,60 +131,61 @@
       {% endwith %}
     {% endif %}
 
-    {% with value=form.metadata.value|stringformat:"s" %}
-    <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.metadata.errors or value and value != '{}' %}open{% endif %}>
-      <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
-        Metadata
-        <span class="text-xs font-normal text-gray-400">Optional</span>
-      </summary>
-      <div class="mt-3 space-y-1">
-        <label class="sr-only" for="{{ form.metadata.id_for_label }}">Metadata</label>
-        {{ form.metadata }}
-        {% if form.metadata.help_text %}
-          <p class="text-xs text-gray-500">{{ form.metadata.help_text }}</p>
-        {% endif %}
-        {% for error in form.metadata.errors %}
-          <p class="text-xs text-red-600">{{ error }}</p>
-        {% endfor %}
-      </div>
-    </details>
-    {% endwith %}
-
-    {% with value=form.environment.value|stringformat:"s" %}
-    <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.environment.errors or value and value != '{}' %}open{% endif %}>
-      <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
-        <span>Environment</span>
-        <span class="flex items-center gap-2">
-          <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-            <i data-lucide="lock" class="h-3 w-3"></i>
-            Encrypted
-          </span>
+    {% if form.allow_commands %}
+      {% with value=form.metadata.value|stringformat:"s" %}
+      <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.metadata.errors or value and value != '{}' %}open{% endif %}>
+        <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
+          Metadata
           <span class="text-xs font-normal text-gray-400">Optional</span>
-        </span>
-      </summary>
-      <div class="mt-3 space-y-1">
-        <label class="sr-only" for="{{ form.environment.id_for_label }}">Environment</label>
-        {{ form.environment }}
-        {% if form.environment.help_text %}
-          <p class="text-xs text-gray-500">{{ form.environment.help_text }}</p>
-        {% endif %}
-        {% for error in form.environment.errors %}
-          <p class="text-xs text-red-600">{{ error }}</p>
-        {% endfor %}
-      </div>
-    </details>
-    {% endwith %}
+        </summary>
+        <div class="mt-3 space-y-1">
+          <label class="sr-only" for="{{ form.metadata.id_for_label }}">Metadata</label>
+          {{ form.metadata }}
+          {% if form.metadata.help_text %}
+            <p class="text-xs text-gray-500">{{ form.metadata.help_text }}</p>
+          {% endif %}
+          {% for error in form.metadata.errors %}
+            <p class="text-xs text-red-600">{{ error }}</p>
+          {% endfor %}
+        </div>
+      </details>
+      {% endwith %}
+    {% endif %}
+
+    {% if form.allow_commands %}
+      {% with value=form.environment.value|stringformat:"s" %}
+      <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.environment.errors or value and value != '{}' %}open{% endif %}>
+        <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
+          <span>Environment</span>
+          <span class="flex items-center gap-2">
+            <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+              <i data-lucide="lock" class="h-3 w-3"></i>
+              Encrypted
+            </span>
+            <span class="text-xs font-normal text-gray-400">Optional</span>
+          </span>
+        </summary>
+        <div class="mt-3 space-y-1">
+          <label class="sr-only" for="{{ form.environment.id_for_label }}">Environment</label>
+          {{ form.environment }}
+          {% if form.environment.help_text %}
+            <p class="text-xs text-gray-500">{{ form.environment.help_text }}</p>
+          {% endif %}
+          {% for error in form.environment.errors %}
+            <p class="text-xs text-red-600">{{ error }}</p>
+          {% endfor %}
+        </div>
+      </details>
+      {% endwith %}
+    {% endif %}
 
     {% with value=form.headers.value|stringformat:"s" %}
     <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.headers.errors or value and value != '{}' %}open{% endif %}>
       <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
         <span>Headers</span>
-        <span class="flex items-center gap-2">
-          <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-            <i data-lucide="lock" class="h-3 w-3"></i>
-            Encrypted
-          </span>
-          <span class="text-xs font-normal text-gray-400">Optional</span>
+        <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+          <i data-lucide="lock" class="h-3 w-3"></i>
+          Encrypted
         </span>
       </summary>
       <div class="mt-3 space-y-1">

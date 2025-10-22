@@ -221,6 +221,8 @@ class MCPServerConfigForm(forms.Form):
         if not self.allow_commands:
             self.fields['command'].widget = forms.HiddenInput()
             self.fields['command_args'].widget = forms.HiddenInput()
+            self.fields['environment'].widget = forms.HiddenInput()
+            self.fields['metadata'].widget = forms.HiddenInput()
 
     def clean(self):
         cleaned = super().clean()
@@ -258,12 +260,17 @@ class MCPServerConfigForm(forms.Form):
 
     def clean_metadata(self):
         value = self.cleaned_data.get('metadata') or {}
+        if not self.allow_commands:
+            return {}
         if not isinstance(value, dict):
             raise forms.ValidationError("Metadata must be a JSON object.")
         return value
 
     def clean_environment(self):
         value = self.cleaned_data.get('environment') or {}
+        if not self.allow_commands:
+            # User-managed servers cannot supply environment secrets via the console.
+            return {}
         if not isinstance(value, dict):
             raise forms.ValidationError("Environment must be a JSON object.")
         return value
