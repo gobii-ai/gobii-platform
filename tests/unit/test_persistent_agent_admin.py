@@ -53,3 +53,28 @@ class PersistentAgentAdminTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Trigger Event Processing")
         self.assertContains(response, "Persistent Agent IDs")
+
+    def test_force_proactive_get_renders_form(self):
+        url = reverse("admin:api_persistentagent_force_proactive", args=[self.persistent_agent.pk])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Force Proactive Outreach")
+        self.assertContains(response, str(self.persistent_agent.id))
+
+    def test_force_proactive_post_triggers_outreach(self):
+        url = reverse("admin:api_persistentagent_force_proactive", args=[self.persistent_agent.pk])
+        reason = " Need immediate outreach "
+
+        with patch("api.admin.ProactiveActivationService.force_trigger") as mock_force, patch("api.admin.process_agent_events_task.delay") as mock_delay:
+            response = self.client.post(url, data={"reason": reason}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        mock_force.assert_called_once_with(
+            self.persistent_agent,
+            initiated_by=self.admin_user.email,
+            reason="Need immediate outreach",
+        )
+        mock_delay.assert_called_once_with(str(self.persistent_agent.pk))
+        messages = list(response.context["messages"])
+        self.assertTrue(any("Forced proactive outreach queued" in message.message for message in messages))

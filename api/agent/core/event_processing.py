@@ -1677,6 +1677,33 @@ def _get_active_peer_dm_context(agent: PersistentAgent):
         "peer_agent": latest_peer_message.peer_agent,
     }
 
+def _get_recent_proactive_context(agent: PersistentAgent) -> dict | None:
+    """Return metadata for a recent proactive trigger, if present."""
+    lookback = dj_timezone.now() - timedelta(hours=6)
+    system_step = (
+        PersistentAgentSystemStep.objects.filter(
+            step__agent=agent,
+            code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+            step__created_at__gte=lookback,
+        )
+        .select_related("step")
+        .order_by("-step__created_at")
+        .first()
+    )
+    if not system_step:
+        return None
+
+    context: dict = {}
+    notes = system_step.notes or ""
+    if notes:
+        try:
+            context = json.loads(notes)
+        except Exception:
+            context = {"raw_notes": notes}
+
+    context.setdefault("triggered_at", system_step.step.created_at.isoformat())
+    context.setdefault("step_id", str(system_step.step_id))
+    return context
 
 @tracer.start_as_current_span("Build Prompt Context")
 def _build_prompt_context(
@@ -1740,10 +1767,12 @@ def _build_prompt_context(
     
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
+    proactive_context = _get_recent_proactive_context(agent)
     system_prompt = _get_system_instruction(
         agent,
         is_first_run=is_first_run,
         peer_dm_context=peer_dm_context,
+        proactive_context=proactive_context,
     )
     
     # Build the user content sections using promptree
@@ -2391,6 +2420,7 @@ def _get_system_instruction(
     *,
     is_first_run: bool = False,
     peer_dm_context: dict | None = None,
+    proactive_context: dict | None = None,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
@@ -2525,6 +2555,13 @@ def _get_system_instruction(
         base_prompt += (
             " Only loop in a human when the other agent requests human input, when you need additional context or approval,"
             " or when there is a materially important development that the human must know. Otherwise, keep the exchange between agents."
+        )
+
+    if proactive_context:
+        base_prompt += (
+            " You intentionally initiated this cycle proactively to help the user."
+            " Offer a concrete way to extend your support or help with related tasks and avoid generic check-ins."
+            " Acknowledge that you reached out on your own so the user understands why you are contacting them now."
         )
 
     if is_first_run:

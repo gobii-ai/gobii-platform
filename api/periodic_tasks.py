@@ -61,6 +61,13 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    # Proactive agent activation sweep
+    beat_schedule["proactive-agent-scan"] = {
+        "task": "api.tasks.schedule_proactive_agents",
+        "schedule": crontab(hour="*", minute = 21), # 21 minutes after every hour
+        "args": [],
+    }
+
 def clean_up_old_decodo_schedules():
     """Clean up old per-block schedule entries from Redis Beat."""
     logger.info("Starting cleanup of old Decodo IP block sync schedules")
