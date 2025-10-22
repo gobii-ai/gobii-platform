@@ -58,6 +58,11 @@
       <i aria-hidden="true" data-lucide="chart-bar" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'usage' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
       Usage
     </a>
+    <a href="{% url 'console-mcp-servers' %}"
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-mcp-servers' or request.resolver_match.url_name == 'console-mcp-server-edit' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <i aria-hidden="true" data-lucide="cog" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-mcp-servers' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
+      Advanced
+    </a>
     <!-- Add other console-specific links here -->
   </nav>
 </aside>

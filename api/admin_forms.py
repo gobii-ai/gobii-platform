@@ -1,7 +1,7 @@
 # admin_forms.py  (optional file)
 from django import forms
 from django.forms import ModelForm
-from .models import CommsChannel, AgentEmailAccount, LLMProvider, StripeConfig
+from .models import CommsChannel, AgentEmailAccount, LLMProvider, StripeConfig, MCPServerConfig
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 class AgentEmailAccountForm(ModelForm):
@@ -105,6 +105,63 @@ class AgentEmailAccountForm(ModelForm):
                     )
             except Exception:
                 pass
+        return obj
+
+
+class MCPServerConfigAdminForm(forms.ModelForm):
+    """Admin form for managing platform-scoped MCP servers."""
+
+    environment = forms.JSONField(
+        required=False,
+        help_text="Key/value environment variables passed to the MCP server process.",
+    )
+    headers = forms.JSONField(
+        required=False,
+        help_text="HTTP headers to include when invoking remote MCP servers.",
+    )
+
+    class Meta:
+        model = MCPServerConfig
+        fields = [
+            "name",
+            "display_name",
+            "description",
+            "command",
+            "command_args",
+            "url",
+            "prefetch_apps",
+            "metadata",
+            "is_active",
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        instance = self.instance
+        if instance and instance.pk:
+            self.fields["environment"].initial = instance.environment
+            self.fields["headers"].initial = instance.headers
+        else:
+            self.fields["environment"].initial = {}
+            self.fields["headers"].initial = {}
+
+    def clean_name(self):
+        name = self.cleaned_data["name"]
+        if name and name.strip().lower() != name:
+            raise forms.ValidationError("Name must be lowercase and may not contain leading/trailing whitespace.")
+        return name
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        obj.scope = MCPServerConfig.Scope.PLATFORM
+        obj.organization = None
+        obj.user = None
+        environment = self.cleaned_data.get("environment") or {}
+        headers = self.cleaned_data.get("headers") or {}
+        obj.environment = environment
+        obj.headers = headers
+        if commit:
+            obj.save()
+            self.save_m2m()
         return obj
 import phonenumbers
 from django.utils import timezone

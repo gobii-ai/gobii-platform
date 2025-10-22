@@ -7,7 +7,44 @@ from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.integrations.pipedream_connect import create_connect_session
-from api.models import BrowserUseAgent, PersistentAgent, PipedreamConnectSession
+from api.models import (
+    BrowserUseAgent,
+    PersistentAgent,
+    PipedreamConnectSession,
+    MCPServerConfig,
+    PersistentAgentEnabledTool,
+)
+from api.agent.tools.mcp_manager import MCPServerRuntime
+
+
+def _get_or_create_pipedream_config():
+    defaults = {
+        "display_name": "Pipedream",
+        "description": "Test Pipedream server",
+        "command": "",
+        "command_args": [],
+        "url": "https://remote.mcp.pipedream.net",
+        "prefetch_apps": [],
+        "metadata": {},
+        "is_active": True,
+    }
+    config, created = MCPServerConfig.objects.get_or_create(
+        scope=MCPServerConfig.Scope.PLATFORM,
+        name="pipedream",
+        defaults=defaults,
+    )
+    if created:
+        return config
+    updated = False
+    if not config.url:
+        config.url = defaults["url"]
+        updated = True
+    if config.command:
+        config.command = ""
+        updated = True
+    if updated:
+        config.save(update_fields=["url", "command"])
+    return config
 
 
 def _create_browser_agent(user):
@@ -58,6 +95,7 @@ class PipedreamTrelloManagerTests(TestCase):
     def setUp(self):
         Site.objects.update_or_create(id=1, defaults={"domain": "example.com", "name": "example"})
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
     @patch("api.integrations.pipedream_connect.create_connect_session")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
@@ -70,16 +108,38 @@ class PipedreamTrelloManagerTests(TestCase):
             bua = BrowserUseAgent.objects.create(user=user, name="bua")
         agent = PersistentAgent.objects.create(user=user, name="agent-trello", charter="c", browser_use_agent=bua)
 
-        from api.agent.tools.mcp_manager import MCPToolInfo, MCPToolManager, enable_mcp_tool
+        from api.agent.tools.mcp_manager import MCPToolInfo, MCPToolManager
 
         mgr = MCPToolManager()
         mgr._initialized = True
-        tool = MCPToolInfo("trello-create-card", "pipedream", "trello-create-card", "desc", {})
-        mgr._tools_cache = {"pipedream": [tool]}
-
-        with patch("api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools") as mock_all:
-            mock_all.return_value = [tool]
-            enable_mcp_tool(agent, "trello-create-card")
+        config = _get_or_create_pipedream_config()
+        runtime = MCPServerRuntime(
+            config_id=str(config.id),
+            name=config.name,
+            display_name=config.display_name,
+            description=config.description,
+            command=config.command or None,
+            args=list(config.command_args or []),
+            url=config.url or "",
+            env=config.environment or {},
+            headers=config.headers or {},
+            prefetch_apps=list(config.prefetch_apps or []),
+            scope=config.scope,
+            organization_id=str(config.organization_id) if config.organization_id else None,
+            user_id=str(config.user_id) if config.user_id else None,
+            updated_at=config.updated_at,
+        )
+        tool = MCPToolInfo(str(config.id), "trello-create-card", "pipedream", "trello-create-card", "desc", {})
+        mgr._server_cache = {runtime.config_id: runtime}
+        mgr._tools_cache = {runtime.config_id: [tool]}
+        mgr._clients = {runtime.config_id: MagicMock()}
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="trello-create-card",
+            tool_server="pipedream",
+            tool_name="trello-create-card",
+            server_config_id=runtime.config_id,
+        )
 
         fake_result = MagicMock()
         fake_result.is_error = False
@@ -94,7 +154,8 @@ class PipedreamTrelloManagerTests(TestCase):
 
         mock_create.return_value = (MagicMock(), "https://example.com/connect?token=abc&app=trello")
 
-        res = mgr.execute_mcp_tool(agent, "trello-create-card", {"instruction": "x"})
+        with patch.object(mgr, "_select_agent_proxy_url", return_value=(None, None)):
+            res = mgr.execute_mcp_tool(agent, "trello-create-card", {"instruction": "x"})
 
         self.assertEqual(res.get("status"), "action_required")
         self.assertIn("example.com/connect", res.get("connect_url"))
@@ -105,13 +166,15 @@ class PipedreamTrelloDiscoveryTests(TestCase):
     def setUp(self):
         Site.objects.update_or_create(id=1, defaults={"domain": "example.com", "name": "example"})
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @patch("api.agent.tools.mcp_manager.select_proxy", return_value=None)
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
     @patch("api.agent.tools.mcp_manager.Client")
     @patch("fastmcp.client.transports.StreamableHttpTransport")
-    def test_discovery_initial_app_slug_trello(self, mock_transport, mock_client_cls, mock_loop):
+    def test_discovery_initial_app_slug_trello(self, mock_transport, mock_client_cls, mock_loop, mock_select_proxy):
         """When Trello is the only prefetch app, headers include the Trello slug."""
 
-        from api.agent.tools.mcp_manager import MCPServer, MCPToolManager
+        from api.agent.tools.mcp_manager import MCPToolManager
 
         mgr = MCPToolManager()
 
@@ -135,17 +198,28 @@ class PipedreamTrelloDiscoveryTests(TestCase):
                     PIPEDREAM_ENVIRONMENT="development",
                     PIPEDREAM_PREFETCH_APPS="trello",
                 ):
-                    server = MCPServer(
-                        name="pipedream",
-                        display_name="Pipedream",
-                        description="Remote",
-                        url="https://remote.mcp.pipedream.net",
-                        env={},
-                        headers={},
-                        enabled=True,
+                    config = _get_or_create_pipedream_config()
+                    runtime = MCPServerRuntime(
+                        config_id=str(config.id),
+                        name=config.name,
+                        display_name=config.display_name,
+                        description=config.description,
+                        command=config.command or None,
+                        args=list(config.command_args or []),
+                        url=config.url or "",
+                        env=config.environment or {},
+                        headers=config.headers or {},
+                        prefetch_apps=["trello"],
+                        scope=config.scope,
+                        organization_id=str(config.organization_id) if config.organization_id else None,
+                        user_id=str(config.user_id) if config.user_id else None,
+                        updated_at=config.updated_at,
                     )
-                    mgr._register_server(server)
+                    mgr._server_cache = {runtime.config_id: runtime}
+                    mgr._register_server(runtime)
 
         self.assertEqual(seen_app.get("app"), "trello")
         _, kwargs = mock_transport.call_args
         self.assertEqual(kwargs["headers"].get("x-pd-app-slug"), "trello")
+        self.assertIn("httpx_client_factory", kwargs)
+        self.assertTrue(callable(kwargs["httpx_client_factory"]))

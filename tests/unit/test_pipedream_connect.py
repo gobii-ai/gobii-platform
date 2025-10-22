@@ -8,7 +8,15 @@ from django.contrib.sites.models import Site
 from django.urls import reverse
 from django.utils import timezone
 
-from api.models import PersistentAgent, BrowserUseAgent, PipedreamConnectSession, PersistentAgentSystemStep
+from api.models import (
+    PersistentAgent,
+    BrowserUseAgent,
+    PipedreamConnectSession,
+    PersistentAgentSystemStep,
+    MCPServerConfig,
+    PersistentAgentEnabledTool,
+)
+from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo
 from api.integrations.pipedream_connect import create_connect_session
 from api.webhooks import pipedream_connect_webhook
 
@@ -16,6 +24,47 @@ from api.webhooks import pipedream_connect_webhook
 def _create_browser_agent(user):
     with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
         return BrowserUseAgent.objects.create(user=user, name="test-browser-agent")
+
+
+def _ensure_pipedream_config():
+    config, _ = MCPServerConfig.objects.get_or_create(
+        scope=MCPServerConfig.Scope.PLATFORM,
+        name="pipedream-test",
+        defaults={
+            "display_name": "Pipedream Test",
+            "description": "Test config",
+            "url": "https://pipedream.example.com",
+            "prefetch_apps": ["google_sheets"],
+        },
+    )
+    if not config.url:
+        config.url = "https://pipedream.example.com"
+        config.save(update_fields=["url"])
+    return config
+
+
+def _setup_pipedream_tool(mgr, agent, description="desc"):
+    config = _ensure_pipedream_config()
+    tool = MCPToolInfo(
+        str(config.id),
+        "google_sheets-add-single-row",
+        "pipedream",
+        "google_sheets-add-single-row",
+        description,
+        {},
+    )
+    mgr._initialized = True
+    mgr._tools_cache = {str(config.id): [tool]}
+    cache_key = f"{agent.id}:google_sheets:sub-agent"
+    mgr._pd_agent_clients[cache_key] = MagicMock()
+    PersistentAgentEnabledTool.objects.create(
+        agent=agent,
+        tool_full_name=tool.full_name,
+        tool_server=tool.server_name,
+        tool_name=tool.tool_name,
+        server_config=config,
+    )
+    return tool
 
 
 @tag("pipedream_connect")
@@ -155,16 +204,8 @@ class PipedreamManagerConnectLinkTests(TestCase):
         agent = PersistentAgent.objects.create(user=user, name="agent3", charter="c", browser_use_agent=bua)
 
         # Prepare manager
-        from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, enable_mcp_tool
         mgr = MCPToolManager()
-        mgr._initialized = True
-        tool = MCPToolInfo("google_sheets-add-single-row", "pipedream", "google_sheets-add-single-row", "desc", {})
-        mgr._tools_cache = {"pipedream": [tool]}
-
-        # Enable tool for agent
-        with patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools') as mock_all:
-            mock_all.return_value = [tool]
-            enable_mcp_tool(agent, "google_sheets-add-single-row")
+        _setup_pipedream_tool(mgr, agent)
 
         # Fake result containing Pipedream's connect link with app
         r = MagicMock()
@@ -199,15 +240,8 @@ class PipedreamManagerConnectLinkTests(TestCase):
             bua = BrowserUseAgent.objects.create(user=user, name="bua2")
         agent = PersistentAgent.objects.create(user=user, name="agent4", charter="c", browser_use_agent=bua)
 
-        from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, enable_mcp_tool
         mgr = MCPToolManager()
-        mgr._initialized = True
-        tool = MCPToolInfo("google_sheets-add-single-row", "pipedream", "google_sheets-add-single-row", "desc", {})
-        mgr._tools_cache = {"pipedream": [tool]}
-
-        with patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools') as mock_all:
-            mock_all.return_value = [tool]
-            enable_mcp_tool(agent, "google_sheets-add-single-row")
+        _setup_pipedream_tool(mgr, agent)
 
         r = MagicMock()
         r.is_error = False
@@ -249,15 +283,8 @@ class PipedreamManagerConnectLinkTests(TestCase):
             bua = BrowserUseAgent.objects.create(user=user, name="bua-reuse")
         agent = PersistentAgent.objects.create(user=user, name="agent-reuse", charter="c", browser_use_agent=bua)
 
-        from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, enable_mcp_tool
         mgr = MCPToolManager()
-        mgr._initialized = True
-        tool = MCPToolInfo("google_sheets-add-single-row", "pipedream", "google_sheets-add-single-row", "desc", {})
-        mgr._tools_cache = {"pipedream": [tool]}
-
-        with patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools') as mock_all:
-            mock_all.return_value = [tool]
-            enable_mcp_tool(agent, "google_sheets-add-single-row")
+        _setup_pipedream_tool(mgr, agent)
 
         # Tool response containing connect link
         response = MagicMock()

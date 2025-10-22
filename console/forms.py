@@ -2,10 +2,18 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.db.utils import IntegrityError
 
-from api.models import ApiKey, PersistentAgent, Organization, OrganizationMembership, OrganizationInvite
+from api.models import (
+    ApiKey,
+    MCPServerConfig,
+    PersistentAgent,
+    Organization,
+    OrganizationMembership,
+    OrganizationInvite,
+)
 from api.models import UserPhoneNumber
 from django.core.validators import RegexValidator
 from django.utils import timezone
+from django.utils.text import slugify
 from django import forms
 from django.core.exceptions import ValidationError
 
@@ -149,6 +157,165 @@ class StyledRadioSelect(forms.RadioSelect):
         option = super().create_option(name, value, label, selected, index, subindex, attrs)
 
         return option
+
+
+class MCPServerConfigForm(forms.Form):
+    name = forms.SlugField(
+        max_length=64,
+        help_text="Short identifier used by agents (lowercase letters, numbers, and hyphens).",
+        required=False,
+    )
+    display_name = forms.CharField(max_length=128)
+    command = forms.CharField(max_length=255, required=False, help_text="Executable to launch (leave blank for HTTP servers).")
+    url = forms.CharField(max_length=512, required=False, help_text="HTTP/S URL for remote MCP servers.")
+    command_args = forms.JSONField(required=False, initial=list, empty_value=list, help_text="JSON array of command arguments, e.g. ['-y', '@pkg@1.0.0'].")
+    metadata = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="Additional JSON metadata (optional).")
+    environment = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="JSON object of environment variables.")
+    headers = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="JSON object of HTTP headers.")
+    is_active = forms.BooleanField(required=False, initial=True)
+
+    def __init__(
+        self,
+        *args,
+        instance: MCPServerConfig | None = None,
+        allow_commands: bool = True,
+        **kwargs,
+    ):
+        self.instance = instance
+        self.allow_commands = allow_commands
+        initial = kwargs.setdefault('initial', {})
+        if instance is not None:
+            initial.setdefault('name', instance.name)
+            initial.setdefault('display_name', instance.display_name)
+            initial.setdefault('command', instance.command)
+            initial.setdefault('url', instance.url)
+            initial.setdefault('command_args', instance.command_args or [])
+            initial.setdefault('metadata', instance.metadata or {})
+            initial.setdefault('environment', instance.environment or {})
+            initial.setdefault('headers', instance.headers or {})
+            initial.setdefault('is_active', instance.is_active)
+        if not allow_commands:
+            initial.setdefault('command', '')
+            initial.setdefault('command_args', [])
+        super().__init__(*args, **kwargs)
+
+        self.fields['name'].widget = forms.HiddenInput()
+        self.fields['name'].widget.attrs.update({'x-model': 'slug', 'x-bind:value': 'slug'})
+
+        display_widget = self.fields['display_name'].widget
+        display_widget.attrs.setdefault('x-model', 'displayName')
+        if instance is None:
+            display_widget.attrs.setdefault('x-on:input', 'slug = slugify($event.target.value)')
+
+        for name, field in self.fields.items():
+            widget = field.widget
+            if isinstance(widget, forms.HiddenInput):
+                continue
+            if isinstance(widget, forms.CheckboxInput):
+                widget.attrs.update({'class': 'h-4 w-4 text-blue-600 border-gray-300 rounded'})
+            elif isinstance(widget, forms.Textarea):
+                widget.attrs.setdefault('rows', 3)
+                widget.attrs.update({'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500 font-mono text-sm'})
+            else:
+                widget.attrs.update({'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500'})
+        headers_widget = forms.HiddenInput()
+        headers_widget.attrs.update({'x-ref': 'headersField'})
+        self.fields['headers'].widget = headers_widget
+        if not self.allow_commands:
+            self.fields['command'].widget = forms.HiddenInput()
+            self.fields['command_args'].widget = forms.HiddenInput()
+            self.fields['environment'].widget = forms.HiddenInput()
+            self.fields['metadata'].widget = forms.HiddenInput()
+
+    def clean(self):
+        cleaned = super().clean()
+        command = (cleaned.get('command') or '').strip()
+        url = (cleaned.get('url') or '').strip()
+        reserved = {name.lower() for name in MCPServerConfig.RESERVED_PLATFORM_NAMES}
+        if not self.allow_commands:
+            errors: dict[str, str] = {}
+            if command:
+                errors['command'] = "Command-based MCP servers are managed by Gobii. Provide a URL instead."
+            if cleaned.get('command_args'):
+                errors['command_args'] = "Command arguments are not supported for user-managed MCP servers."
+            if not url:
+                errors['url'] = "Provide a URL for the MCP server."
+            cleaned['command'] = ''
+            cleaned['command_args'] = []
+            if errors:
+                raise forms.ValidationError(errors)
+        elif not command and not url:
+            raise forms.ValidationError("Provide either a command or a URL for the MCP server.")
+
+        name = (cleaned.get('name') or '').strip()
+        display_name = (cleaned.get('display_name') or '').strip()
+        if not name and display_name:
+            generated = slugify(display_name)
+            cleaned['name'] = generated[:64]
+        if not cleaned.get('name'):
+            raise forms.ValidationError("Unable to generate an identifier. Add a display name with letters or numbers.")
+        if cleaned['name'].lower() in reserved and self.allow_commands is False:
+            raise forms.ValidationError("This MCP server identifier is reserved for Gobii-managed integrations.")
+        return cleaned
+
+    def clean_command_args(self):
+        value = self.cleaned_data.get('command_args') or []
+        if not isinstance(value, list):
+            raise forms.ValidationError("Command arguments must be a JSON array.")
+        return value
+
+    def clean_metadata(self):
+        value = self.cleaned_data.get('metadata') or {}
+        if not self.allow_commands:
+            return {}
+        if not isinstance(value, dict):
+            raise forms.ValidationError("Metadata must be a JSON object.")
+        return value
+
+    def clean_environment(self):
+        value = self.cleaned_data.get('environment') or {}
+        if not self.allow_commands:
+            # User-managed servers cannot supply environment secrets via the console.
+            return {}
+        if not isinstance(value, dict):
+            raise forms.ValidationError("Environment must be a JSON object.")
+        return value
+
+    def clean_headers(self):
+        value = self.cleaned_data.get('headers') or {}
+        if not isinstance(value, dict):
+            raise forms.ValidationError("Headers must be a JSON object.")
+        return value
+
+    def save(self, *, user=None, organization=None) -> MCPServerConfig:
+        if self.instance is None:
+            config = MCPServerConfig()
+            if organization is not None:
+                config.scope = MCPServerConfig.Scope.ORGANIZATION
+                config.organization = organization
+            else:
+                config.scope = MCPServerConfig.Scope.USER
+                config.user = user
+        else:
+            config = self.instance
+
+        config.name = self.cleaned_data['name']
+        config.display_name = self.cleaned_data['display_name']
+        config.command = self.cleaned_data.get('command', '')
+        config.command_args = self.cleaned_data.get('command_args') or []
+        config.url = self.cleaned_data.get('url', '')
+        if not self.allow_commands:
+            config.command = ''
+            config.command_args = []
+        if 'prefetch_apps' in self.cleaned_data:
+            config.prefetch_apps = self.cleaned_data.get('prefetch_apps') or []
+        config.metadata = self.cleaned_data.get('metadata') or {}
+        config.is_active = bool(self.cleaned_data.get('is_active'))
+        config.environment = self.cleaned_data.get('environment') or {}
+        config.headers = self.cleaned_data.get('headers') or {}
+
+        config.save()
+        return config
 
 
 class PersistentAgentCharterForm(forms.Form):

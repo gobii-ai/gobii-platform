@@ -323,6 +323,14 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         write_only=True,
     )
     template_code = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
+    enabled_personal_server_ids = serializers.ListField(
+        child=serializers.UUIDField(format='hex_verbose'),
+        required=False,
+        write_only=True,
+        allow_empty=True,
+    )
+    available_mcp_servers = serializers.SerializerMethodField(read_only=True)
+    personal_mcp_server_ids = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = PersistentAgent
@@ -347,6 +355,9 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'proactive_opt_in',
             'proactive_last_trigger_at',
             'template_code',
+            'enabled_personal_server_ids',
+            'available_mcp_servers',
+            'personal_mcp_server_ids',
         ]
         read_only_fields = (
             'id',
@@ -359,6 +370,8 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'browser_use_agent_id',
             'preferred_contact_endpoint_id',
             'proactive_last_trigger_at',
+            'available_mcp_servers',
+            'personal_mcp_server_ids',
         )
         ref_name = "PersistentAgentDetail"
 
@@ -371,6 +384,38 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         if value.owner_agent_id and (instance is None or value.owner_agent_id != instance.id):
             raise serializers.ValidationError("Contact endpoint belongs to a different agent.")
         return value
+
+    def get_available_mcp_servers(self, obj: PersistentAgent) -> list[dict]:
+        from .services import mcp_servers as server_service
+
+        return server_service.agent_server_overview(obj)
+
+    def get_personal_mcp_server_ids(self, obj: PersistentAgent) -> list[str]:
+        from .services import mcp_servers as server_service
+
+        return server_service.agent_enabled_personal_server_ids(obj)
+
+    def create(self, validated_data):
+        personal_servers = validated_data.pop('enabled_personal_server_ids', None)
+        agent = super().create(validated_data)
+        if personal_servers is not None:
+            self._apply_personal_servers(agent, personal_servers)
+        return agent
+
+    def update(self, instance, validated_data):
+        personal_servers = validated_data.pop('enabled_personal_server_ids', None)
+        agent = super().update(instance, validated_data)
+        if personal_servers is not None:
+            self._apply_personal_servers(agent, personal_servers)
+        return agent
+
+    def _apply_personal_servers(self, agent: PersistentAgent, server_ids):
+        from .services import mcp_servers as server_service
+
+        try:
+            server_service.update_agent_personal_servers(agent, [str(s) for s in server_ids])
+        except ValueError as exc:
+            raise serializers.ValidationError({'enabled_personal_server_ids': [str(exc)]})
 
     def _resolve_preferred_endpoint_channel(self, agent, channel_key: str):
         try:

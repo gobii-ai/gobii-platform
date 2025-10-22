@@ -1,6 +1,7 @@
 from rest_framework import status, viewsets, serializers, mixins
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
@@ -18,6 +19,8 @@ from .models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     LinkShortener,
+    Organization,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     CommsChannel,
@@ -52,14 +55,11 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.core.schedule_parser import ScheduleParser
 from agents.services import AIEmployeeTemplateService
-
 # Import extend_schema from drf-spectacular with minimal dependencies
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
-
-
 
 
 # Standard Pagination (can be customized or moved to settings)

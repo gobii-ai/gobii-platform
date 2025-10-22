@@ -1,0 +1,65 @@
+{% if servers %}
+  {% for server in servers %}
+    <tr class="bg-white">
+      <td class="px-3 md:px-6 py-4 align-top">
+        <div class="text-sm font-semibold text-gray-900">{{ server.display_name }}</div>
+        <div class="text-xs text-gray-500 mt-1">Identifier: {{ server.name }}</div>
+        {% if server.description %}
+          <p class="mt-2 text-sm text-gray-600">{{ server.description }}</p>
+        {% endif %}
+      </td>
+      <td class="px-3 md:px-6 py-4 align-top text-sm text-gray-700 space-y-2">
+        {% if server.command %}
+          <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-slate-100 text-slate-700">Command</span>
+          <p class="font-mono text-xs text-gray-600 break-all">{{ server.command }}</p>
+          {% if server.command_args %}
+            <p class="font-mono text-xs text-gray-500 break-all">Args: {{ server.command_args|join:' ' }}</p>
+          {% endif %}
+        {% elif server.url %}
+          {% with url_lower=server.url|lower %}
+            {% if url_lower|slice:":5" == "https" %}
+              <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700">HTTPS</span>
+            {% else %}
+              <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700">HTTP</span>
+            {% endif %}
+          {% endwith %}
+          <p class="font-mono text-xs text-gray-600 break-all">{{ server.url }}</p>
+        {% else %}
+          <p class="text-xs text-gray-500">No connection settings provided.</p>
+        {% endif %}
+      </td>
+      <td class="px-3 md:px-6 py-4 align-top">
+        <span class="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full {% if server.is_active %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-600{% endif %}">
+          {% if server.is_active %}Active{% else %}Inactive{% endif %}
+        </span>
+        <div class="text-xs text-gray-500 mt-2">{{ server.get_scope_display }} scope</div>
+      </td>
+      <td class="px-3 md:px-6 py-4 align-top text-sm text-gray-600">
+        <div>{{ server.updated_at|date:"M j, Y" }}</div>
+        <div class="text-xs text-gray-400">{{ server.updated_at|date:"g:i A" }}</div>
+      </td>
+      <td class="px-3 md:px-6 py-4 align-top text-right">
+        <div class="flex flex-col sm:flex-row sm:justify-end gap-2">
+          <button type="button"
+                  hx-get="{% url 'console-mcp-server-edit' server.id %}"
+                  hx-target="#modal-container"
+                  hx-swap="innerHTML"
+                  class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+            Edit
+          </button>
+          <button type="button"
+                  class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                  @click="$dispatch('open-modal', { id: 'delete-mcp-server-modal', url: '{% url 'console-mcp-server-delete' server.id %}' })">
+            Delete
+          </button>
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+{% else %}
+  <tr>
+    <td colspan="5" class="px-3 md:px-6 py-6 text-center text-sm text-gray-500">
+      No custom MCP servers configured yet. Add one to get started.
+    </td>
+  </tr>
+{% endif %}

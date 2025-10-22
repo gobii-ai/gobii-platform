@@ -1,0 +1,312 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="space-y-6">
+  <div class="gobii-card-base">
+    <div class="p-6 sm:p-8 space-y-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-gray-800">Edit MCP Server</h1>
+        <p class="text-sm text-gray-600">Update configuration for <strong>{{ config.display_name }}</strong>.</p>
+      </div>
+
+      <form method="post" class="space-y-6"
+            x-data="{
+              displayName: '{{ form.display_name.value|default:''|escapejs }}',
+              slug: '{{ form.name.value|default:''|escapejs }}',
+              headers: [],
+              init() {
+                if (!this.slug && this.displayName) {
+                  this.slug = this.slugify(this.displayName);
+                }
+                this.headers = this.loadHeaders();
+                this.ensureHeaderRows();
+                this.syncHeadersField();
+                this.queueIconRefresh();
+              },
+              slugify(value) {
+                if (!value) { return ''; }
+                const normalized = value.toString().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+                return normalized
+                  .toLowerCase()
+                  .replace(/[^a-z0-9\s-]/g, '')
+                  .trim()
+                  .replace(/[\s_-]+/g, '-')
+                  .replace(/^-+|-+$/g, '')
+                  .slice(0, 64);
+              },
+              loadHeaders() {
+                const field = this.$refs.headersField;
+                if (!field || !field.value) { return []; }
+                try {
+                  const parsed = JSON.parse(field.value);
+                  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                    return [];
+                  }
+                  return Object.entries(parsed).map(([key, value]) => ({
+                    key: key == null ? '' : String(key),
+                    value: value == null ? '' : String(value),
+                  }));
+                } catch (error) {
+                  console.warn('Invalid headers JSON', error);
+                  return [];
+                }
+              },
+              ensureHeaderRows() {
+                if (!this.headers.length) {
+                  this.headers.push({ key: '', value: '' });
+                  this.queueIconRefresh();
+                }
+              },
+              addHeaderRow() {
+                this.headers.push({ key: '', value: '' });
+                this.syncHeadersField();
+                this.queueIconRefresh();
+              },
+              removeHeaderRow(index) {
+                this.headers.splice(index, 1);
+                this.ensureHeaderRows();
+                this.syncHeadersField();
+                this.queueIconRefresh();
+              },
+              syncHeadersField() {
+                const field = this.$refs.headersField;
+                if (!field) { return; }
+                const headersObject = {};
+                for (const entry of this.headers) {
+                  const headerKey = (entry.key || '').trim();
+                  if (!headerKey) {
+                    continue;
+                  }
+                  headersObject[headerKey] = entry.value == null ? '' : String(entry.value);
+                }
+                field.value = JSON.stringify(headersObject);
+              },
+              queueIconRefresh() {
+                this.$nextTick(() => this.refreshIcons());
+              },
+              refreshIcons() {
+                if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                  window.lucide.createIcons({ nameAttr: 'data-lucide' });
+                }
+              }
+            }">
+        {% csrf_token %}
+        {{ form.name }}
+
+        {% if form.non_field_errors %}
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {% for error in form.non_field_errors %}{{ error }}<br>{% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div class="sm:col-span-2 space-y-1">
+            <label class="block text-sm font-medium text-gray-700" for="{{ form.display_name.id_for_label }}">Display Name</label>
+            {{ form.display_name }}
+            <p class="text-xs text-gray-500">Identifier: <span x-text="slug || 'auto-generated'" class="font-mono text-gray-600"></span></p>
+            {% for error in form.display_name.errors %}
+              <p class="text-xs text-red-600">{{ error }}</p>
+            {% endfor %}
+          </div>
+
+          <div class="sm:col-span-2">
+            <label class="flex items-center gap-2 text-sm font-medium text-gray-700" for="{{ form.is_active.id_for_label }}">
+              {{ form.is_active }}
+              <span>Active</span>
+            </label>
+            <p class="text-xs text-gray-500 mt-1">Inactive servers remain configured but hidden from agents.</p>
+            {% for error in form.is_active.errors %}
+              <p class="text-xs text-red-600 mt-1">{{ error }}</p>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+          Provide either a command or a URL. Expand the sections below to adjust connection details and advanced options.
+        </div>
+
+        <div class="space-y-3">
+          <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.command.value or form.command.errors %}open{% endif %}>
+            <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
+              Command
+              <span class="text-xs font-normal text-gray-400">Optional</span>
+            </summary>
+            <div class="mt-3 space-y-1">
+              <label class="sr-only" for="{{ form.command.id_for_label }}">Command</label>
+              {{ form.command }}
+              {% if form.command.help_text %}
+                <p class="text-xs text-gray-500">{{ form.command.help_text }}</p>
+              {% endif %}
+              {% for error in form.command.errors %}
+                <p class="text-xs text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+          </details>
+
+          <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.url.value or form.url.errors %}open{% endif %}>
+            <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
+              URL
+              <span class="text-xs font-normal text-gray-400">Optional</span>
+            </summary>
+            <div class="mt-3 space-y-1">
+              <label class="sr-only" for="{{ form.url.id_for_label }}">URL</label>
+              {{ form.url }}
+              {% if form.url.help_text %}
+                <p class="text-xs text-gray-500">{{ form.url.help_text }}</p>
+              {% endif %}
+              {% for error in form.url.errors %}
+                <p class="text-xs text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+          </details>
+
+          {% with value=form.command_args.value|stringformat:"s" %}
+          <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.command_args.errors or value and value != '[]' %}open{% endif %}>
+            <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
+              Command Arguments
+              <span class="text-xs font-normal text-gray-400">Optional</span>
+            </summary>
+            <div class="mt-3 space-y-1">
+              <label class="sr-only" for="{{ form.command_args.id_for_label }}">Command Arguments</label>
+              {{ form.command_args }}
+              {% if form.command_args.help_text %}
+                <p class="text-xs text-gray-500">{{ form.command_args.help_text }}</p>
+              {% endif %}
+              {% for error in form.command_args.errors %}
+                <p class="text-xs text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+          </details>
+          {% endwith %}
+
+          {% if form.allow_commands %}
+            {% with value=form.metadata.value|stringformat:"s" %}
+            <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.metadata.errors or value and value != '{}' %}open{% endif %}>
+              <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
+                Metadata
+                <span class="text-xs font-normal text-gray-400">Optional</span>
+              </summary>
+              <div class="mt-3 space-y-1">
+                <label class="sr-only" for="{{ form.metadata.id_for_label }}">Metadata</label>
+                {{ form.metadata }}
+                {% if form.metadata.help_text %}
+                  <p class="text-xs text-gray-500">{{ form.metadata.help_text }}</p>
+                {% endif %}
+                {% for error in form.metadata.errors %}
+                  <p class="text-xs text-red-600">{{ error }}</p>
+                {% endfor %}
+              </div>
+            </details>
+            {% endwith %}
+          {% endif %}
+
+          {% if form.allow_commands %}
+            {% with value=form.environment.value|stringformat:"s" %}
+            <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.environment.errors or value and value != '{}' %}open{% endif %}>
+              <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
+                <span>Environment</span>
+                <span class="flex items-center gap-2">
+                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                    <i data-lucide="lock" class="h-3 w-3"></i>
+                    Encrypted
+                  </span>
+                  <span class="text-xs font-normal text-gray-400">Optional</span>
+                </span>
+              </summary>
+              <div class="mt-3 space-y-1">
+                <label class="sr-only" for="{{ form.environment.id_for_label }}">Environment</label>
+                {{ form.environment }}
+                {% if form.environment.help_text %}
+                  <p class="text-xs text-gray-500">{{ form.environment.help_text }}</p>
+                {% endif %}
+                {% for error in form.environment.errors %}
+                  <p class="text-xs text-red-600">{{ error }}</p>
+                {% endfor %}
+              </div>
+            </details>
+            {% endwith %}
+          {% endif %}
+
+          {% with value=form.headers.value|stringformat:"s" %}
+          <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.headers.errors or value and value != '{}' %}open{% endif %}>
+            <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
+              <span>Headers</span>
+              <span class="flex items-center gap-2">
+                <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                  <i data-lucide="lock" class="h-3 w-3"></i>
+                  Encrypted
+                </span>
+                <span class="text-xs font-normal text-gray-400">Optional</span>
+              </span>
+            </summary>
+            <div class="mt-3 space-y-3">
+              {{ form.headers }}
+              <div class="space-y-3">
+                <template x-for="(entry, index) in headers" :key="index">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                    <div class="sm:flex-1 space-y-1">
+                      <label class="block text-xs font-medium text-gray-500">Header</label>
+                      <input
+                        type="text"
+                        class="py-2 px-3 block w-full border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+                        placeholder="X-Custom-Header"
+                        x-model="headers[index].key"
+                        x-on:input="syncHeadersField()" />
+                    </div>
+                    <div class="sm:flex-1 space-y-1">
+                      <label class="block text-xs font-medium text-gray-500">Value</label>
+                      <input
+                        type="text"
+                        class="py-2 px-3 block w-full border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+                        placeholder="Header value"
+                        x-model="headers[index].value"
+                        x-on:input="syncHeadersField()" />
+                    </div>
+                    <div class="sm:w-auto sm:self-end">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                        x-on:click="removeHeaderRow(index)">
+                        <i data-lucide="trash-2" class="h-4 w-4"></i>
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
+                x-on:click="addHeaderRow()">
+                <i data-lucide="plus" class="h-4 w-4"></i>
+                Add Header
+              </button>
+              {% if form.headers.help_text %}
+                <p class="text-xs text-gray-500">{{ form.headers.help_text }}</p>
+              {% endif %}
+              {% for error in form.headers.errors %}
+                <p class="text-xs text-red-600">{{ error }}</p>
+              {% endfor %}
+            </div>
+          </details>
+          {% endwith %}
+        </div>
+
+        <div class="flex items-center justify-between">
+          <a href="{% url 'console-mcp-servers' %}" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Back</a>
+          <div class="flex gap-3">
+            <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">Save Changes</button>
+          </div>
+        </div>
+      </form>
+
+      <form method="post" action="{% url 'console-mcp-server-delete' config.id %}" class="pt-4 border-t border-gray-200" onsubmit="return confirm('Delete this MCP server? This will remove access for any linked agents.');">
+        {% csrf_token %}
+        <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-red-200 text-red-600 hover:bg-red-50">
+          Delete Server
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -2,13 +2,50 @@ import json
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
-from django.test import TestCase, RequestFactory, tag
+from django.test import TestCase, RequestFactory, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.contrib.sites.models import Site
 from django.utils import timezone
 
-from api.models import PersistentAgent, BrowserUseAgent, PipedreamConnectSession
+from api.models import (
+    PersistentAgent,
+    BrowserUseAgent,
+    PipedreamConnectSession,
+    MCPServerConfig,
+    PersistentAgentEnabledTool,
+)
 from api.integrations.pipedream_connect import create_connect_session
+from api.agent.tools.mcp_manager import MCPServerRuntime
+
+
+def _get_or_create_pipedream_config():
+    defaults = {
+        "display_name": "Pipedream",
+        "description": "Test Pipedream server",
+        "command": "",
+        "command_args": [],
+        "url": "https://remote.mcp.pipedream.net",
+        "prefetch_apps": [],
+        "metadata": {},
+        "is_active": True,
+    }
+    config, created = MCPServerConfig.objects.get_or_create(
+        scope=MCPServerConfig.Scope.PLATFORM,
+        name="pipedream",
+        defaults=defaults,
+    )
+    if created:
+        return config
+    updated = False
+    if not config.url:
+        config.url = defaults["url"]
+        updated = True
+    if config.command:
+        config.command = ""
+        updated = True
+    if updated:
+        config.save(update_fields=["url", "command"])
+    return config
 
 
 def _create_browser_agent(user):
@@ -70,16 +107,37 @@ class PipedreamGreenhouseConnectTests(TestCase):
         agent = PersistentAgent.objects.create(user=user, name="agent-gh", charter="c", browser_use_agent=bua)
 
         # Prepare manager and discovered tool (Pipedream unprefixed)
-        from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, enable_mcp_tool
+        from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo
         mgr = MCPToolManager()
         mgr._initialized = True
-        tool = MCPToolInfo("greenhouse-create-candidate", "pipedream", "greenhouse-create-candidate", "desc", {})
-        mgr._tools_cache = {"pipedream": [tool]}
-
-        # Enable tool for agent
-        with patch('api.agent.tools.mcp_manager._mcp_manager.get_all_available_tools') as mock_all:
-            mock_all.return_value = [tool]
-            enable_mcp_tool(agent, "greenhouse-create-candidate")
+        config = _get_or_create_pipedream_config()
+        runtime = MCPServerRuntime(
+            config_id=str(config.id),
+            name=config.name,
+            display_name=config.display_name,
+            description=config.description,
+            command=config.command or None,
+            args=list(config.command_args or []),
+            url=config.url or "",
+            env=config.environment or {},
+            headers=config.headers or {},
+            prefetch_apps=list(config.prefetch_apps or []),
+            scope=config.scope,
+            organization_id=str(config.organization_id) if config.organization_id else None,
+            user_id=str(config.user_id) if config.user_id else None,
+            updated_at=config.updated_at,
+        )
+        tool = MCPToolInfo(str(config.id), "greenhouse-create-candidate", "pipedream", "greenhouse-create-candidate", "desc", {})
+        mgr._server_cache = {runtime.config_id: runtime}
+        mgr._tools_cache = {runtime.config_id: [tool]}
+        mgr._clients = {runtime.config_id: MagicMock()}
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="greenhouse-create-candidate",
+            tool_server="pipedream",
+            tool_name="greenhouse-create-candidate",
+            server_config_id=runtime.config_id,
+        )
 
         # Fake result containing Pipedream's connect link for greenhouse
         r = MagicMock()
@@ -98,7 +156,8 @@ class PipedreamGreenhouseConnectTests(TestCase):
         mock_create.return_value = (fake_session, "https://example.com/connect?token=abc&app=greenhouse")
 
         # Act
-        res = mgr.execute_mcp_tool(agent, "greenhouse-create-candidate", {"instruction": "x"})
+        with patch.object(mgr, "_select_agent_proxy_url", return_value=(None, None)):
+            res = mgr.execute_mcp_tool(agent, "greenhouse-create-candidate", {"instruction": "x"})
 
         # Assert
         self.assertEqual(res.get("status"), "action_required")
@@ -110,12 +169,14 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
     def setUp(self):
         Site.objects.update_or_create(id=1, defaults={"domain": "example.com", "name": "example"})
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @patch('api.agent.tools.mcp_manager.select_proxy', return_value=None)
     @patch('api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop')
     @patch('api.agent.tools.mcp_manager.Client')
     @patch('fastmcp.client.transports.StreamableHttpTransport')
-    def test_discovery_initial_app_slug_greenhouse(self, mock_transport, mock_client_cls, mock_loop):
+    def test_discovery_initial_app_slug_greenhouse(self, mock_transport, mock_client_cls, mock_loop, mock_select_proxy):
         """When prefetch is set to greenhouse only, headers use app=greenhouse."""
-        from api.agent.tools.mcp_manager import MCPToolManager, MCPServer
+        from api.agent.tools.mcp_manager import MCPToolManager
 
         mgr = MCPToolManager()
 
@@ -143,20 +204,109 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
                     PIPEDREAM_ENVIRONMENT="development",
                     PIPEDREAM_PREFETCH_APPS="greenhouse",
                 ):
-                    # Construct server similar to configured pipedream server
-                    server = MCPServer(
-                        name="pipedream",
-                        display_name="Pipedream",
-                        description="Remote",
-                        url="https://remote.mcp.pipedream.net",
-                        env={},
-                        headers={},
-                        enabled=True,
+                    config = _get_or_create_pipedream_config()
+                    runtime = MCPServerRuntime(
+                        config_id=str(config.id),
+                        name=config.name,
+                        display_name=config.display_name,
+                        description=config.description,
+                        command=config.command or None,
+                        args=list(config.command_args or []),
+                        url=config.url or "",
+                        env=config.environment or {},
+                        headers=config.headers or {},
+                        prefetch_apps=["greenhouse"],
+                        scope=config.scope,
+                        organization_id=str(config.organization_id) if config.organization_id else None,
+                        user_id=str(config.user_id) if config.user_id else None,
+                        updated_at=config.updated_at,
                     )
-                    mgr._register_server(server)
+                    mgr._server_cache = {runtime.config_id: runtime}
+                    mgr._register_server(runtime)
 
         self.assertEqual(seen_app.get('app'), 'greenhouse')
         # Transport should be initialized with headers including x-pd-app-slug
         args, kwargs = mock_transport.call_args
         self.assertIn('headers', kwargs)
         self.assertEqual(kwargs['headers'].get('x-pd-app-slug'), 'greenhouse')
+        self.assertIn('httpx_client_factory', kwargs)
+        self.assertTrue(callable(kwargs['httpx_client_factory']))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @patch('api.agent.tools.mcp_manager.select_proxy', side_effect=RuntimeError("No proxies"))
+    @patch('api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop')
+    @patch('api.agent.tools.mcp_manager.Client')
+    @patch('fastmcp.client.transports.StreamableHttpTransport')
+    def test_discovery_logs_warning_when_proxy_unavailable(self, mock_transport, mock_client_cls, mock_loop, mock_select_proxy):
+        from api.agent.tools.mcp_manager import MCPToolManager
+
+        mgr = MCPToolManager()
+        loop = MagicMock()
+        loop.run_until_complete.return_value = []
+        mock_loop.return_value = loop
+        mock_client_cls.return_value = MagicMock()
+
+        with patch.object(mgr, '_fetch_server_tools', return_value=[]), \
+             patch.object(mgr, '_pd_build_headers', return_value={}), \
+             self.assertLogs('api.agent.tools.mcp_manager', level='WARNING') as logs:
+            config = _get_or_create_pipedream_config()
+            runtime = MCPServerRuntime(
+                config_id=str(config.id),
+                name=config.name,
+                display_name=config.display_name,
+                description=config.description,
+                command=config.command or None,
+                args=list(config.command_args or []),
+                url=config.url or "",
+                env=config.environment or {},
+                headers=config.headers or {},
+                prefetch_apps=["greenhouse"],
+                scope=config.scope,
+                organization_id=str(config.organization_id) if config.organization_id else None,
+                user_id=str(config.user_id) if config.user_id else None,
+                updated_at=config.updated_at,
+            )
+            mgr._server_cache = {runtime.config_id: runtime}
+            mgr._register_server(runtime)
+
+        self.assertTrue(any("falling back to direct connection" in message for message in logs.output))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch('api.agent.tools.mcp_manager.select_proxy', return_value=None)
+    @patch('api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop')
+    @patch('api.agent.tools.mcp_manager.Client')
+    @patch('fastmcp.client.transports.StreamableHttpTransport')
+    def test_discovery_errors_when_proxy_required(self, mock_transport, mock_client_cls, mock_loop, mock_select_proxy):
+        from api.agent.tools.mcp_manager import MCPToolManager
+
+        mgr = MCPToolManager()
+        loop = MagicMock()
+        loop.run_until_complete.return_value = []
+        mock_loop.return_value = loop
+        mock_client_cls.return_value = MagicMock()
+
+        with patch.object(mgr, '_fetch_server_tools', return_value=[]), \
+             patch.object(mgr, '_pd_build_headers', return_value={}), \
+             self.assertLogs('api.agent.tools.mcp_manager', level='ERROR') as logs, \
+             self.assertRaises(RuntimeError):
+            config = _get_or_create_pipedream_config()
+            runtime = MCPServerRuntime(
+                config_id=str(config.id),
+                name=config.name,
+                display_name=config.display_name,
+                description=config.description,
+                command=config.command or None,
+                args=list(config.command_args or []),
+                url=config.url or "",
+                env=config.environment or {},
+                headers=config.headers or {},
+                prefetch_apps=["greenhouse"],
+                scope=config.scope,
+                organization_id=str(config.organization_id) if config.organization_id else None,
+                user_id=str(config.user_id) if config.user_id else None,
+                updated_at=config.updated_at,
+            )
+            mgr._server_cache = {runtime.config_id: runtime}
+            mgr._register_server(runtime)
+
+        self.assertTrue(any("requires a proxy" in message for message in logs.output))

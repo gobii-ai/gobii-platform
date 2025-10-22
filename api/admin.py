@@ -11,7 +11,14 @@ from django.db.models.expressions import OuterRef, Exists
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
 from api.services.proactive_activation import ProactiveActivationService
-from .admin_forms import TestSmsForm, GrantPlanCreditsForm, GrantCreditsByUserIdsForm, AgentEmailAccountForm, StripeConfigForm
+from .admin_forms import (
+    TestSmsForm,
+    GrantPlanCreditsForm,
+    GrantCreditsByUserIdsForm,
+    AgentEmailAccountForm,
+    StripeConfigForm,
+    MCPServerConfigAdminForm,
+)
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
@@ -24,6 +31,7 @@ from .models import (
     MeteringBatch,
     UsageThresholdSent,
     PersistentAgentWebhook,
+    MCPServerConfig,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -152,6 +160,40 @@ class StripeConfigAdmin(admin.ModelAdmin):
 
     webhook_secret_status.short_description = "Webhook secret"
 
+
+@admin.register(MCPServerConfig)
+class MCPServerConfigAdmin(admin.ModelAdmin):
+    form = MCPServerConfigAdminForm
+    list_display = ("name", "display_name", "is_active", "transport_summary", "updated_at")
+    search_fields = ("name", "display_name", "description")
+    list_filter = ("is_active",)
+    readonly_fields = ("scope", "created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("name", "display_name", "description", "is_active")}),
+        (
+            "Transport",
+            {"fields": ("command", "command_args", "url", "prefetch_apps", "metadata")},
+        ),
+        ("Secrets", {"fields": ("environment", "headers")}),
+        ("Metadata", {"fields": ("scope", "created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        return queryset.filter(scope=MCPServerConfig.Scope.PLATFORM)
+
+    def save_model(self, request, obj, form, change):
+        obj.scope = MCPServerConfig.Scope.PLATFORM
+        obj.organization = None
+        obj.user = None
+        super().save_model(request, obj, form, change)
+
+    @admin.display(description="Transport", ordering="command")
+    def transport_summary(self, obj):
+        if obj.command:
+            args = " ".join(obj.command_args or [])
+            return f"{obj.command} {args}".strip()
+        return obj.url or "—"
 
 # Ownership filter reused across models
 class OwnershipTypeFilter(SimpleListFilter):

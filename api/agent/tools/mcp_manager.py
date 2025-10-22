@@ -17,19 +17,30 @@ import asyncio
 import os
 import fnmatch
 import re
+import contextlib
+import contextvars
 from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, UTC
 
 import requests
 import litellm  # re-exported for tests expecting to patch LiteLLM directly
 
+import httpx
 from fastmcp import Client
 from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
+from django.db.models import Max
 
-from ...models import PersistentAgent, PersistentAgentEnabledTool, PipedreamConnectSession
+from ...models import (
+    MCPServerConfig,
+    PersistentAgent,
+    PersistentAgentEnabledTool,
+    PipedreamConnectSession,
+)
+from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
+from ...services.mcp_servers import agent_accessible_server_configs
 from ..core.llm_config import get_llm_config_with_failover, LLMNotConfiguredError
 from ..core.llm_utils import run_completion
 
@@ -39,25 +50,48 @@ tracer = trace.get_tracer("gobii.utils")
 # Maximum number of MCP tools that can be enabled per agent
 MAX_MCP_TOOLS = 40
 
+_proxy_url_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "mcp_http_proxy_url", default=None
+)
+
+
+@contextlib.contextmanager
+def _use_mcp_proxy(proxy_url: Optional[str]):
+    """Temporarily bind an HTTP proxy URL for MCP HTTP transports."""
+    if proxy_url:
+        token = _proxy_url_var.set(proxy_url)
+        try:
+            yield
+        finally:
+            _proxy_url_var.reset(token)
+    else:
+        yield
+
 
 @dataclass
-class MCPServer:
-    """Configuration for an MCP server."""
+class MCPServerRuntime:
+    """Runtime representation of an MCP server configuration."""
+
+    config_id: str
     name: str
     display_name: str
     description: str
-    command: Optional[str] = None
-    args: Optional[List[str]] = None
-    url: Optional[str] = None
-    env: Optional[Dict[str, str]] = None
-    headers: Optional[Dict[str, str]] = None
-    prefetch_apps: Optional[List[str]] = None
-    enabled: bool = True
+    command: Optional[str]
+    args: List[str]
+    url: Optional[str]
+    env: Dict[str, str]
+    headers: Dict[str, str]
+    prefetch_apps: List[str]
+    scope: str
+    organization_id: Optional[str]
+    user_id: Optional[str]
+    updated_at: Optional[datetime]
 
 
 @dataclass 
 class MCPToolInfo:
     """Information about an MCP tool for search and display."""
+    config_id: str
     full_name: str  # e.g., "mcp_brightdata_search_engine"
     server_name: str  # e.g., "brightdata"
     tool_name: str  # e.g., "search_engine"
@@ -77,41 +111,7 @@ class MCPToolInfo:
 
 class MCPToolManager:
     """Manages MCP tool connections and provides search/enable/disable functionality."""
-    
-    # Define available MCP servers
-    AVAILABLE_SERVERS = [
-        MCPServer(
-            name="brightdata",
-            display_name="Bright Data",
-            description="Web scraping and data extraction tools with CAPTCHA bypass",
-            command="npx",
-            # Prefer a pinned version for reproducibility; npx will use the preinstalled
-            # global copy inside Docker, and fall back to on-the-fly install in local/dev.
-            args=["-y", "@brightdata/mcp@2.5.0"],
-            env={
-                "API_TOKEN": os.getenv("BRIGHT_DATA_TOKEN", ""),
-                "NPM_CONFIG_CACHE": os.getenv("NPM_CONFIG_CACHE", "/tmp/.npm"),
-                # Enable full tool catalog (costs may apply per Bright Data docs)
-                "PRO_MODE": "true",
-                # Optional: set the MCP server's WEB_UNLOCKER_ZONE from one env var.
-                # If BRIGHT_DATA_WEB_UNLOCKER_ZONE is empty/unset, the server default applies.
-                **({"WEB_UNLOCKER_ZONE": os.getenv("BRIGHT_DATA_WEB_UNLOCKER_ZONE")} if os.getenv("BRIGHT_DATA_WEB_UNLOCKER_ZONE") else {}),
-            },
-            enabled=True
-        ),
-        # Pipedream remote MCP server (HTTP/SSE)
-        MCPServer(
-            name="pipedream",
-            display_name="Pipedream",
-            description="Access 2,800+ API integrations with per-user OAuth via Pipedream Connect",
-            url="https://remote.mcp.pipedream.net",
-            env={},
-            headers={},
-            enabled=True,
 
-        ),
-    ]
-    
     # Default MCP tools that should be enabled for all agents
     DEFAULT_ENABLED_TOOLS = [
         "mcp_brightdata_scrape_as_markdown",
@@ -128,14 +128,17 @@ class MCPToolManager:
     
     def __init__(self):
         self._clients: Dict[str, Client] = {}
+        self._server_cache: Dict[str, MCPServerRuntime] = {}
         self._tools_cache: Dict[str, List[MCPToolInfo]] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._initialized = False
+        self._last_refresh_marker: Optional[datetime] = None
         # Cached Pipedream token and expiry
         self._pd_access_token: Optional[str] = None
         self._pd_token_expiry: Optional[datetime] = None
         # Per‑agent Pipedream clients (unique connection per agent id)
         self._pd_agent_clients: Dict[str, Client] = {}
+        self._httpx_client_factory = self._build_httpx_client_factory()
         
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
         """Ensure we have an event loop for async operations."""
@@ -155,91 +158,259 @@ class MCPToolManager:
                 return True
         return False
     
-    def initialize(self) -> bool:
-        """Initialize all configured MCP servers and cache their tools."""
-        if self._initialized:
+    def initialize(self, force: bool = False) -> bool:
+        """Initialize or refresh all configured MCP servers."""
+
+        if not force and not self._needs_refresh():
+            return self._initialized
+
+        try:
+            self._refresh_server_cache()
+            self._initialized = True
             return True
-            
-        success_count = 0
-        for server in self.AVAILABLE_SERVERS:
-            if not server.enabled:
-                logger.info(f"MCP server '{server.name}' is disabled, skipping")
+        except Exception:
+            logger.exception("Failed to refresh MCP server cache")
+            self._initialized = False
+            return False
+
+    def _needs_refresh(self) -> bool:
+        if not self._initialized:
+            return True
+
+        try:
+            latest = (
+                MCPServerConfig.objects.filter(is_active=True)
+                .aggregate(latest=Max('updated_at'))
+                .get('latest')
+            )
+        except Exception:
+            logger.exception("Failed to determine MCP server freshness; forcing refresh")
+            return True
+
+        if latest is None:
+            # No active servers; refresh only if cache is non-empty
+            return bool(self._server_cache)
+
+        if self._last_refresh_marker is None:
+            return True
+
+        return latest > self._last_refresh_marker
+
+    def _refresh_server_cache(self) -> None:
+        from django.utils import timezone
+
+        configs = list(MCPServerConfig.objects.filter(is_active=True))
+        logger.info("Loaded %d active MCP server configs", len(configs))
+
+        new_cache: Dict[str, MCPServerRuntime] = {}
+        latest_seen: Optional[datetime] = None
+
+        for cfg in configs:
+            runtime = self._build_runtime_from_config(cfg)
+            new_cache[runtime.config_id] = runtime
+
+            if cfg.updated_at and (latest_seen is None or cfg.updated_at > latest_seen):
+                latest_seen = cfg.updated_at
+
+        # Dispose clients no longer present or updated
+        current_ids = set(new_cache.keys())
+        existing_ids = set(self._server_cache.keys())
+
+        removed_ids = existing_ids - current_ids
+        for config_id in removed_ids:
+            self._discard_client(config_id)
+
+        # Detect updated configurations (based on timestamp)
+        failed_configs: List[str] = []
+        for config_id, runtime in list(new_cache.items()):
+            prior = self._server_cache.get(config_id)
+            if prior and prior.updated_at == runtime.updated_at:
                 continue
-                
-            # Check for required environment variables
-            # For stdio-based servers that commonly use an API_TOKEN env
-            # (e.g., Bright Data) preserve generic check to maintain tests.
-            if server.command and server.env and server.env.get("API_TOKEN") == "":
-                logger.warning(f"MCP server '{server.name}' missing API_TOKEN, skipping")
-                continue
-            if server.name == "pipedream":
-                # Require client credentials and project info from settings
-                required = [
-                    getattr(settings, "PIPEDREAM_CLIENT_ID", ""),
-                    getattr(settings, "PIPEDREAM_CLIENT_SECRET", ""),
-                    getattr(settings, "PIPEDREAM_PROJECT_ID", ""),
-                    getattr(settings, "PIPEDREAM_ENVIRONMENT", ""),
-                ]
-                if not all(required):
-                    logger.warning(
-                        "MCP server 'pipedream' missing required env (PIPEDREAM_CLIENT_ID/SECRET/PROJECT_ID/ENVIRONMENT), skipping"
-                    )
-                    continue
-                
+            self._discard_client(config_id)
             try:
-                self._register_server(server)
-                success_count += 1
-            except Exception as e:
-                logger.error(f"Failed to register MCP server '{server.name}': {e}")
-        
-        self._initialized = success_count > 0
-        logger.info(f"Initialized {success_count}/{len(self.AVAILABLE_SERVERS)} MCP servers")
-        return self._initialized
+                self._register_server(runtime)
+            except Exception as exc:
+                logger.error("Failed to register MCP server %s: %s", runtime.name, exc)
+                failed_configs.append(config_id)
+
+        for config_id in failed_configs:
+            new_cache.pop(config_id, None)
+
+        self._server_cache = new_cache
+        self._last_refresh_marker = latest_seen or timezone.now()
+
+    def _discard_client(self, config_id: str) -> None:
+        client = self._clients.pop(config_id, None)
+        if client:
+            try:
+                client.close()
+            except Exception:
+                logger.debug("Error closing MCP client for %s", config_id, exc_info=True)
+        self._tools_cache.pop(config_id, None)
+
+    def _build_runtime_from_config(self, cfg: MCPServerConfig) -> MCPServerRuntime:
+        env = dict(cfg.environment or {})
+        headers = dict(cfg.headers or {})
+        prefetch = list(cfg.prefetch_apps or [])
+        metadata = cfg.metadata or {}
+
+        fallback_map = metadata.get('env_fallback', {}) if isinstance(metadata, dict) else {}
+        for key, env_var in fallback_map.items():
+            if env.get(key):
+                continue
+            fallback_value = os.getenv(env_var, "")
+            if fallback_value:
+                env[key] = fallback_value
+
+        return MCPServerRuntime(
+            config_id=str(cfg.id),
+            name=cfg.name,
+            display_name=cfg.display_name,
+            description=cfg.description,
+            command=cfg.command or None,
+            args=list(cfg.command_args or []),
+            url=cfg.url or None,
+            env=env,
+            headers=headers,
+            prefetch_apps=prefetch,
+            scope=cfg.scope,
+            organization_id=str(cfg.organization_id) if cfg.organization_id else None,
+            user_id=str(cfg.user_id) if cfg.user_id else None,
+            updated_at=cfg.updated_at,
+        )
     
-    def _register_server(self, server: MCPServer):
+    def _build_httpx_client_factory(self):
+        def factory(
+            headers: Optional[dict[str, str]] = None,
+            timeout: Optional[httpx.Timeout] = None,
+            auth: Optional[httpx.Auth] = None,
+        ) -> httpx.AsyncClient:
+            client_kwargs: Dict[str, Any] = {
+                "headers": headers,
+                "timeout": timeout or httpx.Timeout(5.0),
+                "auth": auth,
+                "trust_env": False,
+            }
+            proxy_url = _proxy_url_var.get()
+            if proxy_url:
+                client_kwargs["proxy"] = proxy_url
+            return httpx.AsyncClient(**client_kwargs)
+
+        return factory
+
+    def _select_discovery_proxy_url(self, server: MCPServerRuntime) -> Optional[str]:
+        if not server.url:
+            return None
+        proxy_required = getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+        try:
+            proxy = select_proxy(
+                allow_no_proxy_in_debug=getattr(settings, "DEBUG", False) and not proxy_required,
+                context_id=f"mcp_discovery_{server.config_id}",
+            )
+        except RuntimeError as exc:
+            if proxy_required:
+                logger.error(
+                    "MCP discovery for %s (%s) requires a proxy but none are available: %s",
+                    server.name,
+                    server.config_id,
+                    exc,
+                )
+                raise
+            logger.warning(
+                "MCP discovery for %s (%s) falling back to direct connection; proxy unavailable: %s",
+                server.name,
+                server.config_id,
+                exc,
+            )
+            return None
+        if proxy_required and proxy is None:
+            logger.error(
+                "MCP discovery for %s (%s) requires a proxy but none were selected.",
+                server.name,
+                server.config_id,
+            )
+            raise RuntimeError("Proxy required but unavailable for MCP discovery.")
+        return proxy.proxy_url if proxy else None
+
+    def _select_agent_proxy_url(self, agent: PersistentAgent) -> Tuple[Optional[str], Optional[str]]:
+        if not getattr(settings, "ENABLE_PROXY_ROUTING", True):
+            # Allow environments to opt out entirely (mainly for tests)
+            return None, None
+
+        proxy_required = getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+        try:
+            proxy = select_proxy_for_persistent_agent(agent)
+        except RuntimeError as exc:
+            if proxy_required:
+                logger.error("Proxy selection failed for agent %s and a proxy is required: %s", agent.id, exc)
+                return None, "No proxy server available"
+            logger.warning("Proxy selection failed for agent %s; continuing without proxy: %s", agent.id, exc)
+            return None, None
+
+        if proxy_required and not proxy:
+            logger.error("Proxy required but unavailable for agent %s", agent.id)
+            return None, "No proxy server available"
+
+        return (proxy.proxy_url if proxy else None, None)
+    
+    def _register_server(self, server: MCPServerRuntime):
         """Register an MCP server and cache its tools."""
-        # Use transport directly for better control and to avoid MCPConfig prefixing issues
+
+        if server.command and server.env.get("API_TOKEN") == "":
+            raise ValueError(f"MCP server '{server.name}' missing API_TOKEN")
+
         if server.url:
-            # For HTTP/SSE servers
             from fastmcp.client.transports import StreamableHttpTransport
+
             headers: Dict[str, str] = dict(server.headers or {})
-            if server.name == "pipedream":
-                # Build discovery headers in sub-agent mode with an initial app slug
-                # Some servers expect an app slug present during the initial handshake.
-                app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse")
-                # first_slug is temporarily disabled as multi-prefetch seems to work; it's undocumented by Pipedream
-                # but is shown in their examples. Leaving in case we have to revert
-                # first_slug = next((s.strip() for s in app_csv.split(',') if s.strip()), "google_sheets")
+            if server.name == "pipedream" and server.scope == MCPServerConfig.Scope.PLATFORM:
+                prefetch_csv = ",".join(server.prefetch_apps) if server.prefetch_apps else getattr(
+                    settings,
+                    "PIPEDREAM_PREFETCH_APPS",
+                    "google_sheets,greenhouse",
+                )
                 headers = self._pd_build_headers(
                     mode="sub-agent",
-                    app_slug=app_csv,
+                    app_slug=prefetch_csv,
                     external_user_id="gobii-discovery",
                     conversation_id="discovery",
                 )
-                logger.info(f"Pipedream discovery initializing with app slug '{app_csv}' and sub-agent mode")
-            transport = StreamableHttpTransport(url=server.url, headers=headers)
+                logger.info(
+                    "Pipedream discovery initializing with app slug '%s' and sub-agent mode",
+                    prefetch_csv,
+                )
+
+            transport = StreamableHttpTransport(
+                url=server.url,
+                headers=headers,
+                httpx_client_factory=self._httpx_client_factory,
+            )
         elif server.command:
-            # For stdio servers like npx
             from fastmcp.client.transports import StdioTransport
+
             transport = StdioTransport(
                 command=server.command,
                 args=server.args or [],
-                env=server.env or {}
+                env=server.env or {},
             )
         else:
             raise ValueError(f"Server '{server.name}' must have either 'url' or 'command'")
-        
-        # Create client with transport directly
+
         client = Client(transport)
-        self._clients[server.name] = client
-        
-        # Fetch and cache tools
+        self._clients[server.config_id] = client
+
         loop = self._ensure_event_loop()
-        tools = loop.run_until_complete(self._fetch_server_tools(client, server))
-        self._tools_cache[server.name] = tools
-        
-        logger.info(f"Registered MCP server '{server.name}' with {len(tools)} tools")
-        # Dump full tool list at INFO for observability
+        proxy_url = self._select_discovery_proxy_url(server)
+        with _use_mcp_proxy(proxy_url):
+            tools = loop.run_until_complete(self._fetch_server_tools(client, server))
+        self._tools_cache[server.config_id] = tools
+
+        logger.info(
+            "Registered MCP server '%s' (%s) with %d tools",
+            server.name,
+            server.config_id,
+            len(tools),
+        )
         if tools:
             try:
                 for t in tools:
@@ -251,23 +422,28 @@ class MCPToolManager:
                         json.dumps(t.parameters) if t.parameters else "{}",
                     )
             except Exception:
-                # Never allow logging issues to break initialization
-                logger.exception("Failed while logging MCP tool list for server '%s'", server.name)
-    
-    async def _fetch_server_tools(self, client: Client, server: MCPServer) -> List[MCPToolInfo]:
+                logger.exception(
+                    "Failed while logging MCP tool list for server '%s' (%s)",
+                    server.name,
+                    server.config_id,
+                )
+
+    async def _fetch_server_tools(self, client: Client, server: MCPServerRuntime) -> List[MCPToolInfo]:
         """Fetch tools from an MCP server, filtering out blacklisted tools.
 
         For Pipedream, discover action tools per app slug in sub-agent mode.
         """
-        tools = []
-        blacklisted_count = 0
+        tools: List[MCPToolInfo] = []
         async with client:
             if server.name != "pipedream":
                 mcp_tools = await client.list_tools()
                 tools.extend(self._convert_tools(server, mcp_tools))
             else:
-                app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse")
-                prefetch = [s.strip() for s in app_csv.split(",") if s.strip()]
+                if server.prefetch_apps:
+                    prefetch = [s.strip() for s in server.prefetch_apps if s.strip()]
+                else:
+                    app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse")
+                    prefetch = [s.strip() for s in app_csv.split(",") if s.strip()]
                 for app_slug in prefetch:
                     try:
                         if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
@@ -312,7 +488,7 @@ class MCPToolManager:
 
         return tools
 
-    def _convert_tools(self, server: MCPServer, mcp_tools: List[MCPTool]) -> List[MCPToolInfo]:
+    def _convert_tools(self, server: MCPServerRuntime, mcp_tools: List[MCPTool]) -> List[MCPToolInfo]:
         """Helper to convert MCP tool records to MCPToolInfo list with blacklist applied.
 
         For Pipedream, we intentionally DO NOT prefix tool names to avoid overly long names.
@@ -330,6 +506,7 @@ class MCPToolManager:
                 continue
             tools.append(
                 MCPToolInfo(
+                    config_id=server.config_id,
                     full_name=full_name,
                     server_name=server.name,
                     tool_name=tool.name,
@@ -338,7 +515,12 @@ class MCPToolManager:
                 )
             )
         if blacklisted_count:
-            logger.info(f"Filtered out {blacklisted_count} blacklisted tools from server '{server.name}'")
+            logger.info(
+                "Filtered out %d blacklisted tools from server '%s' (%s)",
+                blacklisted_count,
+                server.name,
+                server.config_id,
+            )
         return tools
     
     def get_all_available_tools(self) -> List[MCPToolInfo]:
@@ -350,6 +532,31 @@ class MCPToolManager:
         for server_tools in self._tools_cache.values():
             all_tools.extend(server_tools)
         return all_tools
+
+    def get_tools_for_agent(self, agent: PersistentAgent) -> List[MCPToolInfo]:
+        """Return MCP tools that the given agent may access."""
+
+        if not self.initialize():
+            return []
+
+        configs = agent_accessible_server_configs(agent)
+        desired_ids = {str(cfg.id) for cfg in configs}
+
+        if not desired_ids:
+            return []
+
+        missing_ids = [config_id for config_id in desired_ids if config_id not in self._server_cache]
+        if missing_ids:
+            logger.info("Refreshing MCP server cache to include missing configs: %s", missing_ids)
+            if not self.initialize(force=True):
+                return []
+
+        tools: List[MCPToolInfo] = []
+        for config_id in desired_ids:
+            server_tools = self._tools_cache.get(config_id)
+            if server_tools:
+                tools.extend(server_tools)
+        return tools
 
     def find_tool_by_name(self, full_name: str) -> Optional[MCPToolInfo]:
         """Find a discovered MCP tool by its full name (exact match)."""
@@ -379,7 +586,7 @@ class MCPToolManager:
 
         definitions: List[Dict[str, Any]] = []
         enabled_set = set(enabled_names)
-        for tool_info in self.get_all_available_tools():
+        for tool_info in self.get_tools_for_agent(agent):
             if tool_info.full_name in enabled_set:
                 definitions.append(
                     {
@@ -423,29 +630,36 @@ class MCPToolManager:
         except Exception:
             logger.exception("Failed to update usage for tool %s", tool_name)
         
-        # Resolve tool to server + actual tool name (supports unprefixed Pipedream tool names)
-        resolved = self._resolve_tool(tool_name)
-        if not resolved:
+        info = self._resolve_tool_info(tool_name)
+        if not info:
             return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
-        server_name, actual_tool_name = resolved
-        
-        # Ensure server availability (non-Pipedream servers)
-        if server_name != "pipedream" and server_name not in self._clients:
-            return {
-                "status": "error",
-                "message": f"MCP server '{server_name}' not available"
-            }
 
-        # Choose the right client
+        server_name = info.server_name
+        actual_tool_name = info.tool_name
+        runtime = self._server_cache.get(info.config_id)
+
+        proxy_url = None
+        proxy_error: Optional[str] = None
+        if runtime and runtime.url:
+            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
+            if proxy_error:
+                return {"status": "error", "message": proxy_error}
+
         if server_name == "pipedream":
-            app_slug, mode = self._pd_parse_tool(actual_tool_name)
+            app_slug, mode = self._pd_parse_tool(info.tool_name)
             client = self._get_pipedream_agent_client(agent, app_slug=app_slug, mode=mode)
         else:
-            client = self._clients[server_name]
+            client = self._clients.get(info.config_id)
+            if not client:
+                return {
+                    "status": "error",
+                    "message": f"MCP server '{info.server_name}' not available",
+                }
         
         try:
             loop = self._ensure_event_loop()
-            result = loop.run_until_complete(self._execute_async(client, actual_tool_name, params))
+            with _use_mcp_proxy(proxy_url):
+                result = loop.run_until_complete(self._execute_async(client, actual_tool_name, params))
             
             # Convert result to consistent format
             if hasattr(result, 'is_error') and result.is_error:
@@ -621,29 +835,53 @@ class MCPToolManager:
             except Exception:
                 pass
         self._pd_agent_clients.clear()
+        self._server_cache.clear()
         self._clients.clear()
         self._tools_cache.clear()
+        self._last_refresh_marker = None
         if self._loop and not self._loop.is_closed():
             self._loop.close()
+        self._loop = None
         self._initialized = False
 
-    def _resolve_tool(self, tool_name: str) -> Optional[Tuple[str, str]]:
-        """Resolve a tool's server and actual MCP tool name from the provided name.
+    def _resolve_tool_info(self, tool_name: str) -> Optional[MCPToolInfo]:
+        """Resolve tool metadata, refreshing cache on demand."""
 
-        - For prefixed servers (e.g., brightdata): 'mcp_{server}_{tool}'
-        - For Pipedream: unprefixed and matches the actual tool name
-        """
-        # Exact match in the discovered catalog
-        for _, tools in self._tools_cache.items():
-            for t in tools:
-                if t.full_name == tool_name:
-                    return (t.server_name, t.tool_name)
-        # Backward-compatible fallback
+        info = self.find_tool_by_name(tool_name)
+        if info:
+            return info
+
+        if self.initialize(force=True):
+            info = self.find_tool_by_name(tool_name)
+            if info:
+                return info
+
         if tool_name.startswith("mcp_"):
             parts = tool_name.split("_", 2)
             if len(parts) == 3:
                 _, server_name, actual = parts
-                return (server_name, actual)
+                runtime = next((r for r in self._server_cache.values() if r.name == server_name), None)
+                if runtime:
+                    return MCPToolInfo(
+                        config_id=runtime.config_id,
+                        full_name=tool_name,
+                        server_name=server_name,
+                        tool_name=actual,
+                        description=f"{actual} via {runtime.display_name}",
+                        parameters={"type": "object", "properties": {}},
+                    )
+
+        runtime = next((r for r in self._server_cache.values() if r.name == "pipedream"), None)
+        if runtime and "-" in tool_name:
+            return MCPToolInfo(
+                config_id=runtime.config_id,
+                full_name=tool_name,
+                server_name=runtime.name,
+                tool_name=tool_name,
+                description=f"{tool_name} via {runtime.display_name}",
+                parameters={"type": "object", "properties": {}},
+            )
+
         return None
 
     def _get_pipedream_access_token(self) -> Optional[str]:
@@ -715,15 +953,39 @@ class MCPToolManager:
                 client.transport.headers["Authorization"] = f"Bearer {token}"
             return client
 
+        if not self.initialize():
+            raise RuntimeError("Pipedream server configuration is unavailable")
+
+        accessible_ids = {
+            str(cfg.id) for cfg in agent_accessible_server_configs(agent)
+        }
+        runtime = next(
+            (
+                srv
+                for srv in self._server_cache.values()
+                if srv.name == "pipedream" and srv.config_id in accessible_ids
+            ),
+            None,
+        )
+        if runtime is None:
+            logger.warning("Agent %s attempted to use pipedream without accessible server config", agent_key)
+            raise RuntimeError("Pipedream MCP server is not accessible to this agent")
+        if not runtime.url:
+            logger.error("Pipedream runtime %s is missing URL", runtime.config_id)
+            raise RuntimeError("Pipedream MCP server is misconfigured")
+
         from fastmcp.client.transports import StreamableHttpTransport
-        server = next(s for s in self.AVAILABLE_SERVERS if s.name == "pipedream")
         headers = self._pd_build_headers(
             mode=mode,
             app_slug=app_slug,
             external_user_id=agent_key,
             conversation_id=agent_key,
         )
-        transport = StreamableHttpTransport(url=server.url, headers=headers)
+        transport = StreamableHttpTransport(
+            url=runtime.url or "",
+            headers=headers,
+            httpx_client_factory=self._httpx_client_factory,
+        )
         client = Client(transport)
         self._pd_agent_clients[cache_key] = client
         return client
@@ -750,7 +1012,7 @@ def search_tools(agent: PersistentAgent, query: str) -> Dict[str, Any]:
         _mcp_manager.initialize()
     
     # Get all available tools
-    all_tools = _mcp_manager.get_all_available_tools()
+    all_tools = _mcp_manager.get_tools_for_agent(agent)
     logger.info("search_tools: %d tools available across servers", len(all_tools))
     try:
         # Log the full set of discovered tool names (server/name)
@@ -995,7 +1257,7 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
             requested.append(n)
             seen.add(n)
 
-    all_tools = _mcp_manager.get_all_available_tools()
+    all_tools = _mcp_manager.get_tools_for_agent(agent)
     available = {t.full_name for t in all_tools}
 
     enabled: List[str] = []
@@ -1015,12 +1277,29 @@ def enable_tools(agent: PersistentAgent, tool_names: List[str]) -> Dict[str, Any
             )
             if created:
                 # Derive server/tool fields when possible
-                resolved = _mcp_manager._resolve_tool(name)
-                if resolved:
-                    row.tool_server, row.tool_name = resolved
-                    row.save(update_fields=["tool_server", "tool_name"])
+                info = _mcp_manager._resolve_tool_info(name)
+                if info:
+                    row.tool_server = info.server_name
+                    row.tool_name = info.tool_name
+                    row.server_config_id = info.config_id
+                    row.save(update_fields=["tool_server", "tool_name", "server_config"])
                 enabled.append(name)
             else:
+                updates: List[str] = []
+                if not row.tool_server or not row.tool_name or not row.server_config_id:
+                    info = _mcp_manager._resolve_tool_info(name)
+                    if info:
+                        if not row.tool_server:
+                            row.tool_server = info.server_name
+                            updates.append("tool_server")
+                        if not row.tool_name:
+                            row.tool_name = info.tool_name
+                            updates.append("tool_name")
+                        if not row.server_config_id:
+                            row.server_config_id = info.config_id
+                            updates.append("server_config")
+                if updates:
+                    row.save(update_fields=updates)
                 already_enabled.append(name)
         except Exception:
             logger.exception("Failed enabling tool %s", name)
@@ -1082,7 +1361,7 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
         }
 
     # Check if tool exists
-    all_tools = _mcp_manager.get_all_available_tools()
+    all_tools = _mcp_manager.get_tools_for_agent(agent)
     tool_exists = any(tool.full_name == tool_name for tool in all_tools)
     if not tool_exists:
         return {
@@ -1097,7 +1376,22 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
             # Touch usage to reflect interest
             row.last_used_at = datetime.now(UTC)
             row.usage_count = (row.usage_count or 0) + 1
-            row.save(update_fields=["last_used_at", "usage_count"])
+            updates = ["last_used_at", "usage_count"]
+
+            if not row.server_config_id or not row.tool_server or not row.tool_name:
+                info = _mcp_manager._resolve_tool_info(tool_name)
+                if info:
+                    if not row.tool_server:
+                        row.tool_server = info.server_name
+                        updates.append("tool_server")
+                    if not row.tool_name:
+                        row.tool_name = info.tool_name
+                        updates.append("tool_name")
+                    if not row.server_config_id:
+                        row.server_config_id = info.config_id
+                        updates.append("server_config")
+
+            row.save(update_fields=updates)
             return {
                 "status": "success",
                 "message": f"Tool '{tool_name}' is already enabled",
@@ -1110,10 +1404,12 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     # Enable new tool
     try:
         row = PersistentAgentEnabledTool.objects.create(agent=agent, tool_full_name=tool_name)
-        resolved = _mcp_manager._resolve_tool(tool_name)
-        if resolved:
-            row.tool_server, row.tool_name = resolved
-            row.save(update_fields=["tool_server", "tool_name"])
+        info = _mcp_manager._resolve_tool_info(tool_name)
+        if info:
+            row.tool_server = info.server_name
+            row.tool_name = info.tool_name
+            row.server_config_id = info.config_id
+            row.save(update_fields=["tool_server", "tool_name", "server_config"])
     except Exception as e:
         logger.error("Failed to create enabled tool %s: %s", tool_name, e)
         return {"status": "error", "message": str(e)}
@@ -1165,7 +1461,7 @@ def ensure_default_tools_enabled(agent: PersistentAgent) -> None:
     
     if missing_tools:
         # Verify the tools actually exist and are not blacklisted
-        all_tools = _mcp_manager.get_all_available_tools()
+        all_tools = _mcp_manager.get_tools_for_agent(agent)
         available_tool_names = {tool.full_name for tool in all_tools}
         
         # Enable missing default tools that exist and are not blacklisted
