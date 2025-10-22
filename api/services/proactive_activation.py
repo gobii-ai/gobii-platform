@@ -32,7 +32,7 @@ class ProactiveActivationService:
     ROLLOUT_FLAG_NAME = "proactive_agent_rollout"
     USER_COOLDOWN_FALLBACK_MINUTES = 360
     MIN_TRIGGER_INTERVAL_MINUTES = 7 * 24 * 60  # At most once per week
-    MIN_ACTIVITY_COOLDOWN = timedelta(days=3)  # Wait at least three days since last interaction
+    MIN_ACTIVITY_COOLDOWN = timedelta(days=1)  # Wait at least one day since last interaction
 
     @classmethod
     def trigger_agents(cls, *, batch_size: int | None = None) -> List[PersistentAgent]:

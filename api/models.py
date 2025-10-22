@@ -2439,7 +2439,7 @@ class PersistentAgent(models.Model):
         help_text="Communication endpoint (email/SMS/etc.) the agent should use by default to reach its owner user."
     )
     proactive_opt_in = models.BooleanField(
-        default=False,
+        default=True,
         help_text="Enable Gobii to proactively start conversations offering related help for this agent.",
     )
     proactive_min_interval_minutes = models.PositiveIntegerField(
