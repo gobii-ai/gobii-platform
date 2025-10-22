@@ -218,6 +218,9 @@ class MCPServerConfigForm(forms.Form):
                 widget.attrs.update({'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500 font-mono text-sm'})
             else:
                 widget.attrs.update({'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500'})
+        headers_widget = forms.HiddenInput()
+        headers_widget.attrs.update({'x-ref': 'headersField'})
+        self.fields['headers'].widget = headers_widget
         if not self.allow_commands:
             self.fields['command'].widget = forms.HiddenInput()
             self.fields['command_args'].widget = forms.HiddenInput()
