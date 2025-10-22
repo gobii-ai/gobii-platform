@@ -132,6 +132,8 @@ jobs:
             tag: batch_event_parallel
           - batch: mcp_tools
             tag: batch_mcp_tools
+          - batch: mcp_admin
+            tag: batch_mcp_admin
           - batch: pipedream_connect
             tag: pipedream_connect
           - batch: promptree
