@@ -19,16 +19,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='persistentagent',
-            name='proactive_max_daily',
-            field=models.PositiveIntegerField(default=1, help_text='Maximum proactive outreach attempts per calendar day for this agent.'),
-        ),
-        migrations.AddField(
-            model_name='persistentagent',
-            name='proactive_min_interval_minutes',
-            field=models.PositiveIntegerField(default=360, help_text='Minimum number of minutes between proactive outreach attempts for this agent.'),
-        ),
-        migrations.AddField(
-            model_name='persistentagent',
             name='proactive_opt_in',
             field=models.BooleanField(default=True, help_text='Enable Gobii to proactively start conversations offering related help for this agent.'),
         ),

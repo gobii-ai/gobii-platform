@@ -2442,14 +2442,6 @@ class PersistentAgent(models.Model):
         default=True,
         help_text="Enable Gobii to proactively start conversations offering related help for this agent.",
     )
-    proactive_min_interval_minutes = models.PositiveIntegerField(
-        default=360,
-        help_text="Minimum number of minutes between proactive outreach attempts for this agent.",
-    )
-    proactive_max_daily = models.PositiveIntegerField(
-        default=1,
-        help_text="Maximum proactive outreach attempts per calendar day for this agent.",
-    )
     proactive_last_trigger_at = models.DateTimeField(
         null=True,
         blank=True,

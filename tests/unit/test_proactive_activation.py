@@ -58,8 +58,6 @@ class ProactiveActivationServiceTests(TestCase):
             schedule="@daily",
             browser_use_agent=self.browser_agent_a,
             proactive_opt_in=True,
-            proactive_min_interval_minutes=0,
-            proactive_max_daily=2,
         )
         self.agent_b = PersistentAgent.objects.create(
             user=self.user,
@@ -68,8 +66,6 @@ class ProactiveActivationServiceTests(TestCase):
             schedule="@daily",
             browser_use_agent=self.browser_agent_b,
             proactive_opt_in=True,
-            proactive_min_interval_minutes=0,
-            proactive_max_daily=2,
         )
         stale_timestamp = timezone.now() - timedelta(days=4)
         PersistentAgent.objects.filter(pk__in=[self.agent_a.pk, self.agent_b.pk]).update(
@@ -92,7 +88,7 @@ class ProactiveActivationServiceTests(TestCase):
         )
         self.assertEqual(system_steps.count(), 1)
 
-        # Second run should respect per-day limit and redis gate
+        # Second run should respect the redis gate
         triggered_again = ProactiveActivationService.trigger_agents(batch_size=5)
         self.assertEqual(len(triggered_again), 0)
 
@@ -172,15 +168,19 @@ class ProactiveActivationServiceTests(TestCase):
 
     @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
     @patch("api.services.proactive_activation.get_redis_client")
-    def test_waits_three_days_since_last_interaction(self, mock_redis_client, _mock_flag):
+    def test_respects_recent_activity_cooldown(self, mock_redis_client, _mock_flag):
         mock_redis_client.return_value = _FakeRedis()
         self.agent_b.proactive_opt_in = False
         self.agent_b.save(update_fields=["proactive_opt_in"])
 
         now = timezone.now()
+        cooldown = ProactiveActivationService.MIN_ACTIVITY_COOLDOWN
+        almost_recent = cooldown - timedelta(hours=1)
+        if almost_recent <= timedelta(0):
+            almost_recent = cooldown / 2 if cooldown > timedelta(0) else timedelta(hours=1)
 
         self.agent_a.proactive_last_trigger_at = None
-        self.agent_a.last_interaction_at = now - timedelta(days=2)
+        self.agent_a.last_interaction_at = now - almost_recent
         self.agent_a.save(update_fields=["proactive_last_trigger_at", "last_interaction_at"])
 
         triggered = ProactiveActivationService.trigger_agents(batch_size=5)
@@ -188,7 +188,7 @@ class ProactiveActivationServiceTests(TestCase):
 
         mock_redis_client.return_value = _FakeRedis()
         self.agent_a.refresh_from_db()
-        self.agent_a.last_interaction_at = now - timedelta(days=4)
+        self.agent_a.last_interaction_at = now - (cooldown + timedelta(hours=1))
         self.agent_a.save(update_fields=["last_interaction_at"])
 
         triggered_after_wait = ProactiveActivationService.trigger_agents(batch_size=5)

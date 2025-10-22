@@ -61,7 +61,7 @@ class ProactiveActivationService:
             if not has_credit:
                 logger.debug("Skipping proactive trigger for agent %s due to insufficient daily credits", agent.id)
                 continue
-            effective_min_interval = cls._effective_min_interval_minutes(agent)
+            effective_min_interval = cls._effective_min_interval_minutes()
             if not cls._min_interval_satisfied(agent, now, effective_min_interval):
                 continue
             if not cls._acquire_user_gate(redis_client, agent.user_id, effective_min_interval):
@@ -106,23 +106,19 @@ class ProactiveActivationService:
                     distinct=True,
                 )
             )
-            .filter(
-                Q(proactive_max_daily__lte=0) | Q(proactive_today__lt=F("proactive_max_daily"))
-            )
             .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")[: cls.SCAN_LIMIT]
         )
 
         return list(qs)
 
     @classmethod
-    def _effective_min_interval_minutes(cls, agent: PersistentAgent) -> int:
-        """Apply global guardrails to per-agent interval settings."""
-        minutes = int(agent.proactive_min_interval_minutes or 0)
-        return max(minutes, cls.MIN_TRIGGER_INTERVAL_MINUTES)
+    def _effective_min_interval_minutes(cls) -> int:
+        """Return the enforced minimum proactive trigger interval in minutes."""
+        return cls.MIN_TRIGGER_INTERVAL_MINUTES
 
     @staticmethod
     def _min_interval_satisfied(agent: PersistentAgent, now: datetime, required_minutes: int) -> bool:
-        """Check per-agent cooldown window."""
+        """Check cooldown window against the enforced minimum interval."""
         if required_minutes <= 0:
             return True
         last = agent.proactive_last_trigger_at
@@ -183,8 +179,6 @@ class ProactiveActivationService:
                 "agent_name": agent.name,
                 "trigger_mode": trigger_mode,
                 "triggered_at": metadata.get("triggered_at"),
-                "proactive_min_interval_minutes": agent.proactive_min_interval_minutes,
-                "proactive_max_daily": agent.proactive_max_daily,
                 "daily_credit_limit": agent.daily_credit_limit,
             }
             if metadata.get("force_trigger") is not None:
