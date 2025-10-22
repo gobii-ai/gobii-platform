@@ -94,7 +94,7 @@
       </details>
     {% endif %}
 
-    <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.url.value or form.url.errors %}open{% endif %}>
+    <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" open>
       <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
         URL
       </summary>
@@ -180,7 +180,7 @@
     {% endif %}
 
     {% with value=form.headers.value|stringformat:"s" %}
-    <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" {% if form.headers.errors or value and value != '{}' %}open{% endif %}>
+    <details class="rounded-lg border border-gray-200 bg-white px-4 py-3" open>
       <summary class="flex items-center justify-between cursor-pointer text-sm font-semibold text-gray-700">
         <span>Headers</span>
         <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
