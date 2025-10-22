@@ -786,9 +786,7 @@ async def _run_agent(
                 llm = ChatAnthropic(**llm_params)
             else:
                 if provider == "openrouter":
-                    headers = get_attribution_headers()
-                    if headers:
-                        llm_params["default_headers"] = headers
+                    llm_params.update(get_attribution_headers())
                 if base_url:
                     llm_params["base_url"] = base_url
                 llm = ChatOpenAI(**llm_params)
