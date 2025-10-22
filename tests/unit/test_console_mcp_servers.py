@@ -129,3 +129,22 @@ class MCPServerConfigFormTests(TestCase):
         config = form.save(user=user)
         self.assertEqual(config.environment, {})
         self.assertEqual(config.metadata, {})
+
+    def test_reserved_identifier_rejected_for_user_scope(self):
+        form = MCPServerConfigForm(
+            data={
+                "display_name": "Pipedream",
+                "name": "",
+                "command": "",
+                "command_args": "[]",
+                "url": "https://user-pipedream.example",
+                "metadata": "{}",
+                "environment": "{}",
+                "headers": "{}",
+                "is_active": "on",
+            },
+            allow_commands=False,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("reserved for Gobii-managed integrations", form.non_field_errors()[0])

@@ -228,6 +228,7 @@ class MCPServerConfigForm(forms.Form):
         cleaned = super().clean()
         command = (cleaned.get('command') or '').strip()
         url = (cleaned.get('url') or '').strip()
+        reserved = {name.lower() for name in MCPServerConfig.RESERVED_PLATFORM_NAMES}
         if not self.allow_commands:
             errors: dict[str, str] = {}
             if command:
@@ -250,6 +251,8 @@ class MCPServerConfigForm(forms.Form):
             cleaned['name'] = generated[:64]
         if not cleaned.get('name'):
             raise forms.ValidationError("Unable to generate an identifier. Add a display name with letters or numbers.")
+        if cleaned['name'].lower() in reserved and self.allow_commands is False:
+            raise forms.ValidationError("This MCP server identifier is reserved for Gobii-managed integrations.")
         return cleaned
 
     def clean_command_args(self):

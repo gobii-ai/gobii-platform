@@ -1,4 +1,5 @@
 from django.contrib.admin.sites import AdminSite
+from django.core.exceptions import ValidationError
 from django.test import RequestFactory, TestCase, tag
 from django.contrib.auth import get_user_model
 
@@ -105,3 +106,20 @@ class MCPServerConfigAdminTests(TestCase):
         self.assertEqual(config.headers, {"X-Test": "value"})
         self.assertEqual(config.command_args, ["-y", "@brightdata/mcp@2.6.0"])
         self.assertEqual(config.prefetch_apps, ["sheets"])
+
+    def test_reserved_identifier_blocked_for_non_platform(self):
+        owner = get_user_model().objects.create_user(
+            username="owner2",
+            email="owner2@example.com",
+            password="password123",
+        )
+
+        cfg = MCPServerConfig(
+            scope=MCPServerConfig.Scope.USER,
+            user=owner,
+            name="pipedream",
+            **self._base_defaults(),
+        )
+
+        with self.assertRaises(ValidationError):
+            cfg.clean()

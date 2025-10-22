@@ -267,7 +267,7 @@ class MCPToolManager:
             from fastmcp.client.transports import StreamableHttpTransport
 
             headers: Dict[str, str] = dict(server.headers or {})
-            if server.name == "pipedream":
+            if server.name == "pipedream" and server.scope == MCPServerConfig.Scope.PLATFORM:
                 prefetch_csv = ",".join(server.prefetch_apps) if server.prefetch_apps else getattr(
                     settings,
                     "PIPEDREAM_PREFETCH_APPS",

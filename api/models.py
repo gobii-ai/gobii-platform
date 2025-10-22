@@ -3011,6 +3011,8 @@ class PersistentAgent(models.Model):
 class MCPServerConfig(models.Model):
     """Configurable MCP server definition scoped to platform, org, or user."""
 
+    RESERVED_PLATFORM_NAMES = {"pipedream"}
+
     class Scope(models.TextChoices):
         PLATFORM = "platform", "Platform"
         ORGANIZATION = "organization", "Organization"
@@ -3091,6 +3093,10 @@ class MCPServerConfig(models.Model):
 
         if not self.command and not self.url:
             raise ValidationError("MCP servers require either a command or a URL")
+
+        reserved = {name.lower() for name in self.RESERVED_PLATFORM_NAMES}
+        if self.scope != self.Scope.PLATFORM and self.name and self.name.lower() in reserved:
+            raise ValidationError({"name": "This identifier is reserved for platform-managed integrations."})
 
     # Secret-backed fields -------------------------------------------------
     def _decrypt_json(self, payload: bytes | None) -> dict[str, str]:
