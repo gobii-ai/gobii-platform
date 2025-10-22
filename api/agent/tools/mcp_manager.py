@@ -287,16 +287,13 @@ class MCPToolManager:
         ) -> httpx.AsyncClient:
             client_kwargs: Dict[str, Any] = {
                 "headers": headers,
-                "timeout": timeout,
+                "timeout": timeout or httpx.Timeout(5.0),
                 "auth": auth,
                 "trust_env": False,
             }
             proxy_url = _proxy_url_var.get()
             if proxy_url:
-                client_kwargs["proxies"] = {
-                    "http": proxy_url,
-                    "https": proxy_url,
-                }
+                client_kwargs["proxy"] = proxy_url
             return httpx.AsyncClient(**client_kwargs)
 
         return factory
