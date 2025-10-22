@@ -97,7 +97,7 @@ def noop_reverse(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0166_mcpserverconfig_and_more'),
+        ('api', '0168_mcpserverconfig_and_more'),
     ]
 
     operations = [

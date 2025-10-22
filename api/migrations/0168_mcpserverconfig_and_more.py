@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0165_browseruseagenttask_webhook_last_called_at_and_more'),
+        ('api', '0167_add_proactive_agent_rollout_flag'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
