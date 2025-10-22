@@ -3,8 +3,9 @@
 import json
 import time
 import uuid
+from contextlib import nullcontext
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.contrib.auth import get_user_model
 
 from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentEnabledTool, MCPServerConfig
@@ -76,6 +77,65 @@ class MCPToolManagerTests(TestCase):
         )
         self.config_id = str(self.server_config.id)
         self.server_name = self.server_config.name
+    
+    def _setup_http_tool(self) -> PersistentAgent:
+        """Register a simple HTTP MCP server and enable it for a new agent."""
+        User = get_user_model()
+        user = User.objects.create_user(username=f'http-{uuid.uuid4().hex[:8]}@example.com')
+        browser_agent = create_test_browser_agent(user)
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name=f"http-agent-{uuid.uuid4().hex[:6]}",
+            charter="HTTP",
+            browser_use_agent=browser_agent,
+        )
+
+        http_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name=f"http-server-{uuid.uuid4().hex[:8]}",
+            display_name="HTTP Server",
+            description="",
+            url="https://example.com/mcp",
+        )
+        runtime = MCPServerRuntime(
+            config_id=str(http_config.id),
+            name=http_config.name,
+            display_name=http_config.display_name,
+            description=http_config.description,
+            command=None,
+            args=[],
+            url=http_config.url,
+            env=http_config.environment or {},
+            headers=http_config.headers or {},
+            prefetch_apps=[],
+            scope=http_config.scope,
+            organization_id=None,
+            user_id=None,
+            updated_at=http_config.updated_at,
+        )
+        tool = MCPToolInfo(
+            runtime.config_id,
+            "http_tool",
+            runtime.name,
+            "http_tool",
+            "HTTP tool",
+            {},
+        )
+
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+        self.manager._clients = {runtime.config_id: MagicMock()}
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="http_tool",
+            tool_server=runtime.name,
+            tool_name=tool.tool_name,
+            server_config=http_config,
+        )
+
+        return agent
         
     def test_default_enabled_tools_defined(self):
         """Test that default enabled tools list is defined."""
@@ -218,12 +278,96 @@ class MCPToolManagerTests(TestCase):
         result = self.manager.execute_mcp_tool(agent, "mcp_test_tool1", {"param": "value"})
         
         self.assertEqual(result["status"], "success")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_execute_http_tool_uses_proxy(self):
+        """Ensure HTTP-based MCP tools route through agent-selected proxy."""
+        agent = self._setup_http_tool()
+
+        mock_result = MagicMock()
+        mock_result.is_error = False
+        mock_result.data = "Success result"
+        mock_result.content = []
+
+        loop = MagicMock()
+        loop.run_until_complete.return_value = mock_result
+
+        captured: list[str] = []
+
+        def fake_proxy_ctx(url):
+            captured.append(url)
+            return nullcontext()
+
+        with patch.object(self.manager, "_select_agent_proxy_url", return_value=("http://proxy.example:8080", None)) as mock_select, \
+             patch("api.agent.tools.mcp_manager._use_mcp_proxy", side_effect=fake_proxy_ctx) as mock_ctx, \
+             patch.object(self.manager, "_execute_async", new=AsyncMock(return_value=mock_result)), \
+             patch.object(self.manager, "_ensure_event_loop", return_value=loop):
+            result = self.manager.execute_mcp_tool(agent, "http_tool", {"foo": "bar"})
+
+        self.assertEqual(result["status"], "success")
+        mock_select.assert_called_once()
+        mock_ctx.assert_called()
+        self.assertIn("http://proxy.example:8080", captured)
         self.assertEqual(result["result"], "Success result")
         
         # Check that usage was tracked
-        row = PersistentAgentEnabledTool.objects.get(agent=agent, tool_full_name="mcp_test_tool1")
+        row = PersistentAgentEnabledTool.objects.get(agent=agent, tool_full_name="http_tool")
         self.assertIsNotNone(row.last_used_at)
-        
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @patch('api.agent.tools.mcp_manager.select_proxy_for_persistent_agent')
+    def test_execute_http_tool_without_proxy_logs_warning(self, mock_select_proxy):
+        """Ensure HTTP tools continue without proxy when none available."""
+        mock_select_proxy.side_effect = RuntimeError("No proxies configured")
+        agent = self._setup_http_tool()
+
+        mock_result = MagicMock()
+        mock_result.is_error = False
+        mock_result.data = "OK"
+        mock_result.content = []
+
+        loop = MagicMock()
+        loop.run_until_complete.return_value = mock_result
+
+        with patch.object(self.manager, "_execute_async", new=AsyncMock(return_value=mock_result)), \
+             patch.object(self.manager, "_ensure_event_loop", return_value=loop), \
+             self.assertLogs("api.agent.tools.mcp_manager", level="WARNING") as log_capture:
+            result = self.manager.execute_mcp_tool(agent, "http_tool", {"foo": "bar"})
+
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(
+            any("continuing without proxy" in message for message in log_capture.output),
+            f"Expected warning about proxy fallback, got: {log_capture.output}",
+        )
+        mock_select_proxy.assert_called_once()
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch('api.agent.tools.mcp_manager.select_proxy_for_persistent_agent')
+    def test_execute_http_tool_errors_when_proxy_required(self, mock_select_proxy):
+        """Ensure HTTP tools fail gracefully when proxy required but unavailable."""
+        mock_select_proxy.side_effect = RuntimeError("No proxies configured")
+        agent = self._setup_http_tool()
+
+        mock_result = MagicMock()
+        mock_result.is_error = False
+        mock_result.data = "OK"
+        mock_result.content = []
+
+        loop = MagicMock()
+        loop.run_until_complete.return_value = mock_result
+
+        with patch.object(self.manager, "_execute_async", new=AsyncMock(return_value=mock_result)), \
+             patch.object(self.manager, "_ensure_event_loop", return_value=loop), \
+             self.assertLogs("api.agent.tools.mcp_manager", level="ERROR") as log_capture:
+            result = self.manager.execute_mcp_tool(agent, "http_tool", {"foo": "bar"})
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("No proxy server available", result["message"])
+        self.assertTrue(
+            any("requires a proxy" in message or "Proxy selection failed" in message for message in log_capture.output),
+            f"Expected error log about proxy requirement, got: {log_capture.output}",
+        )
+
     def test_execute_mcp_tool_not_enabled(self):
         """Test executing a tool that's not enabled."""
         User = get_user_model()

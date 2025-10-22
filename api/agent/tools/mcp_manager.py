@@ -17,6 +17,8 @@ import asyncio
 import os
 import fnmatch
 import re
+import contextlib
+import contextvars
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta, UTC
@@ -24,6 +26,7 @@ from datetime import datetime, timedelta, UTC
 import requests
 import litellm  # re-exported for tests expecting to patch LiteLLM directly
 
+import httpx
 from fastmcp import Client
 from mcp.types import Tool as MCPTool
 from opentelemetry import trace
@@ -36,6 +39,7 @@ from ...models import (
     PersistentAgentEnabledTool,
     PipedreamConnectSession,
 )
+from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
 from ..core.llm_config import get_llm_config_with_failover, LLMNotConfiguredError
 from ..core.llm_utils import run_completion
@@ -45,6 +49,23 @@ tracer = trace.get_tracer("gobii.utils")
 
 # Maximum number of MCP tools that can be enabled per agent
 MAX_MCP_TOOLS = 40
+
+_proxy_url_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "mcp_http_proxy_url", default=None
+)
+
+
+@contextlib.contextmanager
+def _use_mcp_proxy(proxy_url: Optional[str]):
+    """Temporarily bind an HTTP proxy URL for MCP HTTP transports."""
+    if proxy_url:
+        token = _proxy_url_var.set(proxy_url)
+        try:
+            yield
+        finally:
+            _proxy_url_var.reset(token)
+    else:
+        yield
 
 
 @dataclass
@@ -117,6 +138,7 @@ class MCPToolManager:
         self._pd_token_expiry: Optional[datetime] = None
         # Per‑agent Pipedream clients (unique connection per agent id)
         self._pd_agent_clients: Dict[str, Client] = {}
+        self._httpx_client_factory = self._build_httpx_client_factory()
         
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
         """Ensure we have an event loop for async operations."""
@@ -257,6 +279,83 @@ class MCPToolManager:
             updated_at=cfg.updated_at,
         )
     
+    def _build_httpx_client_factory(self):
+        def factory(
+            headers: Optional[dict[str, str]] = None,
+            timeout: Optional[httpx.Timeout] = None,
+            auth: Optional[httpx.Auth] = None,
+        ) -> httpx.AsyncClient:
+            client_kwargs: Dict[str, Any] = {
+                "headers": headers,
+                "timeout": timeout,
+                "auth": auth,
+                "trust_env": False,
+            }
+            proxy_url = _proxy_url_var.get()
+            if proxy_url:
+                client_kwargs["proxies"] = {
+                    "http": proxy_url,
+                    "https": proxy_url,
+                }
+            return httpx.AsyncClient(**client_kwargs)
+
+        return factory
+
+    def _select_discovery_proxy_url(self, server: MCPServerRuntime) -> Optional[str]:
+        if not server.url:
+            return None
+        proxy_required = getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+        try:
+            proxy = select_proxy(
+                allow_no_proxy_in_debug=getattr(settings, "DEBUG", False) and not proxy_required,
+                context_id=f"mcp_discovery_{server.config_id}",
+            )
+        except RuntimeError as exc:
+            if proxy_required:
+                logger.error(
+                    "MCP discovery for %s (%s) requires a proxy but none are available: %s",
+                    server.name,
+                    server.config_id,
+                    exc,
+                )
+                raise
+            logger.warning(
+                "MCP discovery for %s (%s) falling back to direct connection; proxy unavailable: %s",
+                server.name,
+                server.config_id,
+                exc,
+            )
+            return None
+        if proxy_required and proxy is None:
+            logger.error(
+                "MCP discovery for %s (%s) requires a proxy but none were selected.",
+                server.name,
+                server.config_id,
+            )
+            raise RuntimeError("Proxy required but unavailable for MCP discovery.")
+        return proxy.proxy_url if proxy else None
+
+    def _select_agent_proxy_url(self, agent: PersistentAgent) -> Tuple[Optional[str], Optional[str]]:
+        if not getattr(settings, "ENABLE_PROXY_ROUTING", True):
+            # Allow environments to opt out entirely (mainly for tests)
+            return None, None
+
+        proxy_required = getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+        try:
+            proxy = select_proxy_for_persistent_agent(agent)
+        except RuntimeError as exc:
+            if proxy_required:
+                logger.error("Proxy selection failed for agent %s and a proxy is required: %s", agent.id, exc)
+                return None, "No proxy server available"
+            logger.warning("Proxy selection failed for agent %s; continuing without proxy: %s", agent.id, exc)
+            return None, None
+
+        if proxy_required and not proxy:
+            logger.error("Proxy required but unavailable for agent %s", agent.id)
+            return None, "No proxy server available"
+
+        return (proxy.proxy_url if proxy else None, None)
+    
     def _register_server(self, server: MCPServerRuntime):
         """Register an MCP server and cache its tools."""
 
@@ -284,7 +383,11 @@ class MCPToolManager:
                     prefetch_csv,
                 )
 
-            transport = StreamableHttpTransport(url=server.url, headers=headers)
+            transport = StreamableHttpTransport(
+                url=server.url,
+                headers=headers,
+                httpx_client_factory=self._httpx_client_factory,
+            )
         elif server.command:
             from fastmcp.client.transports import StdioTransport
 
@@ -300,7 +403,9 @@ class MCPToolManager:
         self._clients[server.config_id] = client
 
         loop = self._ensure_event_loop()
-        tools = loop.run_until_complete(self._fetch_server_tools(client, server))
+        proxy_url = self._select_discovery_proxy_url(server)
+        with _use_mcp_proxy(proxy_url):
+            tools = loop.run_until_complete(self._fetch_server_tools(client, server))
         self._tools_cache[server.config_id] = tools
 
         logger.info(
@@ -534,6 +639,14 @@ class MCPToolManager:
 
         server_name = info.server_name
         actual_tool_name = info.tool_name
+        runtime = self._server_cache.get(info.config_id)
+
+        proxy_url = None
+        proxy_error: Optional[str] = None
+        if runtime and runtime.url:
+            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
+            if proxy_error:
+                return {"status": "error", "message": proxy_error}
 
         if server_name == "pipedream":
             app_slug, mode = self._pd_parse_tool(info.tool_name)
@@ -548,7 +661,8 @@ class MCPToolManager:
         
         try:
             loop = self._ensure_event_loop()
-            result = loop.run_until_complete(self._execute_async(client, actual_tool_name, params))
+            with _use_mcp_proxy(proxy_url):
+                result = loop.run_until_complete(self._execute_async(client, actual_tool_name, params))
             
             # Convert result to consistent format
             if hasattr(result, 'is_error') and result.is_error:
@@ -870,7 +984,11 @@ class MCPToolManager:
             external_user_id=agent_key,
             conversation_id=agent_key,
         )
-        transport = StreamableHttpTransport(url=runtime.url or "", headers=headers)
+        transport = StreamableHttpTransport(
+            url=runtime.url or "",
+            headers=headers,
+            httpx_client_factory=self._httpx_client_factory,
+        )
         client = Client(transport)
         self._pd_agent_clients[cache_key] = client
         return client

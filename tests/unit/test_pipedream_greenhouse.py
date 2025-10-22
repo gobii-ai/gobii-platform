@@ -2,7 +2,7 @@ import json
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
-from django.test import TestCase, RequestFactory, tag
+from django.test import TestCase, RequestFactory, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.contrib.sites.models import Site
 from django.utils import timezone
@@ -156,7 +156,8 @@ class PipedreamGreenhouseConnectTests(TestCase):
         mock_create.return_value = (fake_session, "https://example.com/connect?token=abc&app=greenhouse")
 
         # Act
-        res = mgr.execute_mcp_tool(agent, "greenhouse-create-candidate", {"instruction": "x"})
+        with patch.object(mgr, "_select_agent_proxy_url", return_value=(None, None)):
+            res = mgr.execute_mcp_tool(agent, "greenhouse-create-candidate", {"instruction": "x"})
 
         # Assert
         self.assertEqual(res.get("status"), "action_required")
@@ -168,10 +169,12 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
     def setUp(self):
         Site.objects.update_or_create(id=1, defaults={"domain": "example.com", "name": "example"})
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @patch('api.agent.tools.mcp_manager.select_proxy', return_value=None)
     @patch('api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop')
     @patch('api.agent.tools.mcp_manager.Client')
     @patch('fastmcp.client.transports.StreamableHttpTransport')
-    def test_discovery_initial_app_slug_greenhouse(self, mock_transport, mock_client_cls, mock_loop):
+    def test_discovery_initial_app_slug_greenhouse(self, mock_transport, mock_client_cls, mock_loop, mock_select_proxy):
         """When prefetch is set to greenhouse only, headers use app=greenhouse."""
         from api.agent.tools.mcp_manager import MCPToolManager
 
@@ -226,3 +229,84 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
         args, kwargs = mock_transport.call_args
         self.assertIn('headers', kwargs)
         self.assertEqual(kwargs['headers'].get('x-pd-app-slug'), 'greenhouse')
+        self.assertIn('httpx_client_factory', kwargs)
+        self.assertTrue(callable(kwargs['httpx_client_factory']))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @patch('api.agent.tools.mcp_manager.select_proxy', side_effect=RuntimeError("No proxies"))
+    @patch('api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop')
+    @patch('api.agent.tools.mcp_manager.Client')
+    @patch('fastmcp.client.transports.StreamableHttpTransport')
+    def test_discovery_logs_warning_when_proxy_unavailable(self, mock_transport, mock_client_cls, mock_loop, mock_select_proxy):
+        from api.agent.tools.mcp_manager import MCPToolManager
+
+        mgr = MCPToolManager()
+        loop = MagicMock()
+        loop.run_until_complete.return_value = []
+        mock_loop.return_value = loop
+        mock_client_cls.return_value = MagicMock()
+
+        with patch.object(mgr, '_fetch_server_tools', return_value=[]), \
+             patch.object(mgr, '_pd_build_headers', return_value={}), \
+             self.assertLogs('api.agent.tools.mcp_manager', level='WARNING') as logs:
+            config = _get_or_create_pipedream_config()
+            runtime = MCPServerRuntime(
+                config_id=str(config.id),
+                name=config.name,
+                display_name=config.display_name,
+                description=config.description,
+                command=config.command or None,
+                args=list(config.command_args or []),
+                url=config.url or "",
+                env=config.environment or {},
+                headers=config.headers or {},
+                prefetch_apps=["greenhouse"],
+                scope=config.scope,
+                organization_id=str(config.organization_id) if config.organization_id else None,
+                user_id=str(config.user_id) if config.user_id else None,
+                updated_at=config.updated_at,
+            )
+            mgr._server_cache = {runtime.config_id: runtime}
+            mgr._register_server(runtime)
+
+        self.assertTrue(any("falling back to direct connection" in message for message in logs.output))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch('api.agent.tools.mcp_manager.select_proxy', return_value=None)
+    @patch('api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop')
+    @patch('api.agent.tools.mcp_manager.Client')
+    @patch('fastmcp.client.transports.StreamableHttpTransport')
+    def test_discovery_errors_when_proxy_required(self, mock_transport, mock_client_cls, mock_loop, mock_select_proxy):
+        from api.agent.tools.mcp_manager import MCPToolManager
+
+        mgr = MCPToolManager()
+        loop = MagicMock()
+        loop.run_until_complete.return_value = []
+        mock_loop.return_value = loop
+        mock_client_cls.return_value = MagicMock()
+
+        with patch.object(mgr, '_fetch_server_tools', return_value=[]), \
+             patch.object(mgr, '_pd_build_headers', return_value={}), \
+             self.assertLogs('api.agent.tools.mcp_manager', level='ERROR') as logs, \
+             self.assertRaises(RuntimeError):
+            config = _get_or_create_pipedream_config()
+            runtime = MCPServerRuntime(
+                config_id=str(config.id),
+                name=config.name,
+                display_name=config.display_name,
+                description=config.description,
+                command=config.command or None,
+                args=list(config.command_args or []),
+                url=config.url or "",
+                env=config.environment or {},
+                headers=config.headers or {},
+                prefetch_apps=["greenhouse"],
+                scope=config.scope,
+                organization_id=str(config.organization_id) if config.organization_id else None,
+                user_id=str(config.user_id) if config.user_id else None,
+                updated_at=config.updated_at,
+            )
+            mgr._server_cache = {runtime.config_id: runtime}
+            mgr._register_server(runtime)
+
+        self.assertTrue(any("requires a proxy" in message for message in logs.output))
