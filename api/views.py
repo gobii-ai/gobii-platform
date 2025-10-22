@@ -71,6 +71,15 @@ class MCPServerConfigViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = None
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        org = self._get_organization_context()
+        if org is not None:
+            context['mcp_scope'] = MCPServerConfig.Scope.ORGANIZATION
+        else:
+            context['mcp_scope'] = MCPServerConfig.Scope.USER
+        return context
+
     def get_queryset(self):
         org = self._get_organization_context()
         if org is not None:

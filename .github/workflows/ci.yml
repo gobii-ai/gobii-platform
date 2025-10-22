@@ -188,6 +188,8 @@ jobs:
             tag: batch_console_api_keys
           - batch: console_mcp_servers
             tag: batch_console_mcp_servers
+          - batch: api_mcp_servers
+            tag: batch_api_mcp_servers
           - batch: charter_tools
             tag: batch_charter_tools
           - batch: text_sanitization

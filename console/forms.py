@@ -174,8 +174,15 @@ class MCPServerConfigForm(forms.Form):
     headers = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="JSON object of HTTP headers.")
     is_active = forms.BooleanField(required=False, initial=True)
 
-    def __init__(self, *args, instance: MCPServerConfig | None = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        instance: MCPServerConfig | None = None,
+        allow_commands: bool = True,
+        **kwargs,
+    ):
         self.instance = instance
+        self.allow_commands = allow_commands
         initial = kwargs.setdefault('initial', {})
         if instance is not None:
             initial.setdefault('name', instance.name)
@@ -187,6 +194,9 @@ class MCPServerConfigForm(forms.Form):
             initial.setdefault('environment', instance.environment or {})
             initial.setdefault('headers', instance.headers or {})
             initial.setdefault('is_active', instance.is_active)
+        if not allow_commands:
+            initial.setdefault('command', '')
+            initial.setdefault('command_args', [])
         super().__init__(*args, **kwargs)
 
         self.fields['name'].widget = forms.HiddenInput()
@@ -208,12 +218,27 @@ class MCPServerConfigForm(forms.Form):
                 widget.attrs.update({'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500 font-mono text-sm'})
             else:
                 widget.attrs.update({'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500'})
+        if not self.allow_commands:
+            self.fields['command'].widget = forms.HiddenInput()
+            self.fields['command_args'].widget = forms.HiddenInput()
 
     def clean(self):
         cleaned = super().clean()
         command = (cleaned.get('command') or '').strip()
         url = (cleaned.get('url') or '').strip()
-        if not command and not url:
+        if not self.allow_commands:
+            errors: dict[str, str] = {}
+            if command:
+                errors['command'] = "Command-based MCP servers are managed by Gobii. Provide a URL instead."
+            if cleaned.get('command_args'):
+                errors['command_args'] = "Command arguments are not supported for user-managed MCP servers."
+            if not url:
+                errors['url'] = "Provide a URL for the MCP server."
+            cleaned['command'] = ''
+            cleaned['command_args'] = []
+            if errors:
+                raise forms.ValidationError(errors)
+        elif not command and not url:
             raise forms.ValidationError("Provide either a command or a URL for the MCP server.")
 
         name = (cleaned.get('name') or '').strip()
@@ -266,6 +291,9 @@ class MCPServerConfigForm(forms.Form):
         config.command = self.cleaned_data.get('command', '')
         config.command_args = self.cleaned_data.get('command_args') or []
         config.url = self.cleaned_data.get('url', '')
+        if not self.allow_commands:
+            config.command = ''
+            config.command_args = []
         if 'prefetch_apps' in self.cleaned_data:
             config.prefetch_apps = self.cleaned_data.get('prefetch_apps') or []
         config.metadata = self.cleaned_data.get('metadata') or {}

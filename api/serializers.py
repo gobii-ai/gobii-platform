@@ -362,6 +362,34 @@ class MCPServerConfigSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, attrs):
+        scope = attrs.get('scope')
+        if scope is None and self.instance is not None:
+            scope = self.instance.scope
+        if scope is None:
+            scope = self.context.get('mcp_scope', MCPServerConfig.Scope.USER)
+
+        if scope != MCPServerConfig.Scope.PLATFORM:
+            errors = {}
+            command_input = attrs.get('command')
+            if command_input:
+                errors['command'] = "Command-based MCP servers are managed by Gobii. Provide a URL instead."
+
+            command_args_input = attrs.get('command_args')
+            if command_args_input:
+                errors['command_args'] = "Command arguments are not supported for user-managed MCP servers."
+
+            final_url = attrs.get('url')
+            if final_url is None and self.instance is not None:
+                final_url = self.instance.url
+            if not final_url:
+                errors['url'] = "Provide a URL for the MCP server."
+
+            attrs['command'] = ''
+            attrs['command_args'] = []
+            if errors:
+                raise serializers.ValidationError(errors)
+            return attrs
+
         command = attrs.get('command', getattr(self.instance, 'command', ''))
         url = attrs.get('url', getattr(self.instance, 'url', ''))
         if not command and not url:

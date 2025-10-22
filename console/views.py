@@ -3406,7 +3406,7 @@ class MCPServerConfigCreateModalView(MCPServerOwnerMixin, ConsoleViewMixin, View
         }
 
     def get(self, request, *args, **kwargs):
-        form = MCPServerConfigForm()
+        form = MCPServerConfigForm(allow_commands=False)
         return render(
             request,
             "console/partials/_mcp_server_modal.html",
@@ -3425,7 +3425,7 @@ class MCPServerConfigCreateView(MCPServerOwnerMixin, ConsoleViewMixin, View):
         }
 
     def post(self, request, *args, **kwargs):
-        form = MCPServerConfigForm(request.POST)
+        form = MCPServerConfigForm(request.POST, allow_commands=False)
         if form.is_valid():
             try:
                 server = form.save(user=self.owner_user, organization=self.owner_org)
@@ -3516,7 +3516,7 @@ class MCPServerConfigUpdateView(ConsoleViewMixin, TemplateView):
 
     def get(self, request, *args, **kwargs):
         if request.htmx:
-            form = MCPServerConfigForm(instance=self.config)
+            form = MCPServerConfigForm(instance=self.config, allow_commands=False)
             return render(
                 request,
                 "console/partials/_mcp_server_modal.html",
@@ -3527,12 +3527,12 @@ class MCPServerConfigUpdateView(ConsoleViewMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['config'] = self.config
-        context['form'] = kwargs.get('form') or MCPServerConfigForm(instance=self.config)
+        context['form'] = kwargs.get('form') or MCPServerConfigForm(instance=self.config, allow_commands=False)
         context['owner_label'] = self._get_owner_label()
         return context
 
     def post(self, request, *args, **kwargs):
-        form = MCPServerConfigForm(request.POST, instance=self.config)
+        form = MCPServerConfigForm(request.POST, instance=self.config, allow_commands=False)
         if form.is_valid():
             try:
                 updated_server = form.save()
