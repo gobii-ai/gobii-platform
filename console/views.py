@@ -3506,7 +3506,20 @@ class AgentSecretsView(LoginRequiredMixin, TemplateView):
                 'description': secret.description,
                 'key': secret.key,
                 'created_at': secret.created_at,
-                'updated_at': secret.updated_at
+                'updated_at': secret.updated_at,
+                'requested': False,
+            }
+        for secret in requested_qs:
+            if secret.domain_pattern not in secrets:
+                secrets[secret.domain_pattern] = {}
+            secrets[secret.domain_pattern][secret.name] = {
+                'id': secret.id,
+                'name': secret.name,
+                'description': secret.description,
+                'key': secret.key,
+                'created_at': secret.created_at,
+                'updated_at': secret.updated_at,
+                'requested': True,
             }
         context['secrets'] = secrets
         context['has_secrets'] = bool(secrets)

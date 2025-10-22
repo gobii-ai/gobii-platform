@@ -464,19 +464,19 @@ class AgentSecretsRequestViewTests(TestCase):
         }
         
         result = execute_secure_credentials_request(self.agent, params)
-        
+
         self.assertEqual(result["status"], "error")
         # The actual implementation checks if credentials list is empty before checking individual items
         # But based on the test output, it seems to give a different error message
         self.assertIn("invalid", result["message"].lower())
-    
+
     def test_invalid_params_format(self):
         """Test that invalid params format is handled gracefully."""
         # credentials not a list
         params = {
             "credentials": "not a list"
         }
-        
+
         result = execute_secure_credentials_request(self.agent, params)
         
         self.assertEqual(result["status"], "error")
@@ -687,6 +687,55 @@ class SecretContextIntegrationTests(TestCase):
                 
                 # Fulfilled secret should be substituted
                 self.assertEqual(headers["X-Fulfilled"], "fulfilled_value")
-                
+        
                 # Requested secret should remain as placeholder
                 self.assertEqual(headers["X-Requested"], "<<<requested_key>>>")
+
+
+@tag("batch_agent_secrets_ctx")
+class AgentSecretsViewDisplayTests(TestCase):
+    """Verify console secrets view keeps requested secrets visible."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="viewer@example.com",
+            email="viewer@example.com",
+            password="password"
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="BrowserAgentDisplay"
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            browser_use_agent=self.browser_agent,
+            name="AgentDisplay"
+        )
+        self.client = Client()
+        assert self.client.login(username="viewer@example.com", password="password")
+
+    def test_requested_secret_still_listed_with_status(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="API Token",
+            description="Token that was re-requested",
+            key="api_token",
+            requested=True,
+            encrypted_value=b""
+        )
+
+        url = reverse('agent_secrets', kwargs={"pk": self.agent.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        secrets = response.context['secrets']
+        self.assertIn(secret.domain_pattern, secrets)
+        domain_secrets = secrets[secret.domain_pattern]
+        self.assertIn(secret.name, domain_secrets)
+        secret_payload = domain_secrets[secret.name]
+        self.assertTrue(secret_payload['requested'])
+        self.assertTrue(response.context['has_secrets'])
+
+        requested_list = response.context['requested_secrets']
+        self.assertTrue(any(item.id == secret.id for item in requested_list))
