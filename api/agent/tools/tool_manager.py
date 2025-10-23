@@ -369,14 +369,13 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
     if not entry:
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}
 
+    if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
+        return {"status": "error", "message": f"Tool '{tool_name}' is not enabled for this agent"}
+
     if entry.provider == "mcp":
-        if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
-            return {"status": "error", "message": f"Tool '{tool_name}' is not enabled for this agent"}
         return execute_mcp_tool(agent, tool_name, params)
 
     if entry.provider == "builtin":
-        if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
-            return {"status": "error", "message": f"Tool '{tool_name}' is not enabled for this agent"}
         registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
         executor = registry_entry.get("executor") if registry_entry else None
         if executor:
