@@ -179,14 +179,14 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
 
         # Send email
         try:
-            send_mail(
-                f'Support Request: {subject}',
-                plain_message,
-                settings.DEFAULT_FROM_EMAIL,
-                [settings.SUPPORT_EMAIL],  # Use a support email address
-                html_message=html_message,
-                fail_silently=False,
-            )
+            # send_mail(
+            #     f'Support Request: {subject}',
+            #     plain_message,
+            #     settings.DEFAULT_FROM_EMAIL,
+            #     [settings.SUPPORT_EMAIL],  # Use a support email address
+            #     html_message=html_message,
+            #     fail_silently=False,
+            # )
 
             # Return success message (for HTMX response)
             return HttpResponse(
