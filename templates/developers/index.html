@@ -1,78 +1,87 @@
 {% extends "page.html" %}
+{% load static %}
 
 {% block title %}Gobii Developer Hub — AI Agent API & Persistent Browser Automation{% endblock %}
 
 {% block head_extras %}
   {{ block.super }}
+  <link rel="canonical" href="https://gobii.ai/developers/">
+  <meta name="robots" content="index,follow">
   <meta name="description" content="Build persistent AI agents and automate the web with one API. Spawn agents, run browser tasks, receive webhooks, and scale to production. Open-core, MIT-licensed.">
+
   <meta property="og:title" content="Gobii Developer Hub — AI Agent API & Persistent Browser Automation">
   <meta property="og:description" content="Build persistent AI agents and automate the web with one API. Open-core, MIT-licensed.">
   <meta property="og:url" content="https://gobii.ai/developers/">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="">
+  <meta property="og:image" content="{% static 'img/devhub_og.jpg' %}">
+
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Gobii Developer Hub — AI Agent API & Persistent Browser Automation">
   <meta name="twitter:description" content="Spawn agents, run tasks, receive webhooks. Open-core, MIT.">
-  <meta name="twitter:image" content="">
+  <meta name="twitter:image" content="{% static 'img/devhub_og.jpg' %}">
 {% endblock %}
 
 {% block page_article %}
-  <div class="mx-auto flex max-w-5xl flex-col gap-12 md:mt-2">
-    <section class="relative overflow-hidden bg-slate-950">
-      <div class="mx-auto max-w-6xl px-6 py-20 text-center">
-        <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight text-white">
-          Build AI Agents. Automate the Web. <span class="block text-indigo-400">All with one API.</span>
-        </h1>
-        <p class="mt-6 text-slate-300 max-w-2xl mx-auto">
-          Gobii is a developer-first, open-core <strong>AI Agent API</strong> for persistent, adaptive browser automation.
-          Spawn agents, run tasks, receive webhooks—no custom infra required.
-        </p>
-        <div class="mt-8 flex items-center justify-center gap-3">
-          <a href="/accounts/signup/" class="rounded-lg bg-indigo-600 px-5 py-3 text-white font-semibold hover:bg-indigo-500">Get API Key</a>
-          <a href="/developers/getting-started/" class="rounded-lg border border-slate-700 px-5 py-3 text-slate-200 hover:bg-slate-900">Quick Start</a>
-          <a href="/docs/guides/api/" class="rounded-lg border border-slate-700 px-5 py-3 text-slate-200 hover:bg-slate-900">API Docs</a>
-        </div>
-        <p class="mt-4 text-xs text-slate-400">Open-core • MIT-licensed • Production-ready</p>
-      </div>
-    </section>
 
-    <section class="bg-white">
-      <div class="mx-auto max-w-6xl px-6 py-16">
-        <div class="grid gap-8 md:grid-cols-3">
-          <div>
-            <h3 class="text-lg font-semibold text-slate-900">Persistent Agents</h3>
-            <p class="mt-2 text-slate-600">Agents that keep state, run 24/7, and answer via webhooks—ideal for monitoring, workflows, and assistants.</p>
-          </div>
-          <div>
-            <h3 class="text-lg font-semibold text-slate-900">Adaptive Browser Control</h3>
-            <p class="mt-2 text-slate-600">Real-browser automation that handles changing layouts, forms, and flows—no brittle scripts.</p>
-          </div>
-          <div>
-            <h3 class="text-lg font-semibold text-slate-900">Open-Core & Portable</h3>
-            <p class="mt-2 text-slate-600">MIT-licensed core with self-hosting path. Use Gobii Cloud for scale or run your own.</p>
-          </div>
+  <!-- Hero -->
+  <section class="relative overflow-hidden bg-slate-950 rounded-2xl shadow-lg">
+    <div class="mx-auto max-w-6xl px-6 py-20 text-center">
+      <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight text-white">
+        Build AI Agents. Automate the Web. <span class="block text-indigo-400">All with one API.</span>
+      </h1>
+      <p class="mt-6 text-slate-300 max-w-2xl mx-auto">
+        Gobii is a developer-first, open-core <strong>AI Agent API</strong> for persistent, adaptive browser automation.
+        Spawn agents, run tasks, receive webhooks—no custom infra required.
+      </p>
+      <div class="mt-8 flex items-center justify-center gap-3">
+        <a href="/accounts/signup/" class="rounded-lg bg-indigo-600 px-5 py-3 text-white font-semibold hover:bg-indigo-500" title="Create a Gobii account and get your API key">Get API Key</a>
+        <a href="/developers/getting-started/" class="rounded-lg border border-slate-700 px-5 py-3 text-slate-200 hover:bg-slate-900" title="Quick start guide for developers">Quick Start</a>
+        <a href="/docs/guides/api/" class="rounded-lg border border-slate-700 px-5 py-3 text-slate-200 hover:bg-slate-900" title="Gobii API documentation">API Docs</a>
+      </div>
+      <p class="mt-4 text-xs text-slate-400">Open-core • MIT-licensed • Production-ready</p>
+    </div>
+  </section>
+
+  <!-- Value props -->
+  <section class="bg-white rounded-2xl shadow-sm mt-12">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+      <div class="grid gap-8 md:grid-cols-3">
+        <div class="rounded-xl bg-slate-50 p-6 shadow-sm hover:shadow-md transition">
+          <h3 class="text-lg font-semibold text-slate-900">Persistent Agents</h3>
+          <p class="mt-2 text-slate-600">Agents that keep state, run 24/7, and answer via webhooks—ideal for monitoring, workflows, and assistants.</p>
+        </div>
+        <div class="rounded-xl bg-slate-50 p-6 shadow-sm hover:shadow-md transition">
+          <h3 class="text-lg font-semibold text-slate-900">Adaptive Browser Control</h3>
+          <p class="mt-2 text-slate-600">Real-browser automation that handles changing layouts, forms, and flows—no brittle scripts.</p>
+        </div>
+        <div class="rounded-xl bg-slate-50 p-6 shadow-sm hover:shadow-md transition">
+          <h3 class="text-lg font-semibold text-slate-900">Open-Core & Portable</h3>
+          <p class="mt-2 text-slate-600">MIT-licensed core with a self-hosting path. Use Gobii Cloud for scale or run your own.</p>
         </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="bg-slate-50">
-  <div class="mx-auto max-w-6xl px-6 py-16">
-    <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Your first request in 3 minutes</h2>
-    <ol class="mt-6 space-y-4 text-slate-700">
-      <li><strong>1.</strong> <a class="text-indigo-600 hover:underline" href="/signup">Create a free account</a> and copy your API key.</li>
-      <li><strong>2.</strong> Run a task.</li>
-    </ol>
-<pre class="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-slate-100 text-sm"><code># cURL
+  <!-- Quick start -->
+  <section class="bg-slate-50 rounded-2xl shadow-sm mt-12">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+      <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Your first request in 3 minutes</h2>
+      <ol class="mt-6 space-y-4 text-slate-700">
+        <li><strong>1.</strong> <a class="text-indigo-600 hover:underline" href="/accounts/signup/">Create a free account</a> and copy your API key.</li>
+        <li><strong>2.</strong> Run a task.</li>
+      </ol>
+
+      <div class="mt-6 rounded-xl bg-slate-900 p-4 shadow-inner">
+<pre class="overflow-x-auto text-slate-100 text-sm"><code># cURL
 curl -X POST https://api.gobii.ai/v1/tasks \
-  -H "Authorization: Bearer <YOUR_API_KEY>" \
+  -H "Authorization: Bearer &lt;YOUR_API_KEY&gt;" \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Log into example.com and export recent messages as CSV",
     "callback_url": "https://yourapp.com/webhooks/gobii"
   }'
 
-# Node.js (fetch)
-import fetch from "node-fetch";
+# Node.js (Node 18+ has fetch built in)
 const res = await fetch("https://api.gobii.ai/v1/tasks", {
   method: "POST",
   headers: {
@@ -86,10 +95,13 @@ const res = await fetch("https://api.gobii.ai/v1/tasks", {
 });
 const json = await res.json();
 console.log(json); // { task_id, status: "queued" }</code></pre>
+      </div>
 
-    <p class="mt-6 text-slate-700"><strong>3.</strong> Receive results via webhook:</p>
-<pre class="mt-3 overflow-x-auto rounded-lg bg-slate-900 p-4 text-slate-100 text-sm"><code>// Express.js webhook example
-app.post("/webhooks/gobii", express.json(), (req, res) => {
+      <p class="mt-6 text-slate-700"><strong>3.</strong> Receive results via webhook:</p>
+
+      <div class="mt-3 rounded-xl bg-slate-900 p-4 shadow-inner">
+<pre class="overflow-x-auto text-slate-100 text-sm"><code>// Express.js webhook example
+app.post("/webhooks/gobii", (req, res) => {
   const { task_id, status, output, error } = req.body;
   if (status === "succeeded") {
     // process output (files, text, structured data)
@@ -98,177 +110,82 @@ app.post("/webhooks/gobii", express.json(), (req, res) => {
   }
   res.sendStatus(200);
 });</code></pre>
-
-    <div class="mt-6">
-      <a href="/developers/getting-started/" class="inline-flex items-center gap-2 text-indigo-600 hover:underline">
-        See full quickstart and error handling →
-      </a>
-    </div>
-  </div>
-</section>
-
-<section class="bg-white">
-  <div class="mx-auto max-w-6xl px-6 py-16">
-    <h2 class="text-2xl md:text-3xl font-bold text-slate-900">What developers build with Gobii</h2>
-    <div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-      <a href="/developers/examples/customer-support-agent/" class="block rounded-xl border p-5 hover:shadow">
-        <h3 class="font-semibold">AI Customer Support Agent</h3>
-        <p class="mt-2 text-sm text-slate-600">Triages tickets, pulls data from web tools, drafts replies.</p>
-      </a>
-      <a href="/developers/examples/form-automation/" class="block rounded-xl border p-5 hover:shadow">
-        <h3 class="font-semibold">Form Auto-Filler</h3>
-        <p class="mt-2 text-sm text-slate-600">Logs in, submits multi-step forms, exports confirmations.</p>
-      </a>
-      <a href="/developers/examples/monitoring-bot/" class="block rounded-xl border p-5 hover:shadow">
-        <h3 class="font-semibold">Monitoring Bots</h3>
-        <p class="mt-2 text-sm text-slate-600">Persistent agents watch pages and alert on changes.</p>
-      </a>
-      <a href="/developers/examples/research-scraper/" class="block rounded-xl border p-5 hover:shadow">
-        <h3 class="font-semibold">Research & Data Ops</h3>
-        <p class="mt-2 text-sm text-slate-600">Collect structured data from complex sites at scale.</p>
-      </a>
-    </div>
-  </div>
-</section>
-
-
-    <section class="bg-slate-50">
-  <div class="mx-auto max-w-6xl px-6 py-16">
-    <div class="grid gap-8 md:grid-cols-2 items-start">
-      <div>
-        <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Open-core by design</h2>
-        <p class="mt-4 text-slate-700">
-          Gobii embraces an open-source foundation (MIT). Use Gobii Cloud for instant scale, or
-          self-host the core engine and extend it to your needs.
-        </p>
-        <div class="mt-6 flex flex-wrap gap-3">
-          <a href="https://github.com/gobii-ai/gobii-platform/" class="rounded-lg bg-slate-900 px-4 py-2 text-white">GitHub</a>
-          <a href="/developers/open-source/" class="rounded-lg border border-slate-300 px-4 py-2">Open-source guide</a>
-        </div>
-      </div>
-      <div class="rounded-xl border bg-white p-5">
-        <h3 class="font-semibold">Featured repositories</h3>
-        <ul class="mt-3 list-disc pl-6 text-sm text-slate-700 space-y-2">
-          <li><a class="text-indigo-600 hover:underline" href="https://github.com/gobii-ai/clients-js">JavaScript Client (alpha)</a></li>
-          <li><a class="text-indigo-600 hover:underline" href="https://github.com/gobii-ai/examples">Examples & starters</a></li>
-          <li><a class="text-indigo-600 hover:underline" href="https://github.com/gobii-ai/awesome-gobii">Awesome Gobii (community)</a></li>
-        </ul>
-        <p class="mt-4 text-xs text-slate-500">Contributions welcome — issues and PRs encouraged.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-
-    <section class="bg-white">
-      <div class="mx-auto max-w-6xl px-6 py-16">
-        <div class="rounded-2xl border p-8 md:flex md:items-center md:justify-between">
-          <div>
-            <h2 class="text-2xl font-bold text-slate-900">Join the Gobii developer community</h2>
-            <p class="mt-2 text-slate-700">Get help fast, share projects, and shape the roadmap.</p>
-          </div>
-          <div class="mt-6 md:mt-0 flex gap-3">
-            <a href="https://discord.gg/yyDB8GwxtE" class="rounded-lg bg-indigo-600 px-5 py-3 text-white" title="Gobii Discord Server">Join Discord</a>
-    {#        <a href="/developers/changelog/" class="rounded-lg border border-slate-300 px-5 py-3">Changelog</a>#}
-          </div>
-        </div>
-      </div>
-    </section>
-
-
-
-
-
-
-
-    <section class="grid gap-6 md:grid-cols-2">
-      <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div class="flex items-center justify-between">
-          <h2 class="text-lg font-semibold text-slate-900">Start building</h2>
-          <span class="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-600">
-            Foundation
-          </span>
-        </div>
-        <p class="mt-2 text-sm text-slate-600">
-          Everything you need to get your first integration live: authentication, agent management, and synchronous task execution.
-        </p>
-        <ul class="mt-4 space-y-3 text-sm text-slate-700">
-          <li class="flex items-start gap-3">
-            <i aria-hidden="true" data-lucide="check-circle" class="mt-0.5 h-4 w-4 text-emerald-500"></i>
-            <span>Review the <a href="{% url 'pages:markdown_page' slug='guides/api' %}" class="text-blue-600 hover:text-blue-700">API introduction</a> to understand the core concepts.</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <i aria-hidden="true" data-lucide="check-circle" class="mt-0.5 h-4 w-4 text-emerald-500"></i>
-            <span>Generate or rotate your API key from the Gobii Console (<em>Console → Settings → API</em>).</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <i aria-hidden="true" data-lucide="check-circle" class="mt-0.5 h-4 w-4 text-emerald-500"></i>
-            <span>Spin up an agent and send it instructions using the language client of your choice.</span>
-          </li>
-        </ul>
       </div>
 
-      <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div class="flex items-center justify-between">
-          <h2 class="text-lg font-semibold text-slate-900">What’s coming</h2>
-          <span class="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-600">
-            Roadmap
-          </span>
-        </div>
-        <p class="mt-2 text-sm text-slate-600">
-          We’re actively investing in tooling to accelerate developer workflows. Expect regular updates in this space.
-        </p>
-        <ul class="mt-4 space-y-3 text-sm text-slate-700">
-          <li class="flex items-start gap-3">
-            <i aria-hidden="true" data-lucide="sparkles" class="mt-0.5 h-4 w-4 text-indigo-500"></i>
-            <span>Language SDKs and code samples covering common automation patterns.</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <i aria-hidden="true" data-lucide="sparkles" class="mt-0.5 h-4 w-4 text-indigo-500"></i>
-            <span>Expanded guides for production agent orchestration and monitoring.</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <i aria-hidden="true" data-lucide="sparkles" class="mt-0.5 h-4 w-4 text-indigo-500"></i>
-            <span>Automation templates and recipes contributed by the community.</span>
-          </li>
-        </ul>
-      </div>
-    </section>
-
-    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 class="text-lg font-semibold text-slate-900">Stay in the loop</h2>
-      <p class="mt-2 text-sm text-slate-600">
-        Connect with the team and other builders as we grow the ecosystem.
-      </p>
-      <div class="mt-4 grid gap-4 md:grid-cols-3">
-        <a href="https://discord.gg/yyDB8GwxtE" target="_blank" class="group flex flex-col rounded-xl border border-slate-200 px-4 py-5 transition hover:border-blue-200 hover:bg-blue-50/40">
-          <span class="text-sm font-semibold text-slate-900 group-hover:text-blue-700">Join the Discord</span>
-          <span class="mt-1 text-sm text-slate-600">Chat with the Gobii team and the broader developer community.</span>
-        </a>
-        <div class="flex flex-col rounded-xl border border-slate-200 px-4 py-5 text-sm text-slate-600">
-          <span class="font-semibold text-slate-900">Developer changelog</span>
-          <span class="mt-1">Get notified when new SDKs, features, and tooling ship. Coming soon.</span>
-        </div>
-        <a href="mailto:hello@gobii.com" class="group flex flex-col rounded-xl border border-slate-200 px-4 py-5 transition hover:border-blue-200 hover:bg-blue-50/40">
-          <span class="text-sm font-semibold text-slate-900 group-hover:text-blue-700">Request something</span>
-          <span class="mt-1 text-sm text-slate-600">Tell us what would make building on Gobii easier for your team.</span>
+      <div class="mt-6">
+        <a href="/developers/getting-started/" class="inline-flex items-center gap-2 text-indigo-600 hover:underline">
+          See full quickstart and error handling →
         </a>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="rounded-2xl border border-slate-200 bg-slate-900 p-6 text-slate-100">
-      <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+  <!-- Examples -->
+  <section class="bg-white rounded-2xl shadow-sm mt-12">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+      <h2 class="text-2xl md:text-3xl font-bold text-slate-900">What developers build with Gobii</h2>
+      <div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <a href="/developers/examples/customer-support-agent/" class="block rounded-xl border p-5 hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <h3 class="font-semibold">AI Customer Support Agent</h3>
+          <p class="mt-2 text-sm text-slate-600">Triages tickets, pulls data from web tools, drafts replies.</p>
+        </a>
+        <a href="/developers/examples/form-automation/" class="block rounded-xl border p-5 hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <h3 class="font-semibold">Form Auto-Filler</h3>
+          <p class="mt-2 text-sm text-slate-600">Logs in, submits multi-step forms, exports confirmations.</p>
+        </a>
+        <a href="/developers/examples/monitoring-bot/" class="block rounded-xl border p-5 hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <h3 class="font-semibold">Monitoring Bots</h3>
+          <p class="mt-2 text-sm text-slate-600">Persistent agents watch pages and alert on changes.</p>
+        </a>
+        <a href="/developers/examples/research-scraper/" class="block rounded-xl border p-5 hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <h3 class="font-semibold">Research & Data Ops</h3>
+          <p class="mt-2 text-sm text-slate-600">Collect structured data from complex sites at scale.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Open-core -->
+  <section class="bg-slate-50 rounded-2xl shadow-sm mt-12">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+      <div class="grid gap-8 md:grid-cols-2 items-start">
         <div>
-          <h2 class="text-lg font-semibold text-white">Ship your next automation faster</h2>
-          <p class="mt-2 text-sm text-slate-300">
-            Already building something? Let us know and we’ll help you get the right pieces in place.
+          <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Open-core by design</h2>
+          <p class="mt-4 text-slate-700">
+            Gobii embraces an open-source foundation (MIT). Use Gobii Cloud for instant scale, or
+            self-host the core engine and extend it to your needs.
           </p>
+          <div class="mt-6 flex flex-wrap gap-3">
+            <a href="https://github.com/gobii-ai/gobii-platform/" class="rounded-lg bg-slate-900 px-4 py-2 text-white shadow hover:bg-slate-800" rel="noopener" target="_blank">GitHub</a>
+            <a href="/developers/open-source/" class="rounded-lg border border-slate-300 px-4 py-2 hover:bg-slate-100">Open-source guide</a>
+          </div>
         </div>
-        <a href="mailto:hello@gobii.com" class="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100">
-          Talk to the team
-          <i aria-hidden="true" data-lucide="send" class="ml-2 h-4 w-4"></i>
-        </a>
+        <div class="rounded-xl border bg-white p-5 shadow-sm">
+          <h3 class="font-semibold">Featured repositories</h3>
+          <ul class="mt-3 list-disc pl-6 text-sm text-slate-700 space-y-2">
+            <li><a class="text-indigo-600 hover:underline" href="https://github.com/gobii-ai/clients-js" rel="noopener" target="_blank">JavaScript Client (alpha)</a></li>
+            <li><a class="text-indigo-600 hover:underline" href="https://github.com/gobii-ai/examples" rel="noopener" target="_blank">Examples & starters</a></li>
+            <li><a class="text-indigo-600 hover:underline" href="https://github.com/gobii-ai/awesome-gobii" rel="noopener" target="_blank">Awesome Gobii (community)</a></li>
+          </ul>
+          <p class="mt-4 text-xs text-slate-500">Contributions welcome — issues and PRs encouraged.</p>
+        </div>
       </div>
-    </section>
-  </div>
+    </div>
+  </section>
+
+  <!-- Community -->
+  <section class="bg-white rounded-2xl shadow-sm mt-12 mb-16">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+      <div class="rounded-2xl border p-8 shadow-sm md:flex md:items-center md:justify-between">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-900">Join the Gobii developer community</h2>
+          <p class="mt-2 text-slate-700">Get help fast, share projects, and shape the roadmap.</p>
+        </div>
+        <div class="mt-6 md:mt-0 flex gap-3">
+          <a href="https://discord.gg/yyDB8GwxtE" class="rounded-lg bg-indigo-600 px-5 py-3 text-white shadow hover:bg-indigo-500" title="Gobii Discord Server" rel="noopener" target="_blank">Join Discord</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
 {% endblock %}
