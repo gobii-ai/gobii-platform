@@ -66,6 +66,7 @@ from ..tools.search_web import execute_search_web, get_search_web_tool
 from ..tools.spawn_web_task import execute_spawn_web_task, get_spawn_web_task_tool
 from ..tools.schedule_updater import execute_update_schedule, get_update_schedule_tool
 from ..tools.charter_updater import execute_update_charter, get_update_charter_tool
+from ..tools.database_enabler import execute_enable_database, get_enable_database_tool
 from ..tools.sqlite_state import get_sqlite_schema_prompt, agent_sqlite_db
 from ..tools.http_request import execute_http_request, get_http_request_tool
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
@@ -1478,6 +1479,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         result = execute_search_web(agent, tool_params)
                     elif tool_name == "secure_credentials_request":
                         result = execute_secure_credentials_request(agent, tool_params)
+                    elif tool_name == "enable_database":
+                        result = execute_enable_database(agent, tool_params)
                     elif tool_name == "request_contact_permission":
                         result = execute_request_contact_permission(agent, tool_params)
                     elif tool_name == "search_tools":
@@ -1804,10 +1807,12 @@ def _build_prompt_context(
     # Contextual note based on whether a schema already exists
     if any(line.startswith("Table ") for line in sqlite_schema_block.splitlines()):
         sqlite_note = (
-            "This is your current SQLite schema. You can execute DDL or other SQL statements at any time to modify and evolve the schema so it best supports your ongoing task or charter."
+            "This is your current SQLite schema. Call enable_database to enable the sqlite_batch tool whenever you need durable structured memory, complex analysis, or set-based queries. "
+            "You can execute DDL or other SQL statements at any time to modify and evolve the schema so it best supports your ongoing task or charter."
         )
     else:
         sqlite_note = (
+            "Call enable_database to enable the sqlite_batch tool whenever you need durable structured memory, complex analysis, or set-based queries. "
             "You can execute DDL or other SQL statements at any time to create and evolve a SQLite database that will help with your current task or charter."
         )
     variable_group.section_text(
@@ -2490,17 +2495,6 @@ def _get_system_instruction(
         "ONLY REQUEST SECURE CREDENTIALS WHEN YOU WILL IMMEDIATELY USE THEM WITH 'http_request' (API keys/tokens) OR 'spawn_web_task' (classic username/password website login). DO NOT REQUEST CREDENTIALS FOR MCP TOOLS (e.g., Google Sheets, Slack). FOR MCP TOOLS: CALL THE TOOL; IF IT RETURNS 'action_required' WITH A CONNECT/AUTH LINK, SURFACE THAT LINK TO THE USER AND WAIT. NEVER ASK FOR USER PASSWORDS OR 2FA CODES FOR OAUTH‑BASED SERVICES. IT WILL RETURN A URL; YOU MUST CONTACT THE USER WITH THAT URL SO THEY CAN FILL OUT THE CREDENTIALS. "
         "You typically will want the domain to be broad enough to support all required auth domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. BE VERY THOUGHTFUL ABOUT THIS. "
 
-        "Use sqlite_batch only when you need durable structured data, complex math, or set-based queries. "
-        "For simple math, checklists, or one-off comparisons, reason directly without SQL. "
-        "If you create tables, keep them small, focused, and pruned - the database must stay under 50 MB "
-        "Store only information you will reuse; do not treat SQLite as a scratchpad. If a value is only needed once, compute it directly instead of writing it to SQLite. "
-        "Use SQLite deliberately for medium and long-term memory, not transient values. "
-        "Provide exactly ONE SQL statement per item in 'operations' (no semicolon-chaining). For a single statement, pass a single-item operations array. "
-        "Do NOT include BEGIN/COMMIT/ROLLBACK; the tool manages transactions. Escape single quotes by doubling them. "
-        "If you have two or more SQL operations to run, use the sqlite_batch tool in one call. "
-        "Use mode=atomic when operations depend on each other (all-or-nothing); use mode=per_statement to continue past individual errors when operations are independent. "
-        "Be very mindful to keep the db efficient and the total size no greater than 50MB of data. "
-
         "Use search_tools to search for additional tools; it will automatically enable all relevant tools in one step. "
         "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
@@ -2874,6 +2868,7 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_update_charter_tool(),
         get_http_request_tool(),
         get_secure_credentials_request_tool(),
+        get_enable_database_tool(),
         # MCP management tools
         get_search_tools_tool(),
         get_request_contact_permission_tool(),

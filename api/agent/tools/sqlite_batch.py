@@ -382,6 +382,11 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
+                "Use this tool only when you need durable structured data, complex math, or set-based queries. "
+                "For simple math, checklists, or one-off comparisons, reason directly without SQL. "
+                "If you create tables, keep them small, focused, and pruned; the database must stay under 50 MB. "
+                "Store only information you will reuse; do not treat SQLite as a scratchpad. "
+                "Use SQLite deliberately for medium and long-term memory, not transient values. "
                 "Execute one or more SQLite operations in order, including DDL and queries. "
                 "Provide exactly ONE SQL statement per item in 'operations' (no semicolon-chaining). "
                 "Do NOT include BEGIN/COMMIT/ROLLBACK; the tool manages transactions for mode='atomic'. "
@@ -390,7 +395,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                 f"If you truly need more, set 'row_limit' (max {MAX_SELECT_ROW_LIMIT}) explicitly and page through results. "
                 "Prefer 'INSERT OR IGNORE' or 'INSERT ... ON CONFLICT(col) DO UPDATE ...' to avoid UNIQUE violations. "
                 "Use mode='atomic' for dependent ops (all-or-nothing) or 'per_statement' to continue past individual errors. "
-                "For a single query, pass a single-item 'operations' array."
+                "For a single query, pass a single-item 'operations' array. "
+                "Call enable_database if you need to enable this tool for the current agent."
             ),
             "parameters": {
                 "type": "object",
