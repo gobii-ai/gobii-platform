@@ -83,7 +83,7 @@
         <pre class="overflow-x-auto text-slate-100 text-sm">
           <code class="language-bash"># cURL
 curl -X POST https://api.gobii.ai/api/v1/agents/ \
-  -H "Authorization: Bearer &lt;YOUR_API_KEY&gt;" \
+  -H "X-Api-Key: &lt;YOUR_API_KEY&gt;" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Lead Finder Agent",
@@ -100,7 +100,7 @@ curl -X POST https://api.gobii.ai/api/v1/agents/ \
 const res = await fetch("https://api.gobii.ai/v1/tasks", {
   method: "POST",
   headers: {
-    "Authorization": "Bearer " + process.env.GOBII_API_KEY,
+    "X-Api-Key": process.env.GOBII_API_KEY,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
