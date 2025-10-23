@@ -9,6 +9,7 @@ from .views import (
     HomeAgentSpawnView,
     TermsOfServiceView,
     PrivacyPolicyView,
+    DevelopersView,
     health_check,
     AboutView,
     CareersView,
@@ -43,6 +44,7 @@ urlpatterns = [
     path("ai-employees/", AIEmployeeDirectoryView.as_view(), name="ai_employee_directory"),
     path("ai-employees/<slug:slug>/", AIEmployeeDetailView.as_view(), name="ai_employee_detail"),
     path("ai-employees/<slug:slug>/hire/", AIEmployeeHireView.as_view(), name="ai_employee_hire"),
+    path("developers/", DevelopersView.as_view(), name="developers"),
     path("health/", health_check, name="health_check"),
     # Kubernetes health check endpoint - matches /healthz/ in BackendConfig
     path("healthz/", health_check, name="health_check_k8s"),
