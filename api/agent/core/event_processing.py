@@ -68,7 +68,6 @@ from ..tools.schedule_updater import execute_update_schedule, get_update_schedul
 from ..tools.charter_updater import execute_update_charter, get_update_charter_tool
 from ..tools.database_enabler import execute_enable_database, get_enable_database_tool
 from ..tools.sqlite_state import get_sqlite_schema_prompt, agent_sqlite_db
-from ..tools.http_request import execute_http_request, get_http_request_tool
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
 from ..tools.request_contact_permission import execute_request_contact_permission, get_request_contact_permission_tool
 from ..tools.search_tools import get_search_tools_tool, execute_search_tools
@@ -1473,8 +1472,6 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         result = execute_update_schedule(agent, tool_params)
                     elif tool_name == "update_charter":
                         result = execute_update_charter(agent, tool_params)
-                    elif tool_name == "http_request":
-                        result = execute_http_request(agent, tool_params)
                     elif tool_name == "search_web":
                         result = execute_search_web(agent, tool_params)
                     elif tool_name == "secure_credentials_request":
@@ -2485,7 +2482,7 @@ def _get_system_instruction(
         "IF YOU NEED TO CALL AN AUTHENTICATED HTTP API USING 'http_request' AND A REQUIRED KEY/TOKEN IS MISSING, USE THE 'secure_credentials_request' TOOL FIRST, THEN CALL THE API. DO NOT USE 'secure_credentials_request' FOR MCP TOOLS. "
         "IF A TOOL IS AVAILABLE, CALL IT FIRST TO SEE IF IT WORKS WITHOUT EXTRA AUTH. MANY MCP TOOLS EITHER WORK OUT‑OF‑THE‑BOX OR WILL RETURN AN 'action_required' RESPONSE WITH A CONNECT/AUTH LINK. IF YOU RECEIVE AN AUTH REQUIREMENT FROM AN MCP TOOL, IMMEDIATELY SURFACE THE PROVIDED LINK TO THE USER AND WAIT — DO NOT CREATE A SECURE CREDENTIALS REQUEST. ONLY USE 'secure_credentials_request' WHEN YOU WILL IMMEDIATELY USE THE CREDENTIALS WITH 'http_request' OR 'spawn_web_task'. "
         
-        "Use the http_request tool for any HTTP request, including GET, POST, PUT, DELETE, etc. "
+        "Enable the http_request tool via search_tools before making HTTP API calls; use it for any HTTP request, including GET, POST, PUT, DELETE, etc. "
         "The http_request tool uses a proxy server for security when one is configured. In proprietary mode a proxy is required; in community mode it falls back to a direct request if no proxy is available. "
         "If you need to look at specific files on the internet, like csv files, etc. use a direct HTTP request. "
         "Sometimes you will want to look up public docs for an API using spawn_web_task, then use the http_request tool to access the API. "
@@ -2866,7 +2863,6 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_spawn_web_task_tool(),
         get_update_schedule_tool(),
         get_update_charter_tool(),
-        get_http_request_tool(),
         get_secure_credentials_request_tool(),
         get_enable_database_tool(),
         # MCP management tools

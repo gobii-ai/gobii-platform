@@ -18,6 +18,7 @@ from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failove
 from ..core.llm_utils import run_completion
 from .mcp_manager import get_mcp_manager
 from .sqlite_batch import get_sqlite_batch_tool
+from .http_request import get_http_request_tool
 from .tool_manager import enable_tools
 
 logger = logging.getLogger(__name__)
@@ -293,9 +294,29 @@ def _search_mcp_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     )
 
 
+def _search_http_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
+    http_tool = get_http_request_tool()
+    catalog = [
+        {
+            "full_name": http_tool["function"]["name"],
+            "description": http_tool["function"]["description"],
+            "parameters": http_tool["function"]["parameters"],
+        }
+    ]
+    return _search_with_llm(
+        agent=agent,
+        query=query,
+        provider_name="http",
+        catalog=catalog,
+        enable_callback=enable_tools,
+        empty_message="HTTP request tool unavailable",
+    )
+
+
 _SEARCH_PROVIDERS: List[Tuple[str, ToolSearchProvider]] = [
     ("mcp", _search_mcp_tools),
     ("sqlite", _search_sqlite_tools),
+    ("http", _search_http_tools),
 ]
 
 

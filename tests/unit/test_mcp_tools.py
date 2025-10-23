@@ -833,6 +833,30 @@ class MCPToolFunctionsTests(TestCase):
         }
         self.assertIn("sqlite_batch", names)
         
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_enable_tools_includes_http_request(self, mock_init, mock_get_tools):
+        """Enable tools should handle built-in http_request tool."""
+        result = enable_tools(self.agent, ["http_request"])
+        self.assertEqual(result["status"], "success")
+        self.assertIn("http_request", result["enabled"])
+        row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="http_request")
+        self.assertEqual(row.tool_server, "builtin")
+        self.assertEqual(row.tool_name, "http_request")
+
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_get_enabled_tool_definitions_includes_http_request(self, mock_init, mock_get_tools):
+        """Enabled tool definitions include http_request when enabled."""
+        enable_tools(self.agent, ["http_request"])
+        definitions = get_enabled_tool_definitions(self.agent)
+        names = {
+            entry.get("function", {}).get("name")
+            for entry in definitions
+            if isinstance(entry, dict)
+        }
+        self.assertIn("http_request", names)
+        
     @patch('api.agent.tools.tool_manager.enable_mcp_tool')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')

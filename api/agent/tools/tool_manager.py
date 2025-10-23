@@ -14,8 +14,9 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 from django.db.models import F
 
 from ...models import PersistentAgent, PersistentAgentEnabledTool
-from .mcp_manager import MCPToolManager, MCPToolInfo, get_mcp_manager, execute_mcp_tool
+from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
+from .http_request import get_http_request_tool, execute_http_request
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,18 @@ logger = logging.getLogger(__name__)
 MAX_ENABLED_TOOLS = 40
 
 SQLITE_TOOL_NAME = "sqlite_batch"
+HTTP_REQUEST_TOOL_NAME = "http_request"
+
+BUILTIN_TOOL_REGISTRY = {
+    SQLITE_TOOL_NAME: {
+        "definition": get_sqlite_batch_tool,
+        "executor": execute_sqlite_batch,
+    },
+    HTTP_REQUEST_TOOL_NAME: {
+        "definition": get_http_request_tool,
+        "executor": execute_http_request,
+    },
+}
 
 
 @dataclass
@@ -62,16 +75,22 @@ def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalog
             server_config_id=info.config_id,
         )
 
-    sqlite_tool = get_sqlite_batch_tool()
-    catalog[SQLITE_TOOL_NAME] = ToolCatalogEntry(
-        provider="builtin",
-        full_name=SQLITE_TOOL_NAME,
-        description=sqlite_tool["function"]["description"],
-        parameters=sqlite_tool["function"]["parameters"],
-        tool_server="builtin",
-        tool_name=SQLITE_TOOL_NAME,
-        server_config_id=None,
-    )
+    for name, info in BUILTIN_TOOL_REGISTRY.items():
+        try:
+            tool_def = info["definition"]()
+        except Exception:
+            logger.exception("Failed to build builtin tool definition for %s", name)
+            continue
+        function_block = tool_def.get("function") if isinstance(tool_def, dict) else {}
+        catalog[name] = ToolCatalogEntry(
+            provider="builtin",
+            full_name=name,
+            description=function_block.get("description", ""),
+            parameters=function_block.get("parameters", {}),
+            tool_server="builtin",
+            tool_name=name,
+            server_config_id=None,
+        )
 
     return catalog
 
@@ -307,18 +326,33 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
     manager = _get_manager()
     definitions = manager.get_enabled_tools_definitions(agent)
 
-    if PersistentAgentEnabledTool.objects.filter(
+    enabled_builtin_rows = PersistentAgentEnabledTool.objects.filter(
         agent=agent,
-        tool_full_name=SQLITE_TOOL_NAME,
-    ).exists():
-        sqlite_tool = get_sqlite_batch_tool()
-        existing_names = {
-            entry.get("function", {}).get("name")
-            for entry in definitions
-            if isinstance(entry, dict)
-        }
-        if SQLITE_TOOL_NAME not in existing_names:
-            definitions.append(sqlite_tool)
+        tool_full_name__in=list(BUILTIN_TOOL_REGISTRY.keys()),
+    )
+    existing_names = {
+        entry.get("function", {}).get("name")
+        for entry in definitions
+        if isinstance(entry, dict)
+    }
+
+    for row in enabled_builtin_rows:
+        registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
+        if not registry_entry:
+            continue
+        try:
+            tool_def = registry_entry["definition"]()
+        except Exception:
+            logger.exception("Failed to build enabled builtin tool definition for %s", row.tool_full_name)
+            continue
+        tool_name = (
+            tool_def.get("function", {}).get("name")
+            if isinstance(tool_def, dict)
+            else None
+        )
+        if tool_name and tool_name not in existing_names:
+            definitions.append(tool_def)
+            existing_names.add(tool_name)
 
     return definitions
 
@@ -343,7 +377,9 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
     if entry.provider == "builtin":
         if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
             return {"status": "error", "message": f"Tool '{tool_name}' is not enabled for this agent"}
-        if tool_name == SQLITE_TOOL_NAME:
-            return execute_sqlite_batch(agent, params)
+        registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+        executor = registry_entry.get("executor") if registry_entry else None
+        if executor:
+            return executor(agent, params)
 
     return {"status": "error", "message": f"Tool '{tool_name}' has no execution handler"}
