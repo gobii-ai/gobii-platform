@@ -8,7 +8,7 @@ from django.urls import reverse
 BATCH_TAG = "batch_support_turnstile"
 
 
-@modify_settings(INSTALLED_APPS={"append": "turnstile"})
+@modify_settings(INSTALLED_APPS={"prepend": "proprietary", "append": "turnstile"})
 @override_settings(GOBII_PROPRIETARY_MODE=True, TURNSTILE_ENABLED=True)
 class SupportViewTurnstileTests(TestCase):
     @tag(BATCH_TAG)
