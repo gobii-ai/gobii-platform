@@ -9,6 +9,7 @@ from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
 from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentToolCall, PersistentAgentStep, UserQuota
+from api.agent.tools.tool_manager import enable_tools
 
 
 @tag("batch_event_parallel")
@@ -31,14 +32,23 @@ class TestBatchToolCallsWithSleep(TestCase):
             charter="Test charter",
             browser_use_agent=browser_agent,
         )
+        enable_tools(self.agent, ["sqlite_batch"])
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
-    @patch('api.agent.core.event_processing.execute_sqlite_batch', return_value={"status": "ok"})
+    @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"})
     @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "success"})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "queued"})
     @patch('api.agent.core.event_processing._build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_batch_of_tools_ignores_sleep_when_others_present(self, mock_completion, mock_build_prompt, *_mocks):
+    def test_batch_of_tools_ignores_sleep_when_others_present(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_email,
+        mock_update_charter,
+        mock_execute_enabled,
+        _mock_credit,
+    ):
         # Minimal prompt context and token usage
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
 
@@ -87,7 +97,14 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing._build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_successful_actions_short_circuit_to_sleep(self, mock_completion, mock_build_prompt, *_mocks):
+    def test_successful_actions_short_circuit_to_sleep(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_email,
+        mock_update_charter,
+        _mock_credit,
+    ):
         """A tool batch that opts-in to auto-sleep should end the loop immediately."""
 
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
@@ -135,7 +152,14 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "sent", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing._build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_auto_sleep_waits_for_all_tool_calls(self, mock_completion, mock_build_prompt, mock_send_email, mock_spawn_task, *_mocks):
+    def test_auto_sleep_waits_for_all_tool_calls(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_email,
+        mock_spawn_task,
+        _mock_credit,
+    ):
         """Ensure we execute every actionable tool call before honoring auto-sleep."""
 
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)

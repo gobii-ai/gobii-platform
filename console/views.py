@@ -134,7 +134,8 @@ from constants.stripe import (
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
 from opentelemetry import trace, baggage, context
-from api.agent.tools.mcp_manager import enable_mcp_tool, get_mcp_manager
+from api.agent.tools.mcp_manager import get_mcp_manager
+from api.agent.tools.tool_manager import enable_mcp_tool
 from api.agent.tasks import process_agent_events_task
 from api.services.persistent_agents import (
     PersistentAgentProvisioningError,

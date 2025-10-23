@@ -7,6 +7,7 @@ from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
 from api.models import PersistentAgent, BrowserUseAgent, UserQuota
+from api.agent.tools.tool_manager import enable_tools
 
 
 @tag("batch_event_parallel")
@@ -27,13 +28,21 @@ class TestParallelToolCallsExecution(TestCase):
             charter="Test charter",
             browser_use_agent=browser_agent,
         )
+        enable_tools(self.agent, ["sqlite_batch"])
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
     @patch('api.agent.core.event_processing.execute_send_sms', return_value={"status": "success"})
-    @patch('api.agent.core.event_processing.execute_sqlite_batch', return_value={"status": "ok"})
+    @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"})
     @patch('api.agent.core.event_processing._build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_executes_all_tool_calls_in_one_turn(self, mock_completion, mock_build_prompt, *_mocks):
+    def test_executes_all_tool_calls_in_one_turn(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_execute_enabled,
+        mock_send_sms,
+        _mock_credit,
+    ):
         # Make prompt builder return minimal content and a small token count
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
 
@@ -65,9 +74,7 @@ class TestParallelToolCallsExecution(TestCase):
 
         # Both executors should have been called once
         # Access the patched functions from the decorator order above
-        execute_sqlite_called = _mocks[1]
-        execute_sms_called = _mocks[0]
-        self.assertTrue(execute_sqlite_called.called, "sqlite_batch was not executed")
-        self.assertTrue(execute_sms_called.called, "send_sms was not executed")
-        self.assertEqual(execute_sqlite_called.call_count, 1)
-        self.assertEqual(execute_sms_called.call_count, 1)
+        self.assertTrue(mock_execute_enabled.called, "sqlite_batch was not executed")
+        self.assertTrue(mock_send_sms.called, "send_sms was not executed")
+        self.assertEqual(mock_execute_enabled.call_count, 1)
+        self.assertEqual(mock_send_sms.call_count, 1)

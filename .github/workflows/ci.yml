@@ -162,6 +162,8 @@ jobs:
             tag: batch_token_usage
           - batch: batch_sqlite
             tag: batch_sqlite
+          - batch: enable_database
+            tag: enable_database
           - batch: pa_step_credits
             tag: batch_pa_step_credits
           - batch: tool_costs

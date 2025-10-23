@@ -66,16 +66,16 @@ from ..tools.search_web import execute_search_web, get_search_web_tool
 from ..tools.spawn_web_task import execute_spawn_web_task, get_spawn_web_task_tool
 from ..tools.schedule_updater import execute_update_schedule, get_update_schedule_tool
 from ..tools.charter_updater import execute_update_charter, get_update_charter_tool
+from ..tools.database_enabler import execute_enable_database, get_enable_database_tool
 from ..tools.sqlite_state import get_sqlite_schema_prompt, agent_sqlite_db
-from ..tools.sqlite_batch import execute_sqlite_batch, get_sqlite_batch_tool
-from ..tools.http_request import execute_http_request, get_http_request_tool
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
 from ..tools.request_contact_permission import execute_request_contact_permission, get_request_contact_permission_tool
-from ..tools.mcp_tools import (
-    get_search_tools_tool,
-    execute_search_tools, execute_mcp_tool
+from ..tools.search_tools import get_search_tools_tool, execute_search_tools
+from ..tools.tool_manager import (
+    ensure_default_tools_enabled,
+    execute_enabled_tool,
+    get_enabled_tool_definitions,
 )
-from ..tools.mcp_manager import get_mcp_manager
 from ..tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
 from ..tools.peer_dm import execute_send_agent_message, get_send_agent_message_tool
 from ..tools.webhook_sender import execute_send_webhook_event, get_send_webhook_tool
@@ -1456,8 +1456,6 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                     if tool_name == "spawn_web_task":
                         # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
                         result = execute_spawn_web_task(agent, tool_params)
-                    elif tool_name == "sqlite_batch":
-                        result = execute_sqlite_batch(agent, tool_params)
                     elif tool_name == "send_email":
                         result = execute_send_email(agent, tool_params)
                     elif tool_name == "send_sms":
@@ -1472,12 +1470,12 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                         result = execute_update_schedule(agent, tool_params)
                     elif tool_name == "update_charter":
                         result = execute_update_charter(agent, tool_params)
-                    elif tool_name == "http_request":
-                        result = execute_http_request(agent, tool_params)
                     elif tool_name == "search_web":
                         result = execute_search_web(agent, tool_params)
                     elif tool_name == "secure_credentials_request":
                         result = execute_secure_credentials_request(agent, tool_params)
+                    elif tool_name == "enable_database":
+                        result = execute_enable_database(agent, tool_params)
                     elif tool_name == "request_contact_permission":
                         result = execute_request_contact_permission(agent, tool_params)
                     elif tool_name == "search_tools":
@@ -1492,15 +1490,9 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                             before_count,
                             after_count,
                         )
-                    # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
-                    elif get_mcp_manager().has_tool(tool_name):
-                        # Handle dynamic MCP tool execution (supports prefixed and unprefixed MCP tool names)
-                        result = execute_mcp_tool(agent, tool_name, tool_params)
                     else:
-                        result = {
-                            "status": "error",
-                            "message": f"Unknown tool '{tool_name}' called.",
-                        }
+                        # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
+                        result = execute_enabled_tool(agent, tool_name, tool_params)
 
                     result_content = json.dumps(result)
                     # Log result summary
@@ -1810,10 +1802,12 @@ def _build_prompt_context(
     # Contextual note based on whether a schema already exists
     if any(line.startswith("Table ") for line in sqlite_schema_block.splitlines()):
         sqlite_note = (
-            "This is your current SQLite schema. You can execute DDL or other SQL statements at any time to modify and evolve the schema so it best supports your ongoing task or charter."
+            "This is your current SQLite schema. Call enable_database to enable the sqlite_batch tool whenever you need durable structured memory, complex analysis, or set-based queries. "
+            "You can execute DDL or other SQL statements at any time to modify and evolve the schema so it best supports your ongoing task or charter."
         )
     else:
         sqlite_note = (
+            "Call enable_database to enable the sqlite_batch tool whenever you need durable structured memory, complex analysis, or set-based queries. "
             "You can execute DDL or other SQL statements at any time to create and evolve a SQLite database that will help with your current task or charter."
         )
     variable_group.section_text(
@@ -2486,7 +2480,7 @@ def _get_system_instruction(
         "IF YOU NEED TO CALL AN AUTHENTICATED HTTP API USING 'http_request' AND A REQUIRED KEY/TOKEN IS MISSING, USE THE 'secure_credentials_request' TOOL FIRST, THEN CALL THE API. DO NOT USE 'secure_credentials_request' FOR MCP TOOLS. "
         "IF A TOOL IS AVAILABLE, CALL IT FIRST TO SEE IF IT WORKS WITHOUT EXTRA AUTH. MANY MCP TOOLS EITHER WORK OUT‑OF‑THE‑BOX OR WILL RETURN AN 'action_required' RESPONSE WITH A CONNECT/AUTH LINK. IF YOU RECEIVE AN AUTH REQUIREMENT FROM AN MCP TOOL, IMMEDIATELY SURFACE THE PROVIDED LINK TO THE USER AND WAIT — DO NOT CREATE A SECURE CREDENTIALS REQUEST. ONLY USE 'secure_credentials_request' WHEN YOU WILL IMMEDIATELY USE THE CREDENTIALS WITH 'http_request' OR 'spawn_web_task'. "
         
-        "Use the http_request tool for any HTTP request, including GET, POST, PUT, DELETE, etc. "
+        "Enable the http_request tool via search_tools before making HTTP API calls; use it for any HTTP request, including GET, POST, PUT, DELETE, etc. "
         "The http_request tool uses a proxy server for security when one is configured. In proprietary mode a proxy is required; in community mode it falls back to a direct request if no proxy is available. "
         "If you need to look at specific files on the internet, like csv files, etc. use a direct HTTP request. "
         "Sometimes you will want to look up public docs for an API using spawn_web_task, then use the http_request tool to access the API. "
@@ -2495,17 +2489,6 @@ def _get_system_instruction(
 
         "ONLY REQUEST SECURE CREDENTIALS WHEN YOU WILL IMMEDIATELY USE THEM WITH 'http_request' (API keys/tokens) OR 'spawn_web_task' (classic username/password website login). DO NOT REQUEST CREDENTIALS FOR MCP TOOLS (e.g., Google Sheets, Slack). FOR MCP TOOLS: CALL THE TOOL; IF IT RETURNS 'action_required' WITH A CONNECT/AUTH LINK, SURFACE THAT LINK TO THE USER AND WAIT. NEVER ASK FOR USER PASSWORDS OR 2FA CODES FOR OAUTH‑BASED SERVICES. IT WILL RETURN A URL; YOU MUST CONTACT THE USER WITH THAT URL SO THEY CAN FILL OUT THE CREDENTIALS. "
         "You typically will want the domain to be broad enough to support all required auth domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. BE VERY THOUGHTFUL ABOUT THIS. "
-
-        "Use sqlite_batch only when you need durable structured data, complex math, or set-based queries. "
-        "For simple math, checklists, or one-off comparisons, reason directly without SQL. "
-        "If you create tables, keep them small, focused, and pruned - the database must stay under 50 MB "
-        "Store only information you will reuse; do not treat SQLite as a scratchpad. If a value is only needed once, compute it directly instead of writing it to SQLite. "
-        "Use SQLite deliberately for medium and long-term memory, not transient values. "
-        "Provide exactly ONE SQL statement per item in 'operations' (no semicolon-chaining). For a single statement, pass a single-item operations array. "
-        "Do NOT include BEGIN/COMMIT/ROLLBACK; the tool manages transactions. Escape single quotes by doubling them. "
-        "If you have two or more SQL operations to run, use the sqlite_batch tool in one call. "
-        "Use mode=atomic when operations depend on each other (all-or-nothing); use mode=per_statement to continue past individual errors when operations are independent. "
-        "Be very mindful to keep the db efficient and the total size no greater than 50MB of data. "
 
         "Use search_tools to search for additional tools; it will automatically enable all relevant tools in one step. "
         "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
@@ -2878,9 +2861,8 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_spawn_web_task_tool(),
         get_update_schedule_tool(),
         get_update_charter_tool(),
-        get_sqlite_batch_tool(),
-        get_http_request_tool(),
         get_secure_credentials_request_tool(),
+        get_enable_database_tool(),
         # MCP management tools
         get_search_tools_tool(),
         get_request_contact_permission_tool(),
@@ -2899,18 +2881,9 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
 
     # Add dynamically enabled MCP tools if agent is provided
     if agent:
-        from ..tools.mcp_manager import ensure_default_tools_enabled
-
-        # Ensure default MCP tools are enabled
         ensure_default_tools_enabled(agent)
-
-        mcp_manager = get_mcp_manager()
-        if not mcp_manager._initialized:
-            mcp_manager.initialize()
-
-        # Get tool definitions for enabled MCP tools
-        mcp_tools = mcp_manager.get_enabled_tools_definitions(agent)
-        static_tools.extend(mcp_tools)
+        dynamic_tools = get_enabled_tool_definitions(agent)
+        static_tools.extend(dynamic_tools)
 
     return static_tools
 
