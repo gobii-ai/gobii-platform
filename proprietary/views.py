@@ -6,11 +6,12 @@ from django.contrib import sitemaps
 from django.http import HttpResponse, Http404
 from django.template.loader import render_to_string
 from django.templatetags.static import static
-from django.utils.html import strip_tags
+from django.utils.html import strip_tags, escape
 from django.views.generic import TemplateView
 from django.urls import reverse
 from django.core.mail import send_mail
 
+from proprietary.forms import SupportForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
 from util.subscription_helper import get_user_plan
 
@@ -151,27 +152,38 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+
+        if not self.request.user.is_authenticated:
+            context["support_form"] = SupportForm()
+
         return context
 
     def post(self, request, *args, **kwargs):
-        # Get form data
-        name = request.POST.get('name', '')
-        email = request.POST.get('email', '')
-        subject = request.POST.get('subject', '')
-        message = request.POST.get('message', '')
+        form = SupportForm(request.POST)
 
-        if not all([name, email, subject, message]):
-            return HttpResponse(
-                '<div class="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg" role="alert">Please fill in all fields.</div>',
-                status=400
+        if not form.is_valid():
+            errors = []
+            for field_errors in form.errors.values():
+                errors.extend(field_errors)
+
+            error_items = "".join(f"<li>{escape(message)}</li>" for message in errors)
+            error_html = (
+                '<div class="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg" role="alert">'
+                'Please correct the following errors:'
+                f'<ul class="mt-2 list-disc list-inside text-red-700">{error_items}</ul>'
+                '</div>'
             )
+            return HttpResponse(error_html, status=400)
 
         # Prepare email content
+        cleaned = form.cleaned_data.copy()
+        cleaned.pop("turnstile", None)
+
         context = {
-            'name': name,
-            'email': email,
-            'subject': subject,
-            'message': message,
+            'name': cleaned['name'],
+            'email': cleaned['email'],
+            'subject': cleaned['subject'],
+            'message': cleaned['message'],
         }
 
         html_message = render_to_string('emails/support_request.html', context)
@@ -179,14 +191,14 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
 
         # Send email
         try:
-            # send_mail(
-            #     f'Support Request: {subject}',
-            #     plain_message,
-            #     settings.DEFAULT_FROM_EMAIL,
-            #     [settings.SUPPORT_EMAIL],  # Use a support email address
-            #     html_message=html_message,
-            #     fail_silently=False,
-            # )
+            send_mail(
+                f'Support Request: {cleaned['subject']}',
+                plain_message,
+                settings.DEFAULT_FROM_EMAIL,
+                [settings.SUPPORT_EMAIL],  # Use a support email address
+                html_message=html_message,
+                fail_silently=False,
+            )
 
             # Return success message (for HTMX response)
             return HttpResponse(
@@ -362,4 +374,3 @@ class BlogSitemap(sitemaps.Sitemap):
 
     def lastmod(self, item):
         return item.get("published_at")
-
