@@ -82,34 +82,34 @@
       <div class="mt-6 rounded-xl p-4 shadow-inner" style="background-color: #282c34;">
         <pre class="overflow-x-auto text-slate-100 text-sm">
           <code class="language-bash"># cURL
-            curl -X POST https://api.gobii.ai/api/v1/agents/ \
-              -H "Authorization: Bearer &lt;YOUR_API_KEY&gt;" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "name": "Lead Finder Agent",
-                "charter": "Find new leads in my industry, and post results to the webhook every few hours",
-                "schedule": "@daily",
-                "preferred_contact_endpoint": "webhook"
-              }'
+curl -X POST https://api.gobii.ai/api/v1/agents/ \
+  -H "Authorization: Bearer &lt;YOUR_API_KEY&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Lead Finder Agent",
+    "charter": "Find new leads in my industry, and post results to the webhook every few hours",
+    "schedule": "@daily",
+    "preferred_contact_endpoint": "webhook"
+  }'
             </code>
         </pre>
       </div>
       <div class="mt-6 rounded-xl p-4 shadow-inner" style="background-color: #282c34;">
         <pre class="overflow-x-auto text-slate-100 text-sm">
           <code class="language-javascript">
-            const res = await fetch("https://api.gobii.ai/v1/tasks", {
-              method: "POST",
-              headers: {
-                "Authorization": "Bearer " + process.env.GOBII_API_KEY,
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                prompt: "Fill out the onboarding form at example.com",
-                callback_url: "https://example.com/webhooks/gobii"
-              })
-            });
-            const json = await res.json();
-            console.log(json);
+const res = await fetch("https://api.gobii.ai/v1/tasks", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer " + process.env.GOBII_API_KEY,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    prompt: "Fill out the onboarding form at example.com",
+    callback_url: "https://example.com/webhooks/gobii"
+  })
+});
+const json = await res.json();
+console.log(json);
             </code>
         </pre>
       </div>
@@ -119,16 +119,16 @@
       <div class="mt-3 rounded-xl p-4 shadow-inner" style="background-color: #282c34;">
         <pre class="overflow-x-auto text-slate-100 text-sm">
           <code class="language-javascript">
-            // Express.js webhook example
-            app.post("/webhooks/gobii", (req, res) => {
-              const { task_id, status, output, error } = req.body;
-              if (status === "succeeded") {
-                // process output (files, text, structured data)
-              } else if (status === "failed") {
-                // log/alert and retry logic
-              }
-              res.sendStatus(200);
-            });
+// Express.js webhook example
+app.post("/webhooks/gobii", (req, res) => {
+  const { task_id, status, output, error } = req.body;
+  if (status === "succeeded") {
+    // process output (files, text, structured data)
+  } else if (status === "failed") {
+    // log/alert and retry logic
+  }
+  res.sendStatus(200);
+});
           </code>
         </pre>
       </div>
