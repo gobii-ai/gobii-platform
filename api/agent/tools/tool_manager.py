@@ -379,6 +379,27 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
         registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
         executor = registry_entry.get("executor") if registry_entry else None
         if executor:
+            try:
+                row = PersistentAgentEnabledTool.objects.filter(
+                    agent=agent,
+                    tool_full_name=tool_name,
+                ).first()
+            except Exception:
+                row = None
+                logger.exception("Failed to load enabled entry for builtin tool %s", tool_name)
+
+            if row:
+                try:
+                    row.last_used_at = datetime.now(UTC)
+                    row.usage_count = (row.usage_count or 0) + 1
+                    update_fields = ["last_used_at", "usage_count"]
+                    metadata_updates = _apply_tool_metadata(row, entry)
+                    if metadata_updates:
+                        update_fields.extend(metadata_updates)
+                    row.save(update_fields=list(dict.fromkeys(update_fields)))
+                except Exception:
+                    logger.exception("Failed to record usage for builtin tool %s", tool_name)
+
             return executor(agent, params)
 
     return {"status": "error", "message": f"Tool '{tool_name}' has no execution handler"}

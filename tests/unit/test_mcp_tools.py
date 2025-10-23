@@ -22,6 +22,7 @@ from api.agent.tools.tool_manager import (
     enable_tools,
     ensure_default_tools_enabled,
     get_enabled_tool_definitions,
+    execute_enabled_tool,
 )
 from api.agent.tools.search_tools import (
     execute_search_tools,
@@ -1063,6 +1064,35 @@ class MCPToolIntegrationTests(TestCase):
                 self.assertIsNotNone(second_time)
                 if first_time is not None:
                     self.assertGreater(second_time, first_time)
+
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_builtin_execution_updates_usage(self, mock_init, mock_get_tools):
+        """Executing a builtin tool should record usage to avoid premature eviction."""
+        from api.agent.tools import tool_manager as tm
+
+        mock_sqlite = MagicMock(return_value={"status": "ok"})
+        original_executor = tm.BUILTIN_TOOL_REGISTRY["sqlite_batch"]["executor"]
+        try:
+            tm.BUILTIN_TOOL_REGISTRY["sqlite_batch"]["executor"] = mock_sqlite
+
+            enable_tools(self.agent, ["sqlite_batch"])
+            row = PersistentAgentEnabledTool.objects.get(
+                agent=self.agent,
+                tool_full_name="sqlite_batch",
+            )
+            self.assertIsNone(row.last_used_at)
+            self.assertEqual(row.usage_count, 0)
+
+            result = execute_enabled_tool(self.agent, "sqlite_batch", {"operations": ["select 1"]})
+        finally:
+            tm.BUILTIN_TOOL_REGISTRY["sqlite_batch"]["executor"] = original_executor
+
+        self.assertEqual(result["status"], "ok")
+        mock_sqlite.assert_called_once_with(self.agent, {"operations": ["select 1"]})
+        row.refresh_from_db()
+        self.assertIsNotNone(row.last_used_at)
+        self.assertEqual(row.usage_count, 1)
 
     def test_enable_tools_batch_with_lru(self):
         """Batch enabling enforces cap and evicts LRU as needed."""

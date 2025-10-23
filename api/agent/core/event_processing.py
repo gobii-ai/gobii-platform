@@ -71,12 +71,10 @@ from ..tools.sqlite_state import get_sqlite_schema_prompt, agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request, get_secure_credentials_request_tool
 from ..tools.request_contact_permission import execute_request_contact_permission, get_request_contact_permission_tool
 from ..tools.search_tools import get_search_tools_tool, execute_search_tools
-from ..tools.mcp_manager import get_mcp_manager, execute_mcp_tool
 from ..tools.tool_manager import (
     ensure_default_tools_enabled,
     execute_enabled_tool,
     get_enabled_tool_definitions,
-    resolve_tool_entry,
 )
 from ..tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
 from ..tools.peer_dm import execute_send_agent_message, get_send_agent_message_tool
