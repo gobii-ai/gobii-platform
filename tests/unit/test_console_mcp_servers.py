@@ -5,12 +5,14 @@ from unittest.mock import patch
 
 from api.models import MCPServerConfig
 from console.forms import MCPServerConfigForm
+from util.analytics import AnalyticsEvent
 
 
 class MCPServerConfigDeleteViewTests(TestCase):
     @tag("batch_console_mcp_servers")
+    @patch("console.views._track_org_event_for_console")
     @patch("console.views.get_mcp_manager")
-    def test_htmx_delete_returns_success_partial(self, mock_get_mcp_manager):
+    def test_htmx_delete_returns_success_partial(self, mock_get_mcp_manager, mock_track_event):
         user = get_user_model().objects.create_user(
             username="test-user",
             email="user@example.com",
@@ -40,6 +42,13 @@ class MCPServerConfigDeleteViewTests(TestCase):
         )
         mock_get_mcp_manager.return_value.initialize.assert_called_once_with(force=True)
         self.assertFalse(MCPServerConfig.objects.filter(id=server.id).exists())
+        mock_track_event.assert_called_once()
+        track_args, track_kwargs = mock_track_event.call_args
+        self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_DELETED)
+        self.assertEqual(track_args[2]["server_id"], str(server.id))
+        self.assertFalse(track_args[2]["has_command"])
+        self.assertTrue(track_args[2]["has_url"])
+        self.assertIsNone(track_kwargs.get("organization"))
 
 
 @tag("batch_console_mcp_servers")
@@ -148,3 +157,100 @@ class MCPServerConfigFormTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("reserved for Gobii-managed integrations", form.non_field_errors()[0])
+
+
+class MCPServerConfigAnalyticsViewTests(TestCase):
+    @tag("batch_console_mcp_servers")
+    @patch("console.views._track_org_event_for_console")
+    @patch("console.views.get_mcp_manager")
+    def test_htmx_create_tracks_analytics(self, mock_get_mcp_manager, mock_track_event):
+        user = get_user_model().objects.create_user(
+            username="creator",
+            email="creator@example.com",
+            password="test-pass-123",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("console-mcp-server-create"),
+            data={
+                "display_name": "New HTTP Server",
+                "name": "",
+                "command": "",
+                "command_args": "[]",
+                "url": "https://new.example.com/mcp",
+                "metadata": "{}",
+                "environment": "{}",
+                "headers": "{}",
+                "is_active": "on",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(MCPServerConfig.objects.count(), 1)
+        server = MCPServerConfig.objects.get()
+        mock_get_mcp_manager.return_value.initialize.assert_called_once_with(force=True)
+        mock_track_event.assert_called_once()
+
+        track_args, track_kwargs = mock_track_event.call_args
+        self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_CREATED)
+        props = track_args[2]
+        self.assertEqual(props["server_id"], str(server.id))
+        self.assertEqual(props["server_scope"], MCPServerConfig.Scope.USER)
+        self.assertEqual(props["owner_scope"], "user")
+        self.assertTrue(props["has_url"])
+        self.assertFalse(props["has_command"])
+        self.assertTrue(props["is_active"])
+        self.assertIsNone(track_kwargs.get("organization"))
+
+    @tag("batch_console_mcp_servers")
+    @patch("console.views._track_org_event_for_console")
+    @patch("console.views.get_mcp_manager")
+    def test_htmx_update_tracks_analytics(self, mock_get_mcp_manager, mock_track_event):
+        user = get_user_model().objects.create_user(
+            username="updater",
+            email="updater@example.com",
+            password="test-pass-123",
+        )
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name="existing-server",
+            display_name="Existing Server",
+            url="https://existing.example.com/mcp",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("console-mcp-server-edit", args=[server.id]),
+            data={
+                "display_name": "Updated Server",
+                "name": server.name,
+                "command": "",
+                "command_args": "[]",
+                "url": "https://updated.example.com/mcp",
+                "metadata": "{}",
+                "environment": "{}",
+                "headers": "{}",
+                "is_active": "on",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        server.refresh_from_db()
+        self.assertEqual(server.url, "https://updated.example.com/mcp")
+        mock_get_mcp_manager.return_value.initialize.assert_called_once_with(force=True)
+        mock_track_event.assert_called_once()
+
+        track_args, track_kwargs = mock_track_event.call_args
+        self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_UPDATED)
+        props = track_args[2]
+        self.assertEqual(props["server_id"], str(server.id))
+        self.assertEqual(props["server_scope"], MCPServerConfig.Scope.USER)
+        self.assertEqual(props["owner_scope"], server.scope)
+        self.assertTrue(props["has_url"])
+        self.assertFalse(props["has_command"])
+        self.assertTrue(props["is_active"])
+        self.assertIsNone(track_kwargs.get("organization"))

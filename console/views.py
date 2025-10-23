@@ -14,7 +14,7 @@ from django.urls import reverse, reverse_lazy
 from django.contrib import messages
 from django.db import transaction, models, IntegrityError
 from django.db.models import Q
-from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404
+from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404, HttpRequest
 from django.core.exceptions import ValidationError, PermissionDenied, ImproperlyConfigured
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
@@ -261,6 +261,23 @@ def _track_org_event_for_console(
     ))
 
     return props
+
+
+def _mcp_server_event_properties(
+    request: HttpRequest,
+    server: MCPServerConfig,
+    owner_scope: str | None = None,
+) -> dict[str, object]:
+    return {
+        "actor_id": str(request.user.id),
+        "server_id": str(server.id),
+        "server_name": server.name,
+        "server_scope": server.scope,
+        "owner_scope": owner_scope or server.scope,
+        "has_command": bool(server.command),
+        "has_url": bool(server.url),
+        "is_active": server.is_active,
+    }
 
 
 def _set_overage_detach_session(request, org_id: str, subscription_id: str, price_id: str) -> None:
@@ -3430,6 +3447,12 @@ class MCPServerConfigCreateView(MCPServerOwnerMixin, ConsoleViewMixin, View):
             try:
                 server = form.save(user=self.owner_user, organization=self.owner_org)
                 get_mcp_manager().initialize(force=True)
+                _track_org_event_for_console(
+                    request,
+                    AnalyticsEvent.MCP_SERVER_CREATED,
+                    _mcp_server_event_properties(request, server, self.owner_scope),
+                    organization=self.owner_org,
+                )
                 if request.htmx:
                     response = render(
                         request,
@@ -3537,6 +3560,12 @@ class MCPServerConfigUpdateView(ConsoleViewMixin, TemplateView):
             try:
                 updated_server = form.save()
                 get_mcp_manager().initialize(force=True)
+                _track_org_event_for_console(
+                    request,
+                    AnalyticsEvent.MCP_SERVER_UPDATED,
+                    _mcp_server_event_properties(request, updated_server, updated_server.scope),
+                    organization=updated_server.organization,
+                )
                 if request.htmx:
                     response = render(
                         request,
@@ -3596,6 +3625,19 @@ class MCPServerConfigDeleteView(ConsoleViewMixin, View):
         get_mcp_manager().initialize(force=True)
         return server_name
 
+    def _handle_delete(self, request: HttpRequest, *args, **kwargs):
+        config = self._get_config(request, *args, **kwargs)
+        organization = config.organization
+        props = _mcp_server_event_properties(request, config, config.scope)
+        server_name = self._delete_config(config)
+        _track_org_event_for_console(
+            request,
+            AnalyticsEvent.MCP_SERVER_DELETED,
+            props,
+            organization=organization,
+        )
+        return self._delete_response(request, server_name)
+
     def _delete_response(self, request, server_name: str):
         if request.htmx:
             response = render(
@@ -3612,14 +3654,10 @@ class MCPServerConfigDeleteView(ConsoleViewMixin, View):
         return redirect('console-mcp-servers')
 
     def post(self, request, *args, **kwargs):
-        config = self._get_config(request, *args, **kwargs)
-        server_name = self._delete_config(config)
-        return self._delete_response(request, server_name)
+        return self._handle_delete(request, *args, **kwargs)
 
     def delete(self, request, *args, **kwargs):
-        config = self._get_config(request, *args, **kwargs)
-        server_name = self._delete_config(config)
-        return self._delete_response(request, server_name)
+        return self._handle_delete(request, *args, **kwargs)
 
 
 class PersistentAgentChatShellView(AgentDetailView):

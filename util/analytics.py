@@ -98,6 +98,11 @@ class AnalyticsEvent(StrEnum):
     API_KEY_DELETED = 'API Key Deleted'
     API_KEY_REVOKED = 'API Key Revoked'
 
+    # MCP Server Events
+    MCP_SERVER_CREATED = 'MCP Server Created'
+    MCP_SERVER_UPDATED = 'MCP Server Updated'
+    MCP_SERVER_DELETED = 'MCP Server Deleted'
+
     # Console Events
     CONSOLE_HOME_VIEWED = 'Console Home Viewed'
     CONSOLE_USAGE_VIEWED = 'Console Usage Viewed'
