@@ -19,6 +19,12 @@
   <meta name="twitter:title" content="Gobii Developer Hub — AI Agent API & Persistent Browser Automation">
   <meta name="twitter:description" content="Spawn agents, run tasks, receive webhooks. Open-core, MIT.">
   <meta name="twitter:image" content="{% static 'img/devhub_og.jpg' %}">
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+
+  <!-- and it's easy to individually load additional languages -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/go.min.js"></script>
 {% endblock %}
 
 {% block page_article %}
@@ -30,8 +36,8 @@
         Build AI Agents. Automate the Web. <span class="block text-indigo-400">All with one API.</span>
       </h1>
       <p class="mt-6 text-slate-300 max-w-2xl mx-auto">
-        Gobii is a developer-first, open-core <strong>AI Agent API</strong> for persistent, adaptive browser automation.
-        Spawn agents, run tasks, receive webhooks—no custom infra required.
+        Gobii is a developer-first, open-core <strong>AI Agent API</strong> for persistent, adaptive browser automation using browser-use.
+        Spawn agents, run tasks, receive webhooks—no custom infrastructure required. Scale to production with Gobii Cloud or self-host.
       </p>
       <div class="mt-8 flex items-center justify-center gap-3">
         <a href="/accounts/signup/" class="rounded-lg bg-indigo-600 px-5 py-3 text-white font-semibold hover:bg-indigo-500" title="Create a Gobii account and get your API key">Get API Key</a>
@@ -51,8 +57,8 @@
           <p class="mt-2 text-slate-600">Agents that keep state, run 24/7, and answer via webhooks—ideal for monitoring, workflows, and assistants.</p>
         </div>
         <div class="rounded-xl bg-slate-50 p-6 shadow-sm hover:shadow-md transition">
-          <h3 class="text-lg font-semibold text-slate-900">Adaptive Browser Control</h3>
-          <p class="mt-2 text-slate-600">Real-browser automation that handles changing layouts, forms, and flows—no brittle scripts.</p>
+          <h3 class="text-lg font-semibold text-slate-900">Ad-hoc Tasks</h3>
+          <p class="mt-2 text-slate-600">Real-browser automation that handles changing layouts, forms, and flows—no brittle scripts, launched by you when needed.</p>
         </div>
         <div class="rounded-xl bg-slate-50 p-6 shadow-sm hover:shadow-md transition">
           <h3 class="text-lg font-semibold text-slate-900">Open-Core & Portable</h3>
@@ -67,53 +73,68 @@
     <div class="mx-auto max-w-6xl px-6 py-16">
       <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Your first request in 3 minutes</h2>
       <ol class="mt-6 space-y-4 text-slate-700">
-        <li><strong>1.</strong> <a class="text-indigo-600 hover:underline" href="/accounts/signup/">Create a free account</a> and copy your API key.</li>
+        <li><strong>1.</strong> <a class="text-indigo-600 hover:underline" href="/accounts/signup/">Create a free
+          account</a> and copy your API key.
+        </li>
         <li><strong>2.</strong> Run a task.</li>
       </ol>
 
-      <div class="mt-6 rounded-xl bg-slate-900 p-4 shadow-inner">
-<pre class="overflow-x-auto text-slate-100 text-sm"><code># cURL
-curl -X POST https://api.gobii.ai/v1/tasks \
-  -H "Authorization: Bearer &lt;YOUR_API_KEY&gt;" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "Find new leads in my industry, and post results to the webhook every few hours",
-    "callback_url": "https://example.com/webhooks/gobii"
-  }'
-
-# Node.js (Node 18+ has fetch built in)
-const res = await fetch("https://api.gobii.ai/v1/tasks", {
-  method: "POST",
-  headers: {
-    "Authorization": "Bearer " + process.env.GOBII_API_KEY,
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    prompt: "Fill out the onboarding form at example.com",
-    callback_url: "https://example.com/webhooks/gobii"
-  })
-});
-const json = await res.json();
-console.log(json); // { task_id, status: "queued" }</code></pre>
+      <div class="mt-6 rounded-xl p-4 shadow-inner" style="background-color: #282c34;">
+        <pre class="overflow-x-auto text-slate-100 text-sm">
+          <code class="language-bash"># cURL
+            curl -X POST https://api.gobii.ai/api/v1/agents/ \
+              -H "Authorization: Bearer &lt;YOUR_API_KEY&gt;" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "name": "Lead Finder Agent",
+                "charter": "Find new leads in my industry, and post results to the webhook every few hours",
+                "schedule": "@daily",
+                "preferred_contact_endpoint": "webhook"
+              }'
+            </code>
+        </pre>
+      </div>
+      <div class="mt-6 rounded-xl p-4 shadow-inner" style="background-color: #282c34;">
+        <pre class="overflow-x-auto text-slate-100 text-sm">
+          <code class="language-javascript">
+            const res = await fetch("https://api.gobii.ai/v1/tasks", {
+              method: "POST",
+              headers: {
+                "Authorization": "Bearer " + process.env.GOBII_API_KEY,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                prompt: "Fill out the onboarding form at example.com",
+                callback_url: "https://example.com/webhooks/gobii"
+              })
+            });
+            const json = await res.json();
+            console.log(json);
+            </code>
+        </pre>
       </div>
 
       <p class="mt-6 text-slate-700"><strong>3.</strong> Receive results via webhook:</p>
 
-      <div class="mt-3 rounded-xl bg-slate-900 p-4 shadow-inner">
-<pre class="overflow-x-auto text-slate-100 text-sm"><code>// Express.js webhook example
-app.post("/webhooks/gobii", (req, res) => {
-  const { task_id, status, output, error } = req.body;
-  if (status === "succeeded") {
-    // process output (files, text, structured data)
-  } else if (status === "failed") {
-    // log/alert and retry logic
-  }
-  res.sendStatus(200);
-});</code></pre>
+      <div class="mt-3 rounded-xl p-4 shadow-inner" style="background-color: #282c34;">
+        <pre class="overflow-x-auto text-slate-100 text-sm">
+          <code class="language-javascript">
+            // Express.js webhook example
+            app.post("/webhooks/gobii", (req, res) => {
+              const { task_id, status, output, error } = req.body;
+              if (status === "succeeded") {
+                // process output (files, text, structured data)
+              } else if (status === "failed") {
+                // log/alert and retry logic
+              }
+              res.sendStatus(200);
+            });
+          </code>
+        </pre>
       </div>
 
       <div class="mt-6">
-        <a href="/developers/getting-started/" class="inline-flex items-center gap-2 text-indigo-600 hover:underline">
+        <a href="/docs/guides/quickstart/" class="inline-flex items-center gap-2 text-indigo-600 hover:underline">
           See full quickstart and error handling →
         </a>
       </div>
@@ -188,4 +209,9 @@ app.post("/webhooks/gobii", (req, res) => {
     </div>
   </section>
 
+  <script>
+    (function () {
+      hljs.highlightAll();
+    })();
+  </script>
 {% endblock %}
