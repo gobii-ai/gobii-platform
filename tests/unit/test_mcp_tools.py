@@ -1,5 +1,6 @@
 """Unit tests for MCP tool management functionality."""
 
+import atexit
 import json
 import time
 import uuid
@@ -28,6 +29,116 @@ from api.agent.tools.search_tools import (
     search_tools,
 )
 from tests.utils.llm_seed import seed_persistent_basic
+
+
+def _default_fake_run_completion(*args, **kwargs):
+    """Default stub to prevent real LLM calls during tests."""
+    user_content = ""
+    messages = kwargs.get("messages") or []
+    if len(messages) >= 2:
+        user_message = messages[1] or {}
+        if isinstance(user_message, dict):
+            user_content = user_message.get("content") or ""
+
+    tool_names: list[str] = []
+    for line in user_content.splitlines():
+        line = line.strip()
+        if not line.startswith("- "):
+            continue
+        # Keep portion before any separator (":" or "|")
+        trimmed = line[2:].split("|", 1)[0].split(":", 1)[0].strip()
+        if trimmed:
+            tool_names.append(trimmed)
+
+    message = MagicMock()
+    if tool_names:
+        message.content = "No MCP tools available.\n" + f"Enabled: {', '.join(tool_names)}"
+        message.tool_calls = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_tools",
+                    "arguments": json.dumps({"tool_names": tool_names}),
+                },
+            }
+        ]
+    else:
+        message.content = "No MCP tools available."
+        message.tool_calls = []
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    return response
+
+
+_RUN_COMPLETION_PATCHER = patch(
+    "api.agent.tools.search_tools.run_completion",
+    side_effect=_default_fake_run_completion,
+)
+RUN_COMPLETION_GUARD = _RUN_COMPLETION_PATCHER.start()
+atexit.register(_RUN_COMPLETION_PATCHER.stop)
+
+
+class _DummyMCPClient:
+    """Stub client to prevent real MCP subprocess or HTTP calls in tests."""
+
+    def __init__(self, transport):
+        self.transport = transport
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def list_tools(self):
+        # Return no tools by default; tests can patch manager caches as needed.
+        return []
+
+    def close(self):
+        pass
+
+
+class _DummyStdioTransport:
+    """Stub transport to prevent subprocess execution."""
+
+    def __init__(self, command, args=None, env=None):
+        self.command = command
+        self.args = list(args or [])
+        self.env = dict(env or {})
+        self.headers: dict[str, str] = {}
+
+
+class _DummyStreamableHttpTransport:
+    """Stub transport to avoid real HTTP connections during discovery."""
+
+    def __init__(self, url, headers=None, httpx_client_factory=None):
+        self.url = url
+        self.headers = dict(headers or {})
+        self.httpx_client_factory = httpx_client_factory
+
+
+_MCP_CLIENT_PATCHER = patch(
+    "api.agent.tools.mcp_manager.Client",
+    new=_DummyMCPClient,
+)
+_MCP_CLIENT_PATCHER.start()
+atexit.register(_MCP_CLIENT_PATCHER.stop)
+
+_STDIO_TRANSPORT_PATCHER = patch(
+    "fastmcp.client.transports.StdioTransport",
+    new=_DummyStdioTransport,
+)
+_STDIO_TRANSPORT_PATCHER.start()
+atexit.register(_STDIO_TRANSPORT_PATCHER.stop)
+
+_STREAM_TRANSPORT_PATCHER = patch(
+    "fastmcp.client.transports.StreamableHttpTransport",
+    new=_DummyStreamableHttpTransport,
+)
+_STREAM_TRANSPORT_PATCHER.start()
+atexit.register(_STREAM_TRANSPORT_PATCHER.stop)
 
 
 def create_test_browser_agent(user):
@@ -602,7 +713,14 @@ class MCPToolFunctionsTests(TestCase):
             "enabled_tools": ["sqlite_batch"],
         }
 
-        result = search_tools(self.agent, "sqlite please")
+        with patch(
+            "api.agent.tools.search_tools._SEARCH_PROVIDERS",
+            [
+                ("mcp", mock_mcp_provider),
+                ("sqlite", mock_sqlite_provider),
+            ],
+        ):
+            result = search_tools(self.agent, "sqlite please")
 
         self.assertEqual(result, mock_sqlite_provider.return_value)
         mock_sqlite_provider.assert_called_once()
