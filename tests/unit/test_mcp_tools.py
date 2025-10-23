@@ -13,16 +13,19 @@ from api.agent.tools.mcp_manager import (
     MCPToolManager,
     MCPToolInfo,
     MCPServerRuntime,
-    search_tools,
+    get_mcp_manager,
+    execute_mcp_tool,
+)
+from api.agent.tools.tool_manager import (
     enable_mcp_tool,
     enable_tools,
     ensure_default_tools_enabled,
-    get_mcp_manager,
+    get_enabled_tool_definitions,
 )
-from api.agent.tools.mcp_tools import (
+from api.agent.tools.search_tools import (
     execute_search_tools,
-    execute_mcp_tool,
     get_search_tools_tool,
+    search_tools,
 )
 from tests.utils.llm_seed import seed_persistent_basic
 
@@ -205,7 +208,7 @@ class MCPToolManagerTests(TestCase):
             {"type": "object", "properties": {}}
         )
         # Enable via API to populate table
-        from api.agent.tools.mcp_manager import enable_mcp_tool
+        from api.agent.tools.tool_manager import enable_mcp_tool
         # Ensure global manager doesn't auto-initialize during enable
         from api.agent.tools import mcp_manager as mm
         mm._mcp_manager._initialized = True
@@ -236,7 +239,7 @@ class MCPToolManagerTests(TestCase):
             browser_use_agent=browser_agent,
         )
         # Mark enabled in table
-        from api.agent.tools.mcp_manager import enable_mcp_tool
+        from api.agent.tools.tool_manager import enable_mcp_tool
         tool1 = MCPToolInfo(self.config_id, "mcp_test_tool1", self.server_name, "tool1", "Test tool 1", {})
         runtime = MCPServerRuntime(
             config_id=self.config_id,
@@ -480,16 +483,20 @@ class MCPToolFunctionsTests(TestCase):
         # Ensure persistent LLM config exists for DB-only selection
         seed_persistent_basic(include_openrouter=False)
         
-    @patch('api.agent.tools.mcp_manager.enable_tools')
-    @patch('api.agent.tools.mcp_manager.litellm.completion')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_search_tools_calls_enable_tools(self, mock_init, mock_get_tools, mock_completion, mock_enable_batch):
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_calls_enable_tools(self, mock_get_config, mock_get_manager, mock_run_completion, mock_enable_batch):
         """search_tools should invoke internal enable_tools via a tool call."""
-        mock_get_tools.return_value = [
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = [
             MCPToolInfo(self.config_id, "mcp_brightdata_scrape", "brightdata", "scrape", "Scrape pages", {}),
             MCPToolInfo(self.config_id, "mcp_brightdata_search", "brightdata", "search", "Search web", {}),
         ]
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
 
         # Mock a tool-call style response
         tool_call = {
@@ -510,7 +517,7 @@ class MCPToolFunctionsTests(TestCase):
         choice.message = message
         mock_response = MagicMock()
         mock_response.choices = [choice]
-        mock_completion.return_value = mock_response
+        mock_run_completion.return_value = mock_response
 
         mock_enable_batch.return_value = {
             "status": "success",
@@ -527,15 +534,17 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result.get("enabled_tools"), ["mcp_brightdata_scrape", "mcp_brightdata_search"]) 
         mock_enable_batch.assert_called_once()
 
-    @patch('api.agent.tools.mcp_manager.get_llm_config_with_failover')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    @patch('api.agent.tools.mcp_manager.litellm.completion')
-    def test_search_tools_drops_parallel_hint_from_params(self, mock_completion, mock_init, mock_get_tools, mock_get_config):
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.run_completion')
+    def test_search_tools_drops_parallel_hint_from_params(self, mock_run_completion, mock_get_manager, mock_get_config):
         """search_tools should not forward internal 'use_parallel_tool_calls' hint to LiteLLM."""
-        mock_get_tools.return_value = [
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = [
             MCPToolInfo(self.config_id, "mcp_brightdata_scrape", "brightdata", "scrape", "Scrape pages", {}),
         ]
+        mock_get_manager.return_value = mock_manager
         # Return a single config with both hints present
         mock_get_config.return_value = [
             (
@@ -551,7 +560,6 @@ class MCPToolFunctionsTests(TestCase):
         ]
 
         # Make litellm.completion return a minimal response
-        from unittest.mock import MagicMock
         mock_response = MagicMock()
         msg = MagicMock()
         msg.content = "No tools"
@@ -559,21 +567,23 @@ class MCPToolFunctionsTests(TestCase):
         choice = MagicMock()
         choice.message = msg
         mock_response.choices = [choice]
-        mock_completion.return_value = mock_response
+        mock_run_completion.return_value = mock_response
 
         # Call search_tools (module-level function)
         res = search_tools(self.agent, "anything")
         self.assertEqual(res["status"], "success")
         # Assert the forwarded kwargs do not contain the internal hint
-        kwargs = mock_completion.call_args.kwargs
+        kwargs = mock_run_completion.call_args.kwargs
         self.assertNotIn('use_parallel_tool_calls', kwargs)
         self.assertNotIn('supports_vision', kwargs)
 
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_search_tools_no_tools(self, mock_init, mock_get_tools):
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    def test_search_tools_no_tools(self, mock_get_manager):
         """search_tools when no tools are available returns a message."""
-        mock_get_tools.return_value = []
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
         result = search_tools(self.agent, "any query")
         self.assertEqual(result["status"], "success")
         self.assertIn("No MCP tools available", result["message"])
@@ -661,8 +671,32 @@ class MCPToolFunctionsTests(TestCase):
         
         self.assertEqual(result["status"], "error")
         self.assertIn("does not exist", result["message"])
+
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_enable_tools_includes_sqlite(self, mock_init, mock_get_tools):
+        """Enable tools should handle built-in sqlite tool."""
+        result = enable_tools(self.agent, ["sqlite_batch"])
+        self.assertEqual(result["status"], "success")
+        self.assertIn("sqlite_batch", result["enabled"])
+        row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="sqlite_batch")
+        self.assertEqual(row.tool_server, "builtin")
+        self.assertEqual(row.tool_name, "sqlite_batch")
+
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_get_enabled_tool_definitions_includes_sqlite(self, mock_init, mock_get_tools):
+        """Enabled tool definitions include sqlite_batch when enabled."""
+        enable_tools(self.agent, ["sqlite_batch"])
+        definitions = get_enabled_tool_definitions(self.agent)
+        names = {
+            entry.get("function", {}).get("name")
+            for entry in definitions
+            if isinstance(entry, dict)
+        }
+        self.assertIn("sqlite_batch", names)
         
-    @patch('api.agent.tools.mcp_manager.enable_mcp_tool')
+    @patch('api.agent.tools.tool_manager.enable_mcp_tool')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_ensure_default_tools_enabled(self, mock_init, mock_get_tools, mock_enable):
@@ -677,7 +711,7 @@ class MCPToolFunctionsTests(TestCase):
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    @patch('api.agent.tools.mcp_manager.enable_mcp_tool')
+    @patch('api.agent.tools.tool_manager.enable_mcp_tool')
     def test_ensure_default_tools_already_enabled(self, mock_enable, mock_init, mock_get_tools):
         """Test ensuring defaults when already enabled."""
         # Pre-enable default tool directly in table
@@ -717,7 +751,7 @@ class MCPToolExecutorsTests(TestCase):
         self.assertIn("query", tool_def["function"]["parameters"]["properties"])
         self.assertIn("query", tool_def["function"]["parameters"]["required"])
         
-    @patch('api.agent.tools.mcp_tools.search_tools')
+    @patch('api.agent.tools.search_tools.search_tools')
     def test_execute_search_tools(self, mock_search):
         """Test executing search_tools function returns pass-through result."""
         mock_search.return_value = {
@@ -742,16 +776,14 @@ class MCPToolExecutorsTests(TestCase):
         
     # enable_tool is no longer exposed to the main agent; auto-enabling is handled inside search_tools
         
-    @patch('api.agent.tools.mcp_tools.get_mcp_manager')
-    def test_execute_mcp_tool(self, mock_get_manager):
+    @patch('api.agent.tools.mcp_manager._mcp_manager')
+    def test_execute_mcp_tool(self, mock_manager):
         """Test executing an MCP tool."""
-        mock_manager = MagicMock()
         mock_manager._initialized = True
         mock_manager.execute_mcp_tool.return_value = {
             "status": "success",
             "result": "Tool executed"
         }
-        mock_get_manager.return_value = mock_manager
         
         result = execute_mcp_tool(self.agent, "mcp_test_tool", {"param": "value"})
         
@@ -828,7 +860,7 @@ class MCPToolIntegrationTests(TestCase):
         self.assertNotIn("mcp_test_tool0", enabled_now)
         self.assertIn("mcp_test_tool40", enabled_now)
         
-    @patch('api.agent.tools.mcp_manager.enable_mcp_tool')
+    @patch('api.agent.tools.tool_manager.enable_mcp_tool')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_default_tools_initialization(self, mock_init, mock_get_tools, mock_enable):

@@ -128,7 +128,7 @@ class TestMCPToolBlacklist(TestCase):
     
     def test_enable_mcp_tool_blocks_blacklisted(self):
         """Test that enable_mcp_tool blocks blacklisted tools."""
-        from api.agent.tools.mcp_manager import enable_mcp_tool
+        from api.agent.tools.tool_manager import enable_mcp_tool
         
         # Create a real agent
         from django.contrib.auth import get_user_model
@@ -148,7 +148,8 @@ class TestMCPToolBlacklist(TestCase):
     
     def test_ensure_default_tools_skips_blacklisted(self):
         """Test that ensure_default_tools_enabled skips blacklisted default tools."""
-        from api.agent.tools.mcp_manager import ensure_default_tools_enabled, MCPToolManager, _mcp_manager
+        from api.agent.tools.tool_manager import ensure_default_tools_enabled
+        from api.agent.tools.mcp_manager import MCPToolManager, _mcp_manager
         
         # Temporarily add a blacklisted tool to defaults for testing
         original_defaults = MCPToolManager.DEFAULT_ENABLED_TOOLS.copy()
@@ -176,7 +177,7 @@ class TestMCPToolBlacklist(TestCase):
                         )
                     ]
                     
-                    with patch('api.agent.tools.mcp_manager.enable_mcp_tool') as mock_enable:
+                    with patch('api.agent.tools.tool_manager.enable_mcp_tool') as mock_enable:
                         ensure_default_tools_enabled(agent)
                         
                         # Should only enable non-blacklisted tools
