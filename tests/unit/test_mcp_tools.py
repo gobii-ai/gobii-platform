@@ -699,31 +699,37 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result["status"], "success")
         self.assertIn("No MCP tools available", result["message"])
 
-    @patch('api.agent.tools.search_tools._search_sqlite_tools')
-    @patch('api.agent.tools.search_tools._search_mcp_tools')
-    def test_search_tools_walks_providers_when_empty(self, mock_mcp_provider, mock_sqlite_provider):
-        """search_tools should continue to later providers when earlier ones return empty successes."""
-        mock_mcp_provider.return_value = {
-            "status": "success",
-            "tools": [],
-            "message": "No MCP tools available",
-        }
-        mock_sqlite_provider.return_value = {
-            "status": "success",
-            "enabled_tools": ["sqlite_batch"],
-        }
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_includes_builtin_catalog(self, mock_get_config, mock_get_manager, mock_run_completion, mock_enable_tools):
+        """search_tools should include builtin tools when MCP catalog is empty."""
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
 
-        with patch(
-            "api.agent.tools.search_tools._SEARCH_PROVIDERS",
-            [
-                ("mcp", mock_mcp_provider),
-                ("sqlite", mock_sqlite_provider),
-            ],
-        ):
-            result = search_tools(self.agent, "sqlite please")
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
 
-        self.assertEqual(result, mock_sqlite_provider.return_value)
-        mock_sqlite_provider.assert_called_once()
+        result = search_tools(self.agent, "anything")
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("No relevant tools", result.get("message", ""))
+        mock_run_completion.assert_called_once()
+        _args, kwargs = mock_run_completion.call_args
+        user_message = kwargs["messages"][1]["content"]
+        self.assertIn("sqlite_batch", user_message)
+        self.assertIn("http_request", user_message)
+        mock_enable_tools.assert_not_called()
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')

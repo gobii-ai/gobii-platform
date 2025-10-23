@@ -1,14 +1,14 @@
 """
 Tool search orchestration for persistent agents.
 
-Provides a unified `search_tools` function that can delegate to multiple discovery providers.
-Currently only MCP tools are available, but additional providers can be appended to `_SEARCH_PROVIDERS`.
+Provides a unified `search_tools` function that queries the LLM once across
+both MCP-discovered tools and builtin tools, then enables any selected tools.
 """
 
 import json
 import logging
 import re
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import litellm  # re-exported for tests that patch LiteLLM directly
 from opentelemetry import trace
@@ -17,15 +17,12 @@ from ...models import PersistentAgent
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from .mcp_manager import get_mcp_manager
-from .sqlite_batch import get_sqlite_batch_tool
-from .http_request import get_http_request_tool
-from .tool_manager import enable_tools
+from .tool_manager import enable_tools, BUILTIN_TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 ToolSearchResult = Dict[str, Any]
-ToolSearchProvider = Callable[[PersistentAgent, str], ToolSearchResult]
 
 
 def _strip_description(text: str, limit: int = 180) -> str:
@@ -260,87 +257,44 @@ def _search_with_llm(
         logger.error("search_tools.%s: unexpected error during search: %s", provider_name, exc)
         return {"status": "error", "message": str(exc)}
 
-def _search_sqlite_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
-    sqlite_tool = get_sqlite_batch_tool()
-    catalog = [
-        {
-            "full_name": sqlite_tool["function"]["name"],
-            "description": sqlite_tool["function"]["description"],
-            "parameters": sqlite_tool["function"]["parameters"],
-        }
-    ]
-    return _search_with_llm(
-        agent=agent,
-        query=query,
-        provider_name="sqlite",
-        catalog=catalog,
-        enable_callback=enable_tools,
-        empty_message="SQLite tools unavailable",
-    )
-
-
-def _search_mcp_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
+def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
+    """Search across MCP and builtin tools in a single LLM call."""
     manager = get_mcp_manager()
     if not manager._initialized:
         manager.initialize()
-    tools = manager.get_tools_for_agent(agent)
-    return _search_with_llm(
-        agent=agent,
-        query=query,
-        provider_name="mcp",
-        catalog=tools,
-        enable_callback=enable_tools,
-        empty_message="No MCP tools available",
-    )
 
+    mcp_tools = manager.get_tools_for_agent(agent)
 
-def _search_http_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
-    http_tool = get_http_request_tool()
-    catalog = [
-        {
-            "full_name": http_tool["function"]["name"],
-            "description": http_tool["function"]["description"],
-            "parameters": http_tool["function"]["parameters"],
-        }
-    ]
-    return _search_with_llm(
-        agent=agent,
-        query=query,
-        provider_name="http",
-        catalog=catalog,
-        enable_callback=enable_tools,
-        empty_message="HTTP request tool unavailable",
-    )
-
-
-_SEARCH_PROVIDERS: List[Tuple[str, ToolSearchProvider]] = [
-    ("mcp", _search_mcp_tools),
-    ("sqlite", _search_sqlite_tools),
-    ("http", _search_http_tools),
-]
-
-
-def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
-    """Search for relevant tools across all configured providers."""
-    last_result: Optional[ToolSearchResult] = None
-    for provider_name, provider in _SEARCH_PROVIDERS:
-        logger.info("search_tools: delegating query '%s' to provider '%s'", query, provider_name)
+    builtin_catalog: List[Dict[str, Any]] = []
+    for name, registry_entry in BUILTIN_TOOL_REGISTRY.items():
         try:
-            result = provider(agent, query)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception("search_tools provider '%s' raised an exception", provider_name)
-            last_result = {"status": "error", "message": f"{provider_name} provider failed: {exc}"}
+            tool_def = registry_entry["definition"]()
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception("search_tools: failed to build builtin tool definition for %s", name)
             continue
-        if result.get("status") == "success":
-            # Some providers return a success stub with an empty `tools` list when nothing is available.
-            if result.get("tools", object()) == []:
-                last_result = result
-                continue
-            return result
-        last_result = result
-    if last_result is not None:
-        return last_result
-    return {"status": "error", "message": "No tool search providers available"}
+        function_block = tool_def.get("function") if isinstance(tool_def, dict) else {}
+        builtin_catalog.append(
+            {
+                "full_name": function_block.get("name", name),
+                "description": function_block.get("description", ""),
+                "parameters": function_block.get("parameters", {}),
+            }
+        )
+
+    combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog
+
+    if not combined_catalog:
+        logger.info("search_tools: no tools available for agent %s", agent.id)
+        return {"status": "success", "tools": [], "message": "No tools available"}
+
+    return _search_with_llm(
+        agent=agent,
+        query=query,
+        provider_name="catalog",
+        catalog=combined_catalog,
+        enable_callback=enable_tools,
+        empty_message="No tools available",
+    )
 
 
 def get_search_tools_tool() -> Dict[str, Any]:
