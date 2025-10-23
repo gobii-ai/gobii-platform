@@ -311,6 +311,10 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
             last_result = {"status": "error", "message": f"{provider_name} provider failed: {exc}"}
             continue
         if result.get("status") == "success":
+            # Some providers return a success stub with an empty `tools` list when nothing is available.
+            if result.get("tools", object()) == []:
+                last_result = result
+                continue
             return result
         last_result = result
     if last_result is not None:

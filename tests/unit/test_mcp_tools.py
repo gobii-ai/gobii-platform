@@ -587,6 +587,25 @@ class MCPToolFunctionsTests(TestCase):
         result = search_tools(self.agent, "any query")
         self.assertEqual(result["status"], "success")
         self.assertIn("No MCP tools available", result["message"])
+
+    @patch('api.agent.tools.search_tools._search_sqlite_tools')
+    @patch('api.agent.tools.search_tools._search_mcp_tools')
+    def test_search_tools_walks_providers_when_empty(self, mock_mcp_provider, mock_sqlite_provider):
+        """search_tools should continue to later providers when earlier ones return empty successes."""
+        mock_mcp_provider.return_value = {
+            "status": "success",
+            "tools": [],
+            "message": "No MCP tools available",
+        }
+        mock_sqlite_provider.return_value = {
+            "status": "success",
+            "enabled_tools": ["sqlite_batch"],
+        }
+
+        result = search_tools(self.agent, "sqlite please")
+
+        self.assertEqual(result, mock_sqlite_provider.return_value)
+        mock_sqlite_provider.assert_called_once()
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
