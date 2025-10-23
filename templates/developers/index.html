@@ -121,10 +121,10 @@ console.log(json);
           <code class="language-javascript">
 // Express.js webhook example
 app.post("/webhooks/gobii", (req, res) => {
-  const { task_id, status, output, error } = req.body;
-  if (status === "succeeded") {
+  const { id, status, output_schema } = req.body;
+  if (status === "completed") {
     // process output (files, text, structured data)
-  } else if (status === "failed") {
+  } else if (status === "error") {
     // log/alert and retry logic
   }
   res.sendStatus(200);
