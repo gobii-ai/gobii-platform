@@ -18,6 +18,8 @@ from django.db import connection
 from django.db.models import Q
 from django.conf import settings
 
+from api.openrouter import get_attribution_headers
+
 logger = logging.getLogger(__name__)
 
 
@@ -199,6 +201,10 @@ def get_provider_config(provider: str) -> Tuple[str, dict]:
             "vertex_project": os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714"),
             "vertex_location": os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4"),
         })
+    elif provider == "openrouter_glm":
+        headers = get_attribution_headers()
+        if headers:
+            params["extra_headers"] = headers
     elif provider == "openai_gpt5":
         # GPT-5 specific parameters
         # Note: GPT-5 only supports temperature=1
@@ -361,6 +367,10 @@ def get_llm_config_with_failover(
                         "vertex_project": vertex_project,
                         "vertex_location": vertex_location,
                     })
+                if provider.key == 'openrouter':
+                    headers = get_attribution_headers()
+                    if headers:
+                        params["extra_headers"] = headers
 
                 # Support OpenAI-compatible endpoints for persistent agents via LiteLLM
                 # When using an OpenAI-compatible proxy, set litellm_model to 'openai/<your-model>'

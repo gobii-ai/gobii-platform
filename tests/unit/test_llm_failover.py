@@ -2,14 +2,16 @@
 import os
 from unittest import mock
 
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from api.agent.core.llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
     PROVIDER_CONFIG,
     LLMNotConfiguredError,
     invalidate_llm_bootstrap_cache,
+    get_provider_config,
 )
+from api.openrouter import DEFAULT_API_BASE
 from tests.utils.llm_seed import seed_persistent_basic, clear_llm_db
 
 
@@ -79,6 +81,39 @@ class TestLLMFailover(TestCase):
             provider, _, _ = configs[0]
             # DB providers are endpoint keys
             self.assertIn(provider, ["openrouter_glm_45", "anthropic_sonnet4", "google_gemini_25_pro"])
+
+    def test_openrouter_configs_include_attribution_headers(self):
+        seed_persistent_basic(include_openrouter=True)
+        referer = "https://example.com"
+        title = "Example App"
+        with override_settings(
+            PUBLIC_SITE_URL=referer,
+            PUBLIC_BRAND_NAME=title,
+        ):
+            with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "openrouter-key"}, clear=True):
+                configs = get_llm_config_with_failover(token_count=12000)
+                openrouter_configs = [cfg for cfg in configs if cfg[0] == "openrouter_glm_45"]
+                self.assertTrue(openrouter_configs)
+                _, _, params = openrouter_configs[0]
+                self.assertEqual(
+                    params.get("extra_headers"),
+                    {"HTTP-Referer": referer, "X-Title": title},
+                )
+
+    def test_get_provider_config_includes_openrouter_headers(self):
+        referer = "https://example.com/app"
+        title = "Example App"
+        with override_settings(
+            PUBLIC_SITE_URL=referer,
+            PUBLIC_BRAND_NAME=title,
+        ):
+            with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "openrouter-key"}, clear=True):
+                model, params = get_provider_config("openrouter_glm")
+                self.assertEqual(model, "openrouter/z-ai/glm-4.5")
+                self.assertEqual(
+                    params.get("extra_headers"),
+                    {"HTTP-Referer": referer, "X-Title": title},
+                )
 
 
 @tag("batch_event_llm")

@@ -33,6 +33,7 @@ from ..models import (
     AgentFsNode, PersistentAgent,
 )
 from ..services.task_webhooks import trigger_task_webhook
+from ..openrouter import DEFAULT_API_BASE, get_attribution_headers
 from util import EphemeralXvfb, should_use_ephemeral_xvfb
 
 tracer = trace.get_tracer('gobii.utils')
@@ -769,7 +770,7 @@ async def _run_agent(
                 elif backend == "OPENAI_COMPAT":
                     if provider == "openrouter":
                         model_name = "z-ai/glm-4.5"
-                        base_url = base_url or "https://openrouter.ai/api/v1"
+                        base_url = base_url or DEFAULT_API_BASE
                     else:
                         model_name = "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
                         base_url = base_url or "https://api.fireworks.ai/inference/v1"
@@ -784,6 +785,10 @@ async def _run_agent(
             elif backend == "ANTHROPIC":
                 llm = ChatAnthropic(**llm_params)
             else:
+                if provider == "openrouter":
+                    headers = get_attribution_headers()
+                    if headers:
+                        llm_params["default_headers"] = headers
                 if base_url:
                     llm_params["base_url"] = base_url
                 llm = ChatOpenAI(**llm_params)
