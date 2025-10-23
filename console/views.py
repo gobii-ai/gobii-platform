@@ -14,7 +14,7 @@ from django.urls import reverse, reverse_lazy
 from django.contrib import messages
 from django.db import transaction, models, IntegrityError
 from django.db.models import Q
-from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404
+from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404, HttpRequest
 from django.core.exceptions import ValidationError, PermissionDenied, ImproperlyConfigured
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
@@ -264,7 +264,7 @@ def _track_org_event_for_console(
 
 
 def _mcp_server_event_properties(
-    request,
+    request: HttpRequest,
     server: MCPServerConfig,
     owner_scope: str | None = None,
 ) -> dict[str, object]:
@@ -3625,6 +3625,19 @@ class MCPServerConfigDeleteView(ConsoleViewMixin, View):
         get_mcp_manager().initialize(force=True)
         return server_name
 
+    def _handle_delete(self, request: HttpRequest, *args, **kwargs):
+        config = self._get_config(request, *args, **kwargs)
+        organization = config.organization
+        props = _mcp_server_event_properties(request, config, config.scope)
+        server_name = self._delete_config(config)
+        _track_org_event_for_console(
+            request,
+            AnalyticsEvent.MCP_SERVER_DELETED,
+            props,
+            organization=organization,
+        )
+        return self._delete_response(request, server_name)
+
     def _delete_response(self, request, server_name: str):
         if request.htmx:
             response = render(
@@ -3641,30 +3654,10 @@ class MCPServerConfigDeleteView(ConsoleViewMixin, View):
         return redirect('console-mcp-servers')
 
     def post(self, request, *args, **kwargs):
-        config = self._get_config(request, *args, **kwargs)
-        organization = config.organization
-        props = _mcp_server_event_properties(request, config, config.scope)
-        server_name = self._delete_config(config)
-        _track_org_event_for_console(
-            request,
-            AnalyticsEvent.MCP_SERVER_DELETED,
-            props,
-            organization=organization,
-        )
-        return self._delete_response(request, server_name)
+        return self._handle_delete(request, *args, **kwargs)
 
     def delete(self, request, *args, **kwargs):
-        config = self._get_config(request, *args, **kwargs)
-        organization = config.organization
-        props = _mcp_server_event_properties(request, config, config.scope)
-        server_name = self._delete_config(config)
-        _track_org_event_for_console(
-            request,
-            AnalyticsEvent.MCP_SERVER_DELETED,
-            props,
-            organization=organization,
-        )
-        return self._delete_response(request, server_name)
+        return self._handle_delete(request, *args, **kwargs)
 
 
 class PersistentAgentChatShellView(AgentDetailView):
