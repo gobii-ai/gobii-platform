@@ -1,0 +1,136 @@
+{% extends "page.html" %}
+
+{% block title %}Gobii Developer Hub — AI Agent API & Persistent Browser Automation{% endblock %}
+
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Build persistent AI agents and automate the web with one API. Spawn agents, run browser tasks, receive webhooks, and scale to production. Open-core, MIT-licensed.">
+  <meta property="og:title" content="Gobii Developer Hub — AI Agent API & Persistent Browser Automation">
+  <meta property="og:description" content="Build persistent AI agents and automate the web with one API. Open-core, MIT-licensed.">
+  <meta property="og:url" content="https://gobii.ai/developers/">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Gobii Developer Hub — AI Agent API & Persistent Browser Automation">
+  <meta name="twitter:description" content="Spawn agents, run tasks, receive webhooks. Open-core, MIT.">
+  <meta name="twitter:image" content="">
+{% endblock %}
+
+{% block page_article %}
+  <div class="mx-auto flex max-w-5xl flex-col gap-12 md:mt-2">
+    <section class="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 px-6 py-12 md:px-12">
+      <div class="relative z-10 max-w-3xl space-y-5">
+        <h1 class="text-3xl font-semibold text-slate-900 md:text-4xl">
+          Build on Gobii with confidence
+        </h1>
+        <p class="text-lg text-slate-600">
+          We’re publishing a single destination for SDKs, integration guides, changelogs, and tooling. Start exploring what’s available today and watch for frequent updates as we expand the developer experience.
+        </p>
+        <div class="flex flex-col gap-3 sm:flex-row">
+          <a href="{% url 'pages:markdown_page' slug='guides/api' %}" class="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700">
+            Explore API guides
+            <i aria-hidden="true" data-lucide="arrow-up-right" class="ml-2 h-4 w-4"></i>
+          </a>
+          <a href="{% url 'schema-swagger-ui' %}" target="_blank" class="inline-flex items-center justify-center rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:text-blue-600">
+            Open API reference
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 h-4 w-4"></i>
+          </a>
+        </div>
+      </div>
+      <div class="pointer-events-none absolute inset-0 [mask-image:radial-gradient(circle_at_top_right,_rgba(255,255,255,.8),_transparent_65%)]">
+        <div class="absolute -right-10 top-0 h-56 w-56 rounded-full bg-blue-200/40 blur-3xl md:right-4 md:h-72 md:w-72"></div>
+        <div class="absolute -bottom-16 left-16 h-44 w-44 rounded-full bg-indigo-200/40 blur-3xl md:h-56 md:w-56"></div>
+      </div>
+    </section>
+
+    <section class="grid gap-6 md:grid-cols-2">
+      <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-slate-900">Start building</h2>
+          <span class="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-600">
+            Foundation
+          </span>
+        </div>
+        <p class="mt-2 text-sm text-slate-600">
+          Everything you need to get your first integration live: authentication, agent management, and synchronous task execution.
+        </p>
+        <ul class="mt-4 space-y-3 text-sm text-slate-700">
+          <li class="flex items-start gap-3">
+            <i aria-hidden="true" data-lucide="check-circle" class="mt-0.5 h-4 w-4 text-emerald-500"></i>
+            <span>Review the <a href="{% url 'pages:markdown_page' slug='guides/api' %}" class="text-blue-600 hover:text-blue-700">API introduction</a> to understand the core concepts.</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <i aria-hidden="true" data-lucide="check-circle" class="mt-0.5 h-4 w-4 text-emerald-500"></i>
+            <span>Generate or rotate your API key from the Gobii Console (<em>Console → Settings → API</em>).</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <i aria-hidden="true" data-lucide="check-circle" class="mt-0.5 h-4 w-4 text-emerald-500"></i>
+            <span>Spin up an agent and send it instructions using the language client of your choice.</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-slate-900">What’s coming</h2>
+          <span class="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-600">
+            Roadmap
+          </span>
+        </div>
+        <p class="mt-2 text-sm text-slate-600">
+          We’re actively investing in tooling to accelerate developer workflows. Expect regular updates in this space.
+        </p>
+        <ul class="mt-4 space-y-3 text-sm text-slate-700">
+          <li class="flex items-start gap-3">
+            <i aria-hidden="true" data-lucide="sparkles" class="mt-0.5 h-4 w-4 text-indigo-500"></i>
+            <span>Language SDKs and code samples covering common automation patterns.</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <i aria-hidden="true" data-lucide="sparkles" class="mt-0.5 h-4 w-4 text-indigo-500"></i>
+            <span>Expanded guides for production agent orchestration and monitoring.</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <i aria-hidden="true" data-lucide="sparkles" class="mt-0.5 h-4 w-4 text-indigo-500"></i>
+            <span>Automation templates and recipes contributed by the community.</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="text-lg font-semibold text-slate-900">Stay in the loop</h2>
+      <p class="mt-2 text-sm text-slate-600">
+        Connect with the team and other builders as we grow the ecosystem.
+      </p>
+      <div class="mt-4 grid gap-4 md:grid-cols-3">
+        <a href="https://discord.gg/yyDB8GwxtE" target="_blank" class="group flex flex-col rounded-xl border border-slate-200 px-4 py-5 transition hover:border-blue-200 hover:bg-blue-50/40">
+          <span class="text-sm font-semibold text-slate-900 group-hover:text-blue-700">Join the Discord</span>
+          <span class="mt-1 text-sm text-slate-600">Chat with the Gobii team and the broader developer community.</span>
+        </a>
+        <div class="flex flex-col rounded-xl border border-slate-200 px-4 py-5 text-sm text-slate-600">
+          <span class="font-semibold text-slate-900">Developer changelog</span>
+          <span class="mt-1">Get notified when new SDKs, features, and tooling ship. Coming soon.</span>
+        </div>
+        <a href="mailto:hello@gobii.com" class="group flex flex-col rounded-xl border border-slate-200 px-4 py-5 transition hover:border-blue-200 hover:bg-blue-50/40">
+          <span class="text-sm font-semibold text-slate-900 group-hover:text-blue-700">Request something</span>
+          <span class="mt-1 text-sm text-slate-600">Tell us what would make building on Gobii easier for your team.</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="rounded-2xl border border-slate-200 bg-slate-900 p-6 text-slate-100">
+      <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Ship your next automation faster</h2>
+          <p class="mt-2 text-sm text-slate-300">
+            Already building something? Let us know and we’ll help you get the right pieces in place.
+          </p>
+        </div>
+        <a href="mailto:hello@gobii.com" class="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100">
+          Talk to the team
+          <i aria-hidden="true" data-lucide="send" class="ml-2 h-4 w-4"></i>
+        </a>
+      </div>
+    </section>
+  </div>
+{% endblock %}
