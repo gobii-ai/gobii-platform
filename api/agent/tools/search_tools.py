@@ -159,6 +159,15 @@ def _search_with_llm(
                     },
                 }
 
+                run_kwargs: Dict[str, Any] = {}
+                safety_value = getattr(agent.user, "id", None) if agent and agent.user else None
+                if (
+                    safety_value is not None
+                    and isinstance(provider, str)
+                    and provider.lower().startswith("openai")
+                ):
+                    run_kwargs["safety_identifier"] = str(safety_value)
+
                 response = run_completion(
                     model=model,
                     messages=[
@@ -167,7 +176,7 @@ def _search_with_llm(
                     ],
                     params=params,
                     tools=[enable_tools_def],
-                    safety_identifier=str(agent.user.id if agent.user else ""),
+                    **run_kwargs,
                 )
 
                 message = response.choices[0].message
