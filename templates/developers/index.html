@@ -77,8 +77,8 @@ curl -X POST https://api.gobii.ai/v1/tasks \
   -H "Authorization: Bearer &lt;YOUR_API_KEY&gt;" \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "Log into example.com and export recent messages as CSV",
-    "callback_url": "https://yourapp.com/webhooks/gobii"
+    "prompt": "Find new leads in my industry, and post results to the webhook every few hours",
+    "callback_url": "https://example.com/webhooks/gobii"
   }'
 
 # Node.js (Node 18+ has fetch built in)
@@ -90,7 +90,7 @@ const res = await fetch("https://api.gobii.ai/v1/tasks", {
   },
   body: JSON.stringify({
     prompt: "Fill out the onboarding form at example.com",
-    callback_url: "https://yourapp.com/webhooks/gobii"
+    callback_url: "https://example.com/webhooks/gobii"
   })
 });
 const json = await res.json();

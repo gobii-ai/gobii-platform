@@ -1,6 +1,21 @@
 {% extends "base.html" %}
 {% load cache %}
 
+{% block title %}
+  {% if meta.title %}
+    {{ meta.title }} – Gobii
+  {% else %}
+    {{ block.super }}
+  {% endif %}
+{% endblock %}
+
+{% block head_extras %}
+  {{ block.super }}
+  {% if meta.description %}
+    <meta name="description" content="{{ meta.description }}">
+  {% endif %}
+{% endblock %}
+
 {% block content %}
 <style>
   .prose h1,
@@ -132,7 +147,7 @@
   
   <!-- Documentation Sidebar (All Docs Navigation) -->
   <aside class="gobii-card-base hidden md:block sticky top-20 self-start min-w-64 w-64 flex-shrink-0 p-4 mx-4 my-4 overflow-y-auto">
-    <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3 px-3">API Menu</h3>
+    <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3 px-3">Developers</h3>
     <nav class="space-y-1">
       <!-- Other documentation pages (excluding API) -->
       {% for doc_page in all_doc_pages %}
@@ -194,77 +209,87 @@
 
   <!-- Main Content Area for Documentation -->
   <main id="docs-main-content" class="relative z-10 flex-1 p-4 md:pl-8 md:pr-8 overflow-x-auto">
-    <!-- If we're on an old API page, redirect to the new auto-generated docs -->
-    {% if request.path|slice:":3" == "api" and request.path != '/api/schema/swagger-ui/' and request.path != '/api/schema/redoc/' and request.path != '/api/docs/' %}
-      <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg mb-6">
-        <p class="font-medium">This API documentation page has moved!</p>
-        <p class="mt-2">We now provide auto-generated, interactive API documentation that's always up-to-date.</p>
-        <div class="mt-4 flex gap-3">
-          <a href="{% url 'schema-swagger-ui' %}" class="inline-flex items-center bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-            View Swagger UI →
-          </a>
-          <a href="{% url 'schema-redoc' %}" class="inline-flex items-center bg-white hover:bg-gray-50 text-yellow-700 border border-yellow-300 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-            View ReDoc →
-          </a>
-        </div>
-      </div>
-    {% endif %}
-
-    <div class="max-w-4xl md:mt-2">
-      <article class="prose max-w-none">
-        <!-- Explicitly render the page title from metadata -->
-        <h1 class="text-4xl font-semibold text-slate-900 mt-2 mb-6">{{ meta.title }}</h1>
-        
-        {% if meta.description %}
-          <p class="lead text-xl text-slate-600 mb-6">{{ meta.description }}</p>
-        {% endif %}
-
-        {% if toc_html %}
-          <div class="docs-toc-inline mb-8">
-            <h3 class="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3">On this page</h3>
-            {{ toc_html|safe }}
-          </div>
-        {% endif %}
-
-        <div class="content">
-          {% cache 86400 docs_body slug %}
-          {{ html|safe }}
-          {% endcache %}
-        </div>
-        
-        <!-- API Reference Auto-Doc Notice -->
-        {% if request.path|slice:":3" == "api" %}
-        <div class="mt-8 p-6 bg-blue-50 rounded-lg border border-blue-100">
-          <h2 class="text-xl font-semibold text-blue-700 mb-2">Interactive API Documentation</h2>
-          <p class="text-blue-600 mb-4">
-            We provide auto-generated, interactive API documentation for developers. This documentation is always up-to-date with our latest API features.
-          </p>
-          <div class="flex flex-col sm:flex-row gap-3">
-            <a href="{% url 'schema-swagger-ui' %}" target="_blank" class="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-              <i aria-hidden="true" data-lucide="file-text" class="h-5 w-5 mr-2"></i>
-              Swagger UI
+    {% block page_article %}
+      <!-- If we're on an old API page, redirect to the new auto-generated docs -->
+      {% if request.path|slice:":3" == "api" and request.path != '/api/schema/swagger-ui/' and request.path != '/api/schema/redoc/' and request.path != '/api/docs/' %}
+        <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg mb-6">
+          <p class="font-medium">This API documentation page has moved!</p>
+          <p class="mt-2">We now provide auto-generated, interactive API documentation that's always up-to-date.</p>
+          <div class="mt-4 flex gap-3">
+            <a href="{% url 'schema-swagger-ui' %}" class="inline-flex items-center bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+              View Swagger UI →
             </a>
-            <a href="{% url 'schema-redoc' %}" target="_blank" class="inline-flex items-center justify-center bg-white hover:bg-gray-50 text-blue-600 border border-blue-200 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-              <i aria-hidden="true" data-lucide="book-open" class="h-5 w-5 mr-2"></i>
-              ReDoc
+            <a href="{% url 'schema-redoc' %}" class="inline-flex items-center bg-white hover:bg-gray-50 text-yellow-700 border border-yellow-300 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+              View ReDoc →
             </a>
           </div>
         </div>
-        {% endif %}
-      </article>
-      
-      <!-- Debug: Print all icons from doc pages -->
-      {% comment %}
-      <div class="mt-8 p-4 border border-gray-200 rounded">
-        <h3>Debug Icon Values:</h3>
-        <ul>
-          {% for doc_page in all_doc_pages %}
-            <li>{{ doc_page.title }}: icon = "{{ doc_page.icon }}"</li>
-          {% endfor %}
-        </ul>
+      {% endif %}
+
+      <div class="max-w-4xl md:mt-2">
+        <article class="prose max-w-none">
+          {% block page_header %}
+            <!-- Explicitly render the page title from metadata -->
+            <h1 class="text-4xl font-semibold text-slate-900 mt-2 mb-6">{{ meta.title }}</h1>
+            
+            {% if meta.description %}
+              <p class="lead text-xl text-slate-600 mb-6">{{ meta.description }}</p>
+            {% endif %}
+          {% endblock %}
+
+          {% block page_toc %}
+            {% if toc_html %}
+              <div class="docs-toc-inline mb-8">
+                <h3 class="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3">On this page</h3>
+                {{ toc_html|safe }}
+              </div>
+            {% endif %}
+          {% endblock %}
+
+          <div class="content">
+            {% block page_content %}
+              {% cache 86400 docs_body slug %}
+                {{ html|safe }}
+              {% endcache %}
+            {% endblock %}
+          </div>
+          
+          {% block page_footer %}
+            <!-- API Reference Auto-Doc Notice -->
+            {% if request.path|slice:":3" == "api" %}
+            <div class="mt-8 p-6 bg-blue-50 rounded-lg border border-blue-100">
+              <h2 class="text-xl font-semibold text-blue-700 mb-2">Interactive API Documentation</h2>
+              <p class="text-blue-600 mb-4">
+                We provide auto-generated, interactive API documentation for developers. This documentation is always up-to-date with our latest API features.
+              </p>
+              <div class="flex flex-col sm:flex-row gap-3">
+                <a href="{% url 'schema-swagger-ui' %}" target="_blank" class="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+                  <i aria-hidden="true" data-lucide="file-text" class="h-5 w-5 mr-2"></i>
+                  Swagger UI
+                </a>
+                <a href="{% url 'schema-redoc' %}" target="_blank" class="inline-flex items-center justify-center bg-white hover:bg-gray-50 text-blue-600 border border-blue-200 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+                  <i aria-hidden="true" data-lucide="book-open" class="h-5 w-5 mr-2"></i>
+                  ReDoc
+                </a>
+              </div>
+            </div>
+            {% endif %}
+          {% endblock %}
+        </article>
+        
+        <!-- Debug: Print all icons from doc pages -->
+        {% comment %}
+        <div class="mt-8 p-4 border border-gray-200 rounded">
+          <h3>Debug Icon Values:</h3>
+          <ul>
+            {% for doc_page in all_doc_pages %}
+              <li>{{ doc_page.title }}: icon = "{{ doc_page.icon }}"</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endcomment %}
       </div>
-      {% endcomment %}
-    </div>
+    {% endblock %}
   </main>
   
   <!-- Mobile Navigation Toggle Button -->
