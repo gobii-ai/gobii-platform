@@ -227,7 +227,7 @@ def build_conversion_event(payload: Dict[str, Any]) -> ConversionEvent:
     return ConversionEvent(
         event_name=event_name,
         event_time=event_time,
-        event_id=str(payload.get("event_id")),
+        event_id=str(payload.get("event_id") or ""),
         action_source=payload.get("action_source", "website"),
         email=payload.get("email"),
         first_name=payload.get("first_name"),
