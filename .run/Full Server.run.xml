@@ -1,0 +1,9 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Full Server" type="CompoundRunConfigurationType">
+    <toRun name="Node Dev Server" type="js.build_tools.npm" />
+    <toRun name="Beat" type="PythonConfigurationType" />
+    <toRun name="Server" type="PythonConfigurationType" />
+    <toRun name="Worker" type="PythonConfigurationType" />
+    <method v="2" />
+  </configuration>
+</component>

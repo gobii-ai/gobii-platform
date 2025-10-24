@@ -1,0 +1,36 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Beat" type="PythonConfigurationType" factoryName="Python">
+    <module name="gobii-platform" />
+    <option name="ENV_FILES" value="" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs>
+      <env name="CELERY_BROKER_URL" value="redis://redis:6379/0" />
+      <env name="CELERY_RESULT_BACKEND" value="redis://redis:6379/0" />
+      <env name="DJANGO_SECRET_KEY" value="dev-insecure" />
+      <env name="GOBII_ENCRYPTION_KEY" value="dev-insecure" />
+      <env name="POSTGRES_DB" value="gobii" />
+      <env name="POSTGRES_HOST" value="db" />
+      <env name="POSTGRES_PASSWORD" value="postgres" />
+      <env name="POSTGRES_PORT" value="5432" />
+      <env name="POSTGRES_USER" value="postgres" />
+      <env name="PYTHONUNBUFFERED" value="1" />
+      <env name="REDIS_URL" value="redis://redis:6379/0" />
+    </envs>
+    <option name="SDK_HOME" value="" />
+    <option name="SDK_NAME" value="Python 3.13 virtualenv at ~/git/gobii/gobii_platform/.venv" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="IS_MODULE_SDK" value="true" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
+    <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+    <option name="SCRIPT_NAME" value="celery" />
+    <option name="PARAMETERS" value="-A config beat --loglevel=info" />
+    <option name="SHOW_COMMAND_LINE" value="false" />
+    <option name="EMULATE_TERMINAL" value="false" />
+    <option name="MODULE_MODE" value="true" />
+    <option name="REDIRECT_INPUT" value="false" />
+    <option name="INPUT_FILE" value="" />
+    <method v="2" />
+  </configuration>
+</component>
