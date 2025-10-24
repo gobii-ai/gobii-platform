@@ -150,6 +150,9 @@
     <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3 px-3"><a href="/developers/" style="text-decoration: none;">Developers</a></h3>
     <nav class="space-y-1">
       <!-- Other documentation pages (excluding API) -->
+      <a href="{% url "pages:developers" %}"
+         class="flex items-center px-3 py-2.5 font-medium rounded-lg transition-colors text-slate-700 hover:bg-white/80 hover:text-blue-600"
+         title="Gobii for Developers">Gobii for Developers</a>
       {% for doc_page in all_doc_pages %}
         {% if doc_page.slug|slice:":6" == "guides" %}
           {% comment %}<!-- Debug: {{ doc_page.icon }} -->{% endcomment %}
@@ -176,7 +179,7 @@
       {% endfor %}
 
       <!-- API Documentation auto-generated link -->
-      <a href="{% url 'schema-swagger-ui' %}" target="_blank" 
+      <a href="{% url 'schema-redoc' %}" target="_blank"
          class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors 
                {% if request.path == '/api/schema/swagger-ui/' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}"
          title="API Reference">
