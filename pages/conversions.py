@@ -222,7 +222,7 @@ def build_conversion_event(payload: Dict[str, Any]) -> ConversionEvent:
     if isinstance(event_time_raw, datetime):
         event_time = int(event_time_raw.timestamp())
     else:
-        event_time = int(event_time_raw or datetime.utcnow().timestamp())
+        event_time = int(event_time_raw or datetime.now(timezone.utc).timestamp())
 
     return ConversionEvent(
         event_name=event_name,
