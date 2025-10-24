@@ -2936,6 +2936,8 @@ from .models import (
     PersistentTokenRange,
     PersistentLLMTier,
     PersistentTierEndpoint,
+    EmbeddingsModelEndpoint,
+    EmbeddingsLLMTier,
     BrowserModelEndpoint,
     BrowserLLMPolicy,
     BrowserLLMTier,
@@ -3007,6 +3009,29 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "use_parallel_tool_calls",
         "supports_vision",
     )
+
+
+@admin.register(EmbeddingsModelEndpoint)
+class EmbeddingsModelEndpointAdmin(admin.ModelAdmin):
+    list_display = ("key", "provider", "litellm_model", "api_base", "enabled")
+    list_filter = ("enabled", "provider")
+    search_fields = ("key", "litellm_model", "api_base")
+    fields = (
+        "key",
+        "provider",
+        "enabled",
+        "litellm_model",
+        "api_base",
+    )
+
+
+@admin.register(EmbeddingsLLMTier)
+class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
+    list_display = ("order", "endpoint", "description", "enabled")
+    list_filter = ("enabled",)
+    search_fields = ("endpoint__key", "description")
+    ordering = ("order",)
+    autocomplete_fields = ("endpoint",)
 
 
 class PersistentTierEndpointInline(admin.TabularInline):

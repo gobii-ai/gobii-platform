@@ -1335,6 +1335,70 @@ class PersistentTierEndpoint(models.Model):
         return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
 
 
+class EmbeddingsModelEndpoint(models.Model):
+    """Embeddings endpoint configuration used for text similarity scoring."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_text_embed_small'")
+    provider = models.ForeignKey(
+        LLMProvider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="embedding_endpoints",
+        help_text="Optional link to the provider supplying credentials for this endpoint.",
+    )
+    enabled = models.BooleanField(default=True)
+
+    litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM for embeddings.")
+    api_base = models.CharField(
+        max_length=256,
+        blank=True,
+        help_text="Optional OpenAI-compatible base URL for proxy endpoints.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider__display_name", "litellm_model"]
+        indexes = [
+            models.Index(fields=["key"]),
+            models.Index(fields=["enabled"]),
+            models.Index(fields=["provider"]),
+        ]
+
+    def __str__(self):
+        provider = self.provider.display_name if self.provider else "no-provider"
+        return f"{self.key} → {self.litellm_model} ({provider})"
+
+
+class EmbeddingsLLMTier(models.Model):
+    """Fallback tier ordering for embeddings endpoints."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.PositiveIntegerField(unique=True, help_text="1-based order across all embedding tiers.")
+    endpoint = models.ForeignKey(
+        EmbeddingsModelEndpoint,
+        on_delete=models.CASCADE,
+        related_name="tiers",
+    )
+    description = models.CharField(max_length=256, blank=True)
+    enabled = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order"]
+        indexes = [
+            models.Index(fields=["enabled"]),
+        ]
+
+    def __str__(self):
+        return f"Tier {self.order} → {self.endpoint.key}"
+
+
 class BrowserModelEndpoint(models.Model):
     """Model endpoint for browser-use agents (Chat clients)."""
 
