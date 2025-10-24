@@ -23,6 +23,32 @@
 
   <!-- and it's easy to individually load additional languages -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/go.min.js"></script>
+  <style>
+    .code-tablist {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .code-tab-button {
+      border-radius: 0.75rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(226, 232, 240, 0.08);
+      color: #e2e8f0;
+      font-size: 0.875rem;
+      padding: 0.4rem 0.9rem;
+      cursor: pointer;
+      transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    }
+    .code-tab-button[aria-selected="true"] {
+      background: rgba(99, 102, 241, 0.3);
+      border-color: rgba(129, 140, 248, 0.6);
+      color: #ffffff;
+    }
+    .code-tab-button:focus-visible {
+      outline: 2px solid rgba(129, 140, 248, 0.9);
+      outline-offset: 2px;
+    }
+  </style>
 {% endblock %}
 
 {% block page_article %}
@@ -78,8 +104,34 @@
       </ol>
 
       <div class="mt-6 rounded-xl p-4 shadow-inner" style="background-color: #282c34;">
-        <pre class="overflow-x-auto text-slate-100 text-sm">
-          <code class="language-bash"># cURL
+        <div data-code-tabs>
+          <div class="code-tablist" role="tablist">
+            <button
+              type="button"
+              class="code-tab-button"
+              id="code-tab-curl"
+              role="tab"
+              aria-selected="true"
+              aria-controls="code-tab-panel-curl"
+              data-code-tab="curl"
+            >
+              cURL
+            </button>
+            <button
+              type="button"
+              class="code-tab-button"
+              id="code-tab-javascript"
+              role="tab"
+              aria-selected="false"
+              aria-controls="code-tab-panel-javascript"
+              data-code-tab="javascript"
+            >
+              JavaScript
+            </button>
+          </div>
+          <div>
+            <pre class="overflow-x-auto text-slate-100 text-sm" id="code-tab-panel-curl" role="tabpanel" aria-labelledby="code-tab-curl" data-code-panel="curl">
+              <code class="language-bash"># cURL
 curl -X POST https://api.gobii.ai/api/v1/agents/ \
   -H "X-Api-Key: &lt;YOUR_API_KEY&gt;" \
   -H "Content-Type: application/json" \
@@ -89,12 +141,10 @@ curl -X POST https://api.gobii.ai/api/v1/agents/ \
     "schedule": "@daily",
     "preferred_contact_endpoint": "webhook"
   }'
-            </code>
-        </pre>
-      </div>
-      <div class="mt-6 rounded-xl p-4 shadow-inner" style="background-color: #282c34;">
-        <pre class="overflow-x-auto text-slate-100 text-sm">
-          <code class="language-javascript">
+              </code>
+            </pre>
+            <pre class="overflow-x-auto text-slate-100 text-sm" id="code-tab-panel-javascript" role="tabpanel" aria-labelledby="code-tab-javascript" data-code-panel="javascript" hidden>
+              <code class="language-javascript">
 const res = await fetch("https://api.gobii.ai/v1/tasks", {
   method: "POST",
   headers: {
@@ -108,8 +158,10 @@ const res = await fetch("https://api.gobii.ai/v1/tasks", {
 });
 const json = await res.json();
 console.log(json);
-            </code>
-        </pre>
+              </code>
+            </pre>
+          </div>
+        </div>
       </div>
 
       <p class="mt-6 text-slate-700"><strong>3.</strong> Receive results via webhook:</p>
@@ -210,6 +262,31 @@ app.post("/webhooks/gobii", (req, res) => {
   <script>
     (function () {
       hljs.highlightAll();
+
+      document.querySelectorAll('[data-code-tabs]').forEach((container) => {
+        const buttons = container.querySelectorAll('[data-code-tab]');
+        const panels = container.querySelectorAll('[data-code-panel]');
+
+        buttons.forEach((button) => {
+          button.addEventListener('click', () => {
+            const target = button.getAttribute('data-code-tab');
+
+            buttons.forEach((btn) => {
+              const isActive = btn === button;
+              btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+
+            panels.forEach((panel) => {
+              const shouldShow = panel.getAttribute('data-code-panel') === target;
+              if (shouldShow) {
+                panel.removeAttribute('hidden');
+              } else {
+                panel.setAttribute('hidden', 'hidden');
+              }
+            });
+          });
+        });
+      });
     })();
   </script>
 {% endblock %}
