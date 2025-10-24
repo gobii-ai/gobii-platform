@@ -6,6 +6,7 @@ from django.test import TransactionTestCase, tag
 from api.agent.tools.email_sender import execute_send_email
 from api.agent.tools.sms_sender import execute_send_sms
 from api.agent.tools.web_chat_sender import execute_send_chat_message
+from api.agent.tools.outbound_duplicate_guard import detect_recent_duplicate_message
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -182,3 +183,75 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
         self.assertEqual(third.get("status"), "ok")
         self.assertFalse(third.get("duplicate_detected"))
         self.assertEqual(mock_deliver_email.call_count, 3)
+
+    @patch("api.agent.tools.outbound_duplicate_guard._compute_levenshtein_ratio")
+    @patch("api.agent.tools.outbound_duplicate_guard._embedding_similarity", return_value=0.985)
+    def test_similarity_uses_embeddings_when_available(
+        self,
+        mock_embedding_similarity,
+        mock_levenshtein_ratio,
+        mock_close_old_connections,
+    ):
+        to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.EMAIL,
+            address=self.email_address,
+            defaults={"owner_agent": None},
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.email_from,
+            to_endpoint=to_endpoint,
+            is_outbound=True,
+            body="Status update with numbers 123",
+            raw_payload={"subject": "Status"},
+        )
+
+        result = detect_recent_duplicate_message(
+            self.agent,
+            channel=CommsChannel.EMAIL,
+            body="Status update with numbers 123!",
+            to_address=self.email_address,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None  # satisfy type checkers
+        self.assertEqual(result.reason, "similarity")
+        self.assertGreaterEqual(result.similarity or 0.0, 0.97)
+        mock_embedding_similarity.assert_called_once()
+        mock_levenshtein_ratio.assert_not_called()
+
+    @patch("api.agent.tools.outbound_duplicate_guard._compute_levenshtein_ratio", return_value=0.99)
+    @patch("api.agent.tools.outbound_duplicate_guard._embedding_similarity", return_value=None)
+    def test_similarity_falls_back_to_levenshtein_when_embeddings_unavailable(
+        self,
+        mock_embedding_similarity,
+        mock_levenshtein_ratio,
+        mock_close_old_connections,
+    ):
+        to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.EMAIL,
+            address=self.email_address,
+            defaults={"owner_agent": None},
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.email_from,
+            to_endpoint=to_endpoint,
+            is_outbound=True,
+            body="Please review the attached file at your convenience.",
+            raw_payload={"subject": "Review"},
+        )
+
+        result = detect_recent_duplicate_message(
+            self.agent,
+            channel=CommsChannel.EMAIL,
+            body="Please review the attached file soon.",
+            to_address=self.email_address,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.reason, "similarity")
+        self.assertAlmostEqual(result.similarity or 0.0, 0.99)
+        mock_embedding_similarity.assert_called_once()
+        mock_levenshtein_ratio.assert_called_once()
