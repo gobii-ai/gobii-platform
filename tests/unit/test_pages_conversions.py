@@ -1,7 +1,9 @@
 import hashlib
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, override_settings, tag
+from django.test import RequestFactory, SimpleTestCase, override_settings, tag
+from django.contrib.auth.models import AnonymousUser
+from django.contrib.sessions.middleware import SessionMiddleware
 from django.utils import timezone
 
 from pages.conversions import (
@@ -11,6 +13,7 @@ from pages.conversions import (
     build_reddit_payload,
 )
 from pages.tasks import send_facebook_signup_conversion, send_reddit_signup_conversion
+from pages.context_processors import analytics as analytics_context, show_signup_tracking as tracking_context
 
 
 @tag('batch_marketing_conversions')
@@ -140,3 +143,30 @@ class ConversionTaskGuardsTests(SimpleTestCase):
             send_reddit_signup_conversion.run(self.payload)
 
         mock_post.assert_not_called()
+
+
+@tag('batch_marketing_conversions')
+class SignupTrackingContextTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _with_session(self):
+        request = self.factory.get('/')
+        request.session = {}
+        request.user = AnonymousUser()
+        return request
+
+    def test_context_uses_session_values(self):
+        request = self._with_session()
+        request.session['show_signup_tracking'] = True
+        request.session['signup_event_id'] = 'reg-123'
+        request.session['signup_user_id'] = '42'
+        request.session['signup_email_hash'] = 'abc123'
+        tracking = tracking_context(request)
+        self.assertTrue(tracking['show_signup_tracking'])
+        self.assertEqual(tracking['signup_event_id'], 'reg-123')
+        self.assertEqual(tracking['signup_user_id'], '42')
+        self.assertEqual(tracking['signup_email_hash'], 'abc123')
+
+        analytics = analytics_context(request)
+        self.assertEqual(analytics['analytics']['data']['email_hash'], 'abc123')
