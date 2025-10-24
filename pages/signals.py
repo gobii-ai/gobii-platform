@@ -1,5 +1,6 @@
 import uuid
 import json
+import hashlib
 from datetime import timedelta, datetime, timezone as dt_timezone
 from numbers import Number
 from typing import Any, Mapping
@@ -416,6 +417,12 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         # ── 2. event-specific properties & last-touch UTMs ──────
         event_id = f'reg-{uuid.uuid4()}'
         request.session['signup_event_id'] = event_id
+        request.session['signup_user_id'] = str(user.id)
+        normalized_email = (user.email or '').strip().lower()
+        if normalized_email:
+            request.session['signup_email_hash'] = hashlib.sha256(normalized_email.encode('utf-8')).hexdigest()
+        else:
+            request.session.pop('signup_email_hash', None)
 
         event_properties = {
             'plan': 'free',
