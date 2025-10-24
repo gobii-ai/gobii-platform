@@ -477,6 +477,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             campaign_context['referrer'] = last_referrer
 
         event_timestamp = timezone.now()
+        event_timestamp_unix = int(event_timestamp.timestamp())
 
         Analytics.track(
             user_id=str(user.id),
@@ -499,7 +500,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         conversion_payload = {
             'event_name': 'SignUp',
             'event_id': event_id,
-            'event_time': event_timestamp,
+            'event_time': event_timestamp_unix,
             'action_source': 'website',
             'email': user.email,
             'first_name': user.first_name or '',
