@@ -426,6 +426,7 @@
   {% if show_signup_tracking and environment.is_production and settings.GOBII_PROPRIETARY_MODE %}
     <script>
       (function () {
+        const signupEventId = "{{ signup_event_id|default_if_none:'' }}";
 
         {% if settings.REDDIT_PIXEL_ID %}
         /* Avoid ReferenceError if the pixel hasn’t loaded yet */
@@ -433,7 +434,7 @@
           rdt('track', 'SignUp', {
             email: "{{ analytics.data.email_hash }}",
             externalId : "{{ user.id }}",
-            conversionId: "reg-{{ user.id }}",
+            conversionId: signupEventId || "reg-{{ user.id }}",
           });
         }
         {% endif %}
@@ -485,13 +486,20 @@
 
       // --- pull any UTM cookies you created earlier (optional) ---
       const utmParams = window.getUTMParams ? window.getUTMParams() : {};
+      const signupEventId = "{{ signup_event_id|default_if_none:'' }}";
+
+      const options = {
+        external_id : "{{ user.id }}",
+        em          : "{{ analytics.data.email_hash }}",
+      };
+
+      if (signupEventId) {
+        options.eventID = signupEventId;
+      }
 
       fbq('track', 'CompleteRegistration',
           {...utmParams},
-          {
-            external_id : "{{ user.id }}",
-            em          : "{{ analytics.data.email_hash }}",
-          });
+          options);
     })();
   </script>
   {% endif %}

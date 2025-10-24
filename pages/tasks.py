@@ -119,6 +119,10 @@ def _get_reddit_access_token() -> Optional[str]:
 def send_facebook_signup_conversion(self, payload: Dict[str, Any]) -> None:
     """Dispatch a Sign Up conversion event to Facebook's Conversions API."""
 
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        logger.debug("Skipping Facebook conversion because proprietary mode is disabled.")
+        return
+
     pixel_id = getattr(settings, "FACEBOOK_PIXEL_ID", "")
     access_token = getattr(settings, "FACEBOOK_ACCESS_TOKEN", "")
 
@@ -156,6 +160,10 @@ def send_facebook_signup_conversion(self, payload: Dict[str, Any]) -> None:
 def send_reddit_signup_conversion(self, payload: Dict[str, Any]) -> None:
     """Dispatch a Sign Up conversion event to Reddit's Conversions API."""
 
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        logger.debug("Skipping Reddit conversion because proprietary mode is disabled.")
+        return
+
     advertiser_id = getattr(settings, "REDDIT_ADVERTISER_ID", "") or getattr(settings, "REDDIT_PIXEL_ID", "")
     if not advertiser_id:
         logger.debug("Reddit advertiser ID not configured; skipping event.")
@@ -190,4 +198,3 @@ def send_reddit_signup_conversion(self, payload: Dict[str, Any]) -> None:
 
     if response.status_code >= 400:
         _log_http_error(response, "Reddit")
-

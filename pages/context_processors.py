@@ -115,7 +115,8 @@ def show_signup_tracking(request):
     This is set in the user_signed_up signal handler.
     """
     return {
-        'show_signup_tracking': request.session.get('show_signup_tracking', False)
+        'show_signup_tracking': request.session.get('show_signup_tracking', False),
+        'signup_event_id': request.session.get('signup_event_id'),
     }
 
 

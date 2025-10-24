@@ -1,6 +1,7 @@
 import hashlib
+from unittest.mock import patch
 
-from django.test import SimpleTestCase, tag
+from django.test import SimpleTestCase, override_settings, tag
 from django.utils import timezone
 
 from pages.conversions import (
@@ -9,6 +10,7 @@ from pages.conversions import (
     build_facebook_payload,
     build_reddit_payload,
 )
+from pages.tasks import send_facebook_signup_conversion, send_reddit_signup_conversion
 
 
 @tag('batch_marketing_conversions')
@@ -106,3 +108,35 @@ class ConversionPayloadTests(SimpleTestCase):
         self.assertEqual(event.event_id, 'signup-789')
         self.assertEqual(event.event_time, int(event_time.timestamp()))
         self.assertEqual(event.email, 'user@example.com')
+
+
+@tag('batch_marketing_conversions')
+class ConversionTaskGuardsTests(SimpleTestCase):
+    payload = {
+        'event_name': 'SignUp',
+        'event_id': 'signup-guard',
+        'event_time': 1_700_000_001,
+        'email': 'user@example.com',
+    }
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=False,
+        FACEBOOK_PIXEL_ID='123',
+        FACEBOOK_ACCESS_TOKEN='token',
+    )
+    def test_facebook_task_noop_when_not_proprietary(self):
+        with patch('pages.tasks._post_json') as mock_post:
+            send_facebook_signup_conversion.run(self.payload)
+
+        mock_post.assert_not_called()
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=False,
+        REDDIT_ADVERTISER_ID='adv-123',
+        REDDIT_ACCESS_TOKEN='token',
+    )
+    def test_reddit_task_noop_when_not_proprietary(self):
+        with patch('pages.tasks._post_json') as mock_post:
+            send_reddit_signup_conversion.run(self.payload)
+
+        mock_post.assert_not_called()

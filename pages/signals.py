@@ -415,6 +415,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
 
         # ── 2. event-specific properties & last-touch UTMs ──────
         event_id = f'reg-{uuid.uuid4()}'
+        request.session['signup_event_id'] = event_id
 
         event_properties = {
             'plan': 'free',
@@ -482,6 +483,11 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             message_id=event_id,          # use same ID in Facebook/Reddit CAPI
             timestamp=event_timestamp
         )
+
+        if not getattr(settings, 'GOBII_PROPRIETARY_MODE', False):
+            logger.debug("Skipping conversion API enqueue because proprietary mode is disabled.")
+            logger.info("Analytics tracking successful for signup.")
+            return
 
         conversion_payload = {
             'event_name': 'SignUp',
