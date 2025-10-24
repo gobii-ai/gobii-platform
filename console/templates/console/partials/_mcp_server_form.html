@@ -195,16 +195,25 @@
             </template>
           </div>
           <div class="space-y-3" x-cloak x-show="oauth && oauth.hasServer">
-            <div class="grid gap-3 sm:grid-cols-2">
-              <div class="space-y-1">
-                <label class="text-xs font-medium text-indigo-700">OAuth Client ID</label>
-                <input type="text" class="py-2 px-3 block w-full border-indigo-200 rounded-md focus:border-indigo-400 focus:ring-indigo-400 text-sm" placeholder="client-id" x-model="oauthClientId">
+            <template x-if="oauth && !oauth.requiresManualClient">
+              <div class="rounded-lg border border-indigo-100 bg-white/60 p-3 text-xs text-indigo-700">
+                Client registration will be handled automatically using the server metadata.
               </div>
-              <div class="space-y-1">
-                <label class="text-xs font-medium text-indigo-700">OAuth Client Secret</label>
-                <input type="password" class="py-2 px-3 block w-full border-indigo-200 rounded-md focus:border-indigo-400 focus:ring-indigo-400 text-sm" placeholder="Optional" x-model="oauthClientSecret">
+            </template>
+            <template x-if="oauth && oauth.requiresManualClient">
+              <div class="space-y-3">
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div class="space-y-1">
+                    <label class="text-xs font-medium text-indigo-700">OAuth Client ID</label>
+                    <input type="text" class="py-2 px-3 block w-full border-indigo-200 rounded-md focus:border-indigo-400 focus:ring-indigo-400 text-sm" placeholder="client-id" x-model="oauthClientId">
+                  </div>
+                  <div class="space-y-1">
+                    <label class="text-xs font-medium text-indigo-700">OAuth Client Secret</label>
+                    <input type="password" class="py-2 px-3 block w-full border-indigo-200 rounded-md focus:border-indigo-400 focus:ring-indigo-400 text-sm" placeholder="Optional" x-model="oauthClientSecret">
+                  </div>
+                </div>
               </div>
-            </div>
+            </template>
             <div class="space-y-1">
               <label class="text-xs font-medium text-indigo-700">Scopes</label>
               <input type="text" class="py-2 px-3 block w-full border-indigo-200 rounded-md focus:border-indigo-400 focus:ring-indigo-400 text-sm" placeholder="e.g. openid profile email" x-model="oauthScope">

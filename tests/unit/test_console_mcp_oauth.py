@@ -49,6 +49,8 @@ class MCPOAuthApiTests(TestCase):
                     "token_endpoint": "https://oauth.example.com/token",
                     "code_verifier": "secret-verifier",
                     "state": "custom-state",
+                    "client_id": "abc123",
+                    "client_secret": "shhh",
                 }
             ),
             content_type="application/json",
@@ -60,6 +62,8 @@ class MCPOAuthApiTests(TestCase):
         session = MCPServerOAuthSession.objects.get(id=payload["session_id"])
         self.assertEqual(session.scope, "read write")
         self.assertEqual(session.code_verifier, "secret-verifier")
+        self.assertEqual(session.client_id, "abc123")
+        self.assertEqual(session.client_secret, "shhh")
 
     def test_start_requires_permission(self):
         self.client.force_login(self.other_user)
@@ -90,6 +94,37 @@ class MCPOAuthApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         payload = response.json()
         self.assertTrue(payload["state"])
+
+    @patch("console.api_views.httpx.post")
+    def test_start_auto_registers_client(self, mock_httpx_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "client_id": "dynamic-client",
+            "client_secret": "dynamic-secret",
+        }
+        mock_httpx_post.return_value = mock_response
+
+        url = reverse("console-mcp-oauth-start")
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "server_config_id": str(self.server.id),
+                    "scope": "read",
+                    "token_endpoint": "https://oauth.example.com/token",
+                    "code_verifier": "secret-verifier",
+                    "metadata": {
+                        "registration_endpoint": "https://oauth.example.com/register",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        session = MCPServerOAuthSession.objects.get()
+        self.assertEqual(session.client_id, "dynamic-client")
+        self.assertEqual(session.client_secret, "dynamic-secret")
 
     @patch("console.api_views.httpx.get")
     def test_metadata_proxy(self, mock_httpx_get):
