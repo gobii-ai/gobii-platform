@@ -712,4 +712,8 @@ class ClearSignupTrackingView(View):
         if 'show_signup_tracking' in request.session:
             del request.session['show_signup_tracking']
 
+        for key in ('signup_event_id', 'signup_user_id', 'signup_email_hash'):
+            if key in request.session:
+                del request.session[key]
+
         return response

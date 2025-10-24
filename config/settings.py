@@ -804,6 +804,23 @@ LINKEDIN_PARTNER_ID = env(
     default=_proprietary_default("analytics", "LINKEDIN_PARTNER_ID"),
 )
 
+FACEBOOK_PIXEL_ID = env(
+    "FACEBOOK_PIXEL_ID",
+    default=META_PIXEL_ID,
+)
+FACEBOOK_ACCESS_TOKEN = env("FACEBOOK_ACCESS_TOKEN", default="")
+FACEBOOK_TEST_EVENT_CODE = env("FACEBOOK_TEST_EVENT_CODE", default="")
+
+REDDIT_ADVERTISER_ID = env(
+    "REDDIT_ADVERTISER_ID",
+    default=REDDIT_PIXEL_ID,
+)
+REDDIT_ACCESS_TOKEN = env("REDDIT_ACCESS_TOKEN", default="")
+REDDIT_CLIENT_ID = env("REDDIT_CLIENT_ID", default="")
+REDDIT_CLIENT_SECRET = env("REDDIT_CLIENT_SECRET", default="")
+REDDIT_REFRESH_TOKEN = env("REDDIT_REFRESH_TOKEN", default="")
+REDDIT_USER_AGENT = env("REDDIT_USER_AGENT", default="gobii-platform/1.0")
+
 LINKEDIN_SIGNUP_CONVERSION_ID = env(
     "LINKEDIN_SIGNUP_CONVERSION_ID",
     default=_proprietary_default("analytics", "LINKEDIN_SIGNUP_CONVERSION_ID"),

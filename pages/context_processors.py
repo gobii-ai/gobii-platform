@@ -115,7 +115,10 @@ def show_signup_tracking(request):
     This is set in the user_signed_up signal handler.
     """
     return {
-        'show_signup_tracking': request.session.get('show_signup_tracking', False)
+        'show_signup_tracking': request.session.get('show_signup_tracking', False),
+        'signup_event_id': request.session.get('signup_event_id'),
+        'signup_user_id': request.session.get('signup_user_id'),
+        'signup_email_hash': request.session.get('signup_email_hash'),
     }
 
 
@@ -132,7 +135,11 @@ def analytics(request):
             "events": _enum_to_dict(AnalyticsEvent),
             "cta": _enum_to_dict(AnalyticsCTAs),
             "data": {
-                "email_hash": sha256_hex(request.user.email) if request.user.is_authenticated else "",
+                "email_hash": (
+                    sha256_hex(request.user.email)
+                    if request.user.is_authenticated
+                    else request.session.get('signup_email_hash', "")
+                ),
             }
         }
     }
