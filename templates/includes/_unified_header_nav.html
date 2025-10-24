@@ -19,7 +19,6 @@
 
       <!-- Desktop Nav -->
       <nav class="hidden md:flex items-center gap-x-6 text-sm font-medium">
-        <a href="{% url 'pages:home' %}" class="text-slate-700 hover:text-blue-600">Home</a>
         {% if settings.GOBII_PROPRIETARY_MODE %}
           <a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a>
           <a href="{% url 'proprietary:support' %}" class="text-slate-700 hover:text-blue-600">Support</a>
@@ -162,7 +161,7 @@
      class="relative z-50">
      
   <!-- Background overlay -->
-  <div x-show="showMobileNav" 
+      <div x-show="showMobileNav"
        x-transition:enter="ease-out duration-300"
        x-transition:enter-start="opacity-0"
        x-transition:enter-end="opacity-100"
@@ -187,7 +186,6 @@
     
     <div class="py-4">
       <div class="px-4 space-y-3 text-sm font-medium">
-        <a href="{% url 'pages:home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Home</a>
         {% if settings.GOBII_PROPRIETARY_MODE %}
           <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
           <a href="{% url 'proprietary:support' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Support</a>
