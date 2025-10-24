@@ -2938,6 +2938,7 @@ from .models import (
     PersistentTierEndpoint,
     EmbeddingsModelEndpoint,
     EmbeddingsLLMTier,
+    EmbeddingsTierEndpoint,
     BrowserModelEndpoint,
     BrowserLLMPolicy,
     BrowserLLMTier,
@@ -3025,13 +3026,18 @@ class EmbeddingsModelEndpointAdmin(admin.ModelAdmin):
     )
 
 
+class EmbeddingsTierEndpointInline(admin.TabularInline):
+    model = EmbeddingsTierEndpoint
+    extra = 0
+    autocomplete_fields = ("endpoint",)
+
+
 @admin.register(EmbeddingsLLMTier)
 class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
-    list_display = ("order", "endpoint", "description", "enabled")
-    list_filter = ("enabled",)
-    search_fields = ("endpoint__key", "description")
+    list_display = ("order", "description")
+    search_fields = ("description", "tier_endpoints__endpoint__key")
     ordering = ("order",)
-    autocomplete_fields = ("endpoint",)
+    inlines = [EmbeddingsTierEndpointInline]
 
 
 class PersistentTierEndpointInline(admin.TabularInline):

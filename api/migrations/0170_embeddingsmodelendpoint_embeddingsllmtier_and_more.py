@@ -5,79 +5,6 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
-def seed_embeddings_defaults(apps, schema_editor):
-    LLMProvider = apps.get_model('api', 'LLMProvider')
-    EmbeddingsModelEndpoint = apps.get_model('api', 'EmbeddingsModelEndpoint')
-    EmbeddingsLLMTier = apps.get_model('api', 'EmbeddingsLLMTier')
-
-    provider_map = {provider.key: provider for provider in LLMProvider.objects.all()}
-
-    endpoint_specs = [
-        ("openai_text_embedding_3_small", "openai", "text-embedding-3-small", ""),
-        ("fireworks_qwen3_embedding_8b", "fireworks", "fireworks_ai/accounts/fireworks/models/qwen3-embedding-8b", ""),
-        ("google_text_embedding_005", "google", "vertex_ai/text-embedding-005", ""),
-    ]
-
-    tier_specs = [
-        (1, "Primary small embedding model.", "openai_text_embedding_3_small"),
-        (2, "Fireworks fallback embedding.", "fireworks_qwen3_embedding_8b"),
-        (3, "Google Vertex fallback embedding.", "google_text_embedding_005"),
-    ]
-
-    endpoints_by_key = {}
-    for key, provider_key, model_name, api_base in endpoint_specs:
-        provider = provider_map.get(provider_key)
-        defaults = {
-            "litellm_model": model_name,
-            "api_base": api_base,
-            "enabled": True,
-        }
-        if provider is not None:
-            defaults["provider"] = provider
-        endpoint, created = EmbeddingsModelEndpoint.objects.get_or_create(
-            key=key,
-            defaults=defaults,
-        )
-        if not created:
-            updated = False
-            for field, value in defaults.items():
-                current = getattr(endpoint, field, None)
-                if current != value and value is not None:
-                    setattr(endpoint, field, value)
-                    updated = True
-            if updated:
-                endpoint.save()
-        endpoints_by_key[key] = endpoint
-
-    for order, description, endpoint_key in tier_specs:
-        endpoint = endpoints_by_key.get(endpoint_key)
-        if endpoint is None:
-            continue
-        EmbeddingsLLMTier.objects.update_or_create(
-            order=order,
-            defaults={
-                "endpoint": endpoint,
-                "description": description,
-                "enabled": True,
-            },
-        )
-
-
-def remove_embeddings_defaults(apps, schema_editor):
-    EmbeddingsLLMTier = apps.get_model('api', 'EmbeddingsLLMTier')
-    EmbeddingsModelEndpoint = apps.get_model('api', 'EmbeddingsModelEndpoint')
-
-    tier_orders = [1, 2, 3]
-    endpoint_keys = [
-        "openai_text_embedding_3_small",
-        "fireworks_qwen3_embedding_8b",
-        "google_text_embedding_005",
-    ]
-
-    EmbeddingsLLMTier.objects.filter(order__in=tier_orders).delete()
-    EmbeddingsModelEndpoint.objects.filter(key__in=endpoint_keys).delete()
-
-
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -107,13 +34,26 @@ class Migration(migrations.Migration):
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('order', models.PositiveIntegerField(help_text='1-based order across all embedding tiers.', unique=True)),
                 ('description', models.CharField(blank=True, max_length=256)),
-                ('enabled', models.BooleanField(default=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('endpoint', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='tiers', to='api.embeddingsmodelendpoint')),
             ],
             options={
                 'ordering': ['order'],
+            },
+        ),
+        migrations.CreateModel(
+            name='EmbeddingsTierEndpoint',
+            fields=[
+                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('weight', models.FloatField(help_text='Relative weight within the tier; must be > 0.')),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('endpoint', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='in_tiers', to='api.embeddingsmodelendpoint')),
+                ('tier', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='tier_endpoints', to='api.embeddingsllmtier')),
+            ],
+            options={
+                'ordering': ['tier__order', 'endpoint__key'],
+                'unique_together': {('tier', 'endpoint')},
             },
         ),
         migrations.AddIndex(
@@ -128,9 +68,4 @@ class Migration(migrations.Migration):
             model_name='embeddingsmodelendpoint',
             index=models.Index(fields=['provider'], name='api_embeddi_provide_5d0738_idx'),
         ),
-        migrations.AddIndex(
-            model_name='embeddingsllmtier',
-            index=models.Index(fields=['enabled'], name='api_embeddi_enabled_df00e3_idx'),
-        ),
-        migrations.RunPython(seed_embeddings_defaults, remove_embeddings_defaults),
     ]

@@ -1378,25 +1378,43 @@ class EmbeddingsLLMTier(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order = models.PositiveIntegerField(unique=True, help_text="1-based order across all embedding tiers.")
-    endpoint = models.ForeignKey(
-        EmbeddingsModelEndpoint,
-        on_delete=models.CASCADE,
-        related_name="tiers",
-    )
     description = models.CharField(max_length=256, blank=True)
-    enabled = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["order"]
-        indexes = [
-            models.Index(fields=["enabled"]),
-        ]
 
     def __str__(self):
-        return f"Tier {self.order} → {self.endpoint.key}"
+        return f"Tier {self.order}"
+
+
+class EmbeddingsTierEndpoint(models.Model):
+    """Weighted association between an embeddings tier and an endpoint."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tier = models.ForeignKey(
+        EmbeddingsLLMTier,
+        on_delete=models.CASCADE,
+        related_name="tier_endpoints",
+    )
+    endpoint = models.ForeignKey(
+        EmbeddingsModelEndpoint,
+        on_delete=models.CASCADE,
+        related_name="in_tiers",
+    )
+    weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tier__order", "endpoint__key"]
+        unique_together = (("tier", "endpoint"),)
+
+    def __str__(self):
+        return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
 
 
 class BrowserModelEndpoint(models.Model):

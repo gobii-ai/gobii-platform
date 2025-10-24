@@ -12,9 +12,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence
 from uuid import UUID
 
+from django.db.models import Prefetch
+
 from ...encryption import SecretsEncryption
 from ...models import (
     EmbeddingsLLMTier,
+    EmbeddingsTierEndpoint,
     PersistentAgent,
     PersistentAgentMessage,
 )
@@ -140,8 +143,12 @@ def _resolve_provider_api_key(provider) -> Optional[str]:
     return api_key or None
 
 
-def _score_embeddings_for_tier(tier: EmbeddingsLLMTier, left: str, right: str) -> Optional[float]:
-    endpoint = getattr(tier, "endpoint", None)
+def _score_embeddings_for_endpoint(
+    tier: EmbeddingsLLMTier,
+    endpoint,
+    left: str,
+    right: str,
+) -> Optional[float]:
     if endpoint is None or not getattr(endpoint, "enabled", False):
         return None
 
@@ -200,16 +207,20 @@ def _embedding_similarity(left: str, right: str) -> Optional[float]:
     if litellm is None:
         return None
 
-    tiers = (
-        EmbeddingsLLMTier.objects.select_related("endpoint__provider")
-        .filter(enabled=True, endpoint__enabled=True)
-        .order_by("order")
+    tier_prefetch = Prefetch(
+        "tier_endpoints",
+        queryset=EmbeddingsTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
     )
-
+    tiers = EmbeddingsLLMTier.objects.prefetch_related(tier_prefetch).order_by("order")
     for tier in tiers:
-        ratio = _score_embeddings_for_tier(tier, left, right)
-        if ratio is not None:
-            return ratio
+        tier_endpoints = [
+            entry for entry in tier.tier_endpoints.all()
+            if entry.weight > 0
+        ]
+        for entry in tier_endpoints:
+            ratio = _score_embeddings_for_endpoint(tier, entry.endpoint, left, right)
+            if ratio is not None:
+                return ratio
     return None
 
 
