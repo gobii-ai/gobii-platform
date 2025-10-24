@@ -16,7 +16,7 @@ from .conversions import build_conversion_event, build_facebook_payload, build_r
 logger = logging.getLogger(__name__)
 
 
-FACEBOOK_ENDPOINT_TEMPLATE = "https://graph.facebook.com/v17.0/{pixel_id}/events"
+FACEBOOK_ENDPOINT_TEMPLATE = "https://graph.facebook.com/v24.0/{pixel_id}/events"
 REDDIT_CONVERSIONS_ENDPOINT = getattr(
     settings,
     "REDDIT_CONVERSIONS_ENDPOINT",
