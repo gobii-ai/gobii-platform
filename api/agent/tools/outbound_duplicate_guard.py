@@ -134,6 +134,7 @@ def _resolve_provider_api_key(provider) -> Optional[str]:
                 getattr(provider, "key", "unknown"),
                 exc,
             )
+            return None # Return None in case of decryption failure
 
     if not api_key and getattr(provider, "env_var_name", None):
         env_val = os.getenv(provider.env_var_name)
@@ -171,7 +172,7 @@ def _score_embeddings_for_endpoint(
     api_base = getattr(endpoint, "api_base", "").strip()
     if api_base:
         params["api_base"] = api_base
-        params.setdefault("api_key", "sk-noauth")
+        params["api_key"] = "sk-noauth" # Set api_key only if api_base is present
 
     if provider is not None and getattr(provider, "key", "") == "google":
         project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
@@ -179,10 +180,8 @@ def _score_embeddings_for_endpoint(
         params["vertex_project"] = project
         params["vertex_location"] = location
 
-    if "api_key" not in params and provider is not None and not api_base:
-        # No credentials available; skip this tier.
-        return None
     if "api_key" not in params and not api_base:
+        # No credentials available; skip this tier.
         return None
 
     try:
