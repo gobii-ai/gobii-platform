@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import json
+import secrets
+import uuid
+from datetime import timedelta
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
+import httpx
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -13,6 +21,9 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.models import (
     CommsChannel,
+    MCPServerConfig,
+    MCPServerOAuthCredential,
+    MCPServerOAuthSession,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     build_web_agent_address,
@@ -38,6 +49,7 @@ from console.agent_chat.timeline import (
     serialize_message_event,
     serialize_processing_snapshot,
 )
+from console.context_helpers import build_console_context
 
 
 def _ensure_console_endpoints(agent: PersistentAgent, user) -> tuple[str, str]:
@@ -73,6 +85,44 @@ def _ensure_console_endpoints(agent: PersistentAgent, user) -> tuple[str, str]:
         defaults={"owner_agent": None, "is_primary": False},
     )
     return sender_address, recipient_address
+
+
+def _resolve_mcp_server_config(request: HttpRequest, config_id: str) -> MCPServerConfig:
+    """Resolve an MCP server configuration the user is allowed to manage."""
+    config = get_object_or_404(MCPServerConfig, pk=config_id)
+    if config.scope == MCPServerConfig.Scope.PLATFORM:
+        raise PermissionDenied("Platform-managed MCP servers cannot be modified from the console.")
+
+    if config.scope == MCPServerConfig.Scope.USER:
+        if config.user_id != request.user.id:
+            raise PermissionDenied("You do not have access to this MCP server.")
+    elif config.scope == MCPServerConfig.Scope.ORGANIZATION:
+        context = build_console_context(request)
+        membership = context.current_membership
+        if (
+            context.current_context.type != "organization"
+            or membership is None
+            or str(membership.org_id) != str(config.organization_id)
+            or not context.can_manage_org_agents
+        ):
+            raise PermissionDenied("You do not have access to this MCP server.")
+    return config
+
+
+def _require_active_session(request: HttpRequest, session_id: uuid.UUID) -> MCPServerOAuthSession:
+    """Fetch a pending OAuth session and enforce ownership + expiry."""
+    session = get_object_or_404(MCPServerOAuthSession, pk=session_id)
+
+    if session.initiated_by_id != request.user.id:
+        raise PermissionDenied("You do not have access to this OAuth session.")
+
+    if session.has_expired():
+        session.delete()
+        raise PermissionDenied("OAuth session has expired. Restart the flow.")
+
+    # Re-check access against server configuration in case ownership changed mid-flow.
+    _resolve_mcp_server_config(request, str(session.server_config_id))
+    return session
 
 
 def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -197,6 +247,329 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
             }
         )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MCPOAuthStartView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        config_id = body.get("server_config_id")
+        if not config_id:
+            return HttpResponseBadRequest("server_config_id is required")
+
+        config = _resolve_mcp_server_config(request, str(config_id))
+        if config.auth_method != MCPServerConfig.AuthMethod.OAUTH2:
+            return HttpResponseBadRequest("This MCP server is not configured for OAuth 2.0.")
+
+        metadata = body.get("metadata") or {}
+        if metadata and not isinstance(metadata, dict):
+            return HttpResponseBadRequest("metadata must be a JSON object")
+
+        scope_raw = body.get("scope") or ""
+        if isinstance(scope_raw, list):
+            scope = " ".join(str(part) for part in scope_raw if part)
+        else:
+            scope = str(scope_raw)
+
+        expires_at = timezone.now() + timedelta(minutes=10)
+        state = secrets.token_urlsafe(32)
+
+        session = MCPServerOAuthSession(
+            server_config=config,
+            initiated_by=request.user,
+            organization=config.organization if config.organization_id else None,
+            user=config.user if config.scope == MCPServerConfig.Scope.USER else None,
+            state=state,
+            redirect_uri=str(body.get("redirect_uri") or ""),
+            scope=scope,
+            code_challenge=str(body.get("code_challenge") or ""),
+            code_challenge_method=str(body.get("code_challenge_method") or ""),
+            token_endpoint=str(body.get("token_endpoint") or ""),
+            client_id=str(body.get("client_id") or ""),
+            metadata=metadata,
+            expires_at=expires_at,
+        )
+
+        code_verifier = body.get("code_verifier")
+        if code_verifier:
+            session.code_verifier = str(code_verifier)
+
+        client_secret = body.get("client_secret")
+        if client_secret:
+            session.client_secret = str(client_secret)
+
+        session.save()
+
+        try:
+            existing_credential = config.oauth_credential
+        except MCPServerOAuthCredential.DoesNotExist:
+            existing_credential = None
+
+        payload = {
+            "session_id": str(session.id),
+            "state": state,
+            "expires_at": expires_at.isoformat(),
+            "has_existing_credentials": existing_credential is not None,
+        }
+        return JsonResponse(payload, status=201)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MCPOAuthSessionVerifierView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, session_id: uuid.UUID, *args: Any, **kwargs: Any):
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        code_verifier = body.get("code_verifier")
+        if not code_verifier:
+            return HttpResponseBadRequest("code_verifier is required")
+
+        session = _require_active_session(request, session_id)
+        session.code_verifier = str(code_verifier)
+
+        if "code_challenge" in body:
+            session.code_challenge = str(body.get("code_challenge") or "")
+        if "code_challenge_method" in body:
+            session.code_challenge_method = str(body.get("code_challenge_method") or "")
+        session.save(update_fields=["code_verifier_encrypted", "code_challenge", "code_challenge_method", "updated_at"])
+        return JsonResponse({"status": "ok"})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MCPOAuthMetadataProxyView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        config_id = body.get("server_config_id")
+        resource = body.get("resource") or body.get("path") or body.get("url")
+        if not config_id or not resource:
+            return HttpResponseBadRequest("server_config_id and resource are required")
+
+        config = _resolve_mcp_server_config(request, str(config_id))
+        base_url = config.url
+        if not base_url:
+            return HttpResponseBadRequest("This MCP server does not define a base URL.")
+
+        target_url = urljoin(base_url, str(resource))
+        parsed_base = urlparse(base_url)
+        parsed_target = urlparse(target_url)
+
+        if parsed_target.scheme not in {"http", "https"}:
+            return HttpResponseBadRequest("Unsupported URL scheme for metadata request.")
+
+        if parsed_target.netloc and parsed_target.netloc != parsed_base.netloc:
+            return HttpResponseForbidden("Metadata requests must target the configured MCP host.")
+
+        headers = body.get("headers") or {}
+        if headers and not isinstance(headers, dict):
+            return HttpResponseBadRequest("headers must be a JSON object")
+
+        try:
+            response = httpx.get(target_url, headers=headers or None, timeout=10.0)
+        except httpx.HTTPError as exc:
+            return JsonResponse(
+                {"error": "Failed to contact MCP server", "detail": str(exc)},
+                status=502,
+            )
+
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type.lower():
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"content": response.text}
+                return JsonResponse(payload, status=response.status_code)
+            else:
+                safe = isinstance(payload, dict)
+                return JsonResponse(payload, status=response.status_code, safe=safe)
+
+        # Non-JSON responses are wrapped for the client to interpret.
+        return JsonResponse(
+            {
+                "content": response.text,
+                "content_type": content_type,
+                "status_code": response.status_code,
+            },
+            status=response.status_code,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MCPOAuthCallbackView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        session_id_raw = body.get("session_id")
+        authorization_code = body.get("authorization_code")
+        if not session_id_raw or not authorization_code:
+            return HttpResponseBadRequest("session_id and authorization_code are required")
+
+        try:
+            session_id = uuid.UUID(str(session_id_raw))
+        except (ValueError, TypeError):
+            return HttpResponseBadRequest("Invalid session_id")
+
+        session = _require_active_session(request, session_id)
+
+        state = body.get("state")
+        if state and state != session.state:
+            return HttpResponseBadRequest("State mismatch for OAuth session.")
+
+        token_endpoint = body.get("token_endpoint") or session.token_endpoint
+        if not token_endpoint:
+            return HttpResponseBadRequest("token_endpoint is required to complete the OAuth flow.")
+
+        client_id = body.get("client_id") or session.client_id or ""
+        client_secret = body.get("client_secret") or session.client_secret or ""
+        redirect_uri = body.get("redirect_uri") or session.redirect_uri or ""
+        headers = body.get("headers") or {}
+        if headers and not isinstance(headers, dict):
+            return HttpResponseBadRequest("headers must be a JSON object")
+
+        data = {
+            "grant_type": "authorization_code",
+            "code": authorization_code,
+        }
+        if redirect_uri:
+            data["redirect_uri"] = redirect_uri
+        if session.code_verifier:
+            data["code_verifier"] = session.code_verifier
+        if client_id:
+            data["client_id"] = client_id
+        if client_secret:
+            data["client_secret"] = client_secret
+
+        try:
+            response = httpx.post(token_endpoint, data=data, headers=headers or None, timeout=15.0)
+        except httpx.HTTPError as exc:
+            return JsonResponse({"error": "Token exchange failed", "detail": str(exc)}, status=502)
+
+        if response.status_code >= 400:
+            return JsonResponse(
+                {
+                    "error": "Token endpoint returned an error",
+                    "status_code": response.status_code,
+                    "body": response.text,
+                },
+                status=response.status_code,
+            )
+
+        try:
+            token_payload = response.json()
+        except ValueError:
+            return JsonResponse(
+                {"error": "Token endpoint returned non-JSON payload", "body": response.text},
+                status=502,
+            )
+
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            return JsonResponse({"error": "Token response missing access_token"}, status=502)
+
+        config = session.server_config
+        try:
+            credential = config.oauth_credential
+        except MCPServerOAuthCredential.DoesNotExist:
+            credential = MCPServerOAuthCredential(server_config=config)
+
+        credential.organization = config.organization
+        credential.user = config.user
+        credential.client_id = client_id
+        if client_secret:
+            credential.client_secret = client_secret
+        credential.access_token = access_token
+        credential.refresh_token = token_payload.get("refresh_token")
+        credential.id_token = token_payload.get("id_token")
+        credential.token_type = token_payload.get("token_type", credential.token_type)
+        credential.scope = token_payload.get("scope") or session.scope
+
+        expires_in = token_payload.get("expires_in")
+        if expires_in is not None:
+            try:
+                expires_seconds = int(expires_in)
+                credential.expires_at = timezone.now() + timedelta(seconds=max(expires_seconds, 0))
+            except (TypeError, ValueError):
+                credential.expires_at = None
+
+        metadata = dict(credential.metadata or {})
+        metadata_update = body.get("metadata") or {}
+        if isinstance(metadata_update, dict):
+            metadata.update(metadata_update)
+        metadata["token_endpoint"] = token_endpoint
+        metadata["last_token_response"] = {
+            key: value
+            for key, value in token_payload.items()
+            if key not in {"access_token", "refresh_token", "id_token"}
+        }
+        credential.metadata = metadata
+        credential.save()
+
+        session.delete()
+
+        payload = {
+            "connected": True,
+            "expires_at": credential.expires_at.isoformat() if credential.expires_at else None,
+            "scope": credential.scope,
+            "token_type": credential.token_type,
+        }
+        return JsonResponse(payload, status=200)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MCPOAuthStatusView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, server_config_id: uuid.UUID, *args: Any, **kwargs: Any):
+        config = _resolve_mcp_server_config(request, str(server_config_id))
+        try:
+            credential = config.oauth_credential
+        except MCPServerOAuthCredential.DoesNotExist:
+            return JsonResponse({"connected": False})
+
+        payload = {
+            "connected": True,
+            "expires_at": credential.expires_at.isoformat() if credential.expires_at else None,
+            "scope": credential.scope,
+            "token_type": credential.token_type,
+            "has_refresh_token": bool(credential.refresh_token),
+            "updated_at": credential.updated_at.isoformat() if credential.updated_at else None,
+        }
+        return JsonResponse(payload)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MCPOAuthRevokeView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, server_config_id: uuid.UUID, *args: Any, **kwargs: Any):
+        config = _resolve_mcp_server_config(request, str(server_config_id))
+        try:
+            credential = config.oauth_credential
+        except MCPServerOAuthCredential.DoesNotExist:
+            return JsonResponse({"revoked": False, "detail": "No stored credentials found."}, status=404)
+
+        credential.delete()
+        return JsonResponse({"revoked": True})
 
 
 def _parse_ttl(payload: dict | None) -> int:
