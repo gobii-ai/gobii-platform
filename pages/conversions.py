@@ -108,7 +108,7 @@ def build_facebook_payload(
 
     external_id_hash = _sha256(event.external_id)
     if external_id_hash:
-        user_data["external_id"] = external_id_hash
+        user_data["external_id"] = [external_id_hash]
 
     if event.ip_address:
         user_data["client_ip_address"] = event.ip_address
