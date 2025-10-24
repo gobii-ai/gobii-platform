@@ -30,7 +30,7 @@ def _sha256(value: str | None) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-def _sha256_phone(phone: str) -> str:
+def _sha256_phone(phone: str | None) -> str:
     """Facebook expects phone numbers with digits only before hashing."""
 
     if not phone:
