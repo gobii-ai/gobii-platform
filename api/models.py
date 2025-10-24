@@ -3105,6 +3105,11 @@ class MCPServerConfig(models.Model):
         ORGANIZATION = "organization", "Organization"
         USER = "user", "User"
 
+    class AuthMethod(models.TextChoices):
+        NONE = "none", "None"
+        BEARER_TOKEN = "bearer_token", "Bearer Token"
+        OAUTH2 = "oauth2", "OAuth 2.0"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     scope = models.CharField(max_length=32, choices=Scope.choices)
     organization = models.ForeignKey(
@@ -3127,6 +3132,11 @@ class MCPServerConfig(models.Model):
     command = models.CharField(max_length=255, blank=True)
     command_args = models.JSONField(default=list, blank=True)
     url = models.CharField(max_length=512, blank=True)
+    auth_method = models.CharField(
+        max_length=32,
+        choices=AuthMethod.choices,
+        default=AuthMethod.NONE,
+    )
     prefetch_apps = models.JSONField(default=list, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     env_json_encrypted = models.BinaryField(null=True, blank=True)

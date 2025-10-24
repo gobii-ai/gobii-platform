@@ -64,6 +64,7 @@ class MCPServerConfigFormTests(TestCase):
                 "metadata": "{}",
                 "environment": "{}",
                 "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
                 "is_active": "on",
             },
             allow_commands=False,
@@ -100,6 +101,7 @@ class MCPServerConfigFormTests(TestCase):
                 "metadata": "{}",
                 "environment": "{}",
                 "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
                 "is_active": "on",
             },
             instance=config,
@@ -111,6 +113,7 @@ class MCPServerConfigFormTests(TestCase):
         self.assertEqual(updated.command, "")
         self.assertEqual(updated.command_args, [])
         self.assertEqual(updated.url, "https://example.com/mcp")
+        self.assertEqual(updated.auth_method, MCPServerConfig.AuthMethod.NONE)
 
     def test_environment_and_metadata_ignored_for_user_scope(self):
         user = get_user_model().objects.create_user(
@@ -129,6 +132,7 @@ class MCPServerConfigFormTests(TestCase):
                 "metadata": '{"timer": "30"}',
                 "environment": '{"API_KEY": "secret"}',
                 "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
                 "is_active": "on",
             },
             allow_commands=False,
@@ -138,6 +142,7 @@ class MCPServerConfigFormTests(TestCase):
         config = form.save(user=user)
         self.assertEqual(config.environment, {})
         self.assertEqual(config.metadata, {})
+        self.assertEqual(config.auth_method, MCPServerConfig.AuthMethod.NONE)
 
     def test_reserved_identifier_rejected_for_user_scope(self):
         form = MCPServerConfigForm(
@@ -150,6 +155,7 @@ class MCPServerConfigFormTests(TestCase):
                 "metadata": "{}",
                 "environment": "{}",
                 "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
                 "is_active": "on",
             },
             allow_commands=False,
@@ -182,6 +188,7 @@ class MCPServerConfigAnalyticsViewTests(TestCase):
                 "metadata": "{}",
                 "environment": "{}",
                 "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
                 "is_active": "on",
             },
             HTTP_HX_REQUEST="true",
@@ -190,6 +197,7 @@ class MCPServerConfigAnalyticsViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(MCPServerConfig.objects.count(), 1)
         server = MCPServerConfig.objects.get()
+        self.assertEqual(server.auth_method, MCPServerConfig.AuthMethod.NONE)
         mock_get_mcp_manager.return_value.initialize.assert_called_once_with(force=True)
         mock_track_event.assert_called_once()
 
@@ -233,6 +241,7 @@ class MCPServerConfigAnalyticsViewTests(TestCase):
                 "metadata": "{}",
                 "environment": "{}",
                 "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
                 "is_active": "on",
             },
             HTTP_HX_REQUEST="true",
@@ -241,6 +250,7 @@ class MCPServerConfigAnalyticsViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         server.refresh_from_db()
         self.assertEqual(server.url, "https://updated.example.com/mcp")
+        self.assertEqual(server.auth_method, MCPServerConfig.AuthMethod.NONE)
         mock_get_mcp_manager.return_value.initialize.assert_called_once_with(force=True)
         mock_track_event.assert_called_once()
 

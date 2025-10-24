@@ -73,6 +73,7 @@ class MCPServerRuntime:
     command: Optional[str]
     args: List[str]
     url: Optional[str]
+    auth_method: str
     env: Dict[str, str]
     headers: Dict[str, str]
     prefetch_apps: List[str]
@@ -264,6 +265,7 @@ class MCPToolManager:
             command=cfg.command or None,
             args=list(cfg.command_args or []),
             url=cfg.url or None,
+            auth_method=cfg.auth_method,
             env=env,
             headers=headers,
             prefetch_apps=prefetch,
