@@ -1,4 +1,5 @@
 {% extends "console_page.html" %}
+{% load static %}
 
 {% block console_content %}
 <div x-data="{}" class="space-y-6">
@@ -40,6 +41,11 @@
     </div>
   </div>
 
-  {% include "console/partials/_mcp_server_delete_modal.html" %}
+{% include "console/partials/_mcp_server_delete_modal.html" %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script type="module" src="{% static 'js/mcp_oauth.js' %}"></script>
 {% endblock %}

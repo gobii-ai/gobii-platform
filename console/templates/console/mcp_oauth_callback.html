@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-8">
+  <div class="max-w-lg w-full bg-white shadow rounded-xl border border-slate-200 p-6 space-y-4">
+    <div class="flex items-center gap-3">
+      <div class="rounded-full bg-indigo-100 text-indigo-600 p-2">
+        <i data-lucide="key-round" class="h-5 w-5"></i>
+      </div>
+      <div>
+        <h1 class="text-lg font-semibold text-slate-900">Finishing OAuth Connection</h1>
+        <p class="text-sm text-slate-600">Please wait while we securely store your tokens.</p>
+      </div>
+    </div>
+    <p id="mcp-oauth-status" class="text-sm text-slate-700">Completing authorization…</p>
+    <pre id="mcp-oauth-error" class="hidden rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 whitespace-pre-wrap"></pre>
+    <div class="text-xs text-slate-500">
+      You can close this tab once the connection succeeds. We&#39;ll redirect automatically in a moment.
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    if (window.lucide) {
+      window.lucide.createIcons({ nameAttr: 'data-lucide' });
+    }
+  });
+</script>
+<script type="module" src="{% static 'js/mcp_oauth_callback.js' %}"></script>
+{% endblock %}

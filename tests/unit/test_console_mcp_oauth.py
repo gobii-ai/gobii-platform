@@ -48,6 +48,7 @@ class MCPOAuthApiTests(TestCase):
                     "scope": "read write",
                     "token_endpoint": "https://oauth.example.com/token",
                     "code_verifier": "secret-verifier",
+                    "state": "custom-state",
                 }
             ),
             content_type="application/json",
@@ -55,6 +56,7 @@ class MCPOAuthApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         payload = response.json()
         self.assertIn("session_id", payload)
+        self.assertEqual(payload["state"], "custom-state")
         session = MCPServerOAuthSession.objects.get(id=payload["session_id"])
         self.assertEqual(session.scope, "read write")
         self.assertEqual(session.code_verifier, "secret-verifier")
@@ -72,6 +74,22 @@ class MCPOAuthApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_start_generates_state_when_missing(self):
+        url = reverse("console-mcp-oauth-start")
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "server_config_id": str(self.server.id),
+                    "token_endpoint": "https://oauth.example.com/token",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertTrue(payload["state"])
 
     @patch("console.api_views.httpx.get")
     def test_metadata_proxy(self, mock_httpx_get):
