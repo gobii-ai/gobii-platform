@@ -61,12 +61,15 @@
       </h1>
       <p class="mt-6 text-slate-300 max-w-2xl mx-auto">
         Gobii is a developer friendly, open-core <strong>AI Agent API</strong> for persistent, adaptive browser automation using browser-use.
-        Spawn agents, run tasks, receive webhooks—no custom infrastructure required. Scale to production with Gobii Cloud or self-host.
+        Spawn agents, run tasks, receive webhooks—no custom infrastructure required.
+        Run browser-use agents in production on the Gobii Cloud with no custom infrastructure, or self-host with the
+        MIT-licensed
+        <a href="https://github.com/gobii-ai/gobii-platform" title="Gobii Platform - open-source browser-use based AI Agent">Gobii Platform</a>.
       </p>
       <div class="mt-8 flex items-center justify-center gap-3">
         <a href="{% url 'account_signup' %}" class="rounded-lg bg-indigo-600 px-5 py-3 text-white hover:bg-indigo-500" title="Create a Gobii account and get your API key">Get API Key</a>
 {#        <a href="/developers/getting-started/" class="rounded-lg border border-slate-700 px-5 py-3 text-slate-200 hover:bg-slate-900" title="Quick start guide for developers">Quick Start</a>#}
-        <a href="/docs/guides/api/" class="rounded-lg border border-slate-700 px-5 py-3 text-slate-200 hover:bg-slate-900" title="Gobii API documentation">API Docs</a>
+        <a href="/api/schema/redoc/" class="rounded-lg border border-slate-700 px-5 py-3 text-slate-200 hover:bg-slate-900" title="Gobii API documentation">API Docs</a>
       </div>
       <p class="mt-4 text-xs text-slate-400">Open-core • MIT-licensed • Production-ready</p>
     </div>
@@ -136,11 +139,8 @@ curl -X POST https://api.gobii.ai/api/v1/agents/ \
   -H "X-Api-Key: &lt;YOUR_API_KEY&gt;" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Lead Finder Agent",
-    "charter": "Find new leads in my industry, and post results to the webhook every few hours",
-    "schedule": "@daily",
-    "preferred_contact_endpoint": "webhook"
-  }'
+    "prompt": "Fetch the latest Y-combinator news articles and summarize the company updates, focusing on funding rounds, leadership team, and product launches.",
+}'
               </code>
             </pre>
             <pre class="overflow-x-auto text-slate-100 text-sm" id="code-tab-panel-javascript" role="tabpanel" aria-labelledby="code-tab-javascript" data-code-panel="javascript" hidden>
@@ -148,12 +148,12 @@ curl -X POST https://api.gobii.ai/api/v1/agents/ \
 const res = await fetch("https://api.gobii.ai/v1/tasks", {
   method: "POST",
   headers: {
-    "X-Api-Key": process.env.GOBII_API_KEY,
+    "X-Api-Key": "< YOUR_API_KEY >",
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    prompt: "Fill out the onboarding form at example.com",
-    callback_url: "https://example.com/webhooks/gobii"
+    prompt: "Fetch the latest Y-combinator news articles and summarize the company updates, focusing on funding rounds, "
+          + "leadership team, and product launches."
   })
 });
 const json = await res.json();
