@@ -5,33 +5,7 @@
   hx-post="{{ form_action }}"
   hx-target="{{ form_target }}"
   hx-swap="innerHTML"
-  hx-on::before-request="
-      const submitButton = document.getElementById('{{ form_id }}-submit');
-      if (submitButton) {
-          submitButton.disabled = true;
-          submitButton.classList.add('cursor-not-allowed', 'opacity-80');
-          submitButton.setAttribute('aria-busy', 'true');
-          const spinner = submitButton.querySelector('[data-loading-spinner]');
-          const defaultLabel = submitButton.querySelector('[data-default-label]');
-          const loadingLabel = submitButton.querySelector('[data-loading-label]');
-          if (spinner) spinner.classList.remove('hidden');
-          if (defaultLabel) defaultLabel.classList.add('hidden');
-          if (loadingLabel) loadingLabel.classList.remove('hidden');
-      }
-  "
   hx-on::after-request="
-      const submitButton = document.getElementById('{{ form_id }}-submit');
-      if (submitButton) {
-          submitButton.disabled = false;
-          submitButton.classList.remove('cursor-not-allowed', 'opacity-80');
-          submitButton.removeAttribute('aria-busy');
-          const spinner = submitButton.querySelector('[data-loading-spinner]');
-          const defaultLabel = submitButton.querySelector('[data-default-label]');
-          const loadingLabel = submitButton.querySelector('[data-loading-label]');
-          if (spinner) spinner.classList.add('hidden');
-          if (defaultLabel) defaultLabel.classList.remove('hidden');
-          if (loadingLabel) loadingLabel.classList.add('hidden');
-      }
       const triggerHeader = event.detail.xhr ? event.detail.xhr.getResponseHeader('HX-Trigger') : null;
       if (event.detail.successful && triggerHeader && triggerHeader.includes('refreshMcpServersTable')) {
         window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: '{{ modal_id }}' } }));
