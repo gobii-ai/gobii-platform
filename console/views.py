@@ -3679,6 +3679,12 @@ class MCPServerConfigDeleteView(ConsoleViewMixin, View):
         return self._handle_delete(request, *args, **kwargs)
 
 
+class MCPOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
+    """Landing page shown after external OAuth redirects back to Gobii."""
+
+    template_name = "console/mcp_oauth_callback.html"
+
+
 class PersistentAgentChatShellView(AgentDetailView):
     template_name = "console/persistent_agent_chat_shell.html"
 

@@ -1,4 +1,7 @@
 {% url 'console-mcp-server-create' as default_form_action %}
+{% url 'console-mcp-oauth-start' as oauth_start_url %}
+{% url 'console-mcp-oauth-metadata' as oauth_metadata_url %}
+{% url 'console-mcp-oauth-callback-view' as oauth_callback_path %}
 {% with modal_id=modal_id|default:'create-mcp-server-modal' form_id=form_id|default:'create-mcp-server-form' form_action=form_action|default:default_form_action form_target=form_target|default:'#mcp-server-result' %}
 <form
   id="{{ form_id }}"
@@ -11,10 +14,22 @@
         window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: '{{ modal_id }}' } }));
       }
   "
+  data-server-id="{{ form.instance.id|default:'' }}"
+  data-oauth-start-url="{{ oauth_start_url }}"
+  data-oauth-metadata-url="{{ oauth_metadata_url }}"
+  data-oauth-callback-path="{{ oauth_callback_path }}"
+  data-oauth-status-url="{% if form.instance and form.instance.id %}{% url 'console-mcp-oauth-status' form.instance.id %}{% endif %}"
+  data-oauth-revoke-url="{% if form.instance and form.instance.id %}{% url 'console-mcp-oauth-revoke' form.instance.id %}{% endif %}"
+  data-oauth-url-field-id="{{ form.url.id_for_label }}"
   x-data="{
       displayName: '{{ form.display_name.value|default:''|escapejs }}',
       slug: '{{ form.name.value|default:''|escapejs }}',
       headers: [],
+      authMethodValue: '{{ form.auth_method.value|default:form.fields.auth_method.initial|default:'none' }}',
+      oauthClientId: '',
+      oauthClientSecret: '',
+      oauthScope: '',
+      oauth: null,
       init() {
         if (!this.slug && this.displayName) {
           this.slug = this.slugify(this.displayName);
@@ -23,6 +38,23 @@
         this.ensureHeaderRows();
         this.syncHeadersField();
         this.queueIconRefresh();
+        if (window.createMCPOAuthStore) {
+          this.oauth = window.createMCPOAuthStore(this.$el.dataset);
+          if (this.oauth) {
+            this.oauth.mount({
+              getServerUrl: () => this.$refs.serverUrl ? this.$refs.serverUrl.value || '' : '',
+              getClientId: () => this.oauthClientId.trim(),
+              getClientSecret: () => this.oauthClientSecret.trim(),
+              getScope: () => this.oauthScope.trim(),
+            });
+            this.oauth.setAuthMethod(this.authMethodValue);
+          }
+        }
+        this.$watch('authMethodValue', (value) => {
+          if (this.oauth) {
+            this.oauth.setAuthMethod(value);
+          }
+        });
       },
       slugify(value) {
         if (!value) { return ''; }
@@ -126,15 +158,83 @@
       {% endfor %}
     </div>
 
-    <div class="sm:col-span-2 space-y-1">
-      <label class="block text-sm font-medium text-gray-700" for="{{ form.auth_method.id_for_label }}">Authentication</label>
-      {{ form.auth_method }}
-      {% if form.auth_method.help_text %}
-        <p class="text-xs text-gray-500">{{ form.auth_method.help_text }}</p>
-      {% endif %}
-      {% for error in form.auth_method.errors %}
-        <p class="text-xs text-red-600">{{ error }}</p>
-      {% endfor %}
+    <div class="sm:col-span-2 space-y-2">
+      <div>
+        <label class="block text-sm font-medium text-gray-700" for="{{ form.auth_method.id_for_label }}">Authentication</label>
+        {{ form.auth_method }}
+        {% if form.auth_method.help_text %}
+          <p class="text-xs text-gray-500">{{ form.auth_method.help_text }}</p>
+        {% endif %}
+        {% for error in form.auth_method.errors %}
+          <p class="text-xs text-red-600">{{ error }}</p>
+        {% endfor %}
+      </div>
+
+      <template x-if="authMethodValue === 'oauth2'">
+        <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-4 space-y-4">
+          <div class="flex items-center gap-2">
+            <i data-lucide="link" class="h-4 w-4 text-indigo-500"></i>
+            <p class="text-sm font-medium text-indigo-700">OAuth Connection</p>
+          </div>
+          <div class="space-y-3 text-sm text-indigo-900">
+            <template x-if="!oauth || !oauth.hasServer">
+              <p>Save this MCP server first, then return to connect via OAuth 2.0.</p>
+            </template>
+            <template x-if="oauth && oauth.hasServer">
+              <div class="space-y-2">
+                <p x-show="oauth && oauth.status === 'connected'">
+                  Connected • <span class="font-mono" x-text="oauth.scope || 'default scope'"></span>
+                </p>
+                <p x-show="oauth && oauth.status === 'pending'">
+                  Pending authorization. Complete the OAuth flow in the other tab to finish setup.
+                </p>
+                <p x-show="oauth && oauth.status === 'disconnected'">
+                  Not connected. Use the fields below and click connect to begin the OAuth flow.
+                </p>
+              </div>
+            </template>
+          </div>
+          <div class="space-y-3" x-cloak x-show="oauth && oauth.hasServer">
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div class="space-y-1">
+                <label class="text-xs font-medium text-indigo-700">OAuth Client ID</label>
+                <input type="text" class="py-2 px-3 block w-full border-indigo-200 rounded-md focus:border-indigo-400 focus:ring-indigo-400 text-sm" placeholder="client-id" x-model="oauthClientId">
+              </div>
+              <div class="space-y-1">
+                <label class="text-xs font-medium text-indigo-700">OAuth Client Secret</label>
+                <input type="password" class="py-2 px-3 block w-full border-indigo-200 rounded-md focus:border-indigo-400 focus:ring-indigo-400 text-sm" placeholder="Optional" x-model="oauthClientSecret">
+              </div>
+            </div>
+            <div class="space-y-1">
+              <label class="text-xs font-medium text-indigo-700">Scopes</label>
+              <input type="text" class="py-2 px-3 block w-full border-indigo-200 rounded-md focus:border-indigo-400 focus:ring-indigo-400 text-sm" placeholder="e.g. openid profile email" x-model="oauthScope">
+              <p class="text-xs text-indigo-600">Separate scopes with spaces. Leave blank for provider defaults.</p>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                :disabled="!oauth || oauth.connecting"
+                x-on:click="oauth.start()">
+                <i data-lucide="key-round" class="h-4 w-4"></i>
+                <span x-text="oauth.connecting ? 'Starting…' : 'Connect with OAuth 2.0'"></span>
+              </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                :disabled="!oauth || oauth.status !== 'connected' || oauth.revoking"
+                x-on:click="oauth.revoke()">
+                <i data-lucide="shield-off" class="h-4 w-4"></i>
+                <span x-text="oauth.revoking ? 'Revoking…' : 'Disconnect'"></span>
+              </button>
+            </div>
+            <p class="text-xs text-indigo-700" x-show="oauth && oauth.status === 'connected' && oauth.expires_at">
+              Token expires at <span class="font-mono" x-text="oauth.expires_at"></span>
+            </p>
+            <p class="text-xs text-amber-600" x-show="oauth && oauth.error" x-text="oauth.error"></p>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 

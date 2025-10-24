@@ -278,7 +278,7 @@ class MCPOAuthStartView(LoginRequiredMixin, View):
             scope = str(scope_raw)
 
         expires_at = timezone.now() + timedelta(minutes=10)
-        state = secrets.token_urlsafe(32)
+        state = str(body.get("state") or secrets.token_urlsafe(32))
 
         session = MCPServerOAuthSession(
             server_config=config,

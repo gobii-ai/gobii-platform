@@ -212,6 +212,10 @@ class MCPServerConfigForm(forms.Form):
         display_widget.attrs.setdefault('x-model', 'displayName')
         if instance is None:
             display_widget.attrs.setdefault('x-on:input', 'slug = slugify($event.target.value)')
+        self.fields['url'].widget.attrs.setdefault('x-ref', 'serverUrl')
+        auth_widget = self.fields['auth_method'].widget
+        auth_widget.attrs.setdefault('x-ref', 'authMethod')
+        auth_widget.attrs.setdefault('x-model', 'authMethodValue')
 
         for name, field in self.fields.items():
             widget = field.widget
