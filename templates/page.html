@@ -150,9 +150,20 @@
     <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3 px-3"><a href="/developers/" style="text-decoration: none;">Developers</a></h3>
     <nav class="space-y-1">
       <!-- Other documentation pages (excluding API) -->
+
       <a href="{% url "pages:developers" %}"
-         class="flex items-center px-3 py-2.5 font-medium rounded-lg transition-colors text-slate-700 hover:bg-white/80 hover:text-blue-600"
-         title="Gobii for Developers">Gobii for Developers</a>
+         class="flex items-center  px-3 py-2.5 text-sm font-medium rounded-lg transition-colors
+                {% if request.path == "/developers/" %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}"
+         title="Gobii for Developers">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+             class="lucide lucide-code-xml-icon lucide-code-xml flex-shrink-0 size-5 me-2 text-gray-500">
+          <path d="m18 16 4-4-4-4"/>
+          <path d="m6 8-4 4 4 4"/>
+          <path d="m14.5 4-5 16"/>
+        </svg>
+        <span class="truncate">Gobii for Developers</span>
+      </a>
       {% for doc_page in all_doc_pages %}
         {% if doc_page.slug|slice:":6" == "guides" %}
           {% comment %}<!-- Debug: {{ doc_page.icon }} -->{% endcomment %}
@@ -181,9 +192,13 @@
       <!-- API Documentation auto-generated link -->
       <a href="{% url 'schema-redoc' %}" target="_blank"
          class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors 
-               {% if request.path == '/api/schema/swagger-ui/' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}"
+               {% if request.path == '/api/schema/redoc/' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}"
          title="API Reference">
-        {% include "includes/_docs_icon.html" with icon_key="api" icon_class="flex-shrink-0 size-5 me-2 text-blue-600" %}
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+             class="lucide lucide-book-icon lucide-book flex-shrink-0 size-5 me-2 text-gray-600">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>
+        </svg>
         <span class="truncate">API Reference</span>
       </a>
     </nav>
