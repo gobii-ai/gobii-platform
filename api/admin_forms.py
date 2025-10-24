@@ -126,6 +126,7 @@ class MCPServerConfigAdminForm(forms.ModelForm):
             "name",
             "display_name",
             "description",
+            "auth_method",
             "command",
             "command_args",
             "url",
@@ -140,9 +141,11 @@ class MCPServerConfigAdminForm(forms.ModelForm):
         if instance and instance.pk:
             self.fields["environment"].initial = instance.environment
             self.fields["headers"].initial = instance.headers
+            self.fields["auth_method"].initial = instance.auth_method
         else:
             self.fields["environment"].initial = {}
             self.fields["headers"].initial = {}
+            self.fields["auth_method"].initial = MCPServerConfig.AuthMethod.NONE
 
     def clean_name(self):
         name = self.cleaned_data["name"]
@@ -159,6 +162,7 @@ class MCPServerConfigAdminForm(forms.ModelForm):
         headers = self.cleaned_data.get("headers") or {}
         obj.environment = environment
         obj.headers = headers
+        obj.auth_method = self.cleaned_data.get("auth_method") or MCPServerConfig.AuthMethod.NONE
         if commit:
             obj.save()
             self.save_m2m()

@@ -164,12 +164,12 @@ class StripeConfigAdmin(admin.ModelAdmin):
 @admin.register(MCPServerConfig)
 class MCPServerConfigAdmin(admin.ModelAdmin):
     form = MCPServerConfigAdminForm
-    list_display = ("name", "display_name", "is_active", "transport_summary", "updated_at")
+    list_display = ("name", "display_name", "auth_method", "is_active", "transport_summary", "updated_at")
     search_fields = ("name", "display_name", "description")
-    list_filter = ("is_active",)
+    list_filter = ("is_active", "auth_method")
     readonly_fields = ("scope", "created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("name", "display_name", "description", "is_active")}),
+        (None, {"fields": ("name", "display_name", "description", "auth_method", "is_active")}),
         (
             "Transport",
             {"fields": ("command", "command_args", "url", "prefetch_apps", "metadata")},

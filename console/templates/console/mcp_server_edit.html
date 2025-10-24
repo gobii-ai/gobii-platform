@@ -119,6 +119,17 @@
               <p class="text-xs text-red-600 mt-1">{{ error }}</p>
             {% endfor %}
           </div>
+
+          <div class="sm:col-span-2 space-y-1">
+            <label class="block text-sm font-medium text-gray-700" for="{{ form.auth_method.id_for_label }}">Authentication</label>
+            {{ form.auth_method }}
+            {% if form.auth_method.help_text %}
+              <p class="text-xs text-gray-500">{{ form.auth_method.help_text }}</p>
+            {% endif %}
+            {% for error in form.auth_method.errors %}
+              <p class="text-xs text-red-600">{{ error }}</p>
+            {% endfor %}
+          </div>
         </div>
 
         <div class="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
