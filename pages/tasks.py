@@ -44,7 +44,7 @@ def _should_retry(status_code: int) -> bool:
 def _log_http_error(response: Response, provider: str) -> None:
     try:
         content = response.json()
-    except Exception:
+    except json.JSONDecodeError:
         content = response.text
 
     logger.warning(
