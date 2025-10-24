@@ -16,6 +16,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
+from django.urls import reverse
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
@@ -280,18 +281,41 @@ class MCPOAuthStartView(LoginRequiredMixin, View):
         expires_at = timezone.now() + timedelta(minutes=10)
         state = str(body.get("state") or secrets.token_urlsafe(32))
 
+        callback_url = body.get("redirect_uri") or request.build_absolute_uri(reverse("console-mcp-oauth-callback-view"))
+
+        manual_client_id = str(body.get("client_id") or "")
+        manual_client_secret = str(body.get("client_secret") or "")
+        client_id = manual_client_id
+        client_secret = manual_client_secret
+
+        if not client_id and metadata.get("registration_endpoint"):
+            try:
+                client_id, client_secret = self._register_dynamic_client(
+                    request,
+                    metadata,
+                    callback_url,
+                    config,
+                )
+            except ValueError as exc:
+                return JsonResponse({"error": str(exc)}, status=400)
+            except httpx.HTTPError as exc:
+                return JsonResponse(
+                    {"error": "Client registration failed", "detail": str(exc)},
+                    status=502,
+                )
+
         session = MCPServerOAuthSession(
             server_config=config,
             initiated_by=request.user,
             organization=config.organization if config.organization_id else None,
             user=config.user if config.scope == MCPServerConfig.Scope.USER else None,
             state=state,
-            redirect_uri=str(body.get("redirect_uri") or ""),
+            redirect_uri=callback_url,
             scope=scope,
             code_challenge=str(body.get("code_challenge") or ""),
             code_challenge_method=str(body.get("code_challenge_method") or ""),
             token_endpoint=str(body.get("token_endpoint") or ""),
-            client_id=str(body.get("client_id") or ""),
+            client_id=client_id,
             metadata=metadata,
             expires_at=expires_at,
         )
@@ -300,7 +324,6 @@ class MCPOAuthStartView(LoginRequiredMixin, View):
         if code_verifier:
             session.code_verifier = str(code_verifier)
 
-        client_secret = body.get("client_secret")
         if client_secret:
             session.client_secret = str(client_secret)
 
@@ -316,8 +339,36 @@ class MCPOAuthStartView(LoginRequiredMixin, View):
             "state": state,
             "expires_at": expires_at.isoformat(),
             "has_existing_credentials": existing_credential is not None,
+            "client_id": session.client_id or "",
         }
         return JsonResponse(payload, status=201)
+
+    def _register_dynamic_client(self, request: HttpRequest, metadata: dict, callback_url: str, config: MCPServerConfig) -> tuple[str, str]:
+        endpoint = metadata.get("registration_endpoint")
+        if not endpoint:
+            raise ValueError("OAuth server does not advertise a registration endpoint.")
+
+        redirect_uri = callback_url
+        payload = {
+            "client_name": f"Gobii MCP - {config.display_name}",
+            "redirect_uris": [redirect_uri],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "client_secret_basic",
+        }
+        if metadata.get("scope"):
+            payload["scope"] = metadata["scope"]
+        elif metadata.get("scopes_supported"):
+            payload["scope"] = " ".join(metadata["scopes_supported"])
+
+        response = httpx.post(endpoint, json=payload, timeout=10.0)
+        response.raise_for_status()
+        client_info = response.json()
+        client_id = client_info.get("client_id")
+        client_secret = client_info.get("client_secret") or ""
+        if not client_id:
+            raise ValueError("Client registration response missing client_id")
+        return str(client_id), str(client_secret)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -441,7 +492,7 @@ class MCPOAuthCallbackView(LoginRequiredMixin, View):
 
         client_id = body.get("client_id") or session.client_id or ""
         client_secret = body.get("client_secret") or session.client_secret or ""
-        redirect_uri = body.get("redirect_uri") or session.redirect_uri or ""
+        redirect_uri = body.get("redirect_uri") or session.redirect_uri or request.build_absolute_uri(reverse("console-mcp-oauth-callback-view"))
         headers = body.get("headers") or {}
         if headers and not isinstance(headers, dict):
             return HttpResponseBadRequest("headers must be a JSON object")

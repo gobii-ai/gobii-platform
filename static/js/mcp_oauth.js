@@ -140,6 +140,9 @@ function createStore(dataset) {
     scope: null,
     expires_at: null,
     pendingState: null,
+    pendingSessionId: null,
+    metadata: null,
+    requiresManualClient: true,
     getters: null,
     mount(getters) {
       this.getters = getters;
@@ -151,13 +154,23 @@ function createStore(dataset) {
     setAuthMethod(method) {
       this.enabled = method === "oauth2";
     },
+    setMetadata(metadata) {
+      this.metadata = metadata || null;
+      if (metadata && metadata.registration_endpoint) {
+        this.requiresManualClient = false;
+      } else {
+        this.requiresManualClient = true;
+      }
+    },
     refreshPending() {
       if (!this.hasServer) {
         this.pendingState = null;
+        this.pendingSessionId = null;
         return;
       }
       const pending = readServerPending(serverId);
       this.pendingState = pending ? pending.state : null;
+      this.pendingSessionId = pending ? pending.sessionId || null : null;
       if (this.pendingState) {
         this.status = "pending";
       }
@@ -190,12 +203,14 @@ function createStore(dataset) {
       return input ? input.value.trim() : "";
     },
     async fetchMetadata(serverUrl) {
-    return postJson(metadataUrl, {
-      server_config_id: serverId,
-      resource: "/.well-known/oauth-authorization-server",
-    });
+      const metadata = await postJson(metadataUrl, {
+        server_config_id: serverId,
+        resource: "/.well-known/oauth-authorization-server",
+      });
+      this.setMetadata(metadata);
+      return metadata;
     },
-    validatePrerequisites() {
+    basicPrerequisites() {
       if (!this.enabled) {
         this.error = "Select OAuth 2.0 to enable this flow.";
         return false;
@@ -213,15 +228,11 @@ function createStore(dataset) {
         this.error = "Form not ready.";
         return false;
       }
-      if (!this.getters.getClientId()) {
-        this.error = "Provide an OAuth client ID.";
-        return false;
-      }
       this.error = null;
       return true;
     },
     async start() {
-      if (!this.validatePrerequisites()) {
+      if (!this.basicPrerequisites()) {
         return;
       }
       try {
@@ -233,6 +244,10 @@ function createStore(dataset) {
         if (!authorizationEndpoint || !tokenEndpoint) {
           throw new Error("OAuth metadata is missing authorization or token endpoints.");
         }
+        if (this.requiresManualClient && !this.getters.getClientId()) {
+          this.error = "Provide an OAuth client ID.";
+          return;
+        }
         const pkce = await generatePkcePair();
         const state = randomState();
         const body = {
@@ -243,27 +258,39 @@ function createStore(dataset) {
           code_challenge_method: "S256",
           code_verifier: pkce.verifier,
           redirect_uri: callbackUrl,
-          client_id: this.getters.getClientId(),
-          client_secret: this.getters.getClientSecret(),
           state,
+          metadata,
         };
+        if (this.requiresManualClient) {
+          body.client_id = this.getters.getClientId();
+          body.client_secret = this.getters.getClientSecret();
+        }
         const session = await postJson(startUrl, body);
+        const sessionClientId = session.client_id || "";
+        const authorizationClientId = this.requiresManualClient
+          ? this.getters.getClientId()
+          : sessionClientId;
+        if (!authorizationClientId) {
+          throw new Error("OAuth server did not provide a client ID.");
+        }
         const redirectUrl = buildAuthorizationUrl(authorizationEndpoint, {
           response_type: "code",
-          client_id: this.getters.getClientId(),
+          client_id: authorizationClientId,
           redirect_uri: callbackUrl,
           state: session.state,
           scope: this.getters.getScope(),
           code_challenge: pkce.challenge,
           code_challenge_method: "S256",
         });
-        storePendingState(session.state, {
+        const pendingPayload = {
           sessionId: session.session_id,
           serverId,
           returnUrl: window.location.href,
-        });
+        };
+        storePendingState(session.state, pendingPayload);
         storeServerPending(serverId, {
           state: session.state,
+          sessionId: session.session_id,
           created_at: Date.now(),
         });
         this.status = "pending";
