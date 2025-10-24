@@ -1,5 +1,6 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Full Server" type="CompoundRunConfigurationType">
+  <configuration default="false" name="Dev Server" type="CompoundRunConfigurationType">
+    <toRun name="Docker Dev" type="docker-deploy" />
     <toRun name="Node Dev Server" type="js.build_tools.npm" />
     <toRun name="Beat" type="PythonConfigurationType" />
     <toRun name="Server" type="PythonConfigurationType" />

@@ -1,19 +1,11 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Server" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="Server" type="PythonConfigurationType" factoryName="Python" activateToolWindowBeforeRun="false">
     <module name="gobii-platform" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
     <envs>
       <env name="PYTHONUNBUFFERED" value="1" />
-      <env name="DJANGO_SECRET_KEY" value="dev-insecure" />
-      <env name="GOBII_ENCRYPTION_KEY" value="dev-insecure" />
-      <env name="POSTGRES_HOST" value="db" />
-      <env name="POSTGRES_PORT" value="5432" />
-      <env name="POSTGRES_DB" value="gobii" />
-      <env name="POSTGRES_USER" value="postgres" />
-      <env name="POSTGRES_PASSWORD" value="postgres" />
-      <env name="REDIS_URL" value="redis://redis:6379/0" />
     </envs>
     <option name="SDK_HOME" value="" />
     <option name="SDK_NAME" value="Python 3.13 virtualenv at ~/git/gobii/gobii_platform/.venv" />
