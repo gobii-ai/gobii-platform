@@ -20,7 +20,7 @@ def _normalized(value: Any) -> str:
     return str(value).strip().lower()
 
 
-def _sha256(value: str) -> str:
+def _sha256(value: str | None) -> str:
     """Return the SHA256 hash for a value if present."""
 
     normalized = _normalized(value)
