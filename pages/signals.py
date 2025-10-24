@@ -7,6 +7,8 @@ from urllib.parse import unquote
 
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.conf import settings
+from django.db import transaction
 
 from allauth.account.signals import user_signed_up, user_logged_in, user_logged_out
 from django.dispatch import receiver
@@ -324,6 +326,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         last_touch_at = _parse_session_timestamp(request.session.get('landing_last_seen_at')) or timezone.now()
 
         fbc_cookie = _decode_cookie_value(request.COOKIES.get('_fbc'))
+        fbp_cookie = _decode_cookie_value(request.COOKIES.get('_fbp'))
         fbclid_cookie = _decode_cookie_value(request.COOKIES.get('fbclid'))
         fbclid_session = request.session.get("fbclid_last") or request.session.get("fbclid_first")
         if not fbclid_cookie and fbclid_session:
@@ -442,6 +445,12 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             event_properties['segment_anonymous_id'] = segment_anonymous_id
         if ga_client_id:
             event_properties['ga_client_id'] = ga_client_id
+        if fbc_cookie:
+            event_properties['fbc'] = fbc_cookie
+        if fbp_cookie:
+            event_properties['fbp'] = fbp_cookie
+        if fbclid_cookie:
+            event_properties['fbclid'] = fbclid_cookie
 
         campaign_context = {}
         for key, utm_param in UTM_MAPPING.items():
@@ -459,6 +468,8 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         if last_referrer:
             campaign_context['referrer'] = last_referrer
 
+        event_timestamp = timezone.now()
+
         Analytics.track(
             user_id=str(user.id),
             event=AnalyticsEvent.SIGNUP,
@@ -469,8 +480,67 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             },
             ip=None,
             message_id=event_id,          # use same ID in Facebook/Reddit CAPI
-            timestamp=timezone.now()
+            timestamp=event_timestamp
         )
+
+        conversion_payload = {
+            'event_name': 'SignUp',
+            'event_id': event_id,
+            'event_time': event_timestamp,
+            'action_source': 'website',
+            'email': user.email,
+            'first_name': user.first_name or '',
+            'last_name': user.last_name or '',
+            'external_id': str(user.id),
+            'ip_address': Analytics.get_client_ip(request),
+            'user_agent': request.META.get('HTTP_USER_AGENT', ''),
+            'event_source_url': request.build_absolute_uri(request.get_full_path()),
+            'fbc': fbc_cookie,
+            'fbp': fbp_cookie,
+            'fbclid': fbclid_cookie,
+            'click_ids': {
+                key: value
+                for key in CLICK_ID_PARAMS
+                if (value := (last_click.get(key) or first_click.get(key)))
+            },
+            'custom_data': {
+                k: v
+                for k, v in event_properties.items()
+                if v not in (None, '', []) and k not in {'fbc', 'fbp', 'fbclid'}
+            },
+            'campaign': campaign_context,
+            'utm': {
+                **{f'{k}_first': v for k, v in first_touch.items() if v},
+                **{f'{k}_last': v for k, v in last_touch.items() if v},
+            },
+        }
+
+        def enqueue_conversion_tasks():
+            from pages.tasks import (
+                send_facebook_signup_conversion,
+                send_reddit_signup_conversion,
+            )
+
+            facebook_ready = getattr(settings, 'FACEBOOK_PIXEL_ID', '') and getattr(settings, 'FACEBOOK_ACCESS_TOKEN', '')
+            reddit_ready = (
+                getattr(settings, 'REDDIT_ADVERTISER_ID', '')
+                or getattr(settings, 'REDDIT_PIXEL_ID', '')
+            ) and (
+                getattr(settings, 'REDDIT_ACCESS_TOKEN', '')
+                or (
+                    getattr(settings, 'REDDIT_CLIENT_ID', '')
+                    and getattr(settings, 'REDDIT_CLIENT_SECRET', '')
+                    and getattr(settings, 'REDDIT_REFRESH_TOKEN', '')
+                )
+            )
+
+            if facebook_ready:
+                send_facebook_signup_conversion.delay(conversion_payload)
+
+            if reddit_ready:
+                send_reddit_signup_conversion.delay(conversion_payload)
+
+        transaction.on_commit(enqueue_conversion_tasks)
 
         logger.info("Analytics tracking successful for signup.")
     except Exception as e:

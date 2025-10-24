@@ -54,6 +54,8 @@ jobs:
             tag: batch_email_allowlist
           - batch: pages
             tag: batch_pages
+          - batch: marketing_conversions
+            tag: batch_marketing_conversions
           - batch: contact_requests
             tag: batch_contact_requests
           - batch: console_agents
