@@ -3263,6 +3263,196 @@ class PersistentAgentMCPServer(models.Model):
             models.Index(fields=["agent", "server_config"], name="agent_personal_server_idx"),
         ]
 
+
+class MCPServerOAuthCredential(models.Model):
+    """Encrypted OAuth credential store for MCP servers."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    server_config = models.OneToOneField(
+        MCPServerConfig,
+        on_delete=models.CASCADE,
+        related_name="oauth_credential",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="mcp_oauth_credentials",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="mcp_oauth_credentials",
+    )
+    client_id = models.CharField(max_length=256, blank=True)
+    client_secret_encrypted = models.BinaryField(null=True, blank=True)
+    access_token_encrypted = models.BinaryField(null=True, blank=True)
+    refresh_token_encrypted = models.BinaryField(null=True, blank=True)
+    id_token_encrypted = models.BinaryField(null=True, blank=True)
+    token_type = models.CharField(max_length=32, blank=True)
+    scope = models.CharField(max_length=512, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization"], name="mcp_oauth_credential_org_idx"),
+            models.Index(fields=["user"], name="mcp_oauth_credential_user_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"MCPServerOAuthCredential<{self.server_config_id}>"
+
+    # Encrypted field helpers -------------------------------------------------
+    @staticmethod
+    def _encrypt_text(value: str | None) -> bytes | None:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @staticmethod
+    def _decrypt_text(payload: bytes | None) -> str:
+        if not payload:
+            return ""
+        try:
+            from .encryption import SecretsEncryption
+
+            return SecretsEncryption.decrypt_value(payload)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to decrypt MCP OAuth credential payload")
+            return ""
+
+    @property
+    def client_secret(self) -> str:
+        return self._decrypt_text(self.client_secret_encrypted)
+
+    @client_secret.setter
+    def client_secret(self, value: str | None) -> None:
+        self.client_secret_encrypted = self._encrypt_text(value)
+
+    @property
+    def access_token(self) -> str:
+        return self._decrypt_text(self.access_token_encrypted)
+
+    @access_token.setter
+    def access_token(self, value: str | None) -> None:
+        self.access_token_encrypted = self._encrypt_text(value)
+
+    @property
+    def refresh_token(self) -> str:
+        return self._decrypt_text(self.refresh_token_encrypted)
+
+    @refresh_token.setter
+    def refresh_token(self, value: str | None) -> None:
+        self.refresh_token_encrypted = self._encrypt_text(value)
+
+    @property
+    def id_token(self) -> str:
+        return self._decrypt_text(self.id_token_encrypted)
+
+    @id_token.setter
+    def id_token(self, value: str | None) -> None:
+        self.id_token_encrypted = self._encrypt_text(value)
+
+
+class MCPServerOAuthSession(models.Model):
+    """Ephemeral OAuth session state for MCP authentication flows."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    server_config = models.ForeignKey(
+        MCPServerConfig,
+        on_delete=models.CASCADE,
+        related_name="oauth_sessions",
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="mcp_oauth_sessions",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="mcp_oauth_sessions",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="mcp_oauth_user_sessions",
+    )
+    state = models.CharField(max_length=255, unique=True)
+    redirect_uri = models.CharField(max_length=512, blank=True)
+    scope = models.CharField(max_length=512, blank=True)
+    code_challenge = models.CharField(max_length=255, blank=True)
+    code_challenge_method = models.CharField(max_length=32, blank=True)
+    code_verifier_encrypted = models.BinaryField(null=True, blank=True)
+    token_endpoint = models.CharField(max_length=512, blank=True)
+    client_id = models.CharField(max_length=256, blank=True)
+    client_secret_encrypted = models.BinaryField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["expires_at"], name="mcp_oauth_session_expiry_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"MCPServerOAuthSession<{self.server_config_id} state={self.state}>"
+
+    @staticmethod
+    def _encrypt_text(value: str | None) -> bytes | None:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @staticmethod
+    def _decrypt_text(payload: bytes | None) -> str:
+        if not payload:
+            return ""
+        try:
+            from .encryption import SecretsEncryption
+
+            return SecretsEncryption.decrypt_value(payload)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to decrypt MCP OAuth session payload")
+            return ""
+
+    @property
+    def code_verifier(self) -> str:
+        return self._decrypt_text(self.code_verifier_encrypted)
+
+    @code_verifier.setter
+    def code_verifier(self, value: str | None) -> None:
+        self.code_verifier_encrypted = self._encrypt_text(value)
+
+    @property
+    def client_secret(self) -> str:
+        return self._decrypt_text(self.client_secret_encrypted)
+
+    @client_secret.setter
+    def client_secret(self, value: str | None) -> None:
+        self.client_secret_encrypted = self._encrypt_text(value)
+
+    def has_expired(self) -> bool:
+        from django.utils import timezone
+
+        return timezone.now() >= self.expires_at
+
     def clean(self):
         super().clean()
         if self.server_config.scope != MCPServerConfig.Scope.USER:
