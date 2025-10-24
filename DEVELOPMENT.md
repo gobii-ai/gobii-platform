@@ -1,103 +1,95 @@
 # DEVELOPMENT
 
-A single-service monorepo. Docker Compose spins up Postgres, Redis, and MinIO;  
-Django and Celery run directly inside your `console/.venv` for fast reloads.
+Run Django and Celery directly on your laptop (via `uv`) while Docker Compose provides Postgres, Redis, and optional extras. All defaults in `config/settings.py` are tuned so you do **not** need to export environment variables for local work; the Compose stack and Python processes share the same static credentials.
 
 ---
 
-## 0. Prerequisites
+## Prerequisites
 
-- docker
-- uv
-- python
-- nodejs 22.x (for the Vite dev server)
+- Docker Desktop (or another Docker engine) with at least 4 GB RAM.
+- `uv` ≥ 0.4.
+- Python 3.12 (uv will manage the interpreter inside `.venv`).
+- Node.js 22.x (ships with npm 10) for the Vite frontend.
 
 ---
 
-## 1. One-time setup
+## One-time setup
+
+From the repository root:
 
 ```bash
-# clone repo, then:
-cp infra/local/.env.example infra/local/.env
-
-# spin up services
-docker compose -f infra/local/docker-compose.yml up -d db, redis, minio
-
-# create Python venv
-cd console
+# Create the reusable virtual environment.
 uv venv .venv
-source .venv/bin/activate
 
-# install
-uv pip install -e '.[dev]'
+# Install Python dependencies in editable mode (no activation needed).
+uv run pip install -e .
 
-# install frontend deps
+# Frontend deps (install once; Vite reuses node_modules).
 npm ci --prefix frontend
 
-# bootstrap Django
-python manage.py migrate
-python manage.py createsuperuser   # email + pw
-python manage.py setup_initial_site   # setup Google OAuth placeholder
+# Start backing services (Postgres, Redis, MinIO).
+docker compose -f docker-compose.dev.yaml up
 
-# run Celery worker (new shell)
-celery -A config worker -l info --pool solo
-
-# optional: Celery beat for periodic jobs
-# celery -A config beat -l info
+# Bootstrap the database.
+uv run python manage.py migrate
+uv run python manage.py createsuperuser
 ```
+
+> Tip: `docker-compose.dev.yaml` binds services to `127.0.0.1` using the `postgres/postgres` defaults that `config/settings.py` applies when `GOBII_RELEASE_ENV=local` (the default outside containers).
 
 ---
 
-## 2. Daily workflow
+## Daily workflow
+
+1. **Ensure services are running**
+   ```bash
+   docker compose -f docker-compose.dev.yaml up
+   ```
+   (Optional) add `--profile containers` if you prefer to run Django from within Docker.
+
+2. **Start the Django ASGI server with live reload**
+   ```bash
+   uv run uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000
+   ```
+
+3. **Start the Celery worker (new shell)**
+   ```bash
+   uv run celery -A config worker -l info --pool solo
+   ```
+   The `--pool solo` setting avoids multiprocessing issues on macOS/Apple Silicon while keeping autoreload-friendly behavior.
+
+4. **Front-end hot reload (new shell)**
+   ```bash
+   npm run dev --prefix frontend
+   ```
+
+5. **Optional processes**
+   - Celery beat: `uv run celery -A config beat --loglevel info --scheduler redbeat.RedBeatScheduler`
+   - Object storage (MinIO UI) is available at http://localhost:9090 (`minioadmin`/`minioadmin` by default).
+   - Prefer running Django/Celery inside containers? `docker compose -f docker-compose.dev.yaml --profile containers up web` (add `--profile worker` or `--profile beat` as needed) will reuse the same backing services.
+
+Stop everything when finished with `Ctrl+C` in the Compose terminal (or run `docker compose -f docker-compose.dev.yaml down` in another shell if you prefer a clean exit).
+
+---
+
+## Testing
+
+Follow the testing guidance in `README` or individual apps. When writing or running tests, prefer targeted modules first, then finish with the full suite:
 
 ```bash
-# 1) ensure services are up
-docker compose -f infra/local/docker-compose.yml up -d
+# Example: run a focused test file
+uv run python manage.py test path.to.app.tests.test_example --settings=config.test_settings
 
-# 2) activate venv
-source console/.venv/bin/activate
-
-# 3) run the ASGI web server with hot reload
-uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000
-
-# 4) (new shell) run the Vite dev server for React pages
-npm run dev --prefix frontend
-```
-
-Open:
-
-* `http://localhost:8000/admin/` – Django admin  
-* `http://localhost:8000/accounts/login/` – email / Google login  
-* `http://localhost:8000/docs/` – Swagger UI (auto-generated OpenAPI)  
-
-With both servers running, `/console/agents/<agent-id>/chat/` serves the React
-shell and calls `/api/v1/ping/` via your Django session. When DEBUG is on
-(default for local dev) the template loads modules from the Vite dev server
-automatically; the legacy agent list at `/console/agents/` stays server-rendered.
-
----
-
-## 3. Project folders
-
-```
-console/
-├── apps/               # first-party Django apps (add them here)
-├── config/             # settings, URLs, celery.py
-├── manage.py
-└── pyproject.toml
-infra/
-└── local/
-    ├── docker-compose.yml
-    └── .env            # never committed
+# (Use --parallel auto for larger suites when needed)
+uv run python manage.py test --settings=config.test_settings --parallel auto
 ```
 
 ---
 
-## 4. Testing
+## Troubleshooting
 
-```bash
-pytest                                      # unit tests
-pytest -q  --cov=apps --cov-report=html     # coverage
-```
+- **Database migrations fail the first time** – ensure Postgres is up (`docker compose -f docker-compose.dev.yaml ps`) and rerun `uv run python manage.py migrate`.
+- **Celery cannot connect to Redis** – verify the container is healthy and that the worker command is using the same shell with `.venv` activated (it will pick up `REDIS_URL=redis://localhost:6379/0` automatically).
+- **Need a clean database** – run `docker compose -f docker-compose.dev.yaml down -v` to drop the local Postgres volume, then bring it back up and rerun migrations.
 
 ---
