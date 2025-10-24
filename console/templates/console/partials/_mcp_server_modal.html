@@ -34,8 +34,13 @@
 {% block modal_footer %}
 <button type="submit"
         form="{{ form_id }}"
-        class="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm">
-  {{ modal_submit_label }}
+        id="{{ form_id }}-submit"
+        class="inline-flex w-full items-center justify-center gap-2 rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm transition">
+  <span data-loading-spinner class="hidden flex items-center">
+    <i aria-hidden="true" data-lucide="loader-2" class="h-4 w-4 animate-spin"></i>
+  </span>
+  <span data-default-label>{{ modal_submit_label }}</span>
+  <span class="hidden" data-loading-label>Saving...</span>
 </button>
 <button type="button"
         x-on:click="$dispatch('close-modal', { id: '{{ modal_id }}' })"
