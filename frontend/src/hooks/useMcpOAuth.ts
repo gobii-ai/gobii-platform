@@ -41,7 +41,7 @@ const initialState: OAuthState = {
   connecting: false,
   revoking: false,
   error: null,
-  requiresManualClient: true,
+  requiresManualClient: false,
 }
 
 export function useMcpOAuth(options: UseMcpOAuthOptions) {
