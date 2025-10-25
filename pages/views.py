@@ -500,6 +500,29 @@ class MarkdownPageView(TemplateView):
         ctx["all_doc_pages"] = get_all_doc_pages()
         return ctx
 
+
+@method_decorator(vary_on_cookie, name="dispatch")
+class DevelopersView(TemplateView):
+    """Landing page for developer resources that reuses the docs layout."""
+
+    template_name = "developers/index.html"
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx.setdefault(
+            "meta",
+            {
+                "title": "Developer Hub",
+                "description": "Resources, announcements, and tooling for building on Gobii.",
+            },
+        )
+        ctx.setdefault("slug", "developers/index")
+        ctx.setdefault("toc_html", "")
+        ctx["prev_page"] = None
+        ctx["next_page"] = None
+        ctx["all_doc_pages"] = get_all_doc_pages()
+        return ctx
+
 class DocsIndexRedirectView(RedirectView):
     """
     Redirect /docs/ to the first available documentation page.
