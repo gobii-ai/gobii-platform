@@ -4,8 +4,8 @@
 {% block content %}
 <div class="bg-gradient-to-b from-white via-indigo-50/40 to-white">
   <section class="max-w-5xl mx-auto px-6 pt-16 pb-6">
-    <a href="{% url 'pages:pretrained_worker_directory' %}" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
-      ← Back to directory
+    <a href="{% url 'pages:home' %}#pretrained-workers" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
+      ← Back to pretrained workers
     </a>
     <div class="mt-6 rounded-3xl border border-slate-200 bg-white/80 backdrop-blur shadow-xl overflow-hidden">
       <div class="relative p-10">
@@ -81,6 +81,7 @@
               <p class="mt-2 text-sm text-indigo-100 leading-relaxed">We’ll preload the playbook, schedule, and integrations—then you choose how it reaches you.</p>
               <form method="post" action="{% url 'pages:pretrained_worker_hire' pretrained_worker.code %}" class="mt-6">
                 {% csrf_token %}
+                <input type="hidden" name="source_page" value="pretrained_worker_detail" />
                 <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-indigo-600 font-semibold px-5 py-3 shadow-lg shadow-indigo-200 hover:text-indigo-700 transition">
                   Hire now
                   <span aria-hidden="true">→</span>

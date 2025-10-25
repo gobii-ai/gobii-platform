@@ -22,6 +22,60 @@ class HomePageTests(TestCase):
             '<meta name="description" content="Deploy always-on pretrained workers that handle outreach, research, and operations for you. Spawn a Gobii agent in minutes and keep work moving around the clock.">',
         )
 
+    @tag("batch_pages")
+    def test_home_page_exposes_all_pretrained_workers(self):
+        templates = PretrainedWorkerTemplateService.get_active_templates()
+        response = self.client.get("/")
+        workers = response.context.get("homepage_pretrained_workers")
+
+        self.assertIsNotNone(workers)
+        self.assertEqual(len(workers), len(templates))
+        self.assertEqual(response.context.get("homepage_pretrained_total"), len(templates))
+        self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(templates))
+
+    @tag("batch_pages")
+    def test_home_page_filters_by_category(self):
+        templates = PretrainedWorkerTemplateService.get_active_templates()
+        category = None
+        for template in templates:
+            if template.category:
+                category = template.category
+                break
+
+        if not category:
+            self.skipTest("No pretrained worker templates expose a category for filtering")
+
+        expected = [template for template in templates if template.category == category]
+
+        response = self.client.get("/", {"pretrained_category": category})
+        workers = response.context.get("homepage_pretrained_workers")
+
+        self.assertEqual(len(workers), len(expected))
+        self.assertTrue(all(worker.category == category for worker in workers))
+        self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
+        self.assertEqual(response.context.get("homepage_pretrained_total"), len(templates))
+
+    @tag("batch_pages")
+    def test_home_page_filters_by_search(self):
+        templates = PretrainedWorkerTemplateService.get_active_templates()
+        self.assertGreater(len(templates), 0)
+        target = templates[0]
+        search_term = target.display_name
+
+        expected = [
+            template
+            for template in templates
+            if search_term.lower() in template.display_name.lower()
+            or search_term.lower() in template.tagline.lower()
+            or search_term.lower() in template.description.lower()
+        ]
+
+        response = self.client.get("/", {"pretrained_search": search_term})
+        workers = response.context.get("homepage_pretrained_workers")
+
+        self.assertEqual(len(workers), len(expected))
+        self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
+
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
     @tag("batch_pages")
@@ -140,12 +194,23 @@ class SitemapTests(TestCase):
 @tag("batch_pages")
 class PretrainedWorkerDirectoryTests(TestCase):
     @tag("batch_pages")
-    def test_directory_has_meta_description(self):
+    def test_directory_redirects_to_home_section(self):
         response = self.client.get("/pretrained-workers/")
-        self.assertContains(
-            response,
-            "<meta name=\"description\" content=\"Explore Gobii's directory of pre-trained workers. Compare charters, cadences, and integrations to hire the perfect always-on agent for your team.\">",
+        self.assertEqual(response.status_code, 301)
+        self.assertTrue(response["Location"].endswith("#pretrained-workers"))
+
+    @tag("batch_pages")
+    def test_directory_redirect_preserves_filters(self):
+        response = self.client.get(
+            "/pretrained-workers/",
+            {"q": "ops", "category": "Team Ops", "foo": "bar"},
         )
+        self.assertEqual(response.status_code, 301)
+        location = response["Location"]
+        self.assertIn("pretrained_search=ops", location)
+        self.assertIn("pretrained_category=Team+Ops", location)
+        self.assertIn("foo=bar", location)
+        self.assertTrue(location.endswith("#pretrained-workers"))
 
 
 @tag("batch_pages")

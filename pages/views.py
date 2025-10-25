@@ -1,4 +1,5 @@
 from datetime import timezone, datetime
+from urllib.parse import urlencode
 
 from django.http.response import JsonResponse
 from django.views.generic import TemplateView, RedirectView, View
@@ -144,28 +145,55 @@ class HomePage(TemplateView):
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
 
-        # Featured pretrained worker templates for homepage
-        all_templates = PretrainedWorkerTemplateService.get_active_templates()
-        homepage_templates = [template for template in all_templates if getattr(template, "show_on_homepage", False)]
-        if not homepage_templates:
-            homepage_templates = all_templates
+        # Featured and full pretrained worker templates for homepage
+        all_templates = list(PretrainedWorkerTemplateService.get_active_templates())
 
-        templates_list = list(homepage_templates)
         tool_names = set()
-
-        for template in templates_list:
+        for template in all_templates:
             template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
             tool_names.update(template.default_tools or [])
 
         tool_display_map = PretrainedWorkerTemplateService.get_tool_display_map(tool_names)
-
-        for template in templates_list:
+        for template in all_templates:
             template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
                 template.default_tools or [],
                 display_map=tool_display_map,
             )
 
-        context["homepage_templates"] = templates_list
+        category_filter = (self.request.GET.get("pretrained_category") or "").strip()
+        search_term = (self.request.GET.get("pretrained_search") or "").strip()
+
+        filtered_templates = list(all_templates)
+        if category_filter:
+            category_lower = category_filter.lower()
+            filtered_templates = [
+                template
+                for template in filtered_templates
+                if (template.category or "").lower() == category_lower
+            ]
+
+        if search_term:
+            search_lower = search_term.lower()
+            filtered_templates = [
+                template
+                for template in filtered_templates
+                if search_lower in template.display_name.lower()
+                or search_lower in template.tagline.lower()
+                or search_lower in template.description.lower()
+            ]
+
+        context.update(
+            {
+                "homepage_pretrained_workers": filtered_templates,
+                "homepage_pretrained_total": len(all_templates),
+                "homepage_pretrained_filtered_count": len(filtered_templates),
+                "homepage_pretrained_categories": sorted(
+                    {template.category for template in all_templates if template.category}
+                ),
+                "homepage_pretrained_selected_category": category_filter,
+                "homepage_pretrained_search_term": search_term,
+            }
+        )
 
         if self.request.user.is_authenticated:
             recent_agents_qs = PersistentAgent.objects.filter(user_id=self.request.user.id)
@@ -255,62 +283,33 @@ class HomeAgentSpawnView(TemplateView):
         return homepage_view.get_context_data(**kwargs)
 
 
-class PretrainedWorkerDirectoryView(TemplateView):
-    template_name = "pretrained_worker_directory/index.html"
+class PretrainedWorkerDirectoryRedirectView(RedirectView):
+    permanent = True
 
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        all_templates = PretrainedWorkerTemplateService.get_active_templates()
-        templates = list(all_templates)
+    def get_redirect_url(self, *args, **kwargs):
+        base_url = reverse('pages:home')
+        params: list[tuple[str, str]] = []
 
-        category = self.request.GET.get('category', '').strip()
-        search = self.request.GET.get('q', '').strip()
-
-        if category:
-            category_lower = category.lower()
-            templates = [
-                template
-                for template in templates
-                if (template.category or "").lower() == category_lower
-            ]
+        search = (self.request.GET.get('q') or '').strip()
+        category = (self.request.GET.get('category') or '').strip()
 
         if search:
-            search_lower = search.lower()
-            templates = [
-                template
-                for template in templates
-                if search_lower in template.display_name.lower()
-                or search_lower in template.tagline.lower()
-                or search_lower in template.description.lower()
-            ]
+            params.append(('pretrained_search', search))
+        if category:
+            params.append(('pretrained_category', category))
 
-        tool_names = set()
+        for key in self.request.GET.keys():
+            if key in {'q', 'category'}:
+                continue
+            for value in self.request.GET.getlist(key):
+                params.append((key, value))
 
-        for template in templates:
-            template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
-            tool_names.update(template.default_tools or [])
+        query_string = urlencode(params, doseq=True)
+        fragment = '#pretrained-workers'
 
-        tool_display_map = PretrainedWorkerTemplateService.get_tool_display_map(tool_names)
-
-        for template in templates:
-            template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
-                template.default_tools or [],
-                display_map=tool_display_map,
-            )
-
-        all_categories = sorted(
-            {template.category for template in all_templates if template.category}
-        )
-
-        context.update(
-            {
-                "pretrained_workers": templates,
-                "categories": list(all_categories),
-                "selected_category": category,
-                "search_term": search,
-            }
-        )
-        return context
+        if query_string:
+            return f"{base_url}?{query_string}{fragment}"
+        return f"{base_url}{fragment}"
 
 
 class PretrainedWorkerDetailView(TemplateView):
@@ -352,13 +351,15 @@ class PretrainedWorkerHireView(View):
         request.session['agent_charter_source'] = 'template'
         request.session.modified = True
 
+        source_page = request.POST.get('source_page') or 'home_pretrained_workers'
+
         if request.user.is_authenticated:
             Analytics.track_event(
                 user_id=request.user.id,
                 event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
                 source=AnalyticsSource.WEB,
                 properties={
-                    "source_page": "pretrained_worker_directory",
+                    "source_page": source_page,
                     "template_code": template.code,
                 },
             )
@@ -374,7 +375,7 @@ class PretrainedWorkerHireView(View):
             event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
             source=AnalyticsSource.WEB,
             properties={
-                "source_page": "pretrained_worker_directory",
+                "source_page": source_page,
                 "template_code": template.code,
             },
         )

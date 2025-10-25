@@ -17,7 +17,7 @@ from .views import (
     PretrainedWorkerTemplateSitemap,
     LandingRedirectView,
     ClearSignupTrackingView,
-    PretrainedWorkerDirectoryView,
+    PretrainedWorkerDirectoryRedirectView,
     PretrainedWorkerDetailView,
     PretrainedWorkerHireView,
 )
@@ -40,7 +40,7 @@ sitemaps['pretrained_workers'] = PretrainedWorkerTemplateSitemap
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
     path("spawn-agent/", HomeAgentSpawnView.as_view(), name="home_agent_spawn"),
-    path("pretrained-workers/", PretrainedWorkerDirectoryView.as_view(), name="pretrained_worker_directory"),
+    path("pretrained-workers/", PretrainedWorkerDirectoryRedirectView.as_view(), name="pretrained_worker_directory"),
     path("pretrained-workers/<slug:slug>/", PretrainedWorkerDetailView.as_view(), name="pretrained_worker_detail"),
     path("pretrained-workers/<slug:slug>/hire/", PretrainedWorkerHireView.as_view(), name="pretrained_worker_hire"),
     path("health/", health_check, name="health_check"),
