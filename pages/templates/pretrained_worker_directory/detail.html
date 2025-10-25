@@ -25,7 +25,7 @@
               <p class="mt-1 text-sm text-slate-500">You can switch to a different touchpoint during setup.</p>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
-              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Time to hire</p>
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Time to spawn</p>
               <p class="mt-2 text-base font-medium text-slate-800">Under 2 minutes</p>
               <p class="mt-1 text-sm text-slate-500">We automatically load the charter, integrations, and schedule defaults.</p>
             </div>
@@ -68,7 +68,7 @@
             {% if default_tools %}
             <section class="rounded-2xl border border-slate-200 bg-white px-5 py-6 shadow-sm">
               <h3 class="text-base font-semibold text-slate-900">Built-in integrations</h3>
-              <p class="mt-2 text-sm text-slate-500">Enabled automatically when you hire.</p>
+              <p class="mt-2 text-sm text-slate-500">Enabled automatically when you spawn.</p>
               <ul class="mt-4 space-y-2">
                 {% for tool in default_tools %}
                 <li class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">{{ tool }}</li>
@@ -77,13 +77,13 @@
             </section>
             {% endif %}
             <section class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-500 to-blue-500 px-6 py-8 text-white shadow-lg">
-              <h3 class="text-xl font-semibold">Hire this pretrained worker</h3>
+              <h3 class="text-xl font-semibold">Spawn this worker</h3>
               <p class="mt-2 text-sm text-indigo-100 leading-relaxed">We’ll preload the playbook, schedule, and integrations—then you choose how it reaches you.</p>
               <form method="post" action="{% url 'pages:pretrained_worker_hire' pretrained_worker.code %}" class="mt-6">
                 {% csrf_token %}
                 <input type="hidden" name="source_page" value="pretrained_worker_detail" />
                 <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-indigo-600 font-semibold px-5 py-3 shadow-lg shadow-indigo-200 hover:text-indigo-700 transition">
-                  Hire now
+                  Spawn this worker
                   <span aria-hidden="true">→</span>
                 </button>
               </form>
