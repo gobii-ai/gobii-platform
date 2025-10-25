@@ -20,6 +20,7 @@ from django.urls import reverse
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
+from api.agent.tools.mcp_manager import get_mcp_manager
 from api.models import (
     CommsChannel,
     MCPServerConfig,
@@ -51,6 +52,8 @@ from console.agent_chat.timeline import (
     serialize_processing_snapshot,
 )
 from console.context_helpers import build_console_context
+from console.forms import MCPServerConfigForm
+from console.views import _track_org_event_for_console, _mcp_server_event_properties
 
 
 def _ensure_console_endpoints(agent: PersistentAgent, user) -> tuple[str, str]:
@@ -124,6 +127,125 @@ def _require_active_session(request: HttpRequest, session_id: uuid.UUID) -> MCPS
     # Re-check access against server configuration in case ownership changed mid-flow.
     _resolve_mcp_server_config(request, str(session.server_config_id))
     return session
+
+
+def _resolve_mcp_owner(request: HttpRequest) -> tuple[str, str, object | None, object | None]:
+    context = build_console_context(request)
+    if context.current_context.type == "organization":
+        membership = context.current_membership
+        if membership is None or not context.can_manage_org_agents:
+            raise PermissionDenied("You do not have permission to manage organization MCP servers.")
+        return (
+            "organization",
+            membership.org.name,
+            None,
+            membership.org,
+        )
+
+    label = request.user.get_full_name() or request.user.username or request.user.email or "Personal"
+    return ("user", label, request.user, None)
+
+
+def _owner_queryset(owner_scope: str, owner_user, owner_org):
+    queryset = MCPServerConfig.objects.select_related("oauth_credential")
+    if owner_scope == "organization" and owner_org is not None:
+        return queryset.filter(
+            scope=MCPServerConfig.Scope.ORGANIZATION,
+            organization=owner_org,
+        ).order_by("display_name")
+    return queryset.filter(
+        scope=MCPServerConfig.Scope.USER,
+        user=owner_user,
+    ).order_by("display_name")
+
+
+def _serialize_mcp_server(
+    server: MCPServerConfig,
+    request: HttpRequest | None = None,
+    pending_servers: set[str] | None = None,
+) -> dict[str, object]:
+    data: dict[str, object] = {
+        "id": str(server.id),
+        "name": server.name,
+        "display_name": server.display_name,
+        "description": server.description,
+        "command": server.command,
+        "command_args": server.command_args,
+        "url": server.url,
+        "auth_method": server.auth_method,
+        "is_active": server.is_active,
+        "scope": server.scope,
+        "scope_label": server.get_scope_display(),
+        "updated_at": server.updated_at.isoformat(),
+        "created_at": server.created_at.isoformat(),
+    }
+    if request is not None:
+        pending = False
+        if (
+            request.user.is_authenticated
+            and server.auth_method == MCPServerConfig.AuthMethod.OAUTH2
+        ):
+            if pending_servers is not None:
+                pending = str(server.id) in pending_servers
+            else:
+                pending = server.oauth_sessions.filter(
+                    initiated_by=request.user,
+                    expires_at__gt=timezone.now(),
+                ).exists()
+        credential = getattr(server, "oauth_credential", None)
+        if credential is None:
+            try:
+                credential = server.oauth_credential
+            except MCPServerOAuthCredential.DoesNotExist:
+                credential = None
+        data.update(
+            {
+                "oauth_status_url": reverse("console-mcp-oauth-status", args=[server.id]),
+                "oauth_revoke_url": reverse("console-mcp-oauth-revoke", args=[server.id]),
+                "oauth_connected": credential is not None,
+                "oauth_pending": pending,
+            }
+        )
+    return data
+
+
+def _serialize_mcp_server_detail(server: MCPServerConfig, request: HttpRequest | None = None) -> dict[str, object]:
+    data = _serialize_mcp_server(server, request=request)
+    data.update(
+        {
+            "metadata": server.metadata or {},
+            "headers": server.headers or {},
+            "environment": server.environment or {},
+            "prefetch_apps": server.prefetch_apps or [],
+            "command": server.command,
+            "command_args": server.command_args or [],
+            "description": server.description,
+        }
+    )
+    if request is not None:
+        data["oauth_status_url"] = reverse("console-mcp-oauth-status", args=[server.id])
+        data["oauth_revoke_url"] = reverse("console-mcp-oauth-revoke", args=[server.id])
+    return data
+
+
+def _form_errors(form: MCPServerConfigForm) -> dict[str, list[str]]:
+    errors: dict[str, list[str]] = {}
+    for field, field_errors in form.errors.items():
+        errors[field] = [str(error) for error in field_errors]
+    non_field = form.non_field_errors()
+    if non_field:
+        errors["non_field_errors"] = [str(error) for error in non_field]
+    return errors
+
+
+def _parse_json_body(request: HttpRequest) -> dict:
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("Invalid JSON body") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("JSON object expected")
+    return payload
 
 
 def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -248,6 +370,108 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
             }
         )
+
+
+class MCPServerListAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        owner_scope, owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
+        queryset = list(_owner_queryset(owner_scope, owner_user, owner_org))
+        pending_servers: set[str] = set()
+        if request.user.is_authenticated and queryset:
+            server_ids = [server.id for server in queryset]
+            pending_servers = {
+                str(server_id)
+                for server_id in MCPServerOAuthSession.objects.filter(
+                    server_config_id__in=server_ids,
+                    initiated_by=request.user,
+                    expires_at__gt=timezone.now(),
+                ).values_list("server_config_id", flat=True)
+            }
+        servers = [_serialize_mcp_server(server, request=request, pending_servers=pending_servers) for server in queryset]
+        return JsonResponse(
+            {
+                "owner_scope": owner_scope,
+                "owner_label": owner_label,
+                "result_count": len(servers),
+                "servers": servers,
+            }
+        )
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        owner_scope, _, owner_user, owner_org = _resolve_mcp_owner(request)
+        form = MCPServerConfigForm(payload, allow_commands=False)
+        if form.is_valid():
+            server = form.save(user=owner_user, organization=owner_org)
+            get_mcp_manager().initialize(force=True)
+            _track_org_event_for_console(
+                request,
+                AnalyticsEvent.MCP_SERVER_CREATED,
+                _mcp_server_event_properties(request, server, owner_scope),
+                organization=owner_org,
+            )
+            return JsonResponse(
+                {
+                    "server": _serialize_mcp_server_detail(server, request),
+                    "message": "MCP server saved.",
+                },
+                status=201,
+            )
+
+        return JsonResponse({"errors": _form_errors(form)}, status=400)
+
+
+class MCPServerDetailAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get", "patch", "delete"]
+
+    def get(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_mcp_server_config(request, server_id)
+        return JsonResponse({"server": _serialize_mcp_server_detail(server, request)})
+
+    def patch(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_mcp_server_config(request, server_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        form = MCPServerConfigForm(payload, instance=server, allow_commands=False)
+        if form.is_valid():
+            updated = form.save()
+            get_mcp_manager().initialize(force=True)
+            _track_org_event_for_console(
+                request,
+                AnalyticsEvent.MCP_SERVER_UPDATED,
+                _mcp_server_event_properties(request, updated, updated.scope),
+                organization=updated.organization,
+            )
+            return JsonResponse({
+                "server": _serialize_mcp_server_detail(updated, request),
+                "message": "MCP server updated.",
+            })
+
+        return JsonResponse({"errors": _form_errors(form)}, status=400)
+
+    def delete(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_mcp_server_config(request, server_id)
+        server_name = server.display_name
+        organization = server.organization
+        props = _mcp_server_event_properties(request, server, server.scope)
+        server.delete()
+        get_mcp_manager().initialize(force=True)
+        _track_org_event_for_console(
+            request,
+            AnalyticsEvent.MCP_SERVER_DELETED,
+            props,
+            organization=organization,
+        )
+        return JsonResponse({"message": f"MCP server '{server_name}' was deleted."})
 
 
 @method_decorator(csrf_exempt, name="dispatch")

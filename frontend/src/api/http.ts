@@ -42,3 +42,37 @@ export async function jsonFetch<T>(input: RequestInfo | URL, init: RequestInit =
 
   return (payload === null ? undefined : (payload as T)) as T
 }
+
+export function getCsrfToken(): string {
+  if (typeof document === 'undefined') {
+    return ''
+  }
+  const match = document.cookie.match(/csrftoken=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+type JsonRequestInit = RequestInit & {
+  json?: unknown
+  includeCsrf?: boolean
+}
+
+export async function jsonRequest<T>(input: RequestInfo | URL, init: JsonRequestInit = {}): Promise<T> {
+  const { json, includeCsrf = false, headers, ...rest } = init
+  const finalHeaders: HeadersInit = {
+    ...(headers ?? {}),
+  }
+  if (json !== undefined) {
+    finalHeaders['Content-Type'] = 'application/json'
+  }
+  if (includeCsrf) {
+    finalHeaders['X-CSRFToken'] = getCsrfToken()
+  }
+
+  const body = json !== undefined ? JSON.stringify(json) : rest.body
+
+  return jsonFetch<T>(input, {
+    ...rest,
+    headers: finalHeaders,
+    body,
+  })
+}
