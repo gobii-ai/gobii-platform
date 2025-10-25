@@ -200,6 +200,12 @@ class MCPOAuthApiTests(TestCase):
             "OAuth session should be removed after callback completion",
         )
 
+    def test_callback_page_includes_completion_script(self):
+        url = reverse("console-mcp-oauth-callback-view")
+        response = self.client.get(url, {"code": "abc", "state": "xyz"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "js/mcp_oauth_callback.js")
+
     def test_status_without_credentials(self):
         url = reverse("console-mcp-oauth-status", args=[self.server.id])
         response = self.client.get(url)
