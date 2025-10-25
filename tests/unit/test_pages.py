@@ -2,8 +2,8 @@
 from urllib.parse import parse_qs, urlparse
 
 from django.test import TestCase, override_settings, tag
-from api.models import PersistentAgentTemplate
 from pages.models import LandingPage
+from agents.services import AIEmployeeTemplateService
 
 
 @tag("batch_pages")
@@ -128,17 +128,13 @@ class CanonicalLinkTests(TestCase):
 class SitemapTests(TestCase):
     @tag("batch_pages")
     def test_ai_employee_detail_urls_included(self):
-        PersistentAgentTemplate.objects.create(
-            code="ops-analyst",
-            display_name="Operations Analyst",
-            tagline="Keeps operations humming",
-            description="Automates daily operations tasks.",
-            charter="Ensure operations run smoothly.",
-        )
-
         response = self.client.get("/sitemap.xml")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("http://example.com/ai-employees/ops-analyst/", response.content.decode())
+        template = AIEmployeeTemplateService.get_active_templates()[0]
+        self.assertIn(
+            f"http://example.com/ai-employees/{template.code}/",
+            response.content.decode(),
+        )
 
 
 @tag("batch_pages")

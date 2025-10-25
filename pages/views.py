@@ -7,7 +7,6 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect, resolve_url
 from django.http import HttpResponseRedirect
-from django.db.models import F, Q
 from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -146,7 +145,10 @@ class HomePage(TemplateView):
         context["rich_examples"] = RICH_EXAMPLES
 
         # Featured AI employee templates for homepage
-        homepage_templates = AIEmployeeTemplateService.get_active_templates().order_by('priority')
+        all_templates = AIEmployeeTemplateService.get_active_templates()
+        homepage_templates = [template for template in all_templates if getattr(template, "show_on_homepage", False)]
+        if not homepage_templates:
+            homepage_templates = all_templates
 
         templates_list = list(homepage_templates)
         tool_names = set()
@@ -258,22 +260,30 @@ class AIEmployeeDirectoryView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        templates_queryset = AIEmployeeTemplateService.get_active_templates()
+        all_templates = AIEmployeeTemplateService.get_active_templates()
+        templates = list(all_templates)
 
         category = self.request.GET.get('category', '').strip()
         search = self.request.GET.get('q', '').strip()
 
         if category:
-            templates_queryset = templates_queryset.filter(category__iexact=category)
+            category_lower = category.lower()
+            templates = [
+                template
+                for template in templates
+                if (template.category or "").lower() == category_lower
+            ]
 
         if search:
-            templates_queryset = templates_queryset.filter(
-                Q(display_name__icontains=search)
-                | Q(tagline__icontains=search)
-                | Q(description__icontains=search)
-            )
+            search_lower = search.lower()
+            templates = [
+                template
+                for template in templates
+                if search_lower in template.display_name.lower()
+                or search_lower in template.tagline.lower()
+                or search_lower in template.description.lower()
+            ]
 
-        templates = list(templates_queryset)
         tool_names = set()
 
         for template in templates:
@@ -288,13 +298,8 @@ class AIEmployeeDirectoryView(TemplateView):
                 display_map=tool_display_map,
             )
 
-        all_categories = (
-            AIEmployeeTemplateService.get_active_templates()
-            .exclude(category__isnull=True)
-            .exclude(category__exact="")
-            .values_list('category', flat=True)
-            .distinct()
-            .order_by('category')
+        all_categories = sorted(
+            {template.category for template in all_templates if template.category}
         )
 
         context.update(
