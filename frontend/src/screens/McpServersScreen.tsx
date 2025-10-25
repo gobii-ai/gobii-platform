@@ -245,12 +245,24 @@ export function McpServersScreen({
                         {server.isActive ? 'Active' : 'Inactive'}
                       </span>
                       <div className="text-xs text-gray-500 mt-2">{server.scopeLabel} scope</div>
-                      {server.authMethod === 'oauth2' && server.oauthPending && (
-                        <div className="mt-3 space-y-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
-                          <p className="text-xs font-semibold text-amber-800">Pending authorization</p>
+                      {server.authMethod === 'oauth2' && !server.oauthConnected && (
+                        <div
+                          className={`mt-3 space-y-2 rounded-lg border px-3 py-2 ${
+                            server.oauthPending
+                              ? 'border-amber-100 bg-amber-50 text-amber-800'
+                              : 'border-indigo-100 bg-indigo-50 text-indigo-800'
+                          }`}
+                        >
+                          <p className="text-xs font-semibold">
+                            {server.oauthPending ? 'Pending authorization' : 'OAuth connection required'}
+                          </p>
                           <button
                             type="button"
-                            className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2 py-1 text-xs font-semibold text-amber-700 shadow-sm transition hover:bg-amber-50"
+                            className={`inline-flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-xs font-semibold shadow-sm transition ${
+                              server.oauthPending
+                                ? 'border-amber-200 text-amber-700 hover:bg-amber-50'
+                                : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50'
+                            }`}
                             onClick={() => openEditModal(server.id)}
                           >
                             <Link2 className="h-3.5 w-3.5" aria-hidden="true" />

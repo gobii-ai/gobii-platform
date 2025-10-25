@@ -53,12 +53,7 @@ export function McpServerFormModal({
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [oauthScope, setOauthScope] = useState('')
-
-  useEffect(() => {
-    if (server) {
-      setState(getInitialState(server))
-    }
-  }, [server])
+  const [useCustomClient, setUseCustomClient] = useState(false)
 
   const oauthStore = useMcpOAuth({
     serverId: mode === 'edit' ? server?.id : undefined,
@@ -70,6 +65,18 @@ export function McpServerFormModal({
     revokeUrl: server?.oauthRevokeUrl,
     getServerUrl: () => state.url,
   })
+
+  useEffect(() => {
+    if (server) {
+      setState(getInitialState(server))
+    }
+  }, [server])
+
+  useEffect(() => {
+    if (oauthStore.requiresManualClient) {
+      setUseCustomClient(true)
+    }
+  }, [oauthStore.requiresManualClient])
 
   const nonFieldErrors = errorResponse?.non_field_errors || []
 
@@ -329,11 +336,31 @@ export function McpServerFormModal({
 
           {mode === 'edit' && state.authMethod === 'oauth2' && (
             <div className="space-y-4 rounded-lg border border-slate-200 bg-white px-4 py-4">
-              {oauthStore.requiresManualClient && (
+              <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                <label className="inline-flex items-start gap-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-70"
+                    checked={useCustomClient}
+                    onChange={(event) => setUseCustomClient(event.target.checked)}
+                    disabled={oauthStore.requiresManualClient}
+                  />
+                  Use custom OAuth credentials
+                </label>
+                <p className="text-xs text-slate-500">
+                  Provide an OAuth client ID + secret from your own app. Leave unchecked to let Gobii register a temporary
+                  client automatically.
+                  {oauthStore.requiresManualClient && ' This server requires manual credentials.'}
+                </p>
+              </div>
+              {useCustomClient && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <label className="text-xs font-medium text-slate-600">OAuth Client ID</label>
+                    <label className="text-xs font-medium text-slate-600" htmlFor="clientId">
+                      OAuth Client ID
+                    </label>
                     <input
+                      id="clientId"
                       type="text"
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
                       value={clientId}
@@ -341,8 +368,11 @@ export function McpServerFormModal({
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-slate-600">OAuth Client Secret</label>
+                    <label className="text-xs font-medium text-slate-600" htmlFor="clientSecret">
+                      OAuth Client Secret
+                    </label>
                     <input
+                      id="clientSecret"
                       type="password"
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
                       value={clientSecret}
@@ -369,7 +399,11 @@ export function McpServerFormModal({
                   className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
                   disabled={oauthStore.connecting || !server}
                   onClick={() =>
-                    oauthStore.startOAuth({ clientId, clientSecret, scope: oauthScope.trim() || undefined })
+                    oauthStore.startOAuth({
+                      clientId: useCustomClient ? clientId : undefined,
+                      clientSecret: useCustomClient ? clientSecret : undefined,
+                      scope: oauthScope.trim() || undefined,
+                    })
                   }
                 >
                   {oauthStore.connecting ? 'Starting…' : 'Connect with OAuth 2.0'}
