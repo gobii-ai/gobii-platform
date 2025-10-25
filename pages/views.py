@@ -12,7 +12,7 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from api.models import PaidPlanIntent, PersistentAgent
 from api.agent.short_description import build_listing_description
-from agents.services import AIEmployeeTemplateService
+from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
 from config.stripe_config import get_stripe_settings
 
@@ -144,8 +144,8 @@ class HomePage(TemplateView):
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
 
-        # Featured AI employee templates for homepage
-        all_templates = AIEmployeeTemplateService.get_active_templates()
+        # Featured pretrained worker templates for homepage
+        all_templates = PretrainedWorkerTemplateService.get_active_templates()
         homepage_templates = [template for template in all_templates if getattr(template, "show_on_homepage", False)]
         if not homepage_templates:
             homepage_templates = all_templates
@@ -154,13 +154,13 @@ class HomePage(TemplateView):
         tool_names = set()
 
         for template in templates_list:
-            template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
+            template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
             tool_names.update(template.default_tools or [])
 
-        tool_display_map = AIEmployeeTemplateService.get_tool_display_map(tool_names)
+        tool_display_map = PretrainedWorkerTemplateService.get_tool_display_map(tool_names)
 
         for template in templates_list:
-            template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+            template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
                 template.default_tools or [],
                 display_map=tool_display_map,
             )
@@ -175,7 +175,7 @@ class HomePage(TemplateView):
             for agent in recent_agents:
                 schedule_text = None
                 if agent.schedule:
-                    schedule_text = AIEmployeeTemplateService.describe_schedule(agent.schedule)
+                    schedule_text = PretrainedWorkerTemplateService.describe_schedule(agent.schedule)
                     if not schedule_text:
                         schedule_text = agent.schedule
                 agent.display_schedule = schedule_text
@@ -255,12 +255,12 @@ class HomeAgentSpawnView(TemplateView):
         return homepage_view.get_context_data(**kwargs)
 
 
-class AIEmployeeDirectoryView(TemplateView):
-    template_name = "ai_directory/index.html"
+class PretrainedWorkerDirectoryView(TemplateView):
+    template_name = "pretrained_worker_directory/index.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        all_templates = AIEmployeeTemplateService.get_active_templates()
+        all_templates = PretrainedWorkerTemplateService.get_active_templates()
         templates = list(all_templates)
 
         category = self.request.GET.get('category', '').strip()
@@ -287,13 +287,13 @@ class AIEmployeeDirectoryView(TemplateView):
         tool_names = set()
 
         for template in templates:
-            template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
+            template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
             tool_names.update(template.default_tools or [])
 
-        tool_display_map = AIEmployeeTemplateService.get_tool_display_map(tool_names)
+        tool_display_map = PretrainedWorkerTemplateService.get_tool_display_map(tool_names)
 
         for template in templates:
-            template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+            template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
                 template.default_tools or [],
                 display_map=tool_display_map,
             )
@@ -304,7 +304,7 @@ class AIEmployeeDirectoryView(TemplateView):
 
         context.update(
             {
-                "ai_employees": templates,
+                "pretrained_workers": templates,
                 "categories": list(all_categories),
                 "selected_category": category,
                 "search_term": search,
@@ -313,42 +313,42 @@ class AIEmployeeDirectoryView(TemplateView):
         return context
 
 
-class AIEmployeeDetailView(TemplateView):
-    template_name = "ai_directory/detail.html"
+class PretrainedWorkerDetailView(TemplateView):
+    template_name = "pretrained_worker_directory/detail.html"
 
     def dispatch(self, request, *args, **kwargs):
-        self.employee = AIEmployeeTemplateService.get_template_by_code(kwargs.get('slug'))
+        self.employee = PretrainedWorkerTemplateService.get_template_by_code(kwargs.get('slug'))
         if not self.employee:
-            raise Http404("This AI employee is no longer available.")
+            raise Http404("This pretrained worker is no longer available.")
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["ai_employee"] = self.employee
+        context["pretrained_worker"] = self.employee
         context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
         context["base_schedule"] = self.employee.base_schedule
-        context["schedule_description"] = AIEmployeeTemplateService.describe_schedule(self.employee.base_schedule)
-        display_map = AIEmployeeTemplateService.get_tool_display_map(self.employee.default_tools or [])
+        context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.employee.base_schedule)
+        display_map = PretrainedWorkerTemplateService.get_tool_display_map(self.employee.default_tools or [])
         context["event_triggers"] = self.employee.event_triggers or []
-        context["default_tools"] = AIEmployeeTemplateService.get_tool_display_list(
+        context["default_tools"] = PretrainedWorkerTemplateService.get_tool_display_list(
             self.employee.default_tools or [],
             display_map=display_map,
         )
-        context["contact_method_label"] = AIEmployeeTemplateService.describe_contact_channel(
+        context["contact_method_label"] = PretrainedWorkerTemplateService.describe_contact_channel(
             self.employee.recommended_contact_channel
         )
         return context
 
 
-class AIEmployeeHireView(View):
+class PretrainedWorkerHireView(View):
     def post(self, request, *args, **kwargs):
         code = kwargs.get('slug')
-        template = AIEmployeeTemplateService.get_template_by_code(code)
+        template = PretrainedWorkerTemplateService.get_template_by_code(code)
         if not template:
-            raise Http404("This AI employee is no longer available.")
+            raise Http404("This pretrained worker is no longer available.")
 
         request.session['agent_charter'] = template.charter
-        request.session[AIEmployeeTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
         request.session['agent_charter_source'] = 'template'
         request.session.modified = True
 
@@ -358,7 +358,7 @@ class AIEmployeeHireView(View):
                 event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
                 source=AnalyticsSource.WEB,
                 properties={
-                    "source_page": "ai_employee_directory",
+                    "source_page": "pretrained_worker_directory",
                     "template_code": template.code,
                 },
             )
@@ -374,7 +374,7 @@ class AIEmployeeHireView(View):
             event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
             source=AnalyticsSource.WEB,
             properties={
-                "source_page": "ai_employee_directory",
+                "source_page": "pretrained_worker_directory",
                 "template_code": template.code,
             },
         )
@@ -685,19 +685,19 @@ class StaticViewSitemap(sitemaps.Sitemap):
         return reverse(item)
 
 
-class AIEmployeeTemplateSitemap(sitemaps.Sitemap):
+class PretrainedWorkerTemplateSitemap(sitemaps.Sitemap):
     changefreq = "weekly"
     priority = 0.6
 
     def items(self):
         try:
-            return list(AIEmployeeTemplateService.get_active_templates())
+            return list(PretrainedWorkerTemplateService.get_active_templates())
         except Exception as e:  # pragma: no cover - defensive fallback to keep sitemap working
-            logger.error("Failed to generate AIEmployeeTemplateSitemap items: %s", e, exc_info=True)
+            logger.error("Failed to generate PretrainedWorkerTemplateSitemap items: %s", e, exc_info=True)
             return []
 
     def location(self, template):
-        return reverse('pages:ai_employee_detail', kwargs={'slug': template.code})
+        return reverse('pages:pretrained_worker_detail', kwargs={'slug': template.code})
 
     def lastmod(self, template):
         return getattr(template, "updated_at", None)

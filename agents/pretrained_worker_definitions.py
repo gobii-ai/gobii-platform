@@ -3,7 +3,7 @@ from typing import Any, Dict, List
 
 
 @dataclass
-class AIEmployeeTemplateDefinition:
+class PretrainedWorkerTemplateDefinition:
     code: str
     display_name: str
     tagline: str
@@ -21,8 +21,8 @@ class AIEmployeeTemplateDefinition:
     show_on_homepage: bool = False
 
 
-TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
-    AIEmployeeTemplateDefinition(
+TEMPLATE_DEFINITIONS: List[PretrainedWorkerTemplateDefinition] = [
+    PretrainedWorkerTemplateDefinition(
         code="competitor-intelligence-analyst",
         display_name="Competitor Intelligence Analyst",
         tagline="Monitors rivals, product launches, and pricing moves",
@@ -50,7 +50,7 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         hero_image_path="images/ai-directory/competitor-analyst.svg",
         priority=10,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="vendor-price-analyst",
         display_name="Vendor Price Analyst",
         tagline="Tracks supplier quotes and finds negotiation leverage",
@@ -77,7 +77,7 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         hero_image_path="images/ai-directory/vendor-analyst.svg",
         priority=15,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="public-safety-scout",
         display_name="Public Safety Scout",
         tagline="Monitors crime and incident feeds around your offices",
@@ -108,7 +108,7 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         hero_image_path="images/ai-directory/public-safety.svg",
         priority=20,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="team-standup-coordinator",
         display_name="Standup Coordinator",
         tagline="Collects blockers and ships the daily standup recap",
@@ -139,7 +139,7 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         hero_image_path="images/ai-directory/standup.svg",
         priority=30,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="incident-comms-scribe",
         display_name="Incident Comms Scribe",
         tagline="Captures status updates and keeps stakeholders aligned",
@@ -170,7 +170,7 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         hero_image_path="images/ai-directory/incident-scribe.svg",
         priority=40,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="sales-pipeline-whisperer",
         display_name="Pipeline Whisperer",
         tagline="Keeps your CRM healthy and nudges reps at the right time",
@@ -202,7 +202,7 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         priority=50,
         show_on_homepage=True,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="talent-sourcer",
         display_name="Talent Sourcer",
         tagline="Builds outreach lists and keeps recruiters in sync",
@@ -233,7 +233,7 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         hero_image_path="images/ai-directory/talent.svg",
         priority=60,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="employee-onboarding-concierge",
         display_name="Onboarding Concierge",
         tagline="Welcomes new hires and keeps the checklist moving",
@@ -264,7 +264,7 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         hero_image_path="images/ai-directory/onboarding.svg",
         priority=70,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="compliance-audit-sentinel",
         display_name="Compliance Sentinel",
         tagline="Audits policies and alerts owners when controls drift",
@@ -294,7 +294,7 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         hero_image_path="images/ai-directory/compliance.svg",
         priority=80,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="customer-health-monitor",
         display_name="Customer Health Monitor",
         tagline="Surfaces churn risk and expansion signals",
@@ -325,12 +325,12 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         hero_image_path="images/ai-directory/customer-health.svg",
         priority=90,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="real-estate-research-analyst",
         display_name="Real Estate Research Analyst",
         tagline="Finds properties, pulls comps, and tracks market trends",
         description=(
-            "An always-on AI employee that monitors real estate listings, researches comparable properties,"
+            "An always-on pretrained worker that monitors real estate listings, researches comparable properties,"
             " analyzes market data, and compiles reports on property values and investment opportunities."
         ),
         charter=(
@@ -359,12 +359,12 @@ TEMPLATE_DEFINITIONS: List[AIEmployeeTemplateDefinition] = [
         priority=5,
         show_on_homepage=True,
     ),
-    AIEmployeeTemplateDefinition(
+    PretrainedWorkerTemplateDefinition(
         code="project-manager",
         display_name="Project Manager",
         tagline="Tracks milestones, manages blockers, and keeps teams aligned",
         description=(
-            "An always-on AI employee that coordinates project activities, tracks progress against milestones,"
+            "An always-on pretrained worker that coordinates project activities, tracks progress against milestones,"
             " manages task dependencies, identifies blockers, and keeps stakeholders informed with status updates and reports."
         ),
         charter=(

@@ -2317,7 +2317,7 @@ class ProxyHealthCheckResult(models.Model):
 # Persistent Agents Models
 
 class PersistentAgentTemplate(models.Model):
-    """Curated template for pre-configured always-on AI employees."""
+    """Curated template for pre-configured always-on pretrained workers."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     code = models.SlugField(
@@ -2379,7 +2379,7 @@ class PersistentAgentTemplate(models.Model):
         ordering = ["priority", "display_name"]
 
     def __str__(self) -> str:  # pragma: no cover - simple repr
-        return f"AIEmployeeTemplate<{self.display_name}>"
+        return f"PretrainedWorkerTemplate<{self.display_name}>"
 
 
 class ToolFriendlyName(models.Model):

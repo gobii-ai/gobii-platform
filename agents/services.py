@@ -5,9 +5,9 @@ from typing import Dict, Iterable, Sequence
 
 from django.apps import apps
 
-from agents.template_definitions import (
+from agents.pretrained_worker_definitions import (
     TEMPLATE_DEFINITIONS,
-    AIEmployeeTemplateDefinition,
+    PretrainedWorkerTemplateDefinition,
 )
 from config.plans import AGENTS_UNLIMITED, MAX_AGENT_LIMIT
 from observability import trace
@@ -120,10 +120,10 @@ class AgentService:
         return AgentService.get_agents_available(user) > 0 or has_unlimited_agents(user)
 
 
-class AIEmployeeTemplateService:
-    """Utilities for working with curated AI employee templates."""
+class PretrainedWorkerTemplateService:
+    """Utilities for working with curated pretrained worker templates."""
 
-    TEMPLATE_SESSION_KEY = "ai_employee_template_code"
+    TEMPLATE_SESSION_KEY = "pretrained_worker_template_code"
     _CRON_MACRO_MAP = {
         "@yearly": "0 0 1 1 *",
         "@annually": "0 0 1 1 *",
@@ -135,12 +135,12 @@ class AIEmployeeTemplateService:
     }
 
     @staticmethod
-    def _all_templates() -> list[AIEmployeeTemplateDefinition]:
-        """Return a fresh copy of all template definitions."""
+    def _all_templates() -> list[PretrainedWorkerTemplateDefinition]:
+        """Return a fresh copy of all pretrained worker template definitions."""
         return [copy.deepcopy(template) for template in TEMPLATE_DEFINITIONS]
 
     @classmethod
-    def get_active_templates(cls) -> list[AIEmployeeTemplateDefinition]:
+    def get_active_templates(cls) -> list[PretrainedWorkerTemplateDefinition]:
         templates = [
             template for template in cls._all_templates() if getattr(template, "is_active", True)
         ]
@@ -196,7 +196,7 @@ class AIEmployeeTemplateService:
         if not base_schedule:
             return None
 
-        expression = AIEmployeeTemplateService._normalize_cron_expression(base_schedule)
+        expression = PretrainedWorkerTemplateService._normalize_cron_expression(base_schedule)
         if not expression:
             return base_schedule
 
@@ -220,7 +220,7 @@ class AIEmployeeTemplateService:
 
         if expression.startswith("@"):
             macro = expression.lower()
-            return AIEmployeeTemplateService._CRON_MACRO_MAP.get(macro)
+            return PretrainedWorkerTemplateService._CRON_MACRO_MAP.get(macro)
 
         return expression
 

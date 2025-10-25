@@ -3,7 +3,7 @@ from urllib.parse import parse_qs, urlparse
 
 from django.test import TestCase, override_settings, tag
 from pages.models import LandingPage
-from agents.services import AIEmployeeTemplateService
+from agents.services import PretrainedWorkerTemplateService
 
 
 @tag("batch_pages")
@@ -19,7 +19,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Deploy always-on AI employees that handle outreach, research, and operations for you. Spawn a Gobii agent in minutes and keep work moving around the clock.">',
+            '<meta name="description" content="Deploy always-on pretrained workers that handle outreach, research, and operations for you. Spawn a Gobii agent in minutes and keep work moving around the clock.">',
         )
 
 @tag("batch_pages")
@@ -127,24 +127,24 @@ class CanonicalLinkTests(TestCase):
 @tag("batch_pages")
 class SitemapTests(TestCase):
     @tag("batch_pages")
-    def test_ai_employee_detail_urls_included(self):
+    def test_pretrained_worker_detail_urls_included(self):
         response = self.client.get("/sitemap.xml")
         self.assertEqual(response.status_code, 200)
-        template = AIEmployeeTemplateService.get_active_templates()[0]
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
         self.assertIn(
-            f"http://example.com/ai-employees/{template.code}/",
+            f"http://example.com/pretrained-workers/{template.code}/",
             response.content.decode(),
         )
 
 
 @tag("batch_pages")
-class AIEmployeeDirectoryTests(TestCase):
+class PretrainedWorkerDirectoryTests(TestCase):
     @tag("batch_pages")
     def test_directory_has_meta_description(self):
-        response = self.client.get("/ai-employees/")
+        response = self.client.get("/pretrained-workers/")
         self.assertContains(
             response,
-            "<meta name=\"description\" content=\"Explore Gobii's directory of pre-trained AI employees. Compare charters, cadences, and integrations to hire the perfect always-on agent for your team.\">",
+            "<meta name=\"description\" content=\"Explore Gobii's directory of pre-trained workers. Compare charters, cadences, and integrations to hire the perfect always-on agent for your team.\">",
         )
 
 
@@ -155,7 +155,7 @@ class MarketingMetaTests(TestCase):
         response = self.client.get("/tos/")
         self.assertContains(
             response,
-            "<meta name=\"description\" content=\"Review Gobii's Terms of Service covering usage policies, billing, and compliance for our AI employee platform.\">",
+            "<meta name=\"description\" content=\"Review Gobii's Terms of Service covering usage policies, billing, and compliance for our pretrained worker platform.\">",
         )
 
     @tag("batch_pages")
@@ -163,7 +163,7 @@ class MarketingMetaTests(TestCase):
         response = self.client.get("/privacy/")
         self.assertContains(
             response,
-            "<meta name=\"description\" content=\"Understand how Gobii collects, uses, and safeguards data across our AI employee platform.\">",
+            "<meta name=\"description\" content=\"Understand how Gobii collects, uses, and safeguards data across our pretrained worker platform.\">",
         )
 
     @tag("batch_pages")
@@ -171,7 +171,7 @@ class MarketingMetaTests(TestCase):
         response = self.client.get("/about/")
         self.assertContains(
             response,
-            "<meta name=\"description\" content=\"Meet the team building Gobii's AI employees and learn how we automate web workflows for modern teams.\">",
+            "<meta name=\"description\" content=\"Meet the team building Gobii's pretrained workers and learn how we automate web workflows for modern teams.\">",
         )
 
     @tag("batch_pages")

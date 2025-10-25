@@ -14,12 +14,12 @@ from .views import (
     CareersView,
     StartupCheckoutView,
     StaticViewSitemap,
-    AIEmployeeTemplateSitemap,
+    PretrainedWorkerTemplateSitemap,
     LandingRedirectView,
     ClearSignupTrackingView,
-    AIEmployeeDirectoryView,
-    AIEmployeeDetailView,
-    AIEmployeeHireView,
+    PretrainedWorkerDirectoryView,
+    PretrainedWorkerDetailView,
+    PretrainedWorkerHireView,
 )
 
 from djstripe import views as djstripe_views
@@ -35,14 +35,14 @@ sitemaps = {
 if GOBII_PROPRIETARY_MODE:
     sitemaps['blog'] = BlogSitemap
 
-sitemaps['ai_employees'] = AIEmployeeTemplateSitemap
+sitemaps['pretrained_workers'] = PretrainedWorkerTemplateSitemap
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
     path("spawn-agent/", HomeAgentSpawnView.as_view(), name="home_agent_spawn"),
-    path("ai-employees/", AIEmployeeDirectoryView.as_view(), name="ai_employee_directory"),
-    path("ai-employees/<slug:slug>/", AIEmployeeDetailView.as_view(), name="ai_employee_detail"),
-    path("ai-employees/<slug:slug>/hire/", AIEmployeeHireView.as_view(), name="ai_employee_hire"),
+    path("pretrained-workers/", PretrainedWorkerDirectoryView.as_view(), name="pretrained_worker_directory"),
+    path("pretrained-workers/<slug:slug>/", PretrainedWorkerDetailView.as_view(), name="pretrained_worker_detail"),
+    path("pretrained-workers/<slug:slug>/hire/", PretrainedWorkerHireView.as_view(), name="pretrained_worker_hire"),
     path("health/", health_check, name="health_check"),
     # Kubernetes health check endpoint - matches /healthz/ in BackendConfig
     path("healthz/", health_check, name="health_check_k8s"),

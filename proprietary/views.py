@@ -234,7 +234,7 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
 
         seo_title = "Gobii Blog"
         seo_description = (
-            "Updates from the Gobii team on AI employees, automation strategies, and product releases."
+            "Updates from the Gobii team on pretrained workers, automation strategies, and product releases."
         )
 
         canonical_url = self.request.build_absolute_uri(self.request.path)

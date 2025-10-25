@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% load static %}
-{% block title %}AI Employee Directory – Gobii{% endblock %}
+{% block title %}Pretrained Worker Directory – Gobii{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="Explore Gobii's directory of pre-trained AI employees. Compare charters, cadences, and integrations to hire the perfect always-on agent for your team.">
+  <meta name="description" content="Explore Gobii's directory of pre-trained workers. Compare charters, cadences, and integrations to hire the perfect always-on agent for your team.">
 {% endblock %}
 {% block content %}
 <div class="relative bg-gradient-to-b from-white via-indigo-50/30 to-white">
   <section class="max-w-6xl mx-auto px-6 pt-20 pb-12 text-center">
     <p class="inline-flex items-center text-xs sm:text-sm font-semibold tracking-[0.25em] uppercase text-indigo-500/80 bg-indigo-50 rounded-full px-4 py-1.5">Always-on agents</p>
-    <h1 class="mt-5 text-4xl sm:text-5xl font-light text-slate-900">Start with a trained AI worker.</h1>
+    <h1 class="mt-5 text-4xl sm:text-5xl font-light text-slate-900">Start with a pretrained worker.</h1>
     <p class="mt-3 max-w-3xl mx-auto text-sm sm:text-base text-slate-500">Deploy a proven worker in minutes &mdash; built for research, ops &amp; intelligence.</p>
   </section>
 
@@ -20,7 +20,7 @@
         <div class="mt-2 relative">
           <input id="directory-search" name="q" type="search" value="{{ search_term }}" placeholder="Search skills, focus areas, workflows…" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" />
           {% if search_term %}
-          <a href="{% url 'pages:ai_employee_directory' %}" class="absolute inset-y-0 right-3 flex items-center text-sm text-indigo-600 hover:text-indigo-700">Clear</a>
+          <a href="{% url 'pages:pretrained_worker_directory' %}" class="absolute inset-y-0 right-3 flex items-center text-sm text-indigo-600 hover:text-indigo-700">Clear</a>
           {% endif %}
         </div>
       </div>
@@ -42,9 +42,9 @@
   </section>
 
   <section class="max-w-6xl mx-auto px-6 pb-24">
-    {% if ai_employees %}
+    {% if pretrained_workers %}
       <div class="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-        {% for employee in ai_employees %}
+        {% for employee in pretrained_workers %}
           <article class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white/80 backdrop-blur shadow-lg transition hover:-translate-y-1 hover:shadow-xl">
             <div class="absolute inset-0 pointer-events-none bg-gradient-to-br from-indigo-50/40 via-transparent to-blue-50/50 opacity-0 group-hover:opacity-100 transition"></div>
             <div class="p-6 flex flex-col h-full relative z-10">
@@ -52,7 +52,7 @@
                 <span class="inline-flex items-center gap-2 font-medium text-indigo-600">
                   <span class="size-2 rounded-full bg-indigo-400"></span>{{ employee.category|default:"General" }}
                 </span>
-                <a href="{% url 'pages:ai_employee_detail' employee.code %}" class="text-indigo-500 hover:text-indigo-600 transition text-sm">View details →</a>
+                <a href="{% url 'pages:pretrained_worker_detail' employee.code %}" class="text-indigo-500 hover:text-indigo-600 transition text-sm">View details →</a>
               </div>
               <h2 class="mt-4 text-2xl font-medium text-slate-900">{{ employee.display_name }}</h2>
               <p class="mt-3 text-base text-slate-600 leading-relaxed">{{ employee.tagline }}</p>
@@ -98,14 +98,14 @@
                 {% endif %}
               </dl>
               <div class="mt-auto pt-6 flex flex-col gap-3">
-                <form method="post" action="{% url 'pages:ai_employee_hire' employee.code %}" class="contents">
+                <form method="post" action="{% url 'pages:pretrained_worker_hire' employee.code %}" class="contents">
                   {% csrf_token %}
                   <button type="submit" class="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-semibold rounded-xl shadow-md hover:shadow-lg hover:from-indigo-500 hover:to-blue-500 transition">
-                    Hire this AI employee
+                    Hire this pretrained worker
                     <span aria-hidden="true">→</span>
                   </button>
                 </form>
-                <a href="{% url 'pages:ai_employee_detail' employee.code %}" class="inline-flex items-center justify-center gap-2 px-5 py-3 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition">View details</a>
+                <a href="{% url 'pages:pretrained_worker_detail' employee.code %}" class="inline-flex items-center justify-center gap-2 px-5 py-3 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition">View details</a>
               </div>
             </div>
           </article>
@@ -113,9 +113,9 @@
       </div>
     {% else %}
       <div class="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-12 text-center shadow-sm">
-        <h2 class="text-2xl font-medium text-slate-900">No AI employees match those filters yet.</h2>
+        <h2 class="text-2xl font-medium text-slate-900">No pretrained workers match those filters yet.</h2>
         <p class="mt-3 text-slate-600">Reset your filters to explore the full directory or reach out to support for a tailored playbook.</p>
-        <a href="{% url 'pages:ai_employee_directory' %}" class="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow hover:bg-indigo-500 transition">Clear filters</a>
+        <a href="{% url 'pages:pretrained_worker_directory' %}" class="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow hover:bg-indigo-500 transition">Clear filters</a>
       </div>
     {% endif %}
   </section>
