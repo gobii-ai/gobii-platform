@@ -196,7 +196,7 @@ class PretrainedWorkerDirectoryTests(TestCase):
     @tag("batch_pages")
     def test_directory_redirects_to_home_section(self):
         response = self.client.get("/pretrained-workers/")
-        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.status_code, 302)
         self.assertTrue(response["Location"].endswith("#pretrained-workers"))
 
     @tag("batch_pages")
@@ -205,7 +205,7 @@ class PretrainedWorkerDirectoryTests(TestCase):
             "/pretrained-workers/",
             {"q": "ops", "category": "Team Ops", "foo": "bar"},
         )
-        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.status_code, 302)
         location = response["Location"]
         self.assertIn("pretrained_search=ops", location)
         self.assertIn("pretrained_category=Team+Ops", location)

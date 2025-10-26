@@ -4,10 +4,10 @@
 {% block content %}
 <div class="bg-gradient-to-b from-white via-indigo-50/40 to-white">
   <section class="max-w-5xl mx-auto px-6 pt-16 pb-6">
-    <a href="{% url 'pages:home' %}#pretrained-workers" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
+    <a href="{% url 'pages:home' %}#pretrained-workers" onclick="const ref=document.referrer; if (ref) { const origin=new URL(ref, window.location.href).origin; if (origin===window.location.origin && window.history.length>1) { window.history.back(); return false; } }" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
       ← Back to pretrained workers
     </a>
-    <div class="mt-6 rounded-3xl border border-slate-200 bg-white/80 backdrop-blur shadow-xl overflow-hidden">
+    <div class="mt-6 rounded-3xl bg-white/80 backdrop-blur shadow-xl overflow-hidden">
       <div class="relative p-10">
         <div class="absolute inset-x-0 -top-40 h-80 bg-gradient-to-br from-indigo-200/40 via-transparent to-blue-200/40 blur-3xl pointer-events-none"></div>
         <div class="relative">
@@ -15,16 +15,16 @@
           <h1 class="mt-6 text-4xl sm:text-5xl font-semibold text-slate-900">{{ pretrained_worker.display_name }}</h1>
           <p class="mt-4 text-lg text-slate-600 max-w-3xl">{{ pretrained_worker.tagline }}</p>
           <div class="mt-8 grid gap-6 md:grid-cols-3">
-            <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
+            <div class="rounded-2xl bg-white/90 p-5 shadow-sm">
               <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Cadence</p>
               <p class="mt-2 text-base font-medium text-slate-800">{{ schedule_description|default:base_schedule }}</p>
             </div>
-            <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
+            <div class="rounded-2xl bg-white/90 p-5 shadow-sm">
               <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">How it keeps you in the loop</p>
               <p class="mt-2 text-base font-medium text-slate-800">{{ contact_method_label }}</p>
               <p class="mt-1 text-sm text-slate-500">You can switch to a different touchpoint during setup.</p>
             </div>
-            <div class="rounded-2xl border border-slate-200 bg-white/90 p-5">
+            <div class="rounded-2xl bg-white/90 p-5 shadow-sm">
               <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Time to spawn</p>
               <p class="mt-2 text-base font-medium text-slate-800">Under 2 minutes</p>
               <p class="mt-1 text-sm text-slate-500">We automatically load the charter, integrations, and schedule defaults.</p>
@@ -66,7 +66,7 @@
           </div>
           <aside class="space-y-8">
             {% if default_tools %}
-            <section class="rounded-2xl border border-slate-200 bg-white px-5 py-6 shadow-sm">
+            <section class="rounded-2xl bg-white px-5 py-6 shadow-sm">
               <h3 class="text-base font-semibold text-slate-900">Built-in integrations</h3>
               <p class="mt-2 text-sm text-slate-500">Enabled automatically when you spawn.</p>
               <ul class="mt-4 space-y-2">

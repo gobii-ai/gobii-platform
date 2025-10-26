@@ -284,7 +284,7 @@ class HomeAgentSpawnView(TemplateView):
 
 
 class PretrainedWorkerDirectoryRedirectView(RedirectView):
-    permanent = True
+    permanent = False
 
     def get_redirect_url(self, *args, **kwargs):
         base_url = reverse('pages:home')
