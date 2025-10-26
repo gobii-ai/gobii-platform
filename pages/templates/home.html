@@ -323,8 +323,8 @@
           {% endif %}
         </div>
 
-        <form method="get" action="{% url 'pages:home' %}#pretrained-workers" class="grid gap-4 lg:grid-cols-6 items-end bg-white/70 backdrop-blur rounded-2xl shadow-lg p-6 border-0 ring-0">
-          <div class="lg:col-span-4 text-left">
+        <form method="get" action="{% url 'pages:home' %}#pretrained-workers" class="flex flex-col gap-4 lg:flex-row lg:items-end bg-white/70 backdrop-blur rounded-2xl shadow-lg p-6 border-0 ring-0">
+          <div class="w-full lg:flex-1 text-left">
             <label for="homepage-directory-search" class="block text-sm font-medium text-slate-500">Search</label>
             <div class="mt-2 relative">
               <input id="homepage-directory-search" name="pretrained_search" type="search" value="{{ homepage_pretrained_search_term }}" placeholder="Search skills, focus areas, workflows..." class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" />
@@ -333,7 +333,7 @@
               {% endif %}
             </div>
           </div>
-          <div class="lg:col-span-2 text-left">
+          <div class="w-full lg:w-64 text-left">
             <label for="homepage-directory-category" class="block text-sm font-medium text-slate-500">Category</label>
             <div class="mt-2 relative">
               <select id="homepage-directory-category" name="pretrained_category" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none">
@@ -349,9 +349,9 @@
               <input type="hidden" name="{{ key }}" value="{{ value }}" />
             {% endif %}
           {% endfor %}
-          <div class="lg:col-span-6 flex justify-end">
+          <div class="w-full flex justify-end lg:w-auto lg:ml-auto">
             <button type="submit" class="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 text-white font-medium shadow-lg shadow-indigo-200 hover:bg-indigo-500 transition">
-              Update results
+              Search
             </button>
           </div>
         </form>

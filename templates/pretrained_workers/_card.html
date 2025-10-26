@@ -61,9 +61,6 @@
           <span aria-hidden="true">→</span>
         </button>
       </form>
-      {% if show_detail_button|default:True %}
-        <a href="{% url 'pages:pretrained_worker_detail' worker.code %}" class="inline-flex items-center justify-center gap-2 px-5 py-3 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition">View details</a>
-      {% endif %}
     </div>
   </div>
 </article>
