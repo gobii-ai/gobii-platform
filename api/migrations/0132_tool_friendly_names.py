@@ -35,9 +35,7 @@ def seed_tool_friendly_names(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        # Note: avoid adding a dependency on 0131_seed_pretrained_worker_templates here.
-        # That migration landed after this one in production and retroactively adding the
-        # dependency causes InconsistentMigrationHistory on existing databases.
+        ('api', '0131_seed_ai_employee_templates'),
         ('api', '0130_persistentagent_sent_expiration_email'),
     ]
 
