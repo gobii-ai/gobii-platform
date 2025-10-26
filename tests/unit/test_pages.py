@@ -76,6 +76,22 @@ class HomePageTests(TestCase):
         self.assertEqual(len(workers), len(expected))
         self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
 
+    @tag("batch_pages")
+    def test_custom_spawn_clears_pretrained_worker_selection(self):
+        session = self.client.session
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = "sales-pipeline-whisperer"
+        session["agent_charter"] = "Template charter"
+        session["agent_charter_source"] = "template"
+        session.save()
+
+        response = self.client.post("/spawn-agent/", {"charter": "Custom charter"})
+        self.assertEqual(response.status_code, 302)
+
+        session = self.client.session
+        self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
+        self.assertEqual(session["agent_charter_source"], "user")
+        self.assertEqual(session["agent_charter"], "Custom charter")
+
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
     @tag("batch_pages")

@@ -245,6 +245,8 @@ class HomeAgentSpawnView(TemplateView):
         form = PersistentAgentCharterForm(request.POST)
         
         if form.is_valid():
+            # Clear any previously selected pretrained worker so we treat this as a fresh custom charter
+            request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
             # Store charter in session for later use
             request.session['agent_charter'] = form.cleaned_data['charter']
             request.session['agent_charter_source'] = 'user'
