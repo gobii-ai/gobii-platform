@@ -1,10 +1,13 @@
 """Helpers for interacting with OpenRouter."""
-
+import logging
 from typing import Dict
-
 from django.conf import settings
 
+from observability import trace
+
 DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
+logger = logging.getLogger(__name__)
+tracer = trace.get_tracer('gobii.utils')
 
 
 def get_attribution_headers() -> Dict[str, str]:
@@ -17,6 +20,9 @@ def get_attribution_headers() -> Dict[str, str]:
         headers["HTTP-Referer"] = str(referer)
     if title:
         headers["X-Title"] = str(title)
+
+    logger.info("OpenRouter attribution headers: %s", headers)
+
     return headers
 
 
