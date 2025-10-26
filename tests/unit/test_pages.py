@@ -161,7 +161,9 @@ class RobotsTxtTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Allow: /")
         self.assertContains(response, "Sitemap:")
-        self.assertNotContains(response, "Disallow: /")
+        lines = [line.strip() for line in response.content.decode().splitlines() if line.strip()]
+        self.assertIn("Disallow: /console/agents/", lines)
+        self.assertNotIn("Disallow: /", lines)
 
     @tag("batch_pages")
     @override_settings(GOBII_RELEASE_ENV="staging")
