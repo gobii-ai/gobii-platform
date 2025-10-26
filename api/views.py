@@ -54,7 +54,7 @@ from console.agent_chat.timeline import (
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.core.schedule_parser import ScheduleParser
-from agents.services import AIEmployeeTemplateService
+from agents.services import PretrainedWorkerTemplateService
 # Import extend_schema from drf-spectacular with minimal dependencies
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 
@@ -903,7 +903,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         except ValueError as exc:
             raise DRFValidationError({'schedule': [str(exc)]})
 
-        description = AIEmployeeTemplateService.describe_schedule(schedule)
+        description = PretrainedWorkerTemplateService.describe_schedule(schedule)
         return Response({'valid': True, 'disabled': False, 'description': description})
 
     @action(detail=True, methods=['get'], url_path='web-tasks')

@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 
 from agent_namer import AgentNameGenerator
-from agents.services import AIEmployeeTemplateService, AgentService
+from agents.services import PretrainedWorkerTemplateService, AgentService
 
 from api.models import BrowserUseAgent, PersistentAgent
 from config import settings
@@ -131,7 +131,7 @@ class PersistentAgentProvisioningService:
                     persistent_agent.save(update_fields=["daily_credit_limit"])
 
             if template_code:
-                template = AIEmployeeTemplateService.get_template_by_code(template_code)
+                template = PretrainedWorkerTemplateService.get_template_by_code(template_code)
                 if template is None:
                     raise PersistentAgentProvisioningError(f"Unknown template code '{template_code}'.")
 
@@ -142,7 +142,7 @@ class PersistentAgentProvisioningService:
                     persistent_agent.charter = template.charter
                     updates.append("charter")
 
-                computed = AIEmployeeTemplateService.compute_schedule_with_jitter(
+                computed = PretrainedWorkerTemplateService.compute_schedule_with_jitter(
                     template.base_schedule,
                     template.schedule_jitter_minutes,
                 )

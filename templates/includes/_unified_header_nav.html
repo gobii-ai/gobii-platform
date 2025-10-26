@@ -19,16 +19,13 @@
 
       <!-- Desktop Nav -->
       <nav class="hidden md:flex items-center gap-x-6 text-sm font-medium">
-        <a href="{% url 'pages:home' %}" class="text-slate-700 hover:text-blue-600">Home</a>
-        <a href="/docs/" class="text-slate-700 hover:text-blue-600">API</a>
         {% if settings.GOBII_PROPRIETARY_MODE %}
-          <a href="{% url 'proprietary:blog_index' %}" class="text-slate-700 hover:text-blue-600">Blog</a>
           <a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a>
           <a href="{% url 'proprietary:support' %}" class="text-slate-700 hover:text-blue-600">Support</a>
         {% endif %}
 
         {% if request.user.is_authenticated %}
-          <a href="{% url 'console-home' %}" class="text-slate-700 hover:text-blue-600">Console</a>
+          <a href="{% url 'console-home' %}" class="text-slate-700 hover:text-blue-600">Dashboard</a>
           <!-- User Profile Dropdown (Desktop) -->
           <div x-data="{ open: false }" class="relative inline-flex">
             <button @click="open = !open"
@@ -164,7 +161,7 @@
      class="relative z-50">
      
   <!-- Background overlay -->
-  <div x-show="showMobileNav" 
+      <div x-show="showMobileNav"
        x-transition:enter="ease-out duration-300"
        x-transition:enter-start="opacity-0"
        x-transition:enter-end="opacity-100"
@@ -189,16 +186,13 @@
     
     <div class="py-4">
       <div class="px-4 space-y-3 text-sm font-medium">
-        <a href="{% url 'pages:home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Home</a>
-        <a href="/docs/" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">API</a>
         {% if settings.GOBII_PROPRIETARY_MODE %}
-          <a href="{% url 'proprietary:blog_index' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Blog</a>
           <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
           <a href="{% url 'proprietary:support' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Support</a>
         {% endif %}
         
         {% if request.user.is_authenticated %}
-          <a href="{% url 'console-home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Console</a>
+          <a href="{% url 'console-home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Dashboard</a>
           
           <div class="mt-4 pt-4 border-t border-gray-200">
             <div class="flex items-center gap-3 px-3 mb-3">

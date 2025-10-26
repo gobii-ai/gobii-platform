@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% load static %}
 {% load waffle_tags %}
-{% block title %}Gobii – Spawn an AI Employee{% endblock %}
+{% block title %}Gobii – Instantly spawn a team of always-on, web browsing agents.{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="Deploy always-on AI employees that handle outreach, research, and operations for you. Spawn a Gobii agent in minutes and keep work moving around the clock.">
+  <meta name="description" content="Deploy always-on pretrained workers that handle outreach, research, and operations for you. Spawn a Gobii agent in minutes and keep work moving around the clock.">
   <style>
     .game-of-life-panel {
       position: relative;
@@ -293,53 +293,83 @@
   </section>
 
   <!-- Employee Directory Section -->
-  <section class="relative pt-12 pb-16">
-    <div class="max-w-5xl mx-auto px-6">
+  <section id="pretrained-workers" class="relative pt-12 pb-16 scroll-mt-32">
+    <div class="max-w-6xl mx-auto px-6">
       <div class="text-center mb-10">
         <span class="inline-flex items-center text-xs font-medium tracking-[0.2em] uppercase text-indigo-400">OR</span>
-        <h2 class="mt-3 text-3xl sm:text-4xl font-light text-gray-900">Hire a pre-trained AI employee</h2>
-        <p class="mt-4 text-base sm:text-lg text-gray-600">Browse curated agents with production-ready playbooks, schedules, and triggers.</p>
+        <h2 class="mt-3 text-3xl sm:text-4xl font-light text-gray-900">Spawn a Pretrained Worker</h2>
+        <p class="mt-4 text-sm sm:text-base text-gray-500">Deploy a proven worker in minutes &mdash; built for research, ops &amp; intelligence.</p>
       </div>
 
-      {% if homepage_templates %}
-      <!-- Featured Templates Grid -->
-      <div class="grid gap-6 md:grid-cols-3 mb-8">
-        {% for template in homepage_templates %}
-        <div class="gobii-card-hoverable group relative p-6 flex flex-col">
-          <div class="flex items-start justify-between mb-3">
-            <span class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600">
-              <span class="size-2 rounded-full bg-indigo-400"></span>{{ template.category|default:"General" }}
-            </span>
+      <div class="space-y-6 mt-12">
+        <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div class="text-left">
+            {% if homepage_pretrained_selected_category or homepage_pretrained_search_term %}
+              <p class="text-xs text-slate-400 mt-1">
+                Filters:
+                {% if homepage_pretrained_selected_category %}{{ homepage_pretrained_selected_category }}{% endif %}
+                {% if homepage_pretrained_selected_category and homepage_pretrained_search_term %}, {% endif %}
+                {% if homepage_pretrained_search_term %}"{{ homepage_pretrained_search_term }}"{% endif %}
+              </p>
+            {% endif %}
           </div>
-          <h3 class="text-xl font-medium text-slate-900 mb-2">{{ template.display_name }}</h3>
-          <p class="text-sm text-slate-600 mb-4 flex-grow">{{ template.tagline }}</p>
-          <div class="space-y-2 text-xs text-slate-500 mb-4">
-            <div class="flex items-center gap-2">
-              <span>🗓️</span>
-              <span>{{ template.schedule_description|default:template.base_schedule }}</span>
+          {% if homepage_pretrained_selected_category or homepage_pretrained_search_term %}
+            <a href="{% url 'pages:home' %}#pretrained-workers" class="inline-flex items-center gap-2 self-start sm:self-auto px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition">
+              Reset filters
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+              </svg>
+            </a>
+          {% endif %}
+        </div>
+
+        <form method="get" action="{% url 'pages:home' %}#pretrained-workers" class="flex flex-col gap-4 lg:flex-row lg:items-end bg-white/70 backdrop-blur rounded-2xl shadow-lg p-6 border-0 ring-0">
+          <div class="w-full lg:flex-1 text-left">
+            <label for="homepage-directory-search" class="block text-sm font-medium text-slate-500">Search</label>
+            <div class="mt-2 relative">
+              <input id="homepage-directory-search" name="pretrained_search" type="search" value="{{ homepage_pretrained_search_term }}" placeholder="Search skills, focus areas, workflows..." class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" />
+              {% if homepage_pretrained_search_term %}
+                <a href="{% url 'pages:home' %}#pretrained-workers" class="absolute inset-y-0 right-3 flex items-center text-sm text-indigo-600 hover:text-indigo-700">Clear</a>
+              {% endif %}
             </div>
           </div>
-          <form method="post" action="{% url 'pages:ai_employee_hire' template.code %}">
-            {% csrf_token %}
-            <button type="submit" class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:shadow-md hover:from-indigo-500 hover:to-blue-500 transition">
-              Hire
-              <span aria-hidden="true">→</span>
+          <div class="w-full lg:w-64 text-left">
+            <label for="homepage-directory-category" class="block text-sm font-medium text-slate-500">Category</label>
+            <div class="mt-2 relative">
+              <select id="homepage-directory-category" name="pretrained_category" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none">
+                <option value="">All categories</option>
+                {% for category in homepage_pretrained_categories %}
+                  <option value="{{ category }}" {% if homepage_pretrained_selected_category == category %}selected{% endif %}>{{ category }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          {% for key, value in request.GET.items %}
+            {% if key != 'pretrained_search' and key != 'pretrained_category' %}
+              <input type="hidden" name="{{ key }}" value="{{ value }}" />
+            {% endif %}
+          {% endfor %}
+          <div class="w-full flex justify-end lg:w-auto lg:ml-auto">
+            <button type="submit" class="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 text-white font-medium shadow-lg shadow-indigo-200 hover:bg-indigo-500 transition">
+              Search
             </button>
-          </form>
-        </div>
-        {% endfor %}
+          </div>
+        </form>
       </div>
-      {% endif %}
 
-      <!-- See All CTA -->
-      <div class="text-center">
-        <a href="{% url 'pages:ai_employee_directory' %}" class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-md hover:from-blue-500 hover:to-indigo-500 transition-all duration-200">
-          See all
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 8l4 4m0 0l-4 4m4-4H3" />
-          </svg>
-        </a>
-      </div>
+      {% if homepage_pretrained_workers %}
+        <div class="mt-12 grid gap-8 md:grid-cols-2 xl:grid-cols-3">
+          {% for worker in homepage_pretrained_workers %}
+            {% include "pretrained_workers/_card.html" with worker=worker %}
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="mt-12 rounded-2xl border border-dashed border-slate-200 bg-white/70 p-12 text-center shadow-sm">
+          <h3 class="text-2xl font-medium text-slate-900">No pretrained workers match those filters yet.</h3>
+          <p class="mt-3 text-slate-600">Reset your filters to explore the full directory or reach out to support for a tailored playbook.</p>
+          <a href="{% url 'pages:home' %}#pretrained-workers" class="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow hover:bg-indigo-500 transition">Clear filters</a>
+        </div>
+      {% endif %}
     </div>
   </section>
 

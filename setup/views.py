@@ -12,7 +12,10 @@ from django.urls import reverse
 from django.utils.text import slugify
 from django.views import View
 
-from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
+from api.agent.core.llm_config import (
+    invalidate_llm_bootstrap_cache,
+    get_required_temperature_for_model,
+)
 from api.encryption import SecretsEncryption
 from api.models import (
     LLMProvider,
@@ -254,6 +257,7 @@ class SetupWizardView(View):
             endpoint = PersistentModelEndpoint.objects.get(key=endpoint_key)
             if model:
                 endpoint.litellm_model = model
+            endpoint.temperature_override = get_required_temperature_for_model(endpoint.litellm_model)
             endpoint.supports_tool_choice = supports_tool_choice
             endpoint.use_parallel_tool_calls = use_parallel_tools
             endpoint.supports_vision = supports_vision
@@ -392,6 +396,7 @@ class SetupWizardView(View):
         )
         endpoint.provider = provider
         endpoint.litellm_model = litellm_model
+        endpoint.temperature_override = get_required_temperature_for_model(litellm_model)
         endpoint.api_base = api_base
         endpoint.supports_tool_choice = supports_tool_choice
         endpoint.use_parallel_tool_calls = use_parallel_tools

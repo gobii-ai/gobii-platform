@@ -4,7 +4,7 @@
 {% block title %}Pricing - Gobii{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="Compare Gobii's Free, Pro, and Enterprise plans to scale always-on AI employees with transparent pricing.">
+  <meta name="description" content="Compare Gobii's Free, Pro, and Enterprise plans to scale always-on pretrained workers with transparent pricing.">
 {% endblock %}
 {% block content %}
 <div class="relative">
@@ -15,12 +15,12 @@
   <!-- Pricing Hero -->
   <section class="relative py-12">
     <div class="max-w-4xl mx-auto px-6 text-center">
-      <h1 class="text-4xl sm:text-5xl font-bold text-gray-900 leading-tight mb-6">
-        <span class="font-semibold">Simple, transparent</span>
-        <span class="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"> pricing</span>
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl font-medium text-gray-900 leading-tight">
+        <span class="font-normal">Scale your output,</span>
+        <span class="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent font-semibold"> not your payroll.</span>
       </h1>
-      <p class="text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
-        Start free, upgrade for serious work.
+      <p class="mt-4 text-sm sm:text-base text-gray-500 max-w-2xl mx-auto">
+        Grow faster, spend less, and keep full control of your work.
       </p>
     </div>
   </section>
@@ -35,7 +35,9 @@
         {% for plan in pricing_plans %}
         <div class="flex flex-col rounded-2xl border {% if plan.highlight %}border-violet-100 bg-gradient-to-br from-white via-violet-50/10 to-purple-50/20 shadow-md{% else %}border-slate-200 bg-white shadow-sm{% endif %} p-6 text-center relative">
           {% if plan.highlight %}
-          <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white text-xs px-3 py-1 rounded-full font-semibold">Popular</div>
+          <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white text-xs px-3 py-1 rounded-full font-semibold">{{ plan.badge|default:"Popular" }}</div>
+          {% elif plan.badge %}
+          <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-slate-100 text-slate-600 text-xs px-3 py-1 rounded-full font-semibold">{{ plan.badge }}</div>
           {% endif %}
           
           <h3 class="text-lg font-semibold text-slate-900 mb-2">{{ plan.name }}</h3>
@@ -57,16 +59,36 @@
             <li>{{ feature }}</li>
             {% endfor %}
           </ul>
-          
-          <a href="{{ plan.cta_url }}" 
-            class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg
-            {% if plan.highlight %}
-            bg-blue-600 text-white hover:bg-blue-700 shadow-md
-            {% else %}
-            bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-blue-600
-            {% endif %}">{{ plan.cta }}</a>
+          {% if plan.disabled %}
+            <span class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg bg-slate-200 text-slate-500 cursor-not-allowed select-none">{{ plan.cta }}</span>
+          {% else %}
+            <a href="{{ plan.cta_url }}" 
+              class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg
+              {% if plan.highlight or plan.name == 'Pro' %}
+              bg-blue-600 text-white hover:bg-blue-700 shadow-md
+              {% else %}
+              bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-blue-600
+              {% endif %}">{{ plan.cta }}</a>
+          {% endif %}
         </div>
         {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= -->
+  <!-- Enterprise CTA -->
+  <section class="py-12">
+    <div class="max-w-4xl mx-auto px-4">
+      <div class="rounded-2xl border border-slate-200 bg-white shadow-sm px-8 py-10 text-center md:text-left md:flex md:items-center md:justify-between md:gap-8">
+        <div>
+          <h3 class="text-2xl font-semibold text-slate-900">Building an army?</h3>
+          <p class="mt-3 text-sm text-slate-500">Custom enterprise plans are available for teams that need dedicated infrastructure and guardrails.</p>
+        </div>
+        <a href="https://cal.com/andrew-gobii" class="mt-6 md:mt-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold shadow-sm hover:bg-blue-700 transition whitespace-nowrap">
+          Book a demo
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </a>
       </div>
     </div>
   </section>
@@ -83,7 +105,7 @@
               <th class="p-2 sm:p-3 text-left font-semibold">Feature</th>
               <th class="p-2 sm:p-3 font-semibold">Free</th>
               <th class="p-2 sm:p-3 font-semibold">Pro</th>
-              <th class="p-2 sm:p-3 font-semibold">Enterprise</th>
+              <th class="p-2 sm:p-3 font-semibold">Scale</th>
             </tr>
           </thead>
           <tbody>

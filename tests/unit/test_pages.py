@@ -2,8 +2,8 @@
 from urllib.parse import parse_qs, urlparse
 
 from django.test import TestCase, override_settings, tag
-from api.models import PersistentAgentTemplate
 from pages.models import LandingPage
+from agents.services import PretrainedWorkerTemplateService
 
 
 @tag("batch_pages")
@@ -19,8 +19,78 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Deploy always-on AI employees that handle outreach, research, and operations for you. Spawn a Gobii agent in minutes and keep work moving around the clock.">',
+            '<meta name="description" content="Deploy always-on pretrained workers that handle outreach, research, and operations for you. Spawn a Gobii agent in minutes and keep work moving around the clock.">',
         )
+
+    @tag("batch_pages")
+    def test_home_page_exposes_all_pretrained_workers(self):
+        templates = PretrainedWorkerTemplateService.get_active_templates()
+        response = self.client.get("/")
+        workers = response.context.get("homepage_pretrained_workers")
+
+        self.assertIsNotNone(workers)
+        self.assertEqual(len(workers), len(templates))
+        self.assertEqual(response.context.get("homepage_pretrained_total"), len(templates))
+        self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(templates))
+
+    @tag("batch_pages")
+    def test_home_page_filters_by_category(self):
+        templates = PretrainedWorkerTemplateService.get_active_templates()
+        category = None
+        for template in templates:
+            if template.category:
+                category = template.category
+                break
+
+        if not category:
+            self.skipTest("No pretrained worker templates expose a category for filtering")
+
+        expected = [template for template in templates if template.category == category]
+
+        response = self.client.get("/", {"pretrained_category": category})
+        workers = response.context.get("homepage_pretrained_workers")
+
+        self.assertEqual(len(workers), len(expected))
+        self.assertTrue(all(worker.category == category for worker in workers))
+        self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
+        self.assertEqual(response.context.get("homepage_pretrained_total"), len(templates))
+
+    @tag("batch_pages")
+    def test_home_page_filters_by_search(self):
+        templates = PretrainedWorkerTemplateService.get_active_templates()
+        self.assertGreater(len(templates), 0)
+        target = templates[0]
+        search_term = target.display_name
+
+        expected = [
+            template
+            for template in templates
+            if search_term.lower() in template.display_name.lower()
+            or search_term.lower() in template.tagline.lower()
+            or search_term.lower() in template.description.lower()
+        ]
+
+        response = self.client.get("/", {"pretrained_search": search_term})
+        workers = response.context.get("homepage_pretrained_workers")
+
+        self.assertEqual(len(workers), len(expected))
+        self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
+
+    @tag("batch_pages")
+    def test_custom_spawn_clears_pretrained_worker_selection(self):
+        session = self.client.session
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = "sales-pipeline-whisperer"
+        session["agent_charter"] = "Template charter"
+        session["agent_charter_source"] = "template"
+        session.save()
+
+        response = self.client.post("/spawn-agent/", {"charter": "Custom charter"})
+        self.assertEqual(response.status_code, 302)
+
+        session = self.client.session
+        self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
+        self.assertEqual(session["agent_charter_source"], "user")
+        self.assertEqual(session["agent_charter"], "Custom charter")
 
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
@@ -127,29 +197,36 @@ class CanonicalLinkTests(TestCase):
 @tag("batch_pages")
 class SitemapTests(TestCase):
     @tag("batch_pages")
-    def test_ai_employee_detail_urls_included(self):
-        PersistentAgentTemplate.objects.create(
-            code="ops-analyst",
-            display_name="Operations Analyst",
-            tagline="Keeps operations humming",
-            description="Automates daily operations tasks.",
-            charter="Ensure operations run smoothly.",
-        )
-
+    def test_pretrained_worker_detail_urls_included(self):
         response = self.client.get("/sitemap.xml")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("http://example.com/ai-employees/ops-analyst/", response.content.decode())
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        self.assertIn(
+            f"http://example.com/pretrained-workers/{template.code}/",
+            response.content.decode(),
+        )
 
 
 @tag("batch_pages")
-class AIEmployeeDirectoryTests(TestCase):
+class PretrainedWorkerDirectoryTests(TestCase):
     @tag("batch_pages")
-    def test_directory_has_meta_description(self):
-        response = self.client.get("/ai-employees/")
-        self.assertContains(
-            response,
-            "<meta name=\"description\" content=\"Explore Gobii's directory of pre-trained AI employees. Compare charters, cadences, and integrations to hire the perfect always-on agent for your team.\">",
+    def test_directory_redirects_to_home_section(self):
+        response = self.client.get("/pretrained-workers/")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].endswith("#pretrained-workers"))
+
+    @tag("batch_pages")
+    def test_directory_redirect_preserves_filters(self):
+        response = self.client.get(
+            "/pretrained-workers/",
+            {"q": "ops", "category": "Team Ops", "foo": "bar"},
         )
+        self.assertEqual(response.status_code, 302)
+        location = response["Location"]
+        self.assertIn("pretrained_search=ops", location)
+        self.assertIn("pretrained_category=Team+Ops", location)
+        self.assertIn("foo=bar", location)
+        self.assertTrue(location.endswith("#pretrained-workers"))
 
 
 @tag("batch_pages")
@@ -159,7 +236,7 @@ class MarketingMetaTests(TestCase):
         response = self.client.get("/tos/")
         self.assertContains(
             response,
-            "<meta name=\"description\" content=\"Review Gobii's Terms of Service covering usage policies, billing, and compliance for our AI employee platform.\">",
+            "<meta name=\"description\" content=\"Review Gobii's Terms of Service covering usage policies, billing, and compliance for our pretrained worker platform.\">",
         )
 
     @tag("batch_pages")
@@ -167,7 +244,7 @@ class MarketingMetaTests(TestCase):
         response = self.client.get("/privacy/")
         self.assertContains(
             response,
-            "<meta name=\"description\" content=\"Understand how Gobii collects, uses, and safeguards data across our AI employee platform.\">",
+            "<meta name=\"description\" content=\"Understand how Gobii collects, uses, and safeguards data across our pretrained worker platform.\">",
         )
 
     @tag("batch_pages")
@@ -175,7 +252,7 @@ class MarketingMetaTests(TestCase):
         response = self.client.get("/about/")
         self.assertContains(
             response,
-            "<meta name=\"description\" content=\"Meet the team building Gobii's AI employees and learn how we automate web workflows for modern teams.\">",
+            "<meta name=\"description\" content=\"Meet the team building Gobii's pretrained workers and learn how we automate web workflows for modern teams.\">",
         )
 
     @tag("batch_pages")

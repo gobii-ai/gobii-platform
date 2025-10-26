@@ -103,6 +103,11 @@ curl --no-buffer \
 
 Want to contribute to the browser automation layer? Check out [browser-use on GitHub](https://github.com/browser-use/browser-use).
 
+## Developing
+- Start infrastructure locally with `docker compose -f docker-compose.dev.yaml up` (Postgres, Redis, MinIO).
+- Run Django via `uv run uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000` and the Celery worker with `uv run celery -A config worker -l info --pool solo`.
+- Full local workflow, optional profiles, and testing steps live in [DEVELOPMENT.md](DEVELOPMENT.md).
+
 ## Contribute & Connect
 - Share ideas or bugs in GitHub issues.
 - Follow existing style (ruff/black) when submitting PRs.

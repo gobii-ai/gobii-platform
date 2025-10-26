@@ -1,12 +1,16 @@
-from django.apps import apps
-
+import copy
+import logging
 import random
 from typing import Dict, Iterable, Sequence
 
+from django.apps import apps
+
+from agents.pretrained_worker_definitions import (
+    TEMPLATE_DEFINITIONS,
+    PretrainedWorkerTemplateDefinition,
+)
 from config.plans import AGENTS_UNLIMITED, MAX_AGENT_LIMIT
 from observability import trace
-
-import logging
 
 from cron_descriptor import get_description, Options
 from cron_descriptor.Exception import FormatError
@@ -116,10 +120,10 @@ class AgentService:
         return AgentService.get_agents_available(user) > 0 or has_unlimited_agents(user)
 
 
-class AIEmployeeTemplateService:
-    """Utilities for working with curated AI employee templates."""
+class PretrainedWorkerTemplateService:
+    """Utilities for working with curated pretrained worker templates."""
 
-    TEMPLATE_SESSION_KEY = "ai_employee_template_code"
+    TEMPLATE_SESSION_KEY = "pretrained_worker_template_code"
     _CRON_MACRO_MAP = {
         "@yearly": "0 0 1 1 *",
         "@annually": "0 0 1 1 *",
@@ -131,19 +135,26 @@ class AIEmployeeTemplateService:
     }
 
     @staticmethod
-    def get_active_templates():
-        Template = apps.get_model("api", "PersistentAgentTemplate")
-        return Template.objects.filter(is_active=True).order_by("priority", "display_name")
+    def _all_templates() -> list[PretrainedWorkerTemplateDefinition]:
+        """Return a fresh copy of all pretrained worker template definitions."""
+        return [copy.deepcopy(template) for template in TEMPLATE_DEFINITIONS]
 
-    @staticmethod
-    def get_template_by_code(code: str):
+    @classmethod
+    def get_active_templates(cls) -> list[PretrainedWorkerTemplateDefinition]:
+        templates = [
+            template for template in cls._all_templates() if getattr(template, "is_active", True)
+        ]
+        templates.sort(key=lambda template: (template.priority, template.display_name.lower()))
+        return templates
+
+    @classmethod
+    def get_template_by_code(cls, code: str):
         if not code:
             return None
-        Template = apps.get_model("api", "PersistentAgentTemplate")
-        try:
-            return Template.objects.get(code=code, is_active=True)
-        except Template.DoesNotExist:
-            return None
+        for template in cls._all_templates():
+            if template.code == code and getattr(template, "is_active", True):
+                return template
+        return None
 
     @staticmethod
     def compute_schedule_with_jitter(base_schedule: str | None, jitter_minutes: int | None) -> str | None:
@@ -185,7 +196,7 @@ class AIEmployeeTemplateService:
         if not base_schedule:
             return None
 
-        expression = AIEmployeeTemplateService._normalize_cron_expression(base_schedule)
+        expression = PretrainedWorkerTemplateService._normalize_cron_expression(base_schedule)
         if not expression:
             return base_schedule
 
@@ -209,7 +220,7 @@ class AIEmployeeTemplateService:
 
         if expression.startswith("@"):
             macro = expression.lower()
-            return AIEmployeeTemplateService._CRON_MACRO_MAP.get(macro)
+            return PretrainedWorkerTemplateService._CRON_MACRO_MAP.get(macro)
 
         return expression
 

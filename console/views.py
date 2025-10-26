@@ -26,7 +26,7 @@ from datetime import timedelta, datetime, timezone as dt_timezone
 from functools import cached_property, wraps
 import uuid
 
-from agents.services import AgentService, AIEmployeeTemplateService
+from agents.services import AgentService, PretrainedWorkerTemplateService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
@@ -1711,18 +1711,18 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
         if 'form' not in kwargs:
             initial_data = {'contact_endpoint_email': self.request.user.email}
 
-            template_code = self.request.session.get(AIEmployeeTemplateService.TEMPLATE_SESSION_KEY)
-            template = AIEmployeeTemplateService.get_template_by_code(template_code) if template_code else None
+            template_code = self.request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
+            template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
 
             if template:
-                template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
-                template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+                template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
+                template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
                     template.default_tools or []
                 )
-                template.contact_method_label = AIEmployeeTemplateService.describe_contact_channel(
+                template.contact_method_label = PretrainedWorkerTemplateService.describe_contact_channel(
                     template.recommended_contact_channel
                 )
-                context['selected_ai_employee'] = template
+                context['selected_pretrained_worker'] = template
                 preferred = (template.recommended_contact_channel or '').lower()
                 valid_choices = {choice for choice, _ in PersistentAgentContactForm.CONTACT_METHOD_CHOICES}
                 if preferred in valid_choices:
@@ -1730,17 +1730,17 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
 
             context['form'] = PersistentAgentContactForm(initial=initial_data)
         else:
-            template_code = self.request.session.get(AIEmployeeTemplateService.TEMPLATE_SESSION_KEY)
-            template = AIEmployeeTemplateService.get_template_by_code(template_code) if template_code else None
+            template_code = self.request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
+            template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
             if template:
-                template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
-                template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+                template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
+                template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
                     template.default_tools or []
                 )
-                template.contact_method_label = AIEmployeeTemplateService.describe_contact_channel(
+                template.contact_method_label = PretrainedWorkerTemplateService.describe_contact_channel(
                     template.recommended_contact_channel
                 )
-                context['selected_ai_employee'] = template
+                context['selected_pretrained_worker'] = template
 
         current_context = context.get('current_context', {
             'type': 'personal',
@@ -1811,8 +1811,8 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
 
             sms_preferred = preferred_contact_method == "sms"
 
-            template_code = request.session.get(AIEmployeeTemplateService.TEMPLATE_SESSION_KEY)
-            selected_template = AIEmployeeTemplateService.get_template_by_code(template_code) if template_code else None
+            template_code = request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
+            selected_template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
             applied_schedule = None
 
             try:
@@ -2000,8 +2000,8 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                         del request.session['agent_charter']
                     if 'agent_charter_source' in request.session:
                         del request.session['agent_charter_source']
-                    if AIEmployeeTemplateService.TEMPLATE_SESSION_KEY in request.session:
-                        del request.session[AIEmployeeTemplateService.TEMPLATE_SESSION_KEY]
+                    if PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY in request.session:
+                        del request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY]
 
                     base_props = {
                         'agent_id': str(persistent_agent.id),
