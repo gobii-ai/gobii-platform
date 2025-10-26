@@ -35,7 +35,7 @@ def seed_tool_friendly_names(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0131_seed_pretrained_worker_templates'),
+        ('api', '0131_seed_ai_employee_templates'),
         ('api', '0130_persistentagent_sent_expiration_email'),
     ]
 
