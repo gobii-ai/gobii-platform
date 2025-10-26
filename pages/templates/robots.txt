@@ -1,6 +1,7 @@
 {% if environment.is_production %}
 User-agent: *
 Allow: /
+Disallow: /console/agents/
 
 Sitemap: {{ request.scheme }}://{{ request.get_host }}/sitemap.xml
 {% else %}
