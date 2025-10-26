@@ -14,7 +14,7 @@ def add_homepage_templates(apps, schema_editor):
         code="real-estate-research-analyst",
         display_name="Real Estate Research Analyst",
         tagline="Finds properties, pulls comps, and tracks market trends",
-        description="An always-on AI employee that monitors real estate listings, researches comparable properties, analyzes market data, and compiles reports on property values and investment opportunities.",
+        description="An always-on pretrained worker that monitors real estate listings, researches comparable properties, analyzes market data, and compiles reports on property values and investment opportunities.",
         charter="""You are a Real Estate Research Analyst. Your job is to:
 
 1. Monitor real estate listing sites for properties matching specified criteria
@@ -41,7 +41,7 @@ Always provide data-driven insights with sources cited. Format your reports clea
         code="project-manager",
         display_name="Project Manager",
         tagline="Tracks milestones, manages blockers, and keeps teams aligned",
-        description="An always-on AI employee that coordinates project activities, tracks progress against milestones, manages task dependencies, identifies blockers, and keeps stakeholders informed with status updates and reports.",
+        description="An always-on pretrained worker that coordinates project activities, tracks progress against milestones, manages task dependencies, identifies blockers, and keeps stakeholders informed with status updates and reports.",
         charter="""You are a Project Manager. Your job is to:
 
 1. Track project milestones and deliverables

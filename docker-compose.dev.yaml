@@ -1,6 +1,7 @@
 # Developer-oriented compose stack retaining the previous defaults.
-# Run with `docker compose -f docker-compose.dev.yaml up` when you need the
-# permissive local experience.
+# Run with `docker compose -f docker-compose.dev.yaml up -d` to launch the core
+# backing services (Postgres, Redis, MinIO). Enable additional profiles for
+# containers such as `web` or `worker` when you need them.
 
 services:
   db:
@@ -10,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-gobii}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
@@ -23,7 +24,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -38,8 +39,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9090:9090"
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9090}:9090"
     volumes:
       - minio-data:/data
 
@@ -75,11 +76,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_started
     restart: unless-stopped
     command: >-
       bash -lc "gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers ${GUNICORN_WORKERS:-4} --bind 0.0.0.0:8000 --graceful-timeout 30 --timeout 0"
+    profiles: ["containers"]
 
   flower:
     image: mher/flower:2.0
@@ -133,6 +133,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     shm_size: 2gb
+    profiles: ["worker"]
 
   # --------------------------------------------------------------------- #
   #  Optional Celery beat scheduler (disabled unless profile "beat" is enabled)
@@ -173,6 +174,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     shm_size: 2gb
+    profiles: ["beat"]
 
   # --------------------------------------------------------------------- #
   #  IMAP IDLE watchers (keeps IMAP IDLE connections and enqueues polls)
@@ -213,6 +215,7 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    profiles: ["imap"]
 
   # Run DB migrations once, then exit. Other services wait on this.
   migrate:
@@ -244,6 +247,7 @@ services:
       db:
         condition: service_healthy
     restart: "no"
+    profiles: ["containers", "worker", "beat", "imap"]
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.128.0

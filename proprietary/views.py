@@ -58,8 +58,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "price_label": "$0",
                 "desc": "Actually useful free tier",
                 "tasks": "100",
-                "pricing_model": "",
+                "pricing_model": "Always free",
                 "highlight": False,
+                "badge": None,
+                "disabled": False,
                 "features": [
                     "5 always-on agents",
                     "30 day time limit for always-on agents",
@@ -74,10 +76,12 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "name": "Pro",
                 "price": 30,
                 "price_label": "$30",
-                "desc": "For growing businesses",
+                "desc": "For growing teams",
                 "tasks": "500",
                 "pricing_model": "Billed monthly",
-                "highlight": True,
+                "highlight": False,
+                "badge": "Most teams",
+                "disabled": False,
                 "features": [
                     "Unlimited always-on agents",
                     "No time limit for always-on agents",
@@ -89,34 +93,36 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "cta_url": reverse("proprietary:startup_checkout"),
             },
             {
-                "name": "Enterprise",
-                "price": None,
-                "price_label": "Custom pricing",
-                "desc": "For mission-critical needs",
-                "tasks": "Custom",
-                "pricing_model": "Tailored to your needs",
-                "highlight": False,
+                "name": "Scale",
+                "price": 250,
+                "price_label": "$250",
+                "desc": "For teams scaling fast",
+                "tasks": "10,000",
+                "pricing_model": "Billed monthly",
+                "highlight": True,
+                "badge": "Best value",
                 "features": [
-                    "Dedicated infrastructure",
-                    "Priority support",
-                    "SLA guarantees",
-                    "Custom integrations",
-                    "Dedicated account manager",
+                    "Unlimited always-on agents",
+                    "Dedicated onboarding specialist",
+                    "$0.04 per task beyond 10,000",
+                    "Priority work queue",
+                    "1,500 requests/min API throughput",
                 ],
-                "cta": "Book a demo",
-                "cta_url": "https://cal.com/andrew-gobii",
+                "cta": "Coming soon",
+                "cta_url": None,
+                "disabled": True,
             },
         ]
 
         # Comparison table rows - updated for new tiers
         context["comparison_rows"] = [
-            ["Tasks included per month", "100", "500", "Custom"],
-            ["Cost per additional task", "—", "$0.10", "Custom"],
-            ["API rate limit (requests/min)", "60", "600", "Custom"],
+            ["Tasks included per month", "100", "500", "10,000"],
+            ["Cost per additional task", "—", "$0.10", "$0.04"],
+            ["API rate limit (requests/min)", "60", "600", "1,500"],
             ["Priority task execution", "—", "✓", "✓"],
-            ["Dedicated infrastructure", "—", "—", "✓"],
-            ["SLA guarantee", "—", "—", "✓"],
-            ["Support", "Community", "Email", "Dedicated"],
+            ["Dedicated onboarding", "—", "—", "✓"],
+            ["Batch scheduling & queueing", "—", "—", "✓"],
+            ["Support", "Community", "Email & chat", "Dedicated channel"],
         ]
 
         # FAQs
@@ -127,7 +133,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             ),
             (
                 "How does the pricing work?",
-                "The Free tier includes 100 tasks per month. The Pro tier includes 500 tasks, then charges $0.10 for each additional task. Enterprise pricing is customized based on your needs.",
+                "The Free tier includes 100 tasks per month. The Pro tier includes 500 tasks, then charges $0.10 for each additional task. The Scale tier includes 10,000 tasks with $0.04 pricing after that.",
             ),
             (
                 "Is there any commitment?",
@@ -135,11 +141,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             ),
             (
                 "What happens if I exceed my free tasks?",
-                "On the Free tier, you'll need to wait until your next billing cycle to run more tasks. On the Pro tier, you'll automatically be charged $0.10 per additional task.",
+                "On the Free tier, you'll need to wait until your next billing cycle to run more tasks. On the Pro tier, additional tasks are $0.10 each, while Scale brings that down to $0.04 once you pass the included 10,000 tasks.",
             ),
             (
                 "Do you offer enterprise features?",
-                "Yes. Our Enterprise tier includes dedicated infrastructure, SLA guarantees, and custom integrations. Schedule a demo to learn more.",
+                "Yes. We offer custom enterprise agreements with dedicated infrastructure, SLAs, and governance controls. Schedule a call and we'll tailor a plan to your team.",
             ),
         ]
 
@@ -228,7 +234,7 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
 
         seo_title = "Gobii Blog"
         seo_description = (
-            "Updates from the Gobii team on AI employees, automation strategies, and product releases."
+            "Updates from the Gobii team on pretrained workers, automation strategies, and product releases."
         )
 
         canonical_url = self.request.build_absolute_uri(self.request.path)

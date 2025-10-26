@@ -1,24 +1,24 @@
 ---
-title: "How a Home Renovation Project Became the Perfect Test Case for AI Employees"
+title: "How a Home Renovation Project Became the Perfect Test Case for Pretrained Workers"
 date: 2025-10-03
 description: "AI Project Management in Action: Lessons from a Home Renovation."
 author: "The Gobii Team"
-seo_title: "How AI Employees Simplified a Complex Home Renovation Project"
-seo_description: "AI project management in action: Discover how Gobii’s AI employee turned a stressful home renovation into a smooth, organized process."
+seo_title: "How Pretrained Workers Simplified a Complex Home Renovation Project"
+seo_description: "AI project management in action: Discover how Gobii’s pretrained worker turned a stressful home renovation into a smooth, organized process."
 tags:
   - case study
   - project management
 ---
 
-<a href="/static/images/blog/horus-intro.png" data-lightbox="gobii-case" data-title="AI employee email draft by Horus">
+<a href="/static/images/blog/horus-intro.png" data-lightbox="gobii-case" data-title="pretrained worker email draft by Horus">
   <img src="/static/images/blog/horus-intro@0.5x.png" style="display: inline-block; float: right; text-align: right; width: 350px; margin-left: 5px; margin-bottom: 5px;"  alt="Horus's Intro Email for AI Project Management"/>
 </a>
 
 When Grace Ha received an email from someone named "Horus" offering to help manage her home renovation project, her first thought was skepticism. "My first impression was, who is this person and why do they want to be so helpful?" she recalls. "Who wants to be helpful is definitely up to something in my experience."
 
-But Horus wasn't a contractor looking for work or a salesperson with an angle. Horus was a Gobii AI employee—an always-on agent that works through email, designed to handle complex, multi-faceted projects just like a capable human assistant would.
+But Horus wasn't a contractor looking for work or a salesperson with an angle. Horus was a Gobii pretrained worker—an always-on agent that works through email, designed to handle complex, multi-faceted projects just like a capable human assistant would.
 
-What followed was an illuminating real-world test of how AI employees can transform the way we approach major life projects, from the mundane tasks we dread to the complex decisions that keep us up at night.
+What followed was an illuminating real-world test of how pretrained workers can transform the way we approach major life projects, from the mundane tasks we dread to the complex decisions that keep us up at night.
 
 ## The Challenge: A Complex Third Renovation
 
@@ -37,13 +37,13 @@ They needed help with:
 
 This wasn't a simple "find me three contractors" request. It was the kind of multi-dimensional challenge that typically requires juggling spreadsheets, browser tabs, email threads, and late-night research sessions.
 
-## What Makes Gobii's AI Employees Different
+## What Makes Gobii's Pretrained Workers Different
 
-Unlike chatbots that require you to visit a website or traditional AI assistants that live in a single app, Gobii's AI employees work through email—the tool you're already using. They're always on, maintain context over weeks or months, and can be delegated tasks just like you would with a human employee or intern.
+Unlike chatbots that require you to visit a website or traditional AI assistants that live in a single app, Gobii's pretrained workers work through email—the tool you're already using. They're always on, maintain context over weeks or months, and can be delegated tasks just like you would with a human employee or intern.
 
 As Gobii founder and CTO [Andrew Christianson](https://gobii.ai/about/ "Andrew Christianson") explains: "We designed Gobii to work with the mental models people already have. You interact with it in natural language, the same way you would with a human being."
 
-These AI employees can:
+These pretrained workers can:
 
 - Conduct in-depth research across multiple sources  
 - Draft professional communications  
@@ -55,7 +55,7 @@ These AI employees can:
 
 ### Validating Complex Decisions
 
-Grace had already spent considerable time thinking through their renovation approach when Horus joined the project. Rather than feeling redundant, the AI employee became a valuable sounding board.
+Grace had already spent considerable time thinking through their renovation approach when Horus joined the project. Rather than feeling redundant, the pretrained worker became a valuable sounding board.
 
 "Horus's research and recommendations aligned with our thinking," Grace noted. "That helped give us confidence in the approach we were taking. If we hadn't already spent so much time thinking through our options, I think Horus would have helped us narrow things down and steer us in a direction."
 
@@ -79,13 +79,13 @@ The email struck the right professional tone, using language like "setting guard
 
 ## The Learning Curve: Setting Expectations
 
-Not everything was seamless. Grace's initial confusion about whether Horus might directly contact contractors on her behalf highlighted an important challenge for AI employees.
+Not everything was seamless. Grace's initial confusion about whether Horus might directly contact contractors on her behalf highlighted an important challenge for pretrained workers.
 
 "When Horus said he wanted the emails of our vendors, my initial thought was—oh my gosh, is he going to directly contact them and start having conversations without looping us in?" Grace recalled.
 
 Will Bonde, a software engineer at Gobii, immediately identified with this concern: "If I hadn't known how Gobii worked, I would have thought the same thing. That wording was very ambiguous."
 
-This led to a key insight: AI employees need clearer upfront communication about their capabilities and limitations. "Setting expectations up front would be helpful," Grace suggested. "Like when you have a facilitated discussion and you establish norms with the audience."
+This led to a key insight: pretrained workers need clearer upfront communication about their capabilities and limitations. "Setting expectations up front would be helpful," Grace suggested. "Like when you have a facilitated discussion and you establish norms with the audience."
 
 Andrew acknowledged this gap: "The agent doesn't currently communicate its approval processes well. If it understood its own constraints better, it could proactively say, 'I can request your approval to contact these contractors if you'd like me to.'"
 
@@ -109,7 +109,7 @@ Will offered a perspective on the uncertainty ahead: "I don't think anyone knows
 
 ## Why This Matters
 
-Grace's experience illustrates a crucial point: AI employees aren't just about completing individual tasks. They reduce the cognitive overhead of managing complex projects.
+Grace's experience illustrates a crucial point: pretrained workers aren't just about completing individual tasks. They reduce the cognitive overhead of managing complex projects.
 
 Home renovations, like many major life projects, involve:
 
@@ -120,7 +120,7 @@ Home renovations, like many major life projects, involve:
 - Research across different domains  
 - Document management and organization
 
-These are exactly the kinds of projects where Gobii AI employees shine—not because any single task is impossibly difficult, but because the cumulative mental load is exhausting. And they can [get started right away](https://gobii.ai/g/nYY/ "Spin up own AI Project Manager").
+These are exactly the kinds of projects where Gobii pretrained workers shine—not because any single task is impossibly difficult, but because the cumulative mental load is exhausting. And they can [get started right away](https://gobii.ai/g/nYY/ "Spin up own AI Project Manager").
 
 For Grace, the assessment was straightforward: "It's been neat engaging with you as developers and the people who conceived of this idea. This was fun."
 
@@ -128,4 +128,4 @@ But more importantly, it worked. And for a complex renovation project with hard 
 
 ---
 
-*Gobii's [AI employees](https://gobii.ai/ai-employees/) work through email, handling research, coordination, and communication for complex projects. They maintain context over time, work autonomously within guardrails, and can be delegated tasks just like a human assistant or intern—but they're always available and never overwhelmed by detail work.*  
+*Gobii's [pretrained workers](https://gobii.ai/pretrained-workers/) work through email, handling research, coordination, and communication for complex projects. They maintain context over time, work autonomously within guardrails, and can be delegated tasks just like a human assistant or intern—but they're always available and never overwhelmed by detail work.*  

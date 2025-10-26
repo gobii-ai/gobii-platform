@@ -10,7 +10,7 @@ The configuration uses a similar pattern to browser use tasks for consistency.
 import os
 import logging
 import random
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 
 from django.apps import apps
 from django.core.cache import cache
@@ -21,6 +21,37 @@ from django.conf import settings
 from api.openrouter import get_attribution_headers
 
 logger = logging.getLogger(__name__)
+
+# Certain models only support a single temperature. When we detect these models
+# we silently coerce the temperature to the required value so LiteLLM does not
+# reject the request with a BadRequestError.
+_MODEL_TEMPERATURE_REQUIREMENTS: Tuple[Tuple[str, float], ...] = (
+    ("openai/gpt-5", 1.0),
+)
+
+
+def get_required_temperature_for_model(model: str) -> Optional[float]:
+    """Return the fixed temperature required by a given LiteLLM model."""
+
+    for prefix, temperature in _MODEL_TEMPERATURE_REQUIREMENTS:
+        if model.startswith(prefix):
+            return temperature
+    return None
+
+
+def _apply_required_temperature(model: str, params: Dict[str, Any]) -> None:
+    """Mutate ``params`` to satisfy model-specific temperature constraints."""
+
+    required_temp = get_required_temperature_for_model(model)
+    if required_temp is None:
+        return
+
+    current_temp = params.get("temperature")
+    if current_temp is None or float(current_temp) != required_temp:
+        logger.debug(
+            "Adjusting temperature for model %s from %s to %s", model, current_temp, required_temp
+        )
+    params["temperature"] = required_temp
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -211,7 +242,9 @@ def get_provider_config(provider: str) -> Tuple[str, dict]:
         params.update({
             "temperature": 1,  # GPT-5 only supports temperature=1
         })
-    
+
+    _apply_required_temperature(model, params)
+
     return model, params
 
 
@@ -386,6 +419,8 @@ def get_llm_config_with_failover(
                         bool(params.get('api_key')),
                     )
 
+                _apply_required_temperature(effective_model, params)
+
                 # Add tool-choice capability hint for callers (not passed to litellm)
                 params_with_hints = dict(params)
                 params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
@@ -435,8 +470,7 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
     if "temperature" not in params or params["temperature"] is None:
         params["temperature"] = 0
 
-    if model.startswith("openai/gpt-5") and params.get("temperature") != 1:
-        params["temperature"] = 1
+    _apply_required_temperature(model, params)
 
     return model, params
 

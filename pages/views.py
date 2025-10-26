@@ -1,4 +1,5 @@
 from datetime import timezone, datetime
+from urllib.parse import urlencode
 
 from django.http.response import JsonResponse
 from django.views.generic import TemplateView, RedirectView, View
@@ -7,13 +8,12 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect, resolve_url
 from django.http import HttpResponseRedirect
-from django.db.models import F, Q
 from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from api.models import PaidPlanIntent, PersistentAgent
 from api.agent.short_description import build_listing_description
-from agents.services import AIEmployeeTemplateService
+from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
 from config.stripe_config import get_stripe_settings
 
@@ -145,25 +145,55 @@ class HomePage(TemplateView):
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
 
-        # Featured AI employee templates for homepage
-        homepage_templates = AIEmployeeTemplateService.get_active_templates().order_by('priority')
+        # Featured and full pretrained worker templates for homepage
+        all_templates = list(PretrainedWorkerTemplateService.get_active_templates())
 
-        templates_list = list(homepage_templates)
         tool_names = set()
-
-        for template in templates_list:
-            template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
+        for template in all_templates:
+            template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
             tool_names.update(template.default_tools or [])
 
-        tool_display_map = AIEmployeeTemplateService.get_tool_display_map(tool_names)
-
-        for template in templates_list:
-            template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
+        tool_display_map = PretrainedWorkerTemplateService.get_tool_display_map(tool_names)
+        for template in all_templates:
+            template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
                 template.default_tools or [],
                 display_map=tool_display_map,
             )
 
-        context["homepage_templates"] = templates_list
+        category_filter = (self.request.GET.get("pretrained_category") or "").strip()
+        search_term = (self.request.GET.get("pretrained_search") or "").strip()
+
+        filtered_templates = list(all_templates)
+        if category_filter:
+            category_lower = category_filter.lower()
+            filtered_templates = [
+                template
+                for template in filtered_templates
+                if (template.category or "").lower() == category_lower
+            ]
+
+        if search_term:
+            search_lower = search_term.lower()
+            filtered_templates = [
+                template
+                for template in filtered_templates
+                if search_lower in template.display_name.lower()
+                or search_lower in template.tagline.lower()
+                or search_lower in template.description.lower()
+            ]
+
+        context.update(
+            {
+                "homepage_pretrained_workers": filtered_templates,
+                "homepage_pretrained_total": len(all_templates),
+                "homepage_pretrained_filtered_count": len(filtered_templates),
+                "homepage_pretrained_categories": sorted(
+                    {template.category for template in all_templates if template.category}
+                ),
+                "homepage_pretrained_selected_category": category_filter,
+                "homepage_pretrained_search_term": search_term,
+            }
+        )
 
         if self.request.user.is_authenticated:
             recent_agents_qs = PersistentAgent.objects.filter(user_id=self.request.user.id)
@@ -173,7 +203,7 @@ class HomePage(TemplateView):
             for agent in recent_agents:
                 schedule_text = None
                 if agent.schedule:
-                    schedule_text = AIEmployeeTemplateService.describe_schedule(agent.schedule)
+                    schedule_text = PretrainedWorkerTemplateService.describe_schedule(agent.schedule)
                     if not schedule_text:
                         schedule_text = agent.schedule
                 agent.display_schedule = schedule_text
@@ -215,6 +245,8 @@ class HomeAgentSpawnView(TemplateView):
         form = PersistentAgentCharterForm(request.POST)
         
         if form.is_valid():
+            # Clear any previously selected pretrained worker so we treat this as a fresh custom charter
+            request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
             # Store charter in session for later use
             request.session['agent_charter'] = form.cleaned_data['charter']
             request.session['agent_charter_source'] = 'user'
@@ -253,99 +285,75 @@ class HomeAgentSpawnView(TemplateView):
         return homepage_view.get_context_data(**kwargs)
 
 
-class AIEmployeeDirectoryView(TemplateView):
-    template_name = "ai_directory/index.html"
+class PretrainedWorkerDirectoryRedirectView(RedirectView):
+    permanent = False
 
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        templates_queryset = AIEmployeeTemplateService.get_active_templates()
+    def get_redirect_url(self, *args, **kwargs):
+        base_url = reverse('pages:home')
+        params: list[tuple[str, str]] = []
 
-        category = self.request.GET.get('category', '').strip()
-        search = self.request.GET.get('q', '').strip()
-
-        if category:
-            templates_queryset = templates_queryset.filter(category__iexact=category)
+        search = (self.request.GET.get('q') or '').strip()
+        category = (self.request.GET.get('category') or '').strip()
 
         if search:
-            templates_queryset = templates_queryset.filter(
-                Q(display_name__icontains=search)
-                | Q(tagline__icontains=search)
-                | Q(description__icontains=search)
-            )
+            params.append(('pretrained_search', search))
+        if category:
+            params.append(('pretrained_category', category))
 
-        templates = list(templates_queryset)
-        tool_names = set()
+        for key in self.request.GET.keys():
+            if key in {'q', 'category'}:
+                continue
+            for value in self.request.GET.getlist(key):
+                params.append((key, value))
 
-        for template in templates:
-            template.schedule_description = AIEmployeeTemplateService.describe_schedule(template.base_schedule)
-            tool_names.update(template.default_tools or [])
+        query_string = urlencode(params, doseq=True)
+        fragment = '#pretrained-workers'
 
-        tool_display_map = AIEmployeeTemplateService.get_tool_display_map(tool_names)
-
-        for template in templates:
-            template.display_default_tools = AIEmployeeTemplateService.get_tool_display_list(
-                template.default_tools or [],
-                display_map=tool_display_map,
-            )
-
-        all_categories = (
-            AIEmployeeTemplateService.get_active_templates()
-            .exclude(category__isnull=True)
-            .exclude(category__exact="")
-            .values_list('category', flat=True)
-            .distinct()
-            .order_by('category')
-        )
-
-        context.update(
-            {
-                "ai_employees": templates,
-                "categories": list(all_categories),
-                "selected_category": category,
-                "search_term": search,
-            }
-        )
-        return context
+        if query_string:
+            return f"{base_url}?{query_string}{fragment}"
+        return f"{base_url}{fragment}"
 
 
-class AIEmployeeDetailView(TemplateView):
-    template_name = "ai_directory/detail.html"
+class PretrainedWorkerDetailView(TemplateView):
+    template_name = "pretrained_worker_directory/detail.html"
 
     def dispatch(self, request, *args, **kwargs):
-        self.employee = AIEmployeeTemplateService.get_template_by_code(kwargs.get('slug'))
+        self.employee = PretrainedWorkerTemplateService.get_template_by_code(kwargs.get('slug'))
         if not self.employee:
-            raise Http404("This AI employee is no longer available.")
+            raise Http404("This pretrained worker is no longer available.")
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["ai_employee"] = self.employee
+        context["pretrained_worker"] = self.employee
         context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
         context["base_schedule"] = self.employee.base_schedule
-        context["schedule_description"] = AIEmployeeTemplateService.describe_schedule(self.employee.base_schedule)
-        display_map = AIEmployeeTemplateService.get_tool_display_map(self.employee.default_tools or [])
+        context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.employee.base_schedule)
+        display_map = PretrainedWorkerTemplateService.get_tool_display_map(self.employee.default_tools or [])
         context["event_triggers"] = self.employee.event_triggers or []
-        context["default_tools"] = AIEmployeeTemplateService.get_tool_display_list(
+        context["default_tools"] = PretrainedWorkerTemplateService.get_tool_display_list(
             self.employee.default_tools or [],
             display_map=display_map,
         )
-        context["contact_method_label"] = AIEmployeeTemplateService.describe_contact_channel(
+        context["contact_method_label"] = PretrainedWorkerTemplateService.describe_contact_channel(
             self.employee.recommended_contact_channel
         )
         return context
 
 
-class AIEmployeeHireView(View):
+class PretrainedWorkerHireView(View):
     def post(self, request, *args, **kwargs):
         code = kwargs.get('slug')
-        template = AIEmployeeTemplateService.get_template_by_code(code)
+        template = PretrainedWorkerTemplateService.get_template_by_code(code)
         if not template:
-            raise Http404("This AI employee is no longer available.")
+            raise Http404("This pretrained worker is no longer available.")
 
         request.session['agent_charter'] = template.charter
-        request.session[AIEmployeeTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
         request.session['agent_charter_source'] = 'template'
         request.session.modified = True
+
+        source_page = request.POST.get('source_page') or 'home_pretrained_workers'
 
         if request.user.is_authenticated:
             Analytics.track_event(
@@ -353,7 +361,7 @@ class AIEmployeeHireView(View):
                 event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
                 source=AnalyticsSource.WEB,
                 properties={
-                    "source_page": "ai_employee_directory",
+                    "source_page": source_page,
                     "template_code": template.code,
                 },
             )
@@ -369,7 +377,7 @@ class AIEmployeeHireView(View):
             event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
             source=AnalyticsSource.WEB,
             properties={
-                "source_page": "ai_employee_directory",
+                "source_page": source_page,
                 "template_code": template.code,
             },
         )
@@ -680,19 +688,19 @@ class StaticViewSitemap(sitemaps.Sitemap):
         return reverse(item)
 
 
-class AIEmployeeTemplateSitemap(sitemaps.Sitemap):
+class PretrainedWorkerTemplateSitemap(sitemaps.Sitemap):
     changefreq = "weekly"
     priority = 0.6
 
     def items(self):
         try:
-            return list(AIEmployeeTemplateService.get_active_templates())
+            return list(PretrainedWorkerTemplateService.get_active_templates())
         except Exception as e:  # pragma: no cover - defensive fallback to keep sitemap working
-            logger.error("Failed to generate AIEmployeeTemplateSitemap items: %s", e, exc_info=True)
+            logger.error("Failed to generate PretrainedWorkerTemplateSitemap items: %s", e, exc_info=True)
             return []
 
     def location(self, template):
-        return reverse('pages:ai_employee_detail', kwargs={'slug': template.code})
+        return reverse('pages:pretrained_worker_detail', kwargs={'slug': template.code})
 
     def lastmod(self, template):
         return getattr(template, "updated_at", None)
