@@ -45,7 +45,7 @@ class DuplicateDetectionResult:
             detail = "is highly similar to"
         message = (
             f"Message blocked: content {detail} the previous message and may be a duplicate. "
-            "Please revise before sending again."
+            "Consider if this message should have been sent at all. If so, please revise before sending again."
         )
         payload: Dict[str, Any] = {
             "status": "error",
