@@ -68,7 +68,7 @@ export function DeleteServerDialog({ serverName, deleteUrl, onClose, onDeleted, 
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
-          This action cannot be undone. If you just need to pause access, edit the server and toggle it inactive.
+          This action cannot be undone.
         </p>
         {localError && <p className="text-xs text-red-600">{localError}</p>}
       </div>

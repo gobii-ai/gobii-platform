@@ -1,7 +1,7 @@
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 import { Fragment, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, ServerCog } from 'lucide-react'
+import { ChevronDown, Loader2, ServerCog } from 'lucide-react'
 
 import {
   createMcpServer,
@@ -40,6 +40,7 @@ type FormState = {
   isActive: boolean
   authMethod: string
   headers: HeaderEntry[]
+  bearerToken: string
 }
 
 const BLANK_HEADER: HeaderEntry = { key: '', value: '' }
@@ -64,6 +65,7 @@ export function McpServerFormModal({
   const [clientSecret, setClientSecret] = useState('')
   const [oauthScope, setOauthScope] = useState('')
   const [useCustomClient, setUseCustomClient] = useState(false)
+  const [headersExpanded, setHeadersExpanded] = useState(() => hasConfiguredHeaders(getInitialState()))
 
   const shouldFetchDetail = mode === 'edit' && Boolean(detailUrl)
   const detailQuery = useQuery({
@@ -76,7 +78,9 @@ export function McpServerFormModal({
 
   useEffect(() => {
     if (mode === 'edit' && server) {
-      setState(getInitialState(server))
+      const nextState = getInitialState(server)
+      setState(nextState)
+      setHeadersExpanded(hasConfiguredHeaders(nextState))
     }
   }, [mode, server])
 
@@ -97,6 +101,12 @@ export function McpServerFormModal({
     }
   }, [oauthStore.requiresManualClient])
 
+  useEffect(() => {
+    if (getFieldErrors('headers', formErrors).length > 0) {
+      setHeadersExpanded(true)
+    }
+  }, [formErrors])
+
   const nonFieldErrors = formErrors?.non_field_errors ?? []
 
   const handleSubmit = async (event: FormEvent) => {
@@ -107,7 +117,10 @@ export function McpServerFormModal({
       url: state.url.trim(),
       auth_method: state.authMethod,
       is_active: state.isActive,
-      headers: headersToObject(state.headers),
+      headers: headersToObject(state.headers, {
+        authMethod: state.authMethod,
+        bearerToken: state.bearerToken,
+      }),
       metadata: {},
       environment: {},
       command: '',
@@ -265,17 +278,21 @@ export function McpServerFormModal({
             ))}
           </div>
 
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                checked={state.isActive}
-                onChange={(event) => setState((prev) => ({ ...prev, isActive: event.target.checked }))}
-              />
-              Active
-            </label>
-            <span className="text-xs text-slate-500">Inactive servers remain hidden from agents.</span>
+          <div>
+            <label className="block text-sm font-medium text-slate-700">URL</label>
+            <input
+              type="url"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+              value={state.url}
+              onChange={(event) => setState((prev) => ({ ...prev, url: event.target.value }))}
+              required
+            />
+            <p className="text-xs text-slate-500">HTTPS URL for the remote MCP server.</p>
+            {getFieldErrors('url', formErrors).map((error) => (
+              <p key={error} className="text-xs text-red-600">
+                {error}
+              </p>
+            ))}
           </div>
 
           <div>
@@ -296,6 +313,21 @@ export function McpServerFormModal({
             ))}
           </div>
 
+          {state.authMethod === 'bearer_token' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Bearer Token</label>
+              <input
+                type="password"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                value={state.bearerToken}
+                onChange={(event) => setState((prev) => ({ ...prev, bearerToken: event.target.value }))}
+                autoComplete="off"
+                placeholder="Enter secure token"
+              />
+              <p className="text-xs text-slate-500">Stored securely and sent as the Authorization header.</p>
+            </div>
+          )}
+
           {ownerScope === 'organization' && (
             <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">
               Only members with manage permissions can update organization servers.
@@ -303,184 +335,193 @@ export function McpServerFormModal({
           )}
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-4">
-          <label className="block text-sm font-semibold text-slate-700">URL</label>
-          <input
-            type="url"
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-            value={state.url}
-            onChange={(event) => setState((prev) => ({ ...prev, url: event.target.value }))}
-            required
-          />
-          <p className="text-xs text-slate-500">HTTPS URL for the remote MCP server.</p>
-          {getFieldErrors('url', formErrors).map((error) => (
-            <p key={error} className="text-xs text-red-600">
-              {error}
-            </p>
-          ))}
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-700">Headers</p>
-              <p className="text-xs text-slate-500">Encrypted and stored securely.</p>
+        {state.authMethod === 'oauth2' && (
+          <div className="space-y-3">
+            <label className="block text-sm font-semibold text-slate-700">OAuth Connection</label>
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+              {mode === 'create' ? (
+                <p>Save this MCP server first, then return to connect via OAuth.</p>
+              ) : (
+                <div className="space-y-1">
+                  <p>
+                    Status: <span className="font-semibold">{statusLabel(oauthStore.status)}</span>
+                  </p>
+                  {oauthStore.scope && (
+                    <p>
+                      Scope: <span className="font-mono">{oauthStore.scope}</span>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
-            <button
-              type="button"
-              className="text-sm font-medium text-blue-600 hover:text-blue-700"
-              onClick={() => setState((prev) => ({ ...prev, headers: [...prev.headers, { ...BLANK_HEADER }] }))}
-            >
-              Add Header
-            </button>
-          </div>
-          <div className="mt-4 space-y-3">
-            {state.headers.map((entry, index) => (
-              <div key={`header-${index}`} className="flex flex-col gap-3 sm:flex-row">
-                <div className="sm:flex-1">
-                  <label className="text-xs font-medium text-slate-500">Header</label>
+
+            {mode === 'edit' && (
+              <div className="space-y-4 rounded-lg border border-slate-200 bg-white px-4 py-4">
+                <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                  <label className="inline-flex items-start gap-2 text-sm font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-70"
+                      checked={useCustomClient}
+                      onChange={(event) => setUseCustomClient(event.target.checked)}
+                      disabled={oauthStore.requiresManualClient}
+                    />
+                    Use custom OAuth credentials
+                  </label>
+                  <p className="text-xs text-slate-500">
+                    Provide an OAuth client ID + secret from your own app. Leave unchecked to let Gobii register a temporary
+                    client automatically.
+                    {oauthStore.requiresManualClient && ' This server requires manual credentials.'}
+                  </p>
+                </div>
+                {useCustomClient && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="text-xs font-medium text-slate-600" htmlFor="clientId">
+                        OAuth Client ID
+                      </label>
+                      <input
+                        id="clientId"
+                        type="text"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                        value={clientId}
+                        onChange={(event) => setClientId(event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600" htmlFor="clientSecret">
+                        OAuth Client Secret
+                      </label>
+                      <input
+                        id="clientSecret"
+                        type="password"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                        value={clientSecret}
+                        onChange={(event) => setClientSecret(event.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs font-medium text-slate-600">Scopes</label>
                   <input
                     type="text"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                    value={entry.key}
-                    onChange={(event) => handleHeaderChange(index, 'key', event.target.value, setState)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    placeholder="e.g. openid profile email"
+                    value={oauthScope}
+                    onChange={(event) => setOauthScope(event.target.value)}
                   />
+                  <p className="text-xs text-slate-500">Separate scopes with spaces. Leave blank for defaults.</p>
                 </div>
-                <div className="sm:flex-1">
-                  <label className="text-xs font-medium text-slate-500">Value</label>
-                  <input
-                    type="text"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                    value={entry.value}
-                    onChange={(event) => handleHeaderChange(index, 'value', event.target.value, setState)}
-                  />
-                </div>
-                <div className="sm:w-auto sm:self-end">
+                {oauthStore.error && <p className="text-xs text-amber-600">{oauthStore.error}</p>}
+                <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                    className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                    disabled={oauthStore.connecting || !server}
                     onClick={() =>
-                      setState((prev) => {
-                        const headers = prev.headers.filter((_, idx) => idx !== index)
-                        return { ...prev, headers: headers.length ? headers : createBlankHeaders() }
+                      oauthStore.startOAuth({
+                        clientId: useCustomClient ? clientId : undefined,
+                        clientSecret: useCustomClient ? clientSecret : undefined,
+                        scope: oauthScope.trim() || undefined,
                       })
                     }
                   >
-                    Remove
+                    {oauthStore.connecting ? 'Starting…' : 'Connect with OAuth 2.0'}
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    disabled={oauthStore.revoking || oauthStore.status !== 'connected'}
+                    onClick={() => oauthStore.revokeOAuth()}
+                  >
+                    {oauthStore.revoking ? 'Revoking…' : 'Disconnect'}
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
-          {getFieldErrors('headers', formErrors).map((error) => (
-            <p key={error} className="text-xs text-red-600">
-              {error}
-            </p>
-          ))}
-        </div>
-
-        <div className="space-y-3">
-          <label className="block text-sm font-semibold text-slate-700">OAuth Connection</label>
-          <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
-            {mode === 'create' && <p>Save this MCP server first, then return to connect via OAuth.</p>}
-            {mode === 'edit' && state.authMethod !== 'oauth2' && <p>Select OAuth 2.0 to enable this integration.</p>}
-            {mode === 'edit' && state.authMethod === 'oauth2' && (
-              <div className="space-y-1">
-                <p>
-                  Status: <span className="font-semibold">{statusLabel(oauthStore.status)}</span>
-                </p>
-                {oauthStore.scope && (
-                  <p>
-                    Scope: <span className="font-mono">{oauthStore.scope}</span>
-                  </p>
-                )}
-              </div>
             )}
           </div>
+        )}
 
-          {mode === 'edit' && state.authMethod === 'oauth2' && (
-            <div className="space-y-4 rounded-lg border border-slate-200 bg-white px-4 py-4">
-              <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                <label className="inline-flex items-start gap-2 text-sm font-medium text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-70"
-                    checked={useCustomClient}
-                    onChange={(event) => setUseCustomClient(event.target.checked)}
-                    disabled={oauthStore.requiresManualClient}
-                  />
-                  Use custom OAuth credentials
-                </label>
-                <p className="text-xs text-slate-500">
-                  Provide an OAuth client ID + secret from your own app. Leave unchecked to let Gobii register a temporary
-                  client automatically.
-                  {oauthStore.requiresManualClient && ' This server requires manual credentials.'}
-                </p>
-              </div>
-              {useCustomClient && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="text-xs font-medium text-slate-600" htmlFor="clientId">
-                      OAuth Client ID
-                    </label>
-                    <input
-                      id="clientId"
-                      type="text"
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                      value={clientId}
-                      onChange={(event) => setClientId(event.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-slate-600" htmlFor="clientSecret">
-                      OAuth Client Secret
-                    </label>
-                    <input
-                      id="clientSecret"
-                      type="password"
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                      value={clientSecret}
-                      onChange={(event) => setClientSecret(event.target.value)}
-                    />
-                  </div>
-                </div>
+        <div className="rounded-lg border border-slate-200 bg-white">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+            onClick={() => setHeadersExpanded((prev) => !prev)}
+            aria-expanded={headersExpanded}
+          >
+            <div>
+              <p className="text-sm font-semibold text-slate-700 capitalize">Custom headers</p>
+              <p className="text-xs text-slate-500">Encrypted and stored securely.</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center rounded-full border border-slate-200 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                Optional
+              </span>
+              {hasConfiguredHeaders(state) && !headersExpanded && (
+                <span className="text-xs font-medium text-slate-600">Configured</span>
               )}
-              <div>
-                <label className="text-xs font-medium text-slate-600">Scopes</label>
-                <input
-                  type="text"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  placeholder="e.g. openid profile email"
-                  value={oauthScope}
-                  onChange={(event) => setOauthScope(event.target.value)}
-                />
-                <p className="text-xs text-slate-500">Separate scopes with spaces. Leave blank for defaults.</p>
-              </div>
-              {oauthStore.error && <p className="text-xs text-amber-600">{oauthStore.error}</p>}
-              <div className="flex flex-wrap gap-3">
+              <ChevronDown
+                className={`h-4 w-4 text-slate-500 transition-transform ${headersExpanded ? 'rotate-180' : ''}`}
+                aria-hidden="true"
+              />
+            </div>
+          </button>
+          {headersExpanded && (
+            <div className="space-y-4 border-t border-slate-100 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-700">Header entries</p>
                 <button
                   type="button"
-                  className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-                  disabled={oauthStore.connecting || !server}
-                  onClick={() =>
-                    oauthStore.startOAuth({
-                      clientId: useCustomClient ? clientId : undefined,
-                      clientSecret: useCustomClient ? clientSecret : undefined,
-                      scope: oauthScope.trim() || undefined,
-                    })
-                  }
+                  className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                  onClick={() => setState((prev) => ({ ...prev, headers: [...prev.headers, { ...BLANK_HEADER }] }))}
                 >
-                  {oauthStore.connecting ? 'Starting…' : 'Connect with OAuth 2.0'}
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex items-center rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                  disabled={oauthStore.revoking || oauthStore.status !== 'connected'}
-                  onClick={() => oauthStore.revokeOAuth()}
-                >
-                  {oauthStore.revoking ? 'Revoking…' : 'Disconnect'}
+                  Add Header
                 </button>
               </div>
+              <div className="space-y-3">
+                {state.headers.map((entry, index) => (
+                  <div key={`header-${index}`} className="flex flex-col gap-3 sm:flex-row">
+                    <div className="sm:flex-1">
+                      <label className="text-xs font-medium text-slate-500">Header</label>
+                      <input
+                        type="text"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                        value={entry.key}
+                        onChange={(event) => handleHeaderChange(index, 'key', event.target.value, setState)}
+                      />
+                    </div>
+                    <div className="sm:flex-1">
+                      <label className="text-xs font-medium text-slate-500">Value</label>
+                      <input
+                        type="text"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                        value={entry.value}
+                        onChange={(event) => handleHeaderChange(index, 'value', event.target.value, setState)}
+                      />
+                    </div>
+                    <div className="sm:w-auto sm:self-end">
+                      <button
+                        type="button"
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                        onClick={() =>
+                          setState((prev) => {
+                            const headers = prev.headers.filter((_, idx) => idx !== index)
+                            return { ...prev, headers: headers.length ? headers : createBlankHeaders() }
+                          })
+                        }
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {getFieldErrors('headers', formErrors).map((error) => (
+                <p key={error} className="text-xs text-red-600">
+                  {error}
+                </p>
+              ))}
             </div>
           )}
         </div>
@@ -498,24 +539,47 @@ function getInitialState(server?: McpServerDetail): FormState {
       isActive: true,
       authMethod: 'none',
       headers: createBlankHeaders(),
+      bearerToken: '',
     }
   }
+  const { headerEntries, bearerToken } = splitHeaders(server.headers, server.authMethod)
   return {
     displayName: server.displayName,
     slug: server.name,
     url: server.url,
     isActive: server.isActive,
     authMethod: server.authMethod,
-    headers: headersFromObject(server.headers),
+    headers: headerEntries,
+    bearerToken,
   }
 }
 
-function headersFromObject(headers: Record<string, string>): HeaderEntry[] {
-  const entries = Object.entries(headers || {}).map(([key, value]) => ({ key, value }))
-  return entries.length ? entries : createBlankHeaders()
+function splitHeaders(headers: Record<string, string>, authMethod: string) {
+  const pairs = Object.entries(headers || {})
+  let bearerToken = ''
+  const headerEntries: HeaderEntry[] = []
+
+  pairs.forEach(([key, value]) => {
+    if (authMethod === 'bearer_token' && key.toLowerCase() === 'authorization') {
+      const token = extractBearerToken(value)
+      if (token) {
+        bearerToken = token
+        return
+      }
+    }
+    headerEntries.push({ key, value })
+  })
+
+  return {
+    headerEntries: headerEntries.length ? headerEntries : createBlankHeaders(),
+    bearerToken,
+  }
 }
 
-function headersToObject(entries: HeaderEntry[]): Record<string, string> {
+function headersToObject(
+  entries: HeaderEntry[],
+  options: { authMethod?: string; bearerToken?: string } = {},
+): Record<string, string> {
   const result: Record<string, string> = {}
   entries.forEach(({ key, value }) => {
     const trimmed = key.trim()
@@ -523,6 +587,17 @@ function headersToObject(entries: HeaderEntry[]): Record<string, string> {
       result[trimmed] = value
     }
   })
+  if (options.authMethod === 'bearer_token') {
+    Object.keys(result).forEach((key) => {
+      if (key.toLowerCase() === 'authorization') {
+        delete result[key]
+      }
+    })
+    const token = options.bearerToken?.trim()
+    if (token) {
+      result.Authorization = `Bearer ${token}`
+    }
+  }
   return result
 }
 
@@ -599,4 +674,21 @@ function resolveErrorMessage(error: unknown, fallback: string): string {
     return (error as { message: string }).message
   }
   return fallback
+}
+
+function extractBearerToken(value: string): string | null {
+  if (!value) {
+    return null
+  }
+  const match = value.match(/^Bearer\s+(.+)$/i)
+  return match ? match[1].trim() : null
+}
+
+function hasCustomHeaderEntries(entries: HeaderEntry[]): boolean {
+  return entries.some(({ key, value }) => key.trim() || value.trim())
+}
+
+function hasConfiguredHeaders(state: FormState): boolean {
+  const hasBearerToken = state.authMethod === 'bearer_token' && Boolean(state.bearerToken.trim())
+  return hasCustomHeaderEntries(state.headers) || hasBearerToken
 }

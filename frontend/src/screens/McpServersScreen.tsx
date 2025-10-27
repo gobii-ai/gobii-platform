@@ -215,7 +215,6 @@ export function McpServersScreen({
                         )}
                         {server.isActive ? 'Active' : 'Inactive'}
                       </span>
-                      <div className="text-xs text-gray-500 mt-2">{server.scopeLabel} scope</div>
                       {server.authMethod === 'oauth2' && !server.oauthConnected && (
                         <div
                           className={`mt-3 space-y-2 rounded-lg border px-3 py-2 ${
