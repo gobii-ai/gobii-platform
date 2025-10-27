@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Search } from 'lucide-react'
 
@@ -34,19 +34,20 @@ export function AssignServerModal({
   const [searchTerm, setSearchTerm] = useState('')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
-  const assignmentsQuery = useQuery({
+  const assignmentsQuery = useQuery<McpServerAssignmentResponse, unknown>({
     queryKey: ['mcp-server-assignments', assignmentUrl],
     queryFn: () => fetchMcpServerAssignments(assignmentUrl),
   })
+  const { data, isLoading, isError, error } = assignmentsQuery
 
   useEffect(() => {
-    if (assignmentsQuery.data) {
-      const assignedIds = assignmentsQuery.data.agents.filter((agent) => agent.assigned).map((agent) => agent.id)
+    if (data) {
+      const assignedIds = data.agents.filter((agent) => agent.assigned).map((agent) => agent.id)
       setSelected(new Set(assignedIds))
     }
-  }, [assignmentsQuery.data])
+  }, [data])
 
-  const mutation = useMutation({
+  const mutation = useMutation<McpServerAssignmentResponse, unknown, string[]>({
     mutationFn: (agentIds: string[]) => updateMcpServerAssignments(assignmentUrl, agentIds),
     onSuccess: (response) => {
       const message = response.message ?? 'Assignments updated.'
@@ -74,10 +75,10 @@ export function AssignServerModal({
   }
 
   const handleSelectAll = () => {
-    if (!assignmentsQuery.data) {
+    if (!data) {
       return
     }
-    const allIds = assignmentsQuery.data.agents.map((agent) => agent.id)
+    const allIds = data.agents.map((agent) => agent.id)
     setSelected(new Set(allIds))
   }
 
@@ -92,10 +93,10 @@ export function AssignServerModal({
     mutation.mutate(payload)
   }
 
-  const filteredAgents = useFilteredAgents(assignmentsQuery.data, searchTerm)
+  const filteredAgents = useFilteredAgents(data, searchTerm)
 
   const assignedCount = selected.size
-  const totalAgents = assignmentsQuery.data?.totalAgents ?? 0
+  const totalAgents = data?.totalAgents ?? 0
 
   const subtitle = `Assign ${server.displayName} to agents in this ${server.scope === 'organization' ? 'workspace' : 'account'}.`
 
@@ -105,15 +106,15 @@ export function AssignServerModal({
         type="submit"
         form="assign-server-form"
         className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-60"
-        disabled={mutation.isLoading || assignmentsQuery.isLoading}
+        disabled={mutation.isPending || isLoading}
       >
-        {mutation.isLoading ? 'Saving…' : 'Save Assignments'}
+        {mutation.isPending ? 'Saving…' : 'Save Assignments'}
       </button>
       <button
         type="button"
         className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto sm:text-sm"
         onClick={onClose}
-        disabled={mutation.isLoading}
+        disabled={mutation.isPending}
       >
         Cancel
       </button>
@@ -135,14 +136,14 @@ export function AssignServerModal({
           </div>
         )}
 
-        {assignmentsQuery.isLoading ? (
+        {isLoading ? (
           <div className="flex items-center gap-2 py-12 text-sm text-slate-500">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading agents…
           </div>
-        ) : assignmentsQuery.error ? (
+        ) : isError ? (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {resolveErrorMessage(assignmentsQuery.error, 'Failed to load agents for this server.')}
+            {resolveErrorMessage(error, 'Failed to load agents for this server.')}
           </div>
         ) : (
           <div className="space-y-5">
@@ -157,7 +158,7 @@ export function AssignServerModal({
                     type="button"
                     className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
                     onClick={handleSelectAll}
-                    disabled={!assignmentsQuery.data || assignmentsQuery.data.agents.length === 0 || mutation.isLoading}
+                    disabled={!data || data.agents.length === 0 || mutation.isPending}
                   >
                     Select all
                   </button>
@@ -166,7 +167,7 @@ export function AssignServerModal({
                     type="button"
                     className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
                     onClick={handleClearAll}
-                    disabled={selected.size === 0 || mutation.isLoading}
+                    disabled={selected.size === 0 || mutation.isPending}
                   >
                     Clear
                   </button>
@@ -182,7 +183,7 @@ export function AssignServerModal({
                   placeholder="Filter agents"
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
-                  disabled={mutation.isLoading}
+                  disabled={mutation.isPending}
                 />
               </label>
             </div>
@@ -200,7 +201,7 @@ export function AssignServerModal({
                           className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                           checked={selected.has(agent.id)}
                           onChange={() => handleToggle(agent.id)}
-                          disabled={mutation.isLoading}
+                          disabled={mutation.isPending}
                         />
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
