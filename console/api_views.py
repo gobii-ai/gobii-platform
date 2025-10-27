@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import logging
 import secrets
@@ -11,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
+from django.db import IntegrityError
 from django.http import HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -413,22 +412,26 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
         owner_scope, _, owner_user, owner_org = _resolve_mcp_owner(request)
         form = MCPServerConfigForm(payload, allow_commands=False)
         if form.is_valid():
-            server = form.save(user=owner_user, organization=owner_org)
-            manager = get_mcp_manager()
-            manager.refresh_server(str(server.id))
-            _track_org_event_for_console(
-                request,
-                AnalyticsEvent.MCP_SERVER_CREATED,
-                _mcp_server_event_properties(request, server, owner_scope),
-                organization=owner_org,
-            )
-            return JsonResponse(
-                {
-                    "server": _serialize_mcp_server_detail(server, request),
-                    "message": "MCP server saved.",
-                },
-                status=201,
-            )
+            try:
+                server = form.save(user=owner_user, organization=owner_org)
+            except IntegrityError as e:
+                form.add_error("name", "A server with that identifier already exists.")
+            else:
+                manager = get_mcp_manager()
+                manager.refresh_server(str(server.id))
+                _track_org_event_for_console(
+                    request,
+                    AnalyticsEvent.MCP_SERVER_CREATED,
+                    _mcp_server_event_properties(request, server, owner_scope),
+                    organization=owner_org,
+                )
+                return JsonResponse(
+                    {
+                        "server": _serialize_mcp_server_detail(server, request),
+                        "message": "MCP server saved.",
+                    },
+                    status=201,
+                )
 
         return JsonResponse({"errors": _form_errors(form)}, status=400)
 
@@ -449,18 +452,22 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
 
         form = MCPServerConfigForm(payload, instance=server, allow_commands=False)
         if form.is_valid():
-            updated = form.save()
-            get_mcp_manager().refresh_server(str(updated.id))
-            _track_org_event_for_console(
-                request,
-                AnalyticsEvent.MCP_SERVER_UPDATED,
-                _mcp_server_event_properties(request, updated, updated.scope),
-                organization=updated.organization,
-            )
-            return JsonResponse({
-                "server": _serialize_mcp_server_detail(updated, request),
-                "message": "MCP server updated.",
-            })
+            try:
+                updated = form.save()
+            except IntegrityError as e:
+                form.add_error("name", "A server with that identifier already exists.")
+            else:
+                get_mcp_manager().refresh_server(str(updated.id))
+                _track_org_event_for_console(
+                    request,
+                    AnalyticsEvent.MCP_SERVER_UPDATED,
+                    _mcp_server_event_properties(request, updated, updated.scope),
+                    organization=updated.organization,
+                )
+                return JsonResponse({
+                    "server": _serialize_mcp_server_detail(updated, request),
+                    "message": "MCP server updated.",
+                })
 
         return JsonResponse({"errors": _form_errors(form)}, status=400)
 

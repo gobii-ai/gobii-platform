@@ -272,6 +272,70 @@ class MCPServerCrudAPITests(TestCase):
         self.assertIn("errors", payload)
         self.assertIn("url", payload["errors"])
 
+    def test_create_server_duplicate_name_returns_validation_error(self):
+        MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="dup-server",
+            display_name="Dup Server",
+            url="https://dup.example.com/mcp",
+        )
+
+        response = self.client.post(
+            reverse("console-mcp-server-list"),
+            data=json.dumps(
+                {
+                    "display_name": "Dup Server",
+                    "url": "https://another.example.com/mcp",
+                    "auth_method": MCPServerConfig.AuthMethod.NONE,
+                    "is_active": True,
+                    "headers": {},
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertIn("errors", payload)
+        self.assertIn("name", payload["errors"])
+
+    def test_update_server_duplicate_name_returns_validation_error(self):
+        existing = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="existing-server",
+            display_name="Existing Server",
+            url="https://existing.example.com/mcp",
+        )
+        target = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="target-server",
+            display_name="Target Server",
+            url="https://target.example.com/mcp",
+        )
+
+        response = self.client.patch(
+            reverse("console-mcp-server-detail", args=[target.id]),
+            data=json.dumps(
+                {
+                    "display_name": "Renamed Server",
+                    "name": existing.name,
+                    "url": target.url,
+                    "auth_method": MCPServerConfig.AuthMethod.NONE,
+                    "is_active": True,
+                    "headers": {},
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertIn("errors", payload)
+        self.assertIn("name", payload["errors"])
+
 
 @tag("batch_console_mcp_servers")
 class MCPServerAssignmentAPITests(TestCase):
