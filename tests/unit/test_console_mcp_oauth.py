@@ -150,8 +150,9 @@ class MCPOAuthApiTests(TestCase):
         self.assertEqual(payload["issuer"], "https://oauth.example.com")
         mock_httpx_get.assert_called_once()
 
+    @patch("console.api_views.get_mcp_manager")
     @patch("console.api_views.httpx.post")
-    def test_callback_stores_credentials(self, mock_httpx_post):
+    def test_callback_stores_credentials(self, mock_httpx_post, mock_get_manager):
         session = MCPServerOAuthSession.objects.create(
             server_config=self.server,
             initiated_by=self.user,
@@ -199,6 +200,7 @@ class MCPOAuthApiTests(TestCase):
             MCPServerOAuthSession.objects.filter(id=session.id).exists(),
             "OAuth session should be removed after callback completion",
         )
+        mock_get_manager.return_value.initialize.assert_called_once_with(force=True)
 
     def test_callback_page_includes_completion_script(self):
         url = reverse("console-mcp-oauth-callback-view")
@@ -213,7 +215,8 @@ class MCPOAuthApiTests(TestCase):
         payload = response.json()
         self.assertFalse(payload["connected"])
 
-    def test_revoke_deletes_credentials(self):
+    @patch("console.api_views.get_mcp_manager")
+    def test_revoke_deletes_credentials(self, mock_get_manager):
         credential = MCPServerOAuthCredential.objects.create(
             server_config=self.server,
             user=self.user,
@@ -227,6 +230,7 @@ class MCPOAuthApiTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["revoked"])
         self.assertFalse(MCPServerOAuthCredential.objects.filter(id=credential.id).exists())
+        mock_get_manager.return_value.initialize.assert_called_once_with(force=True)
 
     def test_session_verifier_update(self):
         session = MCPServerOAuthSession.objects.create(

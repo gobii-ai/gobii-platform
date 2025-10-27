@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import uuid
 from datetime import timedelta
@@ -54,6 +55,9 @@ from console.agent_chat.timeline import (
 from console.context_helpers import build_console_context
 from console.forms import MCPServerConfigForm
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
+
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_console_endpoints(agent: PersistentAgent, user) -> tuple[str, str]:
@@ -801,6 +805,11 @@ class MCPOAuthCallbackView(LoginRequiredMixin, View):
 
         session.delete()
 
+        try:
+            get_mcp_manager().initialize(force=True)
+        except Exception:
+            logger.exception("Failed to refresh MCP manager after OAuth callback for %s", config.id)
+
         payload = {
             "connected": True,
             "expires_at": credential.expires_at.isoformat() if credential.expires_at else None,
@@ -844,6 +853,10 @@ class MCPOAuthRevokeView(LoginRequiredMixin, View):
             return JsonResponse({"revoked": False, "detail": "No stored credentials found."}, status=404)
 
         credential.delete()
+        try:
+            get_mcp_manager().initialize(force=True)
+        except Exception:
+            logger.exception("Failed to refresh MCP manager after OAuth revoke for %s", config.id)
         return JsonResponse({"revoked": True})
 
 

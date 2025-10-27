@@ -1,9 +1,11 @@
 """Unit tests for MCP tool management functionality."""
 
+import asyncio
 import atexit
 import json
 import time
 import uuid
+from datetime import datetime, timedelta, UTC
 from contextlib import nullcontext
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 from django.test import TestCase, tag, override_settings
@@ -252,6 +254,42 @@ class MCPToolManagerTests(TestCase):
         )
 
         return agent
+
+    def test_register_http_server_includes_oauth_header(self):
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="notion",
+            display_name="Notion",
+            description="",
+            command=None,
+            args=[],
+            url="https://mcp.example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            env={},
+            headers={},
+            oauth_access_token="token-123",
+            oauth_token_type="Bearer",
+            oauth_expires_at=datetime.now(UTC) + timedelta(hours=1),
+            oauth_updated_at=datetime.now(UTC),
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        manager = MCPToolManager()
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+
+        async def _fake_fetch(*args, **kwargs):
+            return []
+
+        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
+                patch.object(manager, "_select_discovery_proxy_url", return_value=None), \
+                patch.object(manager, "_fetch_server_tools", new=_fake_fetch):
+            manager._register_server(runtime)
+        transport = manager._clients[runtime.config_id].transport
+        self.assertEqual(transport.headers.get("Authorization"), "Bearer token-123")
         
     def test_default_enabled_tools_defined(self):
         """Test that default enabled tools list is defined."""

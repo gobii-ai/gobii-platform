@@ -19,7 +19,7 @@ import fnmatch
 import contextlib
 import contextvars
 from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 
 import requests
@@ -34,6 +34,7 @@ from django.db.models import Max
 
 from ...models import (
     MCPServerConfig,
+    MCPServerOAuthCredential,
     PersistentAgent,
     PersistentAgentEnabledTool,
     PipedreamConnectSession,
@@ -81,6 +82,10 @@ class MCPServerRuntime:
     organization_id: Optional[str]
     user_id: Optional[str]
     updated_at: Optional[datetime]
+    oauth_access_token: Optional[str] = field(default=None, repr=False)
+    oauth_token_type: Optional[str] = None
+    oauth_expires_at: Optional[datetime] = None
+    oauth_updated_at: Optional[datetime] = None
 
 
 @dataclass 
@@ -194,7 +199,10 @@ class MCPToolManager:
     def _refresh_server_cache(self) -> None:
         from django.utils import timezone
 
-        configs = list(MCPServerConfig.objects.filter(is_active=True))
+        configs = list(
+            MCPServerConfig.objects.filter(is_active=True)
+            .select_related("oauth_credential")
+        )
         logger.info("Loaded %d active MCP server configs", len(configs))
 
         new_cache: Dict[str, MCPServerRuntime] = {}
@@ -219,8 +227,10 @@ class MCPToolManager:
         failed_configs: List[str] = []
         for config_id, runtime in list(new_cache.items()):
             prior = self._server_cache.get(config_id)
-            if prior and prior.updated_at == runtime.updated_at:
-                continue
+            if prior:
+                prior_oauth_updated = getattr(prior, "oauth_updated_at", None)
+                if prior.updated_at == runtime.updated_at and prior_oauth_updated == runtime.oauth_updated_at:
+                    continue
             self._discard_client(config_id)
             try:
                 self._register_server(runtime)
@@ -248,6 +258,26 @@ class MCPToolManager:
         headers = dict(cfg.headers or {})
         prefetch = list(cfg.prefetch_apps or [])
         metadata = cfg.metadata or {}
+        oauth_access_token: Optional[str] = None
+        oauth_token_type: Optional[str] = None
+        oauth_expires_at: Optional[datetime] = None
+        oauth_updated_at: Optional[datetime] = None
+
+        try:
+            credential = cfg.oauth_credential
+        except MCPServerOAuthCredential.DoesNotExist:
+            credential = None
+        except Exception:
+            logger.exception("Failed to load OAuth credential for MCP server %s", cfg.id)
+            credential = None
+
+        if credential:
+            token_value = (credential.access_token or "").strip()
+            token_type_value = (credential.token_type or "").strip()
+            oauth_access_token = token_value or None
+            oauth_token_type = token_type_value or None
+            oauth_expires_at = credential.expires_at
+            oauth_updated_at = credential.updated_at
 
         fallback_map = metadata.get('env_fallback', {}) if isinstance(metadata, dict) else {}
         for key, env_var in fallback_map.items():
@@ -268,6 +298,10 @@ class MCPToolManager:
             auth_method=cfg.auth_method,
             env=env,
             headers=headers,
+            oauth_access_token=oauth_access_token,
+            oauth_token_type=oauth_token_type,
+            oauth_expires_at=oauth_expires_at,
+            oauth_updated_at=oauth_updated_at,
             prefetch_apps=prefetch,
             scope=cfg.scope,
             organization_id=str(cfg.organization_id) if cfg.organization_id else None,
@@ -293,6 +327,20 @@ class MCPToolManager:
             return httpx.AsyncClient(**client_kwargs)
 
         return factory
+
+    def _build_auth_headers(self, server: MCPServerRuntime) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        if server.auth_method == MCPServerConfig.AuthMethod.OAUTH2:
+            token_value = (server.oauth_access_token or "").strip()
+            if not token_value:
+                logger.info(
+                    "MCP server '%s' is configured for OAuth 2.0 but no access token is stored",
+                    server.name,
+                )
+                return headers
+            token_type = (server.oauth_token_type or "Bearer").strip() or "Bearer"
+            headers["Authorization"] = f"{token_type} {token_value}"
+        return headers
 
     def _select_discovery_proxy_url(self, server: MCPServerRuntime) -> Optional[str]:
         if not server.url:
@@ -375,6 +423,11 @@ class MCPToolManager:
                     "Pipedream discovery initializing with app slug '%s' and sub-agent mode",
                     prefetch_csv,
                 )
+
+            else:
+                auth_headers = self._build_auth_headers(server)
+                if auth_headers:
+                    headers.update(auth_headers)
 
             transport = StreamableHttpTransport(
                 url=server.url,
