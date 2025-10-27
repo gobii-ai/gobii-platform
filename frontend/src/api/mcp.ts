@@ -41,6 +41,29 @@ type McpServerMutationResponseDTO = {
   message?: string
 }
 
+type McpServerAssignmentAgentDTO = {
+  id: string
+  name: string
+  description: string
+  is_active: boolean
+  assigned: boolean
+  organization_id?: string | null
+  last_interaction_at?: string | null
+}
+
+type McpServerAssignmentsResponseDTO = {
+  server: {
+    id: string
+    display_name: string
+    scope: string
+    scope_label: string
+  }
+  agents: McpServerAssignmentAgentDTO[]
+  total_agents: number
+  assigned_count: number
+  message?: string
+}
+
 export type McpServer = {
   id: string
   name: string
@@ -90,6 +113,29 @@ export type McpServerPayload = {
   command_args?: string[]
 }
 
+export type McpServerAssignmentAgent = {
+  id: string
+  name: string
+  description: string
+  isActive: boolean
+  assigned: boolean
+  organizationId: string | null
+  lastInteractionAt: string | null
+}
+
+export type McpServerAssignmentResponse = {
+  server: {
+    id: string
+    displayName: string
+    scope: string
+    scopeLabel: string
+  }
+  agents: McpServerAssignmentAgent[]
+  totalAgents: number
+  assignedCount: number
+  message?: string
+}
+
 const mapServer = (server: McpServerDTO): McpServer => ({
   id: server.id,
   name: server.name,
@@ -120,6 +166,27 @@ const mapServerDetail = (server: McpServerDetailDTO): McpServerDetail => ({
   prefetchApps: Array.isArray(server.prefetch_apps) ? server.prefetch_apps : [],
   oauthStatusUrl: server.oauth_status_url,
   oauthRevokeUrl: server.oauth_revoke_url,
+})
+
+const mapAssignments = (payload: McpServerAssignmentsResponseDTO): McpServerAssignmentResponse => ({
+  server: {
+    id: payload.server.id,
+    displayName: payload.server.display_name,
+    scope: payload.server.scope,
+    scopeLabel: payload.server.scope_label,
+  },
+  agents: (payload.agents ?? []).map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    description: agent.description ?? '',
+    isActive: agent.is_active,
+    assigned: Boolean(agent.assigned),
+    organizationId: agent.organization_id ?? null,
+    lastInteractionAt: agent.last_interaction_at ?? null,
+  })),
+  totalAgents: payload.total_agents ?? 0,
+  assignedCount: payload.assigned_count ?? 0,
+  message: payload.message,
 })
 
 export async function fetchMcpServers(listUrl: string): Promise<McpServerListResponse> {
@@ -160,4 +227,18 @@ export async function deleteMcpServer(detailUrl: string): Promise<void> {
     method: 'DELETE',
     includeCsrf: true,
   })
+}
+
+export async function fetchMcpServerAssignments(assignmentsUrl: string): Promise<McpServerAssignmentResponse> {
+  const payload = await jsonFetch<McpServerAssignmentsResponseDTO>(assignmentsUrl)
+  return mapAssignments(payload)
+}
+
+export async function updateMcpServerAssignments(assignmentsUrl: string, agentIds: string[]): Promise<McpServerAssignmentResponse> {
+  const payload = await jsonRequest<McpServerAssignmentsResponseDTO>(assignmentsUrl, {
+    method: 'POST',
+    includeCsrf: true,
+    json: { agent_ids: agentIds },
+  })
+  return mapAssignments(payload)
 }

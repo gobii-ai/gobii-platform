@@ -1,4 +1,5 @@
 import json
+from contextlib import ExitStack
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -7,7 +8,16 @@ from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 
-from api.models import MCPServerConfig, MCPServerOAuthSession, Organization, OrganizationMembership
+from api.models import (
+    MCPServerConfig,
+    MCPServerOAuthSession,
+    Organization,
+    OrganizationMembership,
+    BrowserUseAgent,
+    PersistentAgent,
+    PersistentAgentEnabledTool,
+    PersistentAgentMCPServer,
+)
 from console.forms import MCPServerConfigForm
 from util.analytics import AnalyticsEvent
 
@@ -261,6 +271,181 @@ class MCPServerCrudAPITests(TestCase):
         payload = response.json()
         self.assertIn("errors", payload)
         self.assertIn("url", payload["errors"])
+
+
+@tag("batch_console_mcp_servers")
+class MCPServerAssignmentAPITests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="assign-user",
+            email="assign@example.com",
+            password="test-pass-123",
+        )
+        self.client.force_login(self.user)
+
+    def _create_agent(self, *, user, organization=None, name: str) -> PersistentAgent:
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(BrowserUseAgent, "select_random_proxy", return_value=None))
+            if organization is not None:
+                stack.enter_context(patch.object(PersistentAgent, "_validate_org_seats", return_value=None))
+            browser = BrowserUseAgent.objects.create(user=user, name=f"{name}-browser")
+            return PersistentAgent.objects.create(
+                user=user,
+                organization=organization,
+                name=name,
+                charter="",
+                browser_use_agent=browser,
+            )
+
+    def _set_org_context(self, org: Organization):
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(org.id)
+        session["context_name"] = org.name
+        session.save()
+
+    def test_get_assignments_user_scope(self):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="user-scope-server",
+            display_name="User Scope",
+            url="https://user.example.com/mcp",
+        )
+        agent_one = self._create_agent(user=self.user, name="Alpha")
+        agent_two = self._create_agent(user=self.user, name="Beta")
+        PersistentAgentMCPServer.objects.create(agent=agent_one, server_config=server)
+
+        response = self.client.get(reverse("console-mcp-server-assignments", args=[server.id]))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["server"]["id"], str(server.id))
+        self.assertEqual(payload["total_agents"], 2)
+        self.assertEqual(payload["assigned_count"], 1)
+        records = {record["id"]: record for record in payload["agents"]}
+        self.assertTrue(records[str(agent_one.id)]["assigned"])
+        self.assertFalse(records[str(agent_two.id)]["assigned"])
+
+    @patch("console.api_views.get_mcp_manager")
+    def test_update_assignments_user_scope(self, mock_get_mcp_manager):
+        mock_get_mcp_manager.return_value.initialize.return_value = None
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="user-update-server",
+            display_name="User Update",
+            url="https://update.example.com/mcp",
+        )
+        agent_one = self._create_agent(user=self.user, name="One")
+        agent_two = self._create_agent(user=self.user, name="Two")
+        PersistentAgentMCPServer.objects.create(agent=agent_one, server_config=server)
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent_one,
+            tool_full_name="demo.tool",
+            tool_name="demo",
+            server_config=server,
+        )
+
+        url = reverse("console-mcp-server-assignments", args=[server.id])
+        response = self.client.post(
+            url,
+            data=json.dumps({"agent_ids": [str(agent_two.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["assigned_count"], 1)
+        self.assertEqual(payload["message"], "Assignments updated.")
+
+        assigned_ids = {
+            str(agent_id)
+            for agent_id in PersistentAgentMCPServer.objects.filter(server_config=server).values_list("agent_id", flat=True)
+        }
+        self.assertEqual(assigned_ids, {str(agent_two.id)})
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(agent=agent_one, server_config=server).exists()
+        )
+
+    @patch("console.api_views.get_mcp_manager")
+    def test_update_assignments_org_scope(self, mock_get_mcp_manager):
+        mock_get_mcp_manager.return_value.initialize.return_value = None
+        org = Organization.objects.create(name="Org Assign", slug="org-assign", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        self._set_org_context(org)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.ORGANIZATION,
+            organization=org,
+            name="org-assign",
+            display_name="Org Assign Server",
+            url="https://org.example.com/mcp",
+        )
+        agent_one = self._create_agent(user=self.user, organization=org, name="Org One")
+        agent_two = self._create_agent(user=self.user, organization=org, name="Org Two")
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent_two,
+            tool_full_name="demo.tool",
+            tool_name="demo",
+            server_config=server,
+        )
+
+        url = reverse("console-mcp-server-assignments", args=[server.id])
+        response = self.client.post(
+            url,
+            data=json.dumps({"agent_ids": [str(agent_one.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["assigned_count"], 1)
+        records = {record["id"]: record for record in payload["agents"]}
+        self.assertTrue(records[str(agent_one.id)]["assigned"])
+        self.assertFalse(records[str(agent_two.id)]["assigned"])
+
+        assigned = PersistentAgentMCPServer.objects.filter(server_config=server).values_list("agent_id", flat=True)
+        self.assertEqual({str(agent_one.id)}, {str(agent_id) for agent_id in assigned})
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(agent=agent_two, server_config=server).exists()
+        )
+
+    def test_assignments_platform_scope_blocked(self):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-server",
+            display_name="Platform",
+            url="https://platform.example.com/mcp",
+        )
+
+        response = self.client.get(reverse("console-mcp-server-assignments", args=[server.id]))
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch("console.api_views.get_mcp_manager")
+    def test_update_assignments_rejects_invalid_agents(self, mock_get_mcp_manager):
+        mock_get_mcp_manager.return_value.initialize.return_value = None
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="invalid-agent-server",
+            display_name="Invalid Agent",
+            url="https://invalid.example.com/mcp",
+        )
+        url = reverse("console-mcp-server-assignments", args=[server.id])
+
+        response = self.client.post(
+            url,
+            data=json.dumps({"agent_ids": ["not-a-real-id"]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid agent ids", response.content.decode())
 
 
 @tag("batch_console_mcp_servers")

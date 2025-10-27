@@ -55,6 +55,7 @@ from console.agent_chat.timeline import (
 from console.context_helpers import build_console_context
 from console.forms import MCPServerConfigForm
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
+from api.services import mcp_servers as mcp_server_service
 
 
 logger = logging.getLogger(__name__)
@@ -852,6 +853,78 @@ class MCPOAuthRevokeView(LoginRequiredMixin, View):
         except Exception:
             logger.exception("Failed to refresh MCP manager after OAuth revoke for %s", config.id)
         return JsonResponse({"revoked": True})
+
+
+class MCPServerAssignmentsAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get", "post"]
+
+    def _serialize_assignments(self, server: MCPServerConfig) -> dict[str, object]:
+        assignable = list(mcp_server_service.assignable_agents(server))
+        assigned_ids = mcp_server_service.server_assignment_agent_ids(server)
+        agents_payload = []
+        assigned_count = 0
+        for agent in assignable:
+            agent_id = str(agent.id)
+            is_assigned = agent_id in assigned_ids
+            if is_assigned:
+                assigned_count += 1
+            agents_payload.append(
+                {
+                    "id": agent_id,
+                    "name": agent.name,
+                    "description": agent.short_description or "",
+                    "is_active": agent.is_active,
+                    "assigned": is_assigned,
+                    "organization_id": str(agent.organization_id) if agent.organization_id else None,
+                    "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
+                }
+            )
+        return {
+            "server": {
+                "id": str(server.id),
+                "display_name": server.display_name,
+                "scope": server.scope,
+                "scope_label": server.get_scope_display(),
+            },
+            "agents": agents_payload,
+            "total_agents": len(assignable),
+            "assigned_count": assigned_count,
+        }
+
+    def get(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_mcp_server_config(request, server_id)
+        if server.scope == MCPServerConfig.Scope.PLATFORM:
+            return HttpResponseBadRequest("Platform-managed servers do not support manual assignments.")
+        payload = self._serialize_assignments(server)
+        return JsonResponse(payload)
+
+    def post(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_mcp_server_config(request, server_id)
+        if server.scope == MCPServerConfig.Scope.PLATFORM:
+            return HttpResponseBadRequest("Platform-managed servers do not support manual assignments.")
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        agent_ids_raw = payload.get("agent_ids", [])
+        if not isinstance(agent_ids_raw, list):
+            return HttpResponseBadRequest("agent_ids must be a list.")
+        agent_ids = [str(agent_id) for agent_id in agent_ids_raw]
+
+        try:
+            mcp_server_service.set_server_assignments(server, agent_ids)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        try:
+            get_mcp_manager().initialize(force=True)
+        except Exception:
+            logger.exception("Failed to refresh MCP manager after updating assignments for %s", server.id)
+
+        response_payload = self._serialize_assignments(server)
+        response_payload["message"] = "Assignments updated."
+        return JsonResponse(response_payload)
 
 
 def _parse_ttl(payload: dict | None) -> int:

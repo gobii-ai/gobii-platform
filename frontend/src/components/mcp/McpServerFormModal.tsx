@@ -236,7 +236,7 @@ export function McpServerFormModal({
       widthClass="sm:max-w-3xl"
       icon={ServerCog}
     >
-      <form id="mcp-server-form" className="space-y-6" onSubmit={handleSubmit}>
+      <form id="mcp-server-form" className="space-y-6 p-1" onSubmit={handleSubmit}>
         {(statusMessage || nonFieldErrors.length > 0) && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 space-y-1">
             {statusMessage && <p>{statusMessage}</p>}

@@ -10,6 +10,7 @@
        data-app="mcp-servers"
        data-list-url="{% url 'console-mcp-server-list' %}"
        data-detail-url-template="{% url 'console-mcp-server-detail' placeholder_id %}"
+       data-assign-url-template="{% url 'console-mcp-server-assignments' placeholder_id %}"
        data-owner-scope="{{ owner_scope }}"
        data-owner-label="{{ owner_label|escape }}"
        data-oauth-start-url="{% url 'console-mcp-oauth-start' %}"

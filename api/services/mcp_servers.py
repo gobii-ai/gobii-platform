@@ -1,8 +1,8 @@
 """Helpers for resolving MCP server availability for agents."""
 
-from typing import Iterable, List, Dict, Any
+from typing import Iterable, Iterable as IterableType, List, Dict, Any, Set
 
-from django.db.models import Q
+from django.db import transaction
 
 from api.models import (
     MCPServerConfig,
@@ -48,7 +48,7 @@ def personal_server_configs(user_id) -> Iterable[MCPServerConfig]:
 
 
 def agent_enabled_personal_server_ids(agent: PersistentAgent) -> List[str]:
-    """Return MCP server IDs explicitly enabled for the agent (user scope)."""
+    """Return MCP server IDs explicitly enabled for the agent."""
 
     return [
         str(server_id)
@@ -57,24 +57,129 @@ def agent_enabled_personal_server_ids(agent: PersistentAgent) -> List[str]:
     ]
 
 
+def _assignable_agents_queryset(server: MCPServerConfig):
+    """Return queryset of agents eligible for assignment to the given server."""
+
+    if server.scope == MCPServerConfig.Scope.USER:
+        if not server.user_id:
+            return PersistentAgent.objects.none()
+        return PersistentAgent.objects.filter(user_id=server.user_id, organization_id__isnull=True)
+    if server.scope == MCPServerConfig.Scope.ORGANIZATION:
+        if not server.organization_id:
+            return PersistentAgent.objects.none()
+        return PersistentAgent.objects.filter(organization_id=server.organization_id)
+    return PersistentAgent.objects.none()
+
+
+def assignable_agents(server: MCPServerConfig):
+    """Return agents eligible for assignment to the given server."""
+
+    return _assignable_agents_queryset(server).order_by('name', 'created_at')
+
+
+def server_assignment_agent_ids(server: MCPServerConfig) -> Set[str]:
+    """Return the set of agent IDs explicitly assigned to this server."""
+
+    return {
+        str(agent_id)
+        for agent_id in PersistentAgentMCPServer.objects.filter(server_config=server)
+        .values_list('agent_id', flat=True)
+    }
+
+
+def set_server_assignments(server: MCPServerConfig, desired_agent_ids: IterableType[str]) -> None:
+    """Assign the given server to the provided collection of agents."""
+
+    if server.scope == MCPServerConfig.Scope.PLATFORM:
+        raise ValueError("Platform-scoped servers cannot be assigned manually.")
+
+    desired_set = {str(agent_id) for agent_id in desired_agent_ids}
+    assignable_qs = _assignable_agents_queryset(server)
+    assignable_map = {
+        str(agent.id): agent for agent in assignable_qs.only('id')
+    }
+
+    invalid = desired_set - set(assignable_map.keys())
+    if invalid:
+        raise ValueError(f"Invalid agent ids for this server: {', '.join(sorted(invalid))}")
+
+    existing = server_assignment_agent_ids(server)
+    to_add = desired_set - existing
+    to_remove = existing - desired_set
+
+    if not to_add and not to_remove:
+        return
+
+    with transaction.atomic():
+        if to_add:
+            PersistentAgentMCPServer.objects.bulk_create(
+                [
+                    PersistentAgentMCPServer(agent_id=agent_id, server_config=server)
+                    for agent_id in to_add
+                ],
+                ignore_conflicts=True,
+            )
+
+        if to_remove:
+            PersistentAgentMCPServer.objects.filter(
+                agent_id__in=to_remove,
+                server_config=server,
+            ).delete()
+            PersistentAgentEnabledTool.objects.filter(
+                agent_id__in=to_remove,
+                server_config=server,
+            ).delete()
+
+        unassigned_ids = set(assignable_map.keys()) - desired_set
+        if unassigned_ids:
+            PersistentAgentEnabledTool.objects.filter(
+                agent_id__in=unassigned_ids,
+                server_config=server,
+            ).delete()
+
+
+
 def agent_accessible_server_configs(agent: PersistentAgent) -> List[MCPServerConfig]:
     """Collect all MCP server configs accessible to the agent."""
 
-    filters = Q(scope=MCPServerConfig.Scope.PLATFORM)
+    assigned_ids = set(agent_enabled_personal_server_ids(agent))
+    configs: list[MCPServerConfig] = []
+    seen: Set[str] = set()
 
+    def _add(cfg: MCPServerConfig):
+        server_id = str(cfg.id)
+        if server_id in seen:
+            return
+        seen.add(server_id)
+        configs.append(cfg)
+
+    for cfg in platform_server_configs():
+        _add(cfg)
+
+    explicit_org_server_ids: Set[str] = set()
     if agent.organization_id:
-        filters |= Q(
-            scope=MCPServerConfig.Scope.ORGANIZATION,
-            organization_id=agent.organization_id,
-        )
+        explicit_org_server_ids = {
+            str(server_id)
+            for server_id in PersistentAgentMCPServer.objects.filter(
+                server_config__scope=MCPServerConfig.Scope.ORGANIZATION,
+                server_config__organization_id=agent.organization_id,
+            ).values_list('server_config_id', flat=True)
+        }
+        for cfg in organization_server_configs(agent.organization_id):
+            server_id = str(cfg.id)
+            if server_id in explicit_org_server_ids and server_id not in assigned_ids:
+                continue
+            _add(cfg)
 
-    personal_ids = agent_enabled_personal_server_ids(agent)
-    if personal_ids:
-        filters |= Q(id__in=personal_ids)
+    for cfg in personal_server_configs(agent.user_id):
+        server_id = str(cfg.id)
+        if server_id not in assigned_ids:
+            continue
+        _add(cfg)
 
-    return list(
-        MCPServerConfig.objects.filter(filters, is_active=True)
-        .order_by('display_name', 'name')
+    return sorted(
+        configs,
+        key=lambda cfg: ((cfg.display_name or '').lower(), (cfg.name or '').lower()),
     )
 
 
@@ -82,8 +187,17 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
     """Return structured info about MCP servers available to an agent."""
 
     overview: List[Dict[str, Any]] = []
+    assigned_ids = set(agent_enabled_personal_server_ids(agent))
 
-    personal_ids = set(agent_enabled_personal_server_ids(agent))
+    explicit_org_server_ids: Set[str] = set()
+    if agent.organization_id:
+        explicit_org_server_ids = {
+            str(server_id)
+            for server_id in PersistentAgentMCPServer.objects.filter(
+                server_config__scope=MCPServerConfig.Scope.ORGANIZATION,
+                server_config__organization_id=agent.organization_id,
+            ).values_list('server_config_id', flat=True)
+        }
 
     for cfg in platform_server_configs():
         overview.append(
@@ -92,16 +206,24 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
 
     if agent.organization_id:
         for cfg in organization_server_configs(agent.organization_id):
+            server_id = str(cfg.id)
+            explicit = server_id in explicit_org_server_ids
+            assigned = server_id in assigned_ids or not explicit
             overview.append(
-                _serialize_config(cfg, inherited=True, assigned=True)
+                _serialize_config(
+                    cfg,
+                    inherited=not explicit,
+                    assigned=assigned,
+                )
             )
 
     for cfg in personal_server_configs(agent.user_id):
+        server_id = str(cfg.id)
         overview.append(
             _serialize_config(
                 cfg,
                 inherited=False,
-                assigned=str(cfg.id) in personal_ids,
+                assigned=server_id in assigned_ids,
             )
         )
 

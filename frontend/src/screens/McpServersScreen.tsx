@@ -8,12 +8,14 @@ import {
   type McpServerListResponse,
 } from '../api/mcp'
 import { McpServerFormModal } from '../components/mcp/McpServerFormModal'
+import { AssignServerModal } from '../components/mcp/AssignServerModal'
 import { DeleteServerDialog } from '../components/mcp/DeleteServerDialog'
 import { useModal } from '../hooks/useModal'
 
 type McpServersScreenProps = {
   listUrl: string
   detailUrlTemplate: string
+  assignmentUrlTemplate: string
   ownerScope?: string
   ownerLabel?: string
   oauthStartUrl: string
@@ -26,6 +28,7 @@ const PLACEHOLDER_TOKEN = '00000000-0000-0000-0000-000000000000'
 export function McpServersScreen({
   listUrl,
   detailUrlTemplate,
+  assignmentUrlTemplate,
   ownerScope,
   ownerLabel,
   oauthStartUrl,
@@ -120,6 +123,25 @@ export function McpServersScreen({
       oauthMetadataUrl,
       oauthCallbackPath,
     ],
+  )
+
+  const openAssignModal = useCallback(
+    (server: McpServer) => {
+      if (server.scope === 'platform') {
+        return
+      }
+      const assignmentUrl = buildUrl(assignmentUrlTemplate, server.id)
+      showModal((onClose) => (
+        <AssignServerModal
+          server={server}
+          assignmentUrl={assignmentUrl}
+          onClose={onClose}
+          onSuccess={(message) => handleSuccess(message || 'MCP server assignments updated.')}
+          onError={handleError}
+        />
+      ))
+    },
+    [showModal, assignmentUrlTemplate, handleSuccess, handleError],
   )
 
   const openDeleteModal = useCallback(
@@ -247,6 +269,15 @@ export function McpServersScreen({
                     </td>
                     <td className="px-3 md:px-6 py-4 align-top text-right">
                       <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+                        {server.scope !== 'platform' && (
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center rounded-lg border border-indigo-200 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+                            onClick={() => openAssignModal(server)}
+                          >
+                            Assign Agents
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="inline-flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
