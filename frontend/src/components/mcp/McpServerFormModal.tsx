@@ -1,9 +1,18 @@
+import type { Dispatch, FormEvent, SetStateAction } from 'react'
 import { Fragment, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Loader2, ServerCog } from 'lucide-react'
 
-import type { McpServerDetail, McpServerPayload } from '../../api/mcp'
-import { Modal } from '../common/Modal'
+import {
+  createMcpServer,
+  fetchMcpServerDetail,
+  updateMcpServer,
+  type McpServerDetail,
+  type McpServerPayload,
+} from '../../api/mcp'
+import { HttpError } from '../../api/http'
 import { useMcpOAuth } from '../../hooks/useMcpOAuth'
+import { Modal } from '../common/Modal'
 
 type HeaderEntry = { key: string; value: string }
 
@@ -11,13 +20,12 @@ type FormErrors = Record<string, string[]>
 
 type McpServerFormModalProps = {
   mode: 'create' | 'edit'
-  server?: McpServerDetail
-  loading?: boolean
-  isSubmitting: boolean
+  listUrl: string
+  detailUrl?: string
   ownerScope?: string
   onClose: () => void
-  onSubmit: (payload: McpServerPayload) => Promise<void>
-  errorResponse?: FormErrors | null
+  onSuccess: (message: string) => void
+  onError: (message: string) => void
   oauth: {
     startUrl: string
     metadataUrl: string
@@ -40,20 +48,37 @@ const createBlankHeaders = (): HeaderEntry[] => [{ ...BLANK_HEADER }]
 
 export function McpServerFormModal({
   mode,
-  server,
-  loading,
-  isSubmitting,
+  listUrl,
+  detailUrl,
   ownerScope,
   onClose,
-  onSubmit,
-  errorResponse,
+  onSuccess,
+  onError,
   oauth,
 }: McpServerFormModalProps) {
-  const [state, setState] = useState<FormState>(() => getInitialState(server))
+  const [state, setState] = useState<FormState>(() => getInitialState())
+  const [formErrors, setFormErrors] = useState<FormErrors | null>(null)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [oauthScope, setOauthScope] = useState('')
   const [useCustomClient, setUseCustomClient] = useState(false)
+
+  const shouldFetchDetail = mode === 'edit' && Boolean(detailUrl)
+  const detailQuery = useQuery({
+    queryKey: ['mcp-server-detail', detailUrl],
+    queryFn: () => fetchMcpServerDetail(detailUrl!),
+    enabled: shouldFetchDetail,
+  })
+
+  const server = detailQuery.data
+
+  useEffect(() => {
+    if (mode === 'edit' && server) {
+      setState(getInitialState(server))
+    }
+  }, [mode, server])
 
   const oauthStore = useMcpOAuth({
     serverId: mode === 'edit' ? server?.id : undefined,
@@ -67,47 +92,14 @@ export function McpServerFormModal({
   })
 
   useEffect(() => {
-    if (server) {
-      setState(getInitialState(server))
-    }
-  }, [server])
-
-  useEffect(() => {
     if (oauthStore.requiresManualClient) {
       setUseCustomClient(true)
     }
   }, [oauthStore.requiresManualClient])
 
-  const nonFieldErrors = errorResponse?.non_field_errors || []
+  const nonFieldErrors = formErrors?.non_field_errors ?? []
 
-  const handleDisplayNameChange = (value: string) => {
-    setState((prev) => ({
-      ...prev,
-      displayName: value,
-      slug: mode === 'create' ? slugify(value) : prev.slug,
-    }))
-  }
-
-  const handleHeaderChange = (index: number, key: 'key' | 'value', value: string) => {
-    setState((prev) => {
-      const headers = [...prev.headers]
-      headers[index] = { ...headers[index], [key]: value }
-      return { ...prev, headers }
-    })
-  }
-
-  const addHeaderRow = () => {
-    setState((prev) => ({ ...prev, headers: [...prev.headers, { key: '', value: '' }] }))
-  }
-
-  const removeHeaderRow = (index: number) => {
-    setState((prev) => {
-      const headers = prev.headers.filter((_, idx) => idx !== index)
-      return { ...prev, headers: headers.length ? headers : createBlankHeaders() }
-    })
-  }
-
-  const handleSubmit = async (event: React.FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     const payload: McpServerPayload = {
       display_name: state.displayName.trim(),
@@ -121,18 +113,51 @@ export function McpServerFormModal({
       command: '',
       command_args: [],
     }
-    await onSubmit(payload)
+
+    setFormErrors(null)
+    setStatusMessage(null)
+    setIsSubmitting(true)
+
+    try {
+      if (mode === 'create') {
+        await createMcpServer(listUrl, payload)
+        onSuccess('MCP server saved.')
+      } else if (detailUrl) {
+        await updateMcpServer(detailUrl, payload)
+        onSuccess('MCP server updated.')
+      } else {
+        throw new Error('Missing detail URL for edit modal.')
+      }
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 400 && isErrorBody(error.body)) {
+        setFormErrors(error.body.errors || null)
+        if (error.body.message) {
+          setStatusMessage(error.body.message)
+          onError(error.body.message)
+        }
+      } else {
+        const fallback = mode === 'create' ? 'Unable to save MCP server.' : 'Unable to update MCP server.'
+        const message = resolveErrorMessage(error, fallback)
+        setStatusMessage(message)
+        onError(message)
+      }
+      return
+    } finally {
+      setIsSubmitting(false)
+    }
+
+    onClose()
   }
 
-  const formTitle = mode === 'create' ? 'Add MCP Server' : `Edit ${server?.displayName ?? 'MCP Server'}`
-
+  const formTitle =
+    mode === 'create' ? 'Add MCP Server' : `Edit ${server?.displayName ?? 'MCP Server'}`
   const ownerLabelText = ownerScope === 'organization' ? 'your organization' : 'your workspace'
   const modalSubtitle =
     mode === 'create'
       ? `Connect a new MCP integration for ${ownerLabelText}.`
       : `Update connection and OAuth settings for ${server?.displayName ?? 'this MCP server'}.`
 
-  if (loading) {
+  if (mode === 'edit' && detailQuery.isLoading) {
     return (
       <Modal
         title={formTitle}
@@ -145,6 +170,24 @@ export function McpServerFormModal({
         <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading configuration…
+        </div>
+      </Modal>
+    )
+  }
+
+  if (mode === 'edit' && detailQuery.error) {
+    const message = resolveErrorMessage(detailQuery.error, 'Failed to load MCP server details.')
+    return (
+      <Modal
+        title={formTitle}
+        subtitle={modalSubtitle}
+        onClose={onClose}
+        icon={Loader2}
+        iconBgClass="bg-red-100"
+        iconColorClass="text-red-600"
+      >
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {message}
         </div>
       </Modal>
     )
@@ -164,6 +207,7 @@ export function McpServerFormModal({
         type="button"
         className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto sm:text-sm"
         onClick={onClose}
+        disabled={isSubmitting}
       >
         Cancel
       </button>
@@ -180,8 +224,9 @@ export function McpServerFormModal({
       icon={ServerCog}
     >
       <form id="mcp-server-form" className="space-y-6" onSubmit={handleSubmit}>
-        {nonFieldErrors.length > 0 && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        {(statusMessage || nonFieldErrors.length > 0) && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 space-y-1">
+            {statusMessage && <p>{statusMessage}</p>}
             {nonFieldErrors.map((error) => (
               <p key={error}>{error}</p>
             ))}
@@ -195,16 +240,25 @@ export function McpServerFormModal({
               type="text"
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
               value={state.displayName}
-              onChange={(event) => handleDisplayNameChange(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value
+                setState((prev) => ({
+                  ...prev,
+                  displayName: value,
+                  slug: mode === 'create' ? slugify(value) : prev.slug,
+                }))
+              }}
               required
             />
-            <p className="text-xs text-slate-500">Identifier: <span className="font-mono text-slate-700">{state.slug || 'auto-generated'}</span></p>
-            {getFieldErrors('display_name', errorResponse).map((error) => (
+            <p className="text-xs text-slate-500">
+              Identifier: <span className="font-mono text-slate-700">{state.slug || 'auto-generated'}</span>
+            </p>
+            {getFieldErrors('display_name', formErrors).map((error) => (
               <p key={error} className="text-xs text-red-600">
                 {error}
               </p>
             ))}
-            {getFieldErrors('name', errorResponse).map((error) => (
+            {getFieldErrors('name', formErrors).map((error) => (
               <p key={error} className="text-xs text-red-600">
                 {error}
               </p>
@@ -235,7 +289,7 @@ export function McpServerFormModal({
               <option value="bearer_token">Bearer Token</option>
               <option value="oauth2">OAuth 2.0</option>
             </select>
-            {getFieldErrors('auth_method', errorResponse).map((error) => (
+            {getFieldErrors('auth_method', formErrors).map((error) => (
               <p key={error} className="text-xs text-red-600">
                 {error}
               </p>
@@ -259,7 +313,7 @@ export function McpServerFormModal({
             required
           />
           <p className="text-xs text-slate-500">HTTPS URL for the remote MCP server.</p>
-          {getFieldErrors('url', errorResponse).map((error) => (
+          {getFieldErrors('url', formErrors).map((error) => (
             <p key={error} className="text-xs text-red-600">
               {error}
             </p>
@@ -275,7 +329,7 @@ export function McpServerFormModal({
             <button
               type="button"
               className="text-sm font-medium text-blue-600 hover:text-blue-700"
-              onClick={addHeaderRow}
+              onClick={() => setState((prev) => ({ ...prev, headers: [...prev.headers, { ...BLANK_HEADER }] }))}
             >
               Add Header
             </button>
@@ -289,7 +343,7 @@ export function McpServerFormModal({
                     type="text"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
                     value={entry.key}
-                    onChange={(event) => handleHeaderChange(index, 'key', event.target.value)}
+                    onChange={(event) => handleHeaderChange(index, 'key', event.target.value, setState)}
                   />
                 </div>
                 <div className="sm:flex-1">
@@ -298,14 +352,19 @@ export function McpServerFormModal({
                     type="text"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
                     value={entry.value}
-                    onChange={(event) => handleHeaderChange(index, 'value', event.target.value)}
+                    onChange={(event) => handleHeaderChange(index, 'value', event.target.value, setState)}
                   />
                 </div>
                 <div className="sm:w-auto sm:self-end">
                   <button
                     type="button"
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-                    onClick={() => removeHeaderRow(index)}
+                    onClick={() =>
+                      setState((prev) => {
+                        const headers = prev.headers.filter((_, idx) => idx !== index)
+                        return { ...prev, headers: headers.length ? headers : createBlankHeaders() }
+                      })
+                    }
                   >
                     Remove
                   </button>
@@ -313,7 +372,7 @@ export function McpServerFormModal({
               </div>
             ))}
           </div>
-          {getFieldErrors('headers', errorResponse).map((error) => (
+          {getFieldErrors('headers', formErrors).map((error) => (
             <p key={error} className="text-xs text-red-600">
               {error}
             </p>
@@ -327,8 +386,14 @@ export function McpServerFormModal({
             {mode === 'edit' && state.authMethod !== 'oauth2' && <p>Select OAuth 2.0 to enable this integration.</p>}
             {mode === 'edit' && state.authMethod === 'oauth2' && (
               <div className="space-y-1">
-                <p>Status: <span className="font-semibold">{statusLabel(oauthStore.status)}</span></p>
-                {oauthStore.scope && <p>Scope: <span className="font-mono">{oauthStore.scope}</span></p>}
+                <p>
+                  Status: <span className="font-semibold">{statusLabel(oauthStore.status)}</span>
+                </p>
+                {oauthStore.scope && (
+                  <p>
+                    Scope: <span className="font-mono">{oauthStore.scope}</span>
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -461,6 +526,19 @@ function headersToObject(entries: HeaderEntry[]): Record<string, string> {
   return result
 }
 
+function handleHeaderChange(
+  index: number,
+  key: 'key' | 'value',
+  value: string,
+  setState: Dispatch<SetStateAction<FormState>>,
+) {
+  setState((prev) => {
+    const headers = [...prev.headers]
+    headers[index] = { ...headers[index], [key]: value }
+    return { ...prev, headers }
+  })
+}
+
 function slugify(value: string): string {
   const normalized = value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
   return normalized
@@ -499,3 +577,26 @@ function statusLabel(status: OAuthStatus): string {
 }
 
 type OAuthStatus = ReturnType<typeof useMcpOAuth>['status']
+
+function isErrorBody(payload: unknown): payload is { errors?: FormErrors; message?: string } {
+  if (!payload || typeof payload !== 'object') {
+    return false
+  }
+  const record = payload as Record<string, unknown>
+  return 'errors' in record || 'message' in record
+}
+
+function resolveErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof HttpError) {
+    if (typeof error.body === 'string' && error.body) {
+      return error.body
+    }
+    if (typeof error.statusText === 'string' && error.statusText) {
+      return error.statusText
+    }
+  }
+  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
+    return (error as { message: string }).message
+  }
+  return fallback
+}

@@ -61,7 +61,7 @@ export function Modal({
           role="dialog"
           aria-modal="true"
           aria-labelledby="modal-title"
-          className={`relative z-50 w-full transform rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 ${widthClass}`}
+          className={`relative z-50 w-full transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 ${widthClass}`}
         >
           <div className="px-6 py-5 sm:px-8">
             <div className="sm:flex sm:items-start sm:gap-4">
