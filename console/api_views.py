@@ -478,7 +478,6 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
         return JsonResponse({"message": f"MCP server '{server_name}' was deleted."})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class MCPOAuthStartView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
@@ -599,7 +598,6 @@ class MCPOAuthStartView(LoginRequiredMixin, View):
         return str(client_id), str(client_secret)
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class MCPOAuthSessionVerifierView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
@@ -624,7 +622,6 @@ class MCPOAuthSessionVerifierView(LoginRequiredMixin, View):
         return JsonResponse({"status": "ok"})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class MCPOAuthMetadataProxyView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
@@ -688,7 +685,6 @@ class MCPOAuthMetadataProxyView(LoginRequiredMixin, View):
         )
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class MCPOAuthCallbackView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
@@ -819,7 +815,6 @@ class MCPOAuthCallbackView(LoginRequiredMixin, View):
         return JsonResponse(payload, status=200)
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class MCPOAuthStatusView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
@@ -841,7 +836,6 @@ class MCPOAuthStatusView(LoginRequiredMixin, View):
         return JsonResponse(payload)
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class MCPOAuthRevokeView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
