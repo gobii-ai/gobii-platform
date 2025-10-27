@@ -5,26 +5,43 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from unittest.mock import patch, MagicMock
 
-from api.models import BrowserUseAgent, PersistentAgent, UserQuota
+from api.models import (
+    BrowserUseAgent,
+    Organization,
+    OrganizationMembership,
+    PersistentAgent,
+    UserQuota,
+)
 from agents.services import AgentService
 from config.plans import MAX_AGENT_LIMIT, AGENTS_UNLIMITED, PLAN_CONFIG
-from constants.plans import PlanNames
+from constants.plans import PlanNames, PlanNamesChoices
 from util.subscription_helper import has_unlimited_agents, is_community_unlimited_mode
 
 
 User = get_user_model()
 
 
-def create_persistent_agent(user, name: str, *, bypass_validation: bool = False) -> PersistentAgent:
+def create_persistent_agent(
+    user,
+    name: str,
+    *,
+    organization: Organization | None = None,
+    bypass_validation: bool = False,
+) -> PersistentAgent:
     """Create a PersistentAgent (and backing BrowserUseAgent) for tests."""
     browser_agent = BrowserUseAgent(user=user, name=name)
+    if organization is not None:
+        browser_agent._agent_creation_organization = organization
     if bypass_validation:
         super(BrowserUseAgent, browser_agent).save(force_insert=True)
     else:
         browser_agent.save()
+    if hasattr(browser_agent, "_agent_creation_organization"):
+        delattr(browser_agent, "_agent_creation_organization")
 
     persistent_agent = PersistentAgent(
         user=user,
+        organization=organization,
         name=name,
         charter="",
         browser_use_agent=browser_agent,
@@ -143,7 +160,7 @@ class AgentLimitTests(TestCase):
         mock_has_unlimited.return_value = True
 
         # Mock the get_agents_in_use to return MAX_AGENT_LIMIT
-        with patch.object(AgentService, 'get_agents_in_use', return_value=MAX_AGENT_LIMIT):
+        with patch.object(AgentService, '_count_agents', return_value=MAX_AGENT_LIMIT):
             available = AgentService.get_agents_available(self.unlimited_user)
             self.assertEqual(available, 0)
 
@@ -153,7 +170,7 @@ class AgentLimitTests(TestCase):
         mock_has_unlimited.return_value = True
 
         # Mock the get_agents_in_use to return more than MAX_AGENT_LIMIT
-        with patch.object(AgentService, 'get_agents_in_use', return_value=MAX_AGENT_LIMIT + 5):
+        with patch.object(AgentService, '_count_agents', return_value=MAX_AGENT_LIMIT + 5):
             available = AgentService.get_agents_available(self.unlimited_user)
             self.assertEqual(available, 0)
 
@@ -199,13 +216,77 @@ class AgentLimitTests(TestCase):
         
         self.assertIn("Agent limit reached", str(cm.exception))
 
+    def test_org_agents_scoped_from_personal_quota(self):
+        """Organization-owned agents should not count against personal usage."""
+        organization = Organization.objects.create(
+            name="Acme Org",
+            slug="acme-org",
+            created_by=self.free_user,
+        )
+        billing = organization.billing
+        billing.purchased_seats = 2
+        billing.subscription = PlanNamesChoices.ORG_TEAM.value
+        billing.save(update_fields=["purchased_seats", "subscription"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.free_user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        create_persistent_agent(self.free_user, "personal-agent")
+        create_persistent_agent(self.free_user, "org-agent", organization=organization)
+
+        self.assertEqual(AgentService.get_agents_in_use(self.free_user), 1)
+        self.assertEqual(
+            AgentService.get_agents_in_use(organization),
+            1,
+        )
+
+        self.assertEqual(AgentService.get_agents_available(self.free_user), 4)
+        org_available = AgentService.get_agents_available(organization)
+        self.assertEqual(org_available, MAX_AGENT_LIMIT - 1)
+
+    def test_org_agent_creation_not_blocked_by_personal_limit(self):
+        """Creating an org-owned agent should still succeed when personal quota is exhausted."""
+        organization = Organization.objects.create(
+            name="Acme Secondary",
+            slug="acme-secondary",
+            created_by=self.free_user,
+        )
+        billing = organization.billing
+        billing.purchased_seats = 2
+        billing.subscription = PlanNamesChoices.ORG_TEAM.value
+        billing.save(update_fields=["purchased_seats", "subscription"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.free_user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        for i in range(5):
+            create_persistent_agent(self.free_user, f"personal-{i}")
+
+        self.assertEqual(AgentService.get_agents_available(self.free_user), 0)
+
+        try:
+            create_persistent_agent(self.free_user, "org-agent", organization=organization)
+        except ValidationError:
+            self.fail("Organization agent creation should not be blocked by personal quota.")
+
+        self.assertEqual(
+            AgentService.get_agents_in_use(organization),
+            1,
+        )
+
     @patch('util.subscription_helper.has_unlimited_agents')
     def test_unlimited_user_blocked_at_max_limit(self, mock_has_unlimited):
         """Test that even unlimited users are blocked at MAX_AGENT_LIMIT."""
         mock_has_unlimited.return_value = True
 
         # Mock to simulate user at MAX_AGENT_LIMIT
-        with patch.object(AgentService, 'get_agents_in_use', return_value=MAX_AGENT_LIMIT):
+        with patch.object(AgentService, '_count_agents', return_value=MAX_AGENT_LIMIT):
             agent = BrowserUseAgent(user=self.unlimited_user, name='new_agent')
             with self.assertRaises(ValidationError) as cm:
                 agent.clean()

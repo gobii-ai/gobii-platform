@@ -65,10 +65,11 @@ class PersistentAgentProvisioningService:
         """Create a new persistent agent and its backing browser agent."""
         agent_name = name or cls.generate_unique_name(user)
 
-        # Ensure the user has capacity before we hit database constraints — the
+        # Ensure the owner has capacity before we hit database constraints — the
         # BrowserUseAgent clean() method enforces this but we prefer an early,
         # explicit error for API consumers.
-        if not AgentService.has_agents_available(user):
+        owner = organization or user
+        if not AgentService.has_agents_available(owner):
             raise PersistentAgentProvisioningError("Agent limit reached for this user.")
 
         applied_template_code: Optional[str] = None
@@ -76,19 +77,22 @@ class PersistentAgentProvisioningService:
 
         with transaction.atomic():
             browser_agent = BrowserUseAgent(user=user, name=agent_name)
+            if organization is not None:
+                browser_agent._agent_creation_organization = organization
             try:
                 browser_agent.full_clean()
+                browser_agent.save()
             except ValidationError as exc:
                 raise PersistentAgentProvisioningError(
                     cls._normalize_validation_error(exc)
                 ) from exc
-
-            try:
-                browser_agent.save()
             except IntegrityError as exc:
                 raise PersistentAgentProvisioningError(
                     {"name": ["An agent with this name already exists for the owner."]}
                 ) from exc
+            finally:
+                if hasattr(browser_agent, "_agent_creation_organization"):
+                    delattr(browser_agent, "_agent_creation_organization")
 
             persistent_agent = PersistentAgent(
                 user=user,

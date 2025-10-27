@@ -1,21 +1,26 @@
 import copy
 import logging
 import random
-from typing import Dict, Iterable, Sequence
+from typing import Dict, Iterable, Sequence, Any
 
 from django.apps import apps
+from django.contrib.auth import get_user_model
 
 from agents.pretrained_worker_definitions import (
     TEMPLATE_DEFINITIONS,
     PretrainedWorkerTemplateDefinition,
 )
-from config.plans import AGENTS_UNLIMITED, MAX_AGENT_LIMIT
+from config.plans import AGENTS_UNLIMITED, MAX_AGENT_LIMIT, PLAN_CONFIG
 from observability import trace
 
 from cron_descriptor import get_description, Options
 from cron_descriptor.Exception import FormatError
 
-from util.subscription_helper import has_unlimited_agents, is_community_unlimited_mode
+from util.subscription_helper import (
+    get_organization_plan,
+    has_unlimited_agents,
+    is_community_unlimited_mode,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
@@ -27,97 +32,192 @@ class AgentService:
     """
 
     @staticmethod
+    def _resolve_organization_instance(organization: Any):
+        """Return a hydrated Organization instance (with billing) for plan checks."""
+        if organization is None:
+            return None
+
+        Organization = apps.get_model("api", "Organization")
+
+        try:
+            if isinstance(organization, Organization):
+                org_id = organization.id
+            else:
+                org_id = organization
+            if org_id is None:
+                return None
+            return Organization.objects.select_related("billing").get(pk=org_id)
+        except (Organization.DoesNotExist, ValueError, TypeError):
+            logger.warning("AgentService: Organization %s not found when resolving context", organization)
+            return None
+
+    @staticmethod
+    def _normalize_owner(owner: Any) -> tuple[str, Any, Any]:
+        """Return (owner_type, owner_id, owner_instance) for a user or organization owner."""
+        if owner is None:
+            return "unknown", None, None
+
+        Organization = apps.get_model("api", "Organization")
+        UserModel = get_user_model()
+
+        if isinstance(owner, Organization):
+            org = AgentService._resolve_organization_instance(owner)
+            return ("organization", getattr(org, "id", None), org)
+
+        if isinstance(owner, UserModel):
+            return ("user", owner.id, owner)
+
+        # Attempt to resolve as organization primary key first.
+        org = AgentService._resolve_organization_instance(owner)
+        if org is not None:
+            return ("organization", org.id, org)
+
+        # Fall back to user lookup by primary key.
+        try:
+            user = UserModel.objects.get(pk=owner)
+            return ("user", user.id, user)
+        except (UserModel.DoesNotExist, ValueError, TypeError):
+            logger.warning("AgentService: Unable to resolve owner %s", owner)
+            return "unknown", None, None
+
+    @staticmethod
+    def _count_agents(owner_type: str, owner_id: Any) -> int:
+        """Return count of persistent agents for the provided owner context."""
+        if owner_type not in {"user", "organization"} or owner_id is None:
+            return 0
+
+        PersistentAgent = apps.get_model("api", "PersistentAgent")
+
+        if owner_type == "organization":
+            return PersistentAgent.objects.filter(organization_id=owner_id).count()
+
+        return PersistentAgent.objects.filter(user_id=owner_id, organization__isnull=True).count()
+
+    @staticmethod
     @tracer.start_as_current_span("AGENT SERVICE: get_agents_in_use")
-    def get_agents_in_use(user) -> int:
+    def get_agents_in_use(owner) -> int:
         """
-        Returns a count of agents that are currently in use by the user.
+        Returns a count of agents that are currently in use for the provided owner.
 
-        Parameters:
+        Parameters
         ----------
-        user : User
-            The user whose agents are to be checked.
+        owner : User | Organization | UUID | str
+            Entity that owns the agents. Can be a user instance, organization instance,
+            or the primary key for either.
 
-        Returns:
+        Returns
         -------
         int
-            A count of agents that are currently in use by the user.
+            Number of agents currently in use for the owner.
         """
-        PersistentAgent = apps.get_model("api", "PersistentAgent")
-        return PersistentAgent.objects.filter(user_id=user.id).count()
+        owner_type, owner_id, _ = AgentService._normalize_owner(owner)
+        return AgentService._count_agents(owner_type, owner_id)
 
     @staticmethod
     @tracer.start_as_current_span("AGENT SERVICE: get_agents_available")
-    def get_agents_available(user) -> int:
+    def get_agents_available(owner) -> int:
         """
-        Returns the number of agents available for the user.
+        Returns the number of agents available for the provided owner.
 
-        Parameters:
+        Parameters
         ----------
-        user : User
-            The user whose agent availability is to be checked.
+        owner : User | Organization | UUID | str
+            Entity that owns the agents. Can be a user instance, organization instance,
+            or the primary key for either.
 
-        Returns:
+        Returns
         -------
         int
-            The number of agents available for the user.
+            Number of additional agents that may be created for the owner.
         """
-        """
-        We always enforce an absolute safety cap of ``MAX_AGENT_LIMIT`` even for
-        "unlimited" plans.  This prevents runaway usage scenarios while we are
-        still scaling the infrastructure.
+        owner_type, owner_id, owner_instance = AgentService._normalize_owner(owner)
+        if owner_id is None:
+            return 0
 
-        Implementation details:
-        1. Users on an unlimited plan get a ceiling of ``MAX_AGENT_LIMIT``.
-        2. Users with a smaller per-plan or per-quota limit keep that lower
-           value.
-        3. The return value is **never** negative – when the user has reached or
-           exceeded their limit we return ``0`` so callers can fail fast.
-        """
-
-        in_use = AgentService.get_agents_in_use(user)
-
+        in_use = AgentService._count_agents(owner_type, owner_id)
         community_unlimited = is_community_unlimited_mode()
-        plan_unlimited = has_unlimited_agents(user)
 
-        # Step 1: Determine the user's plan/quota limit.
-        # Prefer explicit per-user quota when present; fall back to plan-based checks.
+        if owner_type == "organization":
+            organization_obj = owner_instance or AgentService._resolve_organization_instance(owner_id)
+            if organization_obj is None:
+                return 0
+
+            plan = get_organization_plan(organization_obj) or PLAN_CONFIG["free"]
+            plan_limit = plan.get("agent_limit", PLAN_CONFIG["free"]["agent_limit"])
+
+            if community_unlimited or plan_limit == AGENTS_UNLIMITED:
+                org_limit = MAX_AGENT_LIMIT
+            else:
+                try:
+                    org_limit = int(plan_limit)
+                except (TypeError, ValueError):
+                    org_limit = PLAN_CONFIG["free"]["agent_limit"]
+                org_limit = min(org_limit, MAX_AGENT_LIMIT)
+
+            return max(org_limit - in_use, 0)
+
+        # User-owned agents
+        user = owner_instance
+        if user is None:
+            return 0
+
+        plan_unlimited = has_unlimited_agents(user)
         UserQuota = apps.get_model("api", "UserQuota")
 
         if community_unlimited or plan_unlimited:
             user_limit = MAX_AGENT_LIMIT
         else:
             try:
-                user_quota = UserQuota.objects.get(user_id=user.id)
+                user_quota = UserQuota.objects.get(user_id=owner_id)
                 user_limit = min(user_quota.agent_limit, MAX_AGENT_LIMIT)
             except UserQuota.DoesNotExist:
-                # Without an explicit per-user quota, treat as no capacity.
-                # Tests and safety expectations prefer an explicit quota to be present.
-                logger.warning(f"UserQuota not found for user_id: {user.id}")
+                logger.warning(f"UserQuota not found for user_id: {owner_id}")
                 return 0
 
-        # Step 2: Calculate remaining slots (never negative).
-        remaining = max(user_limit - in_use, 0)
-
-        return remaining
+        return max(user_limit - in_use, 0)
 
     @staticmethod
     @tracer.start_as_current_span("AGENT SERVICE: has_agents_available")
-    def has_agents_available(user) -> bool:
+    def has_agents_available(owner) -> bool:
         """
-        Checks if the user has any agents available.
+        Checks if the provided owner has agent capacity remaining.
 
-        Parameters:
+        Parameters
         ----------
-        user : User
-            The user whose agent availability is to be checked.
+        owner : User | Organization | UUID | str
+            Entity that owns the agents. Can be a user instance, organization instance,
+            or the primary key for either.
 
-        Returns:
+        Returns
         -------
         bool
-            True if the user has agents available, False otherwise.
+            True if additional agents can be created, False otherwise.
         """
-        # -1 is unlimited, so we just check if not 0
-        return AgentService.get_agents_available(user) > 0 or has_unlimited_agents(user)
+        owner_type, _, owner_instance = AgentService._normalize_owner(owner)
+        if owner_type == "unknown":
+            return False
+
+        available = AgentService.get_agents_available(owner)
+        if available > 0:
+            return True
+
+        community_unlimited = is_community_unlimited_mode()
+        if owner_type == "user":
+            user = owner_instance
+            return bool(user) and (community_unlimited or has_unlimited_agents(user))
+
+        # organization
+        if community_unlimited:
+            return True
+
+        organization_obj = owner_instance or AgentService._resolve_organization_instance(owner)
+        if organization_obj is None:
+            return False
+
+        plan = get_organization_plan(organization_obj) or PLAN_CONFIG["free"]
+        plan_limit = plan.get("agent_limit", PLAN_CONFIG["free"]["agent_limit"])
+
+        return plan_limit == AGENTS_UNLIMITED
 
 
 class PretrainedWorkerTemplateService:
