@@ -148,8 +148,11 @@ class AgentService:
             if community_unlimited or plan_limit == AGENTS_UNLIMITED:
                 org_limit = MAX_AGENT_LIMIT
             else:
+                org_limit = PLAN_CONFIG["org_team"]["agent_limit"]
+                if org_limit == AGENTS_UNLIMITED:
+                    org_limit = MAX_AGENT_LIMIT
                 try:
-                    org_limit = int(plan_limit)
+                    org_limit = int(org_limit)
                 except (TypeError, ValueError):
                     org_limit = PLAN_CONFIG["free"]["agent_limit"]
                 org_limit = min(org_limit, MAX_AGENT_LIMIT)
