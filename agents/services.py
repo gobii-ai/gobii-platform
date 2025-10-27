@@ -193,31 +193,15 @@ class AgentService:
         bool
             True if additional agents can be created, False otherwise.
         """
-        owner_type, _, owner_instance = AgentService._normalize_owner(owner)
+        owner_type, _, _ = AgentService._normalize_owner(owner)
         if owner_type == "unknown":
             return False
 
         available = AgentService.get_agents_available(owner)
         if available > 0:
             return True
-
-        community_unlimited = is_community_unlimited_mode()
-        if owner_type == "user":
-            user = owner_instance
-            return bool(user) and (community_unlimited or has_unlimited_agents(user))
-
-        # organization
-        if community_unlimited:
-            return True
-
-        organization_obj = owner_instance or AgentService._resolve_organization_instance(owner)
-        if organization_obj is None:
-            return False
-
-        plan = get_organization_plan(organization_obj) or PLAN_CONFIG["free"]
-        plan_limit = plan.get("agent_limit", PLAN_CONFIG["free"]["agent_limit"])
-
-        return plan_limit == AGENTS_UNLIMITED
+        # We always enforce the global safety cap, even for unlimited plans.
+        return False
 
 
 class PretrainedWorkerTemplateService:

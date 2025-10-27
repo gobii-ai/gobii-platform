@@ -174,6 +174,14 @@ class AgentLimitTests(TestCase):
             available = AgentService.get_agents_available(self.unlimited_user)
             self.assertEqual(available, 0)
 
+    @patch('agents.services.has_unlimited_agents')
+    def test_has_agents_available_blocks_unlimited_user_at_max_limit(self, mock_has_unlimited):
+        """Even unlimited users must respect the safety cap."""
+        mock_has_unlimited.return_value = True
+
+        with patch.object(AgentService, '_count_agents', return_value=MAX_AGENT_LIMIT):
+            self.assertFalse(AgentService.has_agents_available(self.unlimited_user))
+
     def test_high_quota_user_capped_at_max_limit(self):
         """Test that users with quota above MAX_AGENT_LIMIT are capped."""
         # high_quota_user has agent_limit=2000, should be capped to MAX_AGENT_LIMIT=1000
@@ -279,6 +287,21 @@ class AgentLimitTests(TestCase):
             AgentService.get_agents_in_use(organization),
             1,
         )
+
+    def test_has_agents_available_blocks_unlimited_org_at_max_limit(self):
+        """Organizations with unlimited plans must still respect the safety cap."""
+        organization = Organization.objects.create(
+            name="Limit Hit Org",
+            slug="limit-hit-org",
+            created_by=self.free_user,
+        )
+        billing = organization.billing
+        billing.purchased_seats = 2
+        billing.subscription = PlanNamesChoices.ORG_TEAM.value
+        billing.save(update_fields=["purchased_seats", "subscription"])
+
+        with patch.object(AgentService, '_count_agents', return_value=MAX_AGENT_LIMIT):
+            self.assertFalse(AgentService.has_agents_available(organization))
 
     @patch('util.subscription_helper.has_unlimited_agents')
     def test_unlimited_user_blocked_at_max_limit(self, mock_has_unlimited):
