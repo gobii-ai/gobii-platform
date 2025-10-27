@@ -42,8 +42,8 @@ class AgentService:
         int
             A count of agents that are currently in use by the user.
         """
-        BrowserUseAgent = apps.get_model("api", "BrowserUseAgent")
-        return BrowserUseAgent.objects.filter(user_id=user.id).count()
+        PersistentAgent = apps.get_model("api", "PersistentAgent")
+        return PersistentAgent.objects.filter(user_id=user.id).count()
 
     @staticmethod
     @tracer.start_as_current_span("AGENT SERVICE: get_agents_available")
