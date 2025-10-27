@@ -329,7 +329,6 @@ export function McpServerFormModal({
               <div className="space-y-1">
                 <p>Status: <span className="font-semibold">{statusLabel(oauthStore.status)}</span></p>
                 {oauthStore.scope && <p>Scope: <span className="font-mono">{oauthStore.scope}</span></p>}
-                {oauthStore.expiresAt && <p>Token expires at {oauthStore.expiresAt}</p>}
               </div>
             )}
           </div>
