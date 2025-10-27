@@ -31,6 +31,7 @@ from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
 from django.db.models import Max
+from django.utils import timezone
 
 from ...models import (
     MCPServerConfig,
@@ -125,6 +126,10 @@ class MCPToolManager:
         "select_apps"
         # Add more blacklist patterns here as needed
     ]
+
+    # Buffer window before expiry where we will proactively refresh OAuth tokens
+    OAUTH_REFRESH_SAFETY_MARGIN = timedelta(minutes=2)
+    OAUTH_REFRESH_TIMEOUT_SECONDS = 15
     
     def __init__(self):
         self._clients: Dict[str, Client] = {}
@@ -272,6 +277,7 @@ class MCPToolManager:
             credential = None
 
         if credential:
+            credential = self._maybe_refresh_oauth_credential(cfg, credential)
             token_value = (credential.access_token or "").strip()
             token_type_value = (credential.token_type or "").strip()
             oauth_access_token = token_value or None
@@ -308,7 +314,131 @@ class MCPToolManager:
             user_id=str(cfg.user_id) if cfg.user_id else None,
             updated_at=cfg.updated_at,
         )
-    
+
+    def _maybe_refresh_oauth_credential(
+        self,
+        cfg: MCPServerConfig,
+        credential: MCPServerOAuthCredential | None,
+    ) -> MCPServerOAuthCredential | None:
+        """Refresh an OAuth credential when the stored access token is expired or near expiry."""
+
+        if not credential or cfg.auth_method != MCPServerConfig.AuthMethod.OAUTH2:
+            return credential
+
+        refresh_token = (credential.refresh_token or "").strip()
+        if not refresh_token:
+            return credential
+
+        expires_at = credential.expires_at
+        now = timezone.now()
+        if expires_at and expires_at > now + self.OAUTH_REFRESH_SAFETY_MARGIN:
+            return credential
+
+        metadata = credential.metadata if isinstance(credential.metadata, dict) else {}
+        cfg_metadata = cfg.metadata if isinstance(cfg.metadata, dict) else {}
+        token_endpoint = (metadata.get("token_endpoint") or cfg_metadata.get("token_endpoint") or "").strip()
+        if not token_endpoint:
+            logger.warning(
+                "OAuth credential for MCP server %s lacks a token endpoint; skipping refresh",
+                cfg.id,
+            )
+            return credential
+
+        request_data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+
+        client_id = (credential.client_id or cfg_metadata.get("client_id") or "").strip()
+        if client_id:
+            request_data["client_id"] = client_id
+
+        client_secret = (credential.client_secret or cfg_metadata.get("client_secret") or "").strip()
+        if client_secret:
+            request_data["client_secret"] = client_secret
+
+        try:
+            response = requests.post(
+                token_endpoint,
+                data=request_data,
+                timeout=self.OAUTH_REFRESH_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            logger.error(
+                "Failed to refresh OAuth token for MCP server %s: %s",
+                cfg.id,
+                exc,
+            )
+            return credential
+
+        try:
+            token_payload = response.json()
+        except ValueError:
+            logger.error(
+                "Token refresh response for MCP server %s was not valid JSON",
+                cfg.id,
+            )
+            return credential
+
+        new_access_token = (token_payload.get("access_token") or "").strip()
+        if not new_access_token:
+            logger.error(
+                "Token refresh for MCP server %s did not return an access token",
+                cfg.id,
+            )
+            return credential
+
+        update_fields = ["access_token_encrypted"]
+        credential.access_token = new_access_token
+
+        new_refresh_token = (token_payload.get("refresh_token") or "").strip()
+        if new_refresh_token:
+            credential.refresh_token = new_refresh_token
+            update_fields.append("refresh_token_encrypted")
+
+        new_id_token = (token_payload.get("id_token") or "").strip()
+        if new_id_token:
+            credential.id_token = new_id_token
+            update_fields.append("id_token_encrypted")
+
+        token_type = (token_payload.get("token_type") or "").strip()
+        if token_type:
+            credential.token_type = token_type
+            update_fields.append("token_type")
+
+        scope = (token_payload.get("scope") or "").strip()
+        if scope:
+            credential.scope = scope
+            update_fields.append("scope")
+
+        expires_in_raw = token_payload.get("expires_in")
+        if expires_in_raw is not None:
+            try:
+                expires_seconds = int(expires_in_raw)
+                credential.expires_at = now + timedelta(seconds=max(expires_seconds, 0))
+            except (TypeError, ValueError):
+                credential.expires_at = None
+            update_fields.append("expires_at")
+
+        metadata_update = dict(metadata)
+        metadata_update["last_refresh_response"] = {
+            key: value
+            for key, value in token_payload.items()
+            if key not in {"access_token", "refresh_token", "id_token"}
+        }
+        credential.metadata = metadata_update
+        update_fields.append("metadata")
+
+        credential.save(update_fields=list(dict.fromkeys(update_fields)))
+        credential.refresh_from_db()
+        logger.info(
+            "Refreshed OAuth token for MCP server %s (credential updated at %s)",
+            cfg.id,
+            credential.updated_at,
+        )
+        return credential
+
     def _build_httpx_client_factory(self):
         def factory(
             headers: Optional[dict[str, str]] = None,
@@ -338,7 +468,8 @@ class MCPToolManager:
                     server.name,
                 )
                 return headers
-            token_type = (server.oauth_token_type or "Bearer").strip() or "Bearer"
+            token_type_raw = (server.oauth_token_type or "Bearer").strip() or "Bearer"
+            token_type = "Bearer" if token_type_raw.lower() == "bearer" else token_type_raw
             headers["Authorization"] = f"{token_type} {token_value}"
         return headers
 
