@@ -200,7 +200,7 @@ class MCPOAuthApiTests(TestCase):
             MCPServerOAuthSession.objects.filter(id=session.id).exists(),
             "OAuth session should be removed after callback completion",
         )
-        mock_get_manager.return_value.initialize.assert_called_once_with(force=True)
+        mock_get_manager.return_value.refresh_server.assert_called_once_with(str(self.server.id))
 
     def test_callback_page_includes_completion_script(self):
         url = reverse("console-mcp-oauth-callback-view")
@@ -230,7 +230,7 @@ class MCPOAuthApiTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["revoked"])
         self.assertFalse(MCPServerOAuthCredential.objects.filter(id=credential.id).exists())
-        mock_get_manager.return_value.initialize.assert_called_once_with(force=True)
+        mock_get_manager.return_value.refresh_server.assert_called_once_with(str(self.server.id))
 
     def test_session_verifier_update(self):
         session = MCPServerOAuthSession.objects.create(

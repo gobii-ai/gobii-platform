@@ -414,7 +414,8 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
         form = MCPServerConfigForm(payload, allow_commands=False)
         if form.is_valid():
             server = form.save(user=owner_user, organization=owner_org)
-            get_mcp_manager().initialize(force=True)
+            manager = get_mcp_manager()
+            manager.refresh_server(str(server.id))
             _track_org_event_for_console(
                 request,
                 AnalyticsEvent.MCP_SERVER_CREATED,
@@ -449,7 +450,7 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
         form = MCPServerConfigForm(payload, instance=server, allow_commands=False)
         if form.is_valid():
             updated = form.save()
-            get_mcp_manager().initialize(force=True)
+            get_mcp_manager().refresh_server(str(updated.id))
             _track_org_event_for_console(
                 request,
                 AnalyticsEvent.MCP_SERVER_UPDATED,
@@ -468,8 +469,9 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
         server_name = server.display_name
         organization = server.organization
         props = _mcp_server_event_properties(request, server, server.scope)
+        cached_server_id = str(server.id)
         server.delete()
-        get_mcp_manager().initialize(force=True)
+        get_mcp_manager().remove_server(cached_server_id)
         _track_org_event_for_console(
             request,
             AnalyticsEvent.MCP_SERVER_DELETED,
@@ -803,7 +805,7 @@ class MCPOAuthCallbackView(LoginRequiredMixin, View):
         session.delete()
 
         try:
-            get_mcp_manager().initialize(force=True)
+            get_mcp_manager().refresh_server(str(config.id))
         except Exception:
             logger.exception("Failed to refresh MCP manager after OAuth callback for %s", config.id)
 
@@ -849,7 +851,7 @@ class MCPOAuthRevokeView(LoginRequiredMixin, View):
 
         credential.delete()
         try:
-            get_mcp_manager().initialize(force=True)
+            get_mcp_manager().refresh_server(str(config.id))
         except Exception:
             logger.exception("Failed to refresh MCP manager after OAuth revoke for %s", config.id)
         return JsonResponse({"revoked": True})
@@ -916,11 +918,6 @@ class MCPServerAssignmentsAPIView(LoginRequiredMixin, View):
             mcp_server_service.set_server_assignments(server, agent_ids)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        try:
-            get_mcp_manager().initialize(force=True)
-        except Exception:
-            logger.exception("Failed to refresh MCP manager after updating assignments for %s", server.id)
 
         response_payload = self._serialize_assignments(server)
         response_payload["message"] = "Assignments updated."

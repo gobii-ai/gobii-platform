@@ -257,6 +257,64 @@ class MCPToolManager:
             except Exception:
                 logger.debug("Error closing MCP client for %s", config_id, exc_info=True)
         self._tools_cache.pop(config_id, None)
+    def _update_refresh_marker(self, runtime: MCPServerRuntime) -> None:
+        marker = runtime.updated_at or timezone.now()
+        if self._last_refresh_marker is None or marker > self._last_refresh_marker:
+            self._last_refresh_marker = marker
+
+    def _safe_register_runtime(self, runtime: MCPServerRuntime) -> bool:
+        try:
+            self._register_server(runtime)
+        except Exception:
+            logger.exception("Failed to register MCP server %s", runtime.name)
+            return False
+        self._server_cache[runtime.config_id] = runtime
+        self._update_refresh_marker(runtime)
+        return True
+
+    def refresh_server(self, config_id: str) -> None:
+        if not config_id:
+            return
+        if not self._initialized:
+            return
+
+        existing_runtime = self._server_cache.get(config_id)
+        self._discard_client(config_id)
+        self._server_cache.pop(config_id, None)
+        self._pd_agent_clients.clear()
+
+        try:
+            cfg = (
+                MCPServerConfig.objects.filter(id=config_id, is_active=True)
+                .select_related("oauth_credential")
+                .first()
+            )
+        except Exception:
+            logger.exception("Failed to load MCP server %s during refresh", config_id)
+            if existing_runtime:
+                self._safe_register_runtime(existing_runtime)
+            return
+
+        if not cfg:
+            return
+
+        runtime = self._build_runtime_from_config(cfg)
+        if self._safe_register_runtime(runtime):
+            return
+
+        if existing_runtime:
+            logger.warning(
+                "Reverting to cached MCP server runtime for %s after refresh failure",
+                config_id,
+            )
+            self._safe_register_runtime(existing_runtime)
+
+    def remove_server(self, config_id: str) -> None:
+        if not config_id:
+            return
+        self._discard_client(config_id)
+        self._server_cache.pop(config_id, None)
+        self._pd_agent_clients.clear()
 
     def _build_runtime_from_config(self, cfg: MCPServerConfig) -> MCPServerRuntime:
         env = dict(cfg.environment or {})

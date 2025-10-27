@@ -178,7 +178,7 @@ class MCPServerCrudAPITests(TestCase):
         self.assertIn("server", data)
         server = MCPServerConfig.objects.get()
         self.assertEqual(server.display_name, "HTTP Server")
-        mock_get_mcp_manager.return_value.initialize.assert_called_once_with(force=True)
+        mock_get_mcp_manager.return_value.refresh_server.assert_called_once_with(str(server.id))
         mock_track_event.assert_called_once()
         track_args, track_kwargs = mock_track_event.call_args
         self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_CREATED)
@@ -219,7 +219,7 @@ class MCPServerCrudAPITests(TestCase):
         server.refresh_from_db()
         self.assertEqual(server.display_name, "Updated Server")
         self.assertFalse(server.is_active)
-        mock_get_mcp_manager.return_value.initialize.assert_called_once_with(force=True)
+        mock_get_mcp_manager.return_value.refresh_server.assert_called_once_with(str(server.id))
         mock_track_event.assert_called_once()
         track_args, track_kwargs = mock_track_event.call_args
         self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_UPDATED)
@@ -247,7 +247,7 @@ class MCPServerCrudAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(MCPServerConfig.objects.filter(id=server.id).exists())
-        mock_get_mcp_manager.return_value.initialize.assert_called_once_with(force=True)
+        mock_get_mcp_manager.return_value.remove_server.assert_called_once_with(str(server.id))
         mock_track_event.assert_called_once()
         track_args, track_kwargs = mock_track_event.call_args
         self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_DELETED)
@@ -329,7 +329,6 @@ class MCPServerAssignmentAPITests(TestCase):
 
     @patch("console.api_views.get_mcp_manager")
     def test_update_assignments_user_scope(self, mock_get_mcp_manager):
-        mock_get_mcp_manager.return_value.initialize.return_value = None
         server = MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.USER,
             user=self.user,
@@ -367,10 +366,13 @@ class MCPServerAssignmentAPITests(TestCase):
         self.assertFalse(
             PersistentAgentEnabledTool.objects.filter(agent=agent_one, server_config=server).exists()
         )
+        manager = mock_get_mcp_manager.return_value
+        manager.initialize.assert_not_called()
+        manager.refresh_server.assert_not_called()
+        manager.remove_server.assert_not_called()
 
     @patch("console.api_views.get_mcp_manager")
     def test_update_assignments_org_scope(self, mock_get_mcp_manager):
-        mock_get_mcp_manager.return_value.initialize.return_value = None
         org = Organization.objects.create(name="Org Assign", slug="org-assign", created_by=self.user)
         OrganizationMembership.objects.create(
             org=org,
@@ -413,6 +415,10 @@ class MCPServerAssignmentAPITests(TestCase):
         self.assertFalse(
             PersistentAgentEnabledTool.objects.filter(agent=agent_two, server_config=server).exists()
         )
+        manager = mock_get_mcp_manager.return_value
+        manager.initialize.assert_not_called()
+        manager.refresh_server.assert_not_called()
+        manager.remove_server.assert_not_called()
 
     def test_assignments_platform_scope_blocked(self):
         server = MCPServerConfig.objects.create(
@@ -428,7 +434,6 @@ class MCPServerAssignmentAPITests(TestCase):
 
     @patch("console.api_views.get_mcp_manager")
     def test_update_assignments_rejects_invalid_agents(self, mock_get_mcp_manager):
-        mock_get_mcp_manager.return_value.initialize.return_value = None
         server = MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.USER,
             user=self.user,
@@ -446,6 +451,10 @@ class MCPServerAssignmentAPITests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("Invalid agent ids", response.content.decode())
+        manager = mock_get_mcp_manager.return_value
+        manager.initialize.assert_not_called()
+        manager.refresh_server.assert_not_called()
+        manager.remove_server.assert_not_called()
 
 
 @tag("batch_console_mcp_servers")
