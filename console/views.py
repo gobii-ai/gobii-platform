@@ -1774,9 +1774,12 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
         if resolved_context.current_context.type == "organization" and resolved_context.current_membership:
             organization = resolved_context.current_membership.org
 
-        owner = organization or request.user
+        availability_checks: list[bool] = []
+        if organization is not None:
+            availability_checks.append(AgentService.has_agents_available(organization))
+        availability_checks.append(AgentService.has_agents_available(request.user))
 
-        if not AgentService.has_agents_available(owner):
+        if not any(availability_checks):
             messages.error(request, "You do not have any persistent agents available. Please upgrade to spawn more.")
             return redirect('pages:home')
 

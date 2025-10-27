@@ -288,6 +288,31 @@ class AgentLimitTests(TestCase):
             1,
         )
 
+    def test_org_with_seat_has_effective_unlimited_capacity(self):
+        """Organizations with purchased seats should behave as unlimited."""
+        organization = Organization.objects.create(
+            name="Seat Holder Org",
+            slug="seat-holder-org",
+            created_by=self.free_user,
+        )
+        billing = organization.billing
+        billing.purchased_seats = 1
+        billing.subscription = PlanNamesChoices.FREE.value
+        billing.save(update_fields=["purchased_seats", "subscription"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.free_user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        for i in range(6):
+            create_persistent_agent(self.free_user, f"seat-org-agent-{i}", organization=organization)
+
+        available = AgentService.get_agents_available(organization)
+        self.assertGreater(available, 0)
+        self.assertTrue(AgentService.has_agents_available(organization))
+
     def test_has_agents_available_blocks_unlimited_org_at_max_limit(self):
         """Organizations with unlimited plans must still respect the safety cap."""
         organization = Organization.objects.create(
