@@ -454,25 +454,34 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
             context['pending_agent_transfer_invites'] = pending_transfers
 
         # Add agent statistics (personal vs organization)
-        from api.models import BrowserUseAgent, BrowserUseAgentTask
+        from api.models import BrowserUseAgentTask, Organization
 
         ctx_type = current_ctx.get('type', 'personal')
 
         if ctx_type == 'organization' and current_ctx.get('id'):
             org_id = current_ctx.get('id')
+            membership = context.get('current_membership')
+            organization = None
+            if membership and str(membership.org_id) == org_id:
+                organization = getattr(membership, "org", None)
+            if organization is None:
+                organization = Organization.objects.filter(pk=org_id).first()
             # Verify active membership; if missing, fall back to personal context values
-            if OrganizationMembership.objects.filter(
-                user=self.request.user,
-                org_id=org_id,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-            ).exists():
+            if (
+                organization is not None
+                and OrganizationMembership.objects.filter(
+                    user=self.request.user,
+                    org_id=organization.id,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                ).exists()
+            ):
                 # Agents (org-owned persistent agents)
-                context['agent_count'] = PersistentAgent.objects.filter(organization_id=org_id).count()
+                context['agent_count'] = AgentService.get_agents_in_use(organization)
 
                 # Task status for org-owned agents
                 from django.db.models import Count, Sum
                 pa_browser_ids = (
-                    PersistentAgent.objects.filter(organization_id=org_id)
+                    PersistentAgent.objects.filter(organization_id=organization.id)
                     .values_list('browser_use_agent_id', flat=True)
                 )
                 task_stats = (
@@ -512,7 +521,7 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
                 TaskCredit = apps.get_model('api', 'TaskCredit')
                 now = timezone.now()
                 qs = TaskCredit.objects.filter(
-                    organization_id=org_id,
+                    organization_id=organization.id,
                     granted_date__lte=now,
                     expiration_date__gte=now,
                     voided=False,
@@ -545,11 +554,10 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
                 context['org_tasks_used_pct'] = tasks_used_pct
             else:
                 # Fallback to personal if no membership
-                context['agent_count'] = BrowserUseAgent.objects.filter(user=self.request.user).count()
+                context['agent_count'] = AgentService.get_agents_in_use(self.request.user)
         else:
             # Personal context defaults
-            agent_count = BrowserUseAgent.objects.filter(user=self.request.user).count()
-            context['agent_count'] = agent_count
+            context['agent_count'] = AgentService.get_agents_in_use(self.request.user)
 
         # Get the user's subscription plan (defaults to 'free' if not set)
         context['subscription_plan'] = get_user_plan(self.request.user)
@@ -1761,7 +1769,14 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
 
     def get(self, request, *args, **kwargs):
         """Render the contact preferences form."""
-        if not AgentService.has_agents_available(request.user):
+        resolved_context = build_console_context(request)
+        organization = None
+        if resolved_context.current_context.type == "organization" and resolved_context.current_membership:
+            organization = resolved_context.current_membership.org
+
+        owner = organization or request.user
+
+        if not AgentService.has_agents_available(owner):
             messages.error(request, "You do not have any persistent agents available. Please upgrade to spawn more.")
             return redirect('pages:home')
 

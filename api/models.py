@@ -504,7 +504,12 @@ class BrowserUseAgent(models.Model):
     def clean(self):
         super().clean()
         if self._state.adding and getattr(self, 'user_id', None):
-            agents_available = AgentService.get_agents_available(self.user)
+            org_context = getattr(self, "_agent_creation_organization", None)
+            if org_context is None:
+                org_context = getattr(self, "_agent_creation_organization_id", None)
+
+            owner = org_context if org_context is not None else self.user
+            agents_available = AgentService.get_agents_available(owner)
 
             # Regardless of plan type, if no slots remain we raise a validation
             # error.  ``AgentService`` already applies the global safety cap.

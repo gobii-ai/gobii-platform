@@ -141,7 +141,13 @@ class AgentTransferServiceTests(TestCase):
 
     def test_accept_transfer_pauses_agent_when_no_capacity(self):
         UserQuota.objects.filter(user=self.recipient).update(agent_limit=1)
-        _create_browser(self.recipient, "Existing Browser")
+        existing_browser = _create_browser(self.recipient, "Existing Browser")
+        PersistentAgent.objects.create(
+            user=self.recipient,
+            name="Existing Persistent",
+            charter="",
+            browser_use_agent=existing_browser,
+        )
 
         invite = self._initiate(self.recipient.email)
         AgentTransferService.accept_invite(invite, self.recipient)
