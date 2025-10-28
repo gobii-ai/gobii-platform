@@ -26,10 +26,19 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
   const closeScrollRef = useRef<number | null>(null)
   const pendingScrollKeyRef = useRef<string | null>(null)
   const lastOpenKeyRef = useRef<string | null>(null)
+  const previousCollapsibleRef = useRef<boolean>(transformed.collapsible)
 
   useEffect(() => {
+    const wasCollapsible = previousCollapsibleRef.current
+    previousCollapsibleRef.current = transformed.collapsible
+
     if (!transformed.collapsible) {
       setCollapsed(false)
+      return
+    }
+
+    if (!wasCollapsible && transformed.collapsible) {
+      setCollapsed(true)
     }
   }, [transformed.collapsible])
 
