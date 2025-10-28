@@ -18,6 +18,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     MCPServerConfig,
     MCPServerOAuthCredential,
+    PersistentAgentMCPServer,
 )
 from api.agent.tools.mcp_manager import (
     MCPToolManager,
@@ -427,6 +428,58 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(result, new_loop)
         mock_new_loop.assert_called_once()
         mock_set_loop.assert_called_once_with(new_loop)
+        
+    def test_initialize_does_not_register_servers(self):
+        """Ensure initialize() avoids contacting MCP servers during refresh."""
+        with patch.object(self.manager, "_register_server") as mock_register:
+            self.manager.initialize(force=True)
+        mock_register.assert_not_called()
+        
+    def test_get_tools_for_agent_registers_accessible_servers_only(self):
+        """Ensure discovery runs only for servers the agent can access."""
+        User = get_user_model()
+        user = User.objects.create_user(username="lazy-agent@example.com")
+        browser_agent = create_test_browser_agent(user)
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="lazy-agent",
+            charter="Test charter",
+            browser_use_agent=browser_agent,
+        )
+
+        assigned_personal = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name=f"assigned-{uuid.uuid4().hex[:8]}",
+            display_name="Assigned Personal Server",
+            description="",
+            command="npx",
+            command_args=[],
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+        )
+        PersistentAgentMCPServer.objects.create(agent=agent, server_config=assigned_personal)
+
+        MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name=f"unassigned-{uuid.uuid4().hex[:8]}",
+            display_name="Unassigned Personal Server",
+            description="",
+            command="npx",
+            command_args=[],
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+        )
+
+        self.manager.initialize(force=True)
+        original_register = self.manager._register_server
+        with patch.object(self.manager, "_register_server", wraps=original_register) as mock_register:
+            tools = self.manager.get_tools_for_agent(agent)
+
+        self.assertEqual(tools, [])
+        registered_ids = {call.args[0].config_id for call in mock_register.call_args_list}
+        expected_ids = {str(self.server_config.id), str(assigned_personal.id)}
+        self.assertEqual(registered_ids, expected_ids)
+        self.assertEqual(mock_register.call_count, len(expected_ids))
         
     @patch('api.agent.tools.mcp_manager.MCPToolManager.initialize')
     def test_get_all_available_tools(self, mock_init):

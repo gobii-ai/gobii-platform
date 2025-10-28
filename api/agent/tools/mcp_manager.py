@@ -220,31 +220,22 @@ class MCPToolManager:
             if cfg.updated_at and (latest_seen is None or cfg.updated_at > latest_seen):
                 latest_seen = cfg.updated_at
 
-        # Dispose clients no longer present or updated
-        current_ids = set(new_cache.keys())
         existing_ids = set(self._server_cache.keys())
+        current_ids = set(new_cache.keys())
 
         removed_ids = existing_ids - current_ids
         for config_id in removed_ids:
             self._discard_client(config_id)
 
-        # Detect updated configurations (based on timestamp)
-        failed_configs: List[str] = []
-        for config_id, runtime in list(new_cache.items()):
+        for config_id, runtime in new_cache.items():
             prior = self._server_cache.get(config_id)
-            if prior:
-                prior_oauth_updated = getattr(prior, "oauth_updated_at", None)
-                if prior.updated_at == runtime.updated_at and prior_oauth_updated == runtime.oauth_updated_at:
-                    continue
+            if not prior:
+                continue
+            prior_oauth_updated = getattr(prior, "oauth_updated_at", None)
+            if prior.updated_at == runtime.updated_at and prior_oauth_updated == runtime.oauth_updated_at:
+                continue
+            logger.debug("Invalidating cached MCP runtime for %s due to updated configuration", runtime.name)
             self._discard_client(config_id)
-            try:
-                self._register_server(runtime)
-            except Exception as exc:
-                logger.error("Failed to register MCP server %s: %s", runtime.name, exc)
-                failed_configs.append(config_id)
-
-        for config_id in failed_configs:
-            new_cache.pop(config_id, None)
 
         self._server_cache = new_cache
         self._last_refresh_marker = latest_seen or timezone.now()
@@ -261,6 +252,18 @@ class MCPToolManager:
         marker = runtime.updated_at or timezone.now()
         if self._last_refresh_marker is None or marker > self._last_refresh_marker:
             self._last_refresh_marker = marker
+
+    def _ensure_runtime_registered(self, runtime: MCPServerRuntime) -> bool:
+        """Ensure the given runtime has an active client and cached tool list."""
+        config_id = runtime.config_id
+        if config_id in self._clients and config_id in self._tools_cache:
+            return True
+        try:
+            self._register_server(runtime)
+        except Exception:
+            logger.exception("Failed to register MCP server %s", runtime.name)
+            return False
+        return True
 
     def _safe_register_runtime(self, runtime: MCPServerRuntime) -> bool:
         try:
@@ -791,6 +794,11 @@ class MCPToolManager:
 
         tools: List[MCPToolInfo] = []
         for config_id in desired_ids:
+            runtime = self._server_cache.get(config_id)
+            if not runtime:
+                continue
+            if not self._ensure_runtime_registered(runtime):
+                continue
             server_tools = self._tools_cache.get(config_id)
             if server_tools:
                 tools.extend(server_tools)
@@ -875,6 +883,11 @@ class MCPToolManager:
         server_name = info.server_name
         actual_tool_name = info.tool_name
         runtime = self._server_cache.get(info.config_id)
+        if runtime and not self._ensure_runtime_registered(runtime):
+            return {
+                "status": "error",
+                "message": f"MCP server '{server_name}' is not available",
+            }
 
         proxy_url = None
         proxy_error: Optional[str] = None
