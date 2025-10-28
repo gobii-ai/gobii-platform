@@ -62,10 +62,6 @@ function deriveMcpInfo(toolName: string | null | undefined, rawResult: unknown):
         : null)
   }
 
-  if (!serverSlug && normalizedName.includes('-')) {
-    serverSlug = 'pipedream'
-  }
-
   if (!toolId && resultObject) {
     toolId =
       pickString(resultObject['tool']) ??
@@ -124,18 +120,20 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
 
   const caption = transform.caption ?? deriveCaptionFallback(entry, parameters)
   const mcpInfo = deriveMcpInfo(toolName, entry.result)
+  const isDefaultDescriptor = descriptor.name === 'default'
 
   const baseLabel = transform.label ?? descriptor.label
   const baseCaption = caption ?? descriptor.label
   const detailComponent = transform.detailComponent ?? descriptor.detailComponent
+  const shouldUseGenericMcpDisplay = Boolean(mcpInfo && isDefaultDescriptor)
 
-  const finalLabel = mcpInfo ? 'MCP Tool' : baseLabel
+  const finalLabel = shouldUseGenericMcpDisplay ? 'MCP Tool' : baseLabel
   const finalCaption =
-    mcpInfo && (mcpInfo.serverLabel || mcpInfo.toolLabel)
+    shouldUseGenericMcpDisplay && (mcpInfo.serverLabel || mcpInfo.toolLabel)
       ? [mcpInfo.serverLabel, mcpInfo.toolLabel].filter(Boolean).join(' • ')
       : baseCaption
-  const finalDetailComponent = mcpInfo ? resolveDetailComponent('mcpTool') : detailComponent
-  const finalIcon = mcpInfo ? Waypoints : transform.icon ?? descriptor.icon
+  const finalDetailComponent = shouldUseGenericMcpDisplay ? resolveDetailComponent('mcpTool') : detailComponent
+  const finalIcon = shouldUseGenericMcpDisplay ? Waypoints : transform.icon ?? descriptor.icon
 
   return {
     id: entry.id,
