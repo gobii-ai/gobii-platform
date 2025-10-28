@@ -18,6 +18,7 @@ import os
 import fnmatch
 import contextlib
 import contextvars
+import sys
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
@@ -27,6 +28,8 @@ import litellm  # re-exported for tests expecting to patch LiteLLM directly
 
 import httpx
 from fastmcp import Client
+from fastmcp.client.transports import StdioTransport as FastMCPStdioTransport
+from mcp import ClientSession, StdioServerParameters
 from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
@@ -108,6 +111,89 @@ class MCPToolInfo:
             "description": self.description,
             "parameters": json.dumps(self.parameters) if self.parameters else "{}",
         }
+
+
+class GobiiStdioTransport(FastMCPStdioTransport):
+    """Custom stdio transport that guarantees an errlog with a real fileno."""
+
+    def __init__(
+        self,
+        command: str,
+        args: List[str],
+        env: Optional[Dict[str, str]] = None,
+        cwd: Optional[str] = None,
+        keep_alive: Optional[bool] = None,
+    ):
+        super().__init__(command=command, args=args, env=env, cwd=cwd, keep_alive=keep_alive)
+        self._errlog_fallback = None
+
+    def _resolve_errlog(self):
+        for candidate in (getattr(sys, "__stderr__", None), sys.stderr):
+            if candidate and hasattr(candidate, "fileno"):
+                return candidate
+        if self._errlog_fallback is None:
+            self._errlog_fallback = open(os.devnull, "w")
+        return self._errlog_fallback
+
+    async def connect(self, **session_kwargs):
+        if self._connect_task is not None:
+            return
+
+        errlog = self._resolve_errlog()
+
+        async def _connect_task():
+            from mcp.client.stdio import stdio_client
+
+            try:
+                async with contextlib.AsyncExitStack() as stack:
+                    try:
+                        server_params = StdioServerParameters(
+                            command=self.command,
+                            args=self.args,
+                            env=self.env,
+                            cwd=self.cwd,
+                        )
+                        transport = await stack.enter_async_context(
+                            stdio_client(server_params, errlog=errlog)
+                        )
+                        read_stream, write_stream = transport
+                        self._session = await stack.enter_async_context(
+                            ClientSession(read_stream, write_stream, **session_kwargs)
+                        )
+
+                        logger.debug("Stdio transport connected")
+                        self._ready_event.set()
+
+                        await self._stop_event.wait()
+                    finally:
+                        self._session = None
+                        logger.debug("Stdio transport disconnected")
+            except Exception:
+                self._ready_event.set()
+                raise
+
+        self._connect_task = asyncio.create_task(_connect_task())
+        await self._ready_event.wait()
+
+        if self._connect_task.done():
+            exception = self._connect_task.exception()
+            if exception is not None:
+                raise exception
+
+    async def disconnect(self):
+        await super().disconnect()
+        self._cleanup_errlog()
+
+    async def close(self):
+        await super().close()
+        self._cleanup_errlog()
+
+    def _cleanup_errlog(self):
+        if self._errlog_fallback:
+            try:
+                self._errlog_fallback.close()
+            finally:
+                self._errlog_fallback = None
 
 
 class MCPToolManager:
@@ -625,9 +711,7 @@ class MCPToolManager:
                 httpx_client_factory=self._httpx_client_factory,
             )
         elif server.command:
-            from fastmcp.client.transports import StdioTransport
-
-            transport = StdioTransport(
+            transport = GobiiStdioTransport(
                 command=server.command,
                 args=server.args or [],
                 env=server.env or {},
