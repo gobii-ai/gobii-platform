@@ -200,6 +200,55 @@ export function SqliteBatchDetail({ entry }: ToolDetailProps) {
   )
 }
 
+export function EnableDatabaseDetail({ entry }: ToolDetailProps) {
+  const resultObject = parseResultObject(entry.result)
+  const statusValue = resultObject?.['status']
+  const messageValue = resultObject?.['message']
+  const managerValue = resultObject?.['tool_manager']
+  const detailsValue = resultObject?.['details']
+
+  const status = typeof statusValue === 'string' && statusValue.trim().length ? statusValue : null
+  const message = typeof messageValue === 'string' && messageValue.trim().length ? messageValue : null
+  const manager = isRecord(managerValue) ? managerValue : null
+  const details = isRecord(detailsValue) ? detailsValue : null
+
+  const toStringList = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return []
+    return (value as unknown[])
+      .map((item) => (typeof item === 'string' && item.trim().length > 0 ? item : null))
+      .filter((item): item is string => Boolean(item))
+  }
+
+  const enabledList = toStringList(manager?.['enabled'])
+  const alreadyEnabledList = toStringList(manager?.['already_enabled'])
+  const evictedList = toStringList(manager?.['evicted'])
+  const invalidList = toStringList(manager?.['invalid'])
+
+  const renderedMessage = message ?? entry.summary ?? 'sqlite_batch availability updated.'
+
+  return (
+    <div className="space-y-3 text-sm text-slate-600">
+      <p className="text-slate-700">{renderedMessage}</p>
+      <KeyValueList
+        items={[
+          status ? { label: 'Status', value: status.toUpperCase() } : null,
+          enabledList.length ? { label: 'Enabled', value: enabledList.join(', ') } : null,
+          alreadyEnabledList.length ? { label: 'Already enabled', value: alreadyEnabledList.join(', ') } : null,
+          evictedList.length ? { label: 'Evicted', value: evictedList.join(', ') } : null,
+          invalidList.length ? { label: 'Invalid', value: invalidList.join(', ') } : null,
+        ]}
+      />
+      {details ? (
+        <Section title="Details">
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
+            {stringify(details)}
+          </pre>
+        </Section>
+      ) : null}
+    </div>
+  )
+}
+
 function looksLikeJson(value: string): boolean {
   const trimmed = value.trim()
   return (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))
@@ -792,6 +841,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   default: GenericToolDetail,
   updateCharter: UpdateCharterDetail,
   sqliteBatch: SqliteBatchDetail,
+  enableDatabase: EnableDatabaseDetail,
   search: SearchToolDetail,
   apiRequest: ApiRequestDetail,
   fileRead: FileReadDetail,

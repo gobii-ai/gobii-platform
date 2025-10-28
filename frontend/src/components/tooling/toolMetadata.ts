@@ -105,6 +105,60 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'enable_database',
+    label: 'Database enabled',
+    iconPaths: [
+      'M5 7c0-2.21 3.582-4 8-4s8 1.79 8 4-3.582 4-8 4-8-1.79-8-4z',
+      'M5 12c0 2.21 3.582 4 8 4s8-1.79 8-4',
+      'M10 17.5l2.5 2.5 5-5',
+    ],
+    iconBgClass: 'bg-emerald-50',
+    iconColorClass: 'text-emerald-600',
+    detailKind: 'enableDatabase',
+    derive(entry) {
+      const resultObject = parseResultObject(entry.result)
+      const messageValue = resultObject?.['message']
+      const statusValue = resultObject?.['status']
+      const managerValue = resultObject?.['tool_manager']
+
+      const message = coerceString(messageValue)
+      const status = coerceString(statusValue)
+      const manager =
+        managerValue && typeof managerValue === 'object' && !Array.isArray(managerValue)
+          ? (managerValue as Record<string, unknown>)
+          : null
+
+      const toStringList = (value: unknown): string[] => {
+        if (!Array.isArray(value)) return []
+        return (value as unknown[])
+          .map((item) => (typeof item === 'string' && item.trim().length > 0 ? item : null))
+          .filter((item): item is string => Boolean(item))
+      }
+
+      const enabledList = toStringList(manager?.['enabled'])
+      const alreadyEnabledList = toStringList(manager?.['already_enabled'])
+
+      const summaryPieces: string[] = []
+      if (status) {
+        summaryPieces.push(status === 'ok' ? 'Enabled' : status)
+      }
+      if (enabledList.length) {
+        summaryPieces.push(`Enabled: ${enabledList.join(', ')}`)
+      } else if (alreadyEnabledList.length) {
+        summaryPieces.push(`Already enabled: ${alreadyEnabledList.join(', ')}`)
+      }
+
+      const summaryText = summaryPieces.length ? truncate(summaryPieces.join(' • '), 96) : null
+      const label = message && /already/i.test(message) ? 'Database already enabled' : 'Database enabled'
+
+      return {
+        label,
+        caption: message ? truncate(message, 56) : entry.caption ?? label,
+        summary: summaryText ?? message ?? entry.summary ?? null,
+      }
+    },
+  },
+  {
     name: 'api_task',
     label: 'API task',
     iconPaths: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
