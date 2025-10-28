@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Workflow } from 'lucide-react'
 import { useToolDetailController, entryKey } from './tooling/ToolDetailContext'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
 import type { ToolClusterEvent } from './types'
@@ -8,6 +9,11 @@ import { scrollIntoViewIfNeeded } from './scrollIntoView'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
+}
+
+function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefined; className?: string }) {
+  const IconComponent = icon ?? Workflow
+  return <IconComponent className={className} aria-hidden="true" />
 }
 
 function slugify(value: string) {
@@ -168,11 +174,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
       <div className="tool-chip-detail">
         <div className="tool-chip-detail-header">
           <span className={`tool-chip-detail-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              {entry.iconPaths.map((path, index) => (
-                <path key={index} strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={path} />
-              ))}
-            </svg>
+            <ToolIcon icon={entry.icon} className="h-5 w-5" />
           </span>
           <div className="tool-chip-detail-text">
             <span className="tool-chip-detail-label">{entry.label}</span>
@@ -245,11 +247,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
                   onClick={() => handleChipClick(entry)}
                 >
                   <span className={`tool-chip-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                      {entry.iconPaths.map((path, index) => (
-                        <path key={index} strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={path} />
-                      ))}
-                    </svg>
+                    <ToolIcon icon={entry.icon} className="h-5 w-5" />
                   </span>
                   <span className="tool-chip-body">
                     <span className="tool-chip-label">{entry.label}</span>

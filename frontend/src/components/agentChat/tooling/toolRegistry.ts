@@ -53,7 +53,7 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
     label: transform.label ?? descriptor.label,
     caption: caption ?? descriptor.label,
     timestamp: entry.timestamp ?? null,
-    iconPaths: transform.iconPaths ?? descriptor.iconPaths,
+    icon: transform.icon ?? descriptor.icon,
     iconBgClass: transform.iconBgClass ?? descriptor.iconBgClass,
     iconColorClass: transform.iconColorClass ?? descriptor.iconColorClass,
     parameters,
