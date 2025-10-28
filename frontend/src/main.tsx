@@ -1,14 +1,22 @@
 import 'vite/modulepreload-polyfill'
-import { StrictMode, type ReactElement } from 'react'
+import { StrictMode, lazy, Suspense, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from 'react-aria-components'
+import { Loader2 } from 'lucide-react'
 import './index.css'
 import './styles/consoleShell.css'
-import { AgentChatPage } from './screens/AgentChatPage'
-import { DiagnosticsScreen } from './screens/DiagnosticsScreen'
-import { McpServersScreen } from './screens/McpServersScreen'
-import { UsageScreen } from './screens/UsageScreen'
+
+const AgentChatPage = lazy(async () => ({ default: (await import('./screens/AgentChatPage')).AgentChatPage }))
+const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/DiagnosticsScreen')).DiagnosticsScreen }))
+const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
+const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageScreen')).UsageScreen }))
+
+const LoadingFallback = () => (
+  <div className="app-loading" role="status" aria-live="polite" aria-label="Loading">
+    <Loader2 size={56} className="app-loading__spinner" aria-hidden="true" />
+  </div>
+)
 
 const mountNode = document.getElementById('gobii-frontend-root')
 
@@ -80,7 +88,9 @@ const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US'
 createRoot(mountNode).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <I18nProvider locale={locale}>{screen}</I18nProvider>
+      <I18nProvider locale={locale}>
+        <Suspense fallback={<LoadingFallback />}>{screen}</Suspense>
+      </I18nProvider>
     </QueryClientProvider>
   </StrictMode>,
 )
