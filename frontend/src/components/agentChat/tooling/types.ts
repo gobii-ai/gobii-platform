@@ -24,6 +24,12 @@ export type ToolEntryDisplay = {
   detailComponent: ToolDetailComponent
   meta?: ToolCallEntry['meta']
   sourceEntry: ToolCallEntry
+  mcpInfo?: {
+    serverSlug: string
+    serverLabel: string
+    toolId: string
+    toolLabel: string
+  }
 }
 
 export type ToolClusterDisplay = {
