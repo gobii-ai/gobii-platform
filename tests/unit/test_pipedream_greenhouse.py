@@ -109,6 +109,7 @@ class PipedreamGreenhouseConnectTests(TestCase):
         # Prepare manager and discovered tool (Pipedream unprefixed)
         from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo
         mgr = MCPToolManager()
+        mgr._get_pipedream_access_token = MagicMock(return_value="pd_token")
         mgr._initialized = True
         config = _get_or_create_pipedream_config()
         runtime = MCPServerRuntime(

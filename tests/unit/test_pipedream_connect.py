@@ -55,8 +55,11 @@ def _setup_pipedream_tool(mgr, agent, description="desc"):
     )
     mgr._initialized = True
     mgr._tools_cache = {str(config.id): [tool]}
+    mgr._get_pipedream_access_token = MagicMock(return_value="pd_token")
     cache_key = f"{agent.id}:google_sheets:sub-agent"
-    mgr._pd_agent_clients[cache_key] = MagicMock()
+    client_mock = MagicMock()
+    client_mock.transport = MagicMock(headers={})
+    mgr._pd_agent_clients[cache_key] = client_mock
     PersistentAgentEnabledTool.objects.create(
         agent=agent,
         tool_full_name=tool.full_name,

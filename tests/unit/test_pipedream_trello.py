@@ -111,6 +111,7 @@ class PipedreamTrelloManagerTests(TestCase):
         from api.agent.tools.mcp_manager import MCPToolInfo, MCPToolManager
 
         mgr = MCPToolManager()
+        mgr._get_pipedream_access_token = MagicMock(return_value="pd_token")
         mgr._initialized = True
         config = _get_or_create_pipedream_config()
         runtime = MCPServerRuntime(
