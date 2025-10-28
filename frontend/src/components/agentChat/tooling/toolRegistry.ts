@@ -129,8 +129,8 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
 
   const finalLabel = shouldUseGenericMcpDisplay ? 'MCP Tool' : baseLabel
   const finalCaption =
-    shouldUseGenericMcpDisplay && (mcpInfo.serverLabel || mcpInfo.toolLabel)
-      ? [mcpInfo.serverLabel, mcpInfo.toolLabel].filter(Boolean).join(' • ')
+    shouldUseGenericMcpDisplay && (mcpInfo?.serverLabel || mcpInfo?.toolLabel)
+      ? [mcpInfo?.serverLabel, mcpInfo?.toolLabel].filter(Boolean).join(' • ')
       : baseCaption
   const finalDetailComponent = shouldUseGenericMcpDisplay ? resolveDetailComponent('mcpTool') : detailComponent
   const finalIcon = shouldUseGenericMcpDisplay ? Waypoints : transform.icon ?? descriptor.icon
