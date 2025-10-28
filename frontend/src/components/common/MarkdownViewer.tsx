@@ -84,13 +84,14 @@ const markdownComponents = {
 
 export function MarkdownViewer({ content, className }: MarkdownViewerProps) {
   return (
-    <ReactMarkdown
-      className={className}
-      remarkPlugins={[remarkGfm as unknown as any, remarkBreaks as unknown as any]}
-      rehypePlugins={[rehypeHighlight as unknown as any]}
-      components={markdownComponents}
-    >
-      {content}
-    </ReactMarkdown>
+    <div className={className}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm as unknown as any, remarkBreaks as unknown as any]}
+        rehypePlugins={[rehypeHighlight as unknown as any]}
+        components={markdownComponents}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
   )
 }

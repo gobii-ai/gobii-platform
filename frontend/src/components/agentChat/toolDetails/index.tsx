@@ -211,19 +211,20 @@ function normalizeStructuredValue(value: unknown, context: NormalizeContext): un
   return value
 }
 
-export function GenericToolDetail({ entry }: ToolDetailProps) {
+function useToolData(entry: ToolDetailProps['entry']) {
   const parameters =
     entry.parameters && typeof entry.parameters === 'object' && !Array.isArray(entry.parameters)
       ? (entry.parameters as Record<string, unknown>)
       : null
   const showParameters = Boolean(parameters && Object.keys(parameters).length > 0)
+  const normalizedParameters = parameters ? (normalizeStructuredValue(parameters, createNormalizeContext()) as Record<string, unknown>) : null
+
   const stringResult = typeof entry.result === 'string' ? entry.result.trim() : null
   const htmlResult = stringResult && looksLikeHtml(stringResult) ? sanitizeHtml(stringResult) : null
   const objectResult =
     entry.result && typeof entry.result === 'object'
       ? (entry.result as Record<string, unknown> | unknown[])
       : null
-  const normalizedParameters = parameters ? (normalizeStructuredValue(parameters, createNormalizeContext()) as Record<string, unknown>) : null
   const parsedJsonResult = stringResult ? tryParseJson(stringResult) : null
   const structuredResult = objectResult ?? parsedJsonResult
   const normalizedStructuredResult =
@@ -231,7 +232,35 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
       ? normalizeStructuredValue(structuredResult, createNormalizeContext())
       : null
   const hasStructuredResult = normalizedStructuredResult !== null && normalizedStructuredResult !== undefined
-  const showStringResult = stringResult && !parsedJsonResult
+  const showStringResult = Boolean(stringResult && !parsedJsonResult)
+
+  return {
+    parameters,
+    showParameters,
+    normalizedParameters,
+    stringResult,
+    htmlResult,
+    objectResult,
+    structuredResult,
+    normalizedStructuredResult,
+    hasStructuredResult,
+    showStringResult,
+  }
+}
+
+export function GenericToolDetail({ entry }: ToolDetailProps) {
+  const {
+    parameters,
+    showParameters,
+    normalizedParameters,
+    stringResult,
+    htmlResult,
+    structuredResult,
+    normalizedStructuredResult,
+    hasStructuredResult,
+    showStringResult,
+  } = useToolData(entry)
+
   return (
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList
@@ -245,7 +274,7 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
           <StructuredDataTable value={normalizedParameters ?? parameters} />
         </Section>
       ) : null}
-      {showStringResult ? (
+      {showStringResult && stringResult ? (
         <Section title="Result">
           {htmlResult ? (
             <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: htmlResult }} />
@@ -280,27 +309,17 @@ export function UpdateCharterDetail({ entry }: ToolDetailProps) {
 }
 
 export function McpToolDetail({ entry }: ToolDetailProps) {
-  const parameters =
-    entry.parameters && typeof entry.parameters === 'object' && !Array.isArray(entry.parameters)
-      ? (entry.parameters as Record<string, unknown>)
-      : null
-  const showParameters = Boolean(parameters && Object.keys(parameters).length > 0)
-  const normalizedParameters = parameters ? (normalizeStructuredValue(parameters, createNormalizeContext()) as Record<string, unknown>) : null
-
-  const stringResult = typeof entry.result === 'string' ? entry.result.trim() : null
-  const htmlResult = stringResult && looksLikeHtml(stringResult) ? sanitizeHtml(stringResult) : null
-  const objectResult =
-    entry.result && typeof entry.result === 'object'
-      ? (entry.result as Record<string, unknown> | unknown[])
-      : null
-  const parsedJsonResult = stringResult ? tryParseJson(stringResult) : null
-  const structuredResult = objectResult ?? parsedJsonResult
-  const normalizedStructuredResult =
-    structuredResult !== null && structuredResult !== undefined
-      ? normalizeStructuredValue(structuredResult, createNormalizeContext())
-      : null
-  const hasStructuredResult = normalizedStructuredResult !== null && normalizedStructuredResult !== undefined
-  const showStringResult = stringResult && !parsedJsonResult
+  const {
+    parameters,
+    showParameters,
+    normalizedParameters,
+    stringResult,
+    htmlResult,
+    structuredResult,
+    normalizedStructuredResult,
+    hasStructuredResult,
+    showStringResult,
+  } = useToolData(entry)
 
   const infoItems = [
     entry.mcpInfo?.serverLabel ? { label: 'Server', value: entry.mcpInfo.serverLabel } : null,
@@ -316,7 +335,7 @@ export function McpToolDetail({ entry }: ToolDetailProps) {
           <StructuredDataTable value={normalizedParameters ?? parameters} />
         </Section>
       ) : null}
-      {showStringResult ? (
+      {showStringResult && stringResult ? (
         <Section title="Result">
           {htmlResult ? (
             <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: htmlResult }} />
