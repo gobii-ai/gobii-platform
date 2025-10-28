@@ -10,7 +10,7 @@ import {
   Network,
   FileText,
   FilePen,
-  MonitorCog,
+  Globe,
   ContactRound,
   Mail,
   MessageSquareText,
@@ -270,7 +270,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'spawn_web_task',
     label: 'Browser task',
-    icon: MonitorCog,
+    icon: Globe,
     iconBgClass: 'bg-violet-100',
     iconColorClass: 'text-violet-600',
     detailKind: 'browserTask',
