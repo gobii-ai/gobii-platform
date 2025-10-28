@@ -144,6 +144,7 @@ class MCPToolManager:
         # Per‑agent Pipedream clients (unique connection per agent id)
         self._pd_agent_clients: Dict[str, Client] = {}
         self._httpx_client_factory = self._build_httpx_client_factory()
+        self._pd_missing_credentials_logged = False
         
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
         """Ensure we have an event loop for async operations."""
@@ -591,9 +592,6 @@ class MCPToolManager:
     
     def _register_server(self, server: MCPServerRuntime):
         """Register an MCP server and cache its tools."""
-
-        if server.command and server.env.get("API_TOKEN") == "":
-            raise ValueError(f"MCP server '{server.name}' missing API_TOKEN")
 
         if server.url:
             from fastmcp.client.transports import StreamableHttpTransport
@@ -1153,6 +1151,11 @@ class MCPToolManager:
             client_id = getattr(settings, "PIPEDREAM_CLIENT_ID", "")
             client_secret = getattr(settings, "PIPEDREAM_CLIENT_SECRET", "")
             if not client_id or not client_secret:
+                if not self._pd_missing_credentials_logged:
+                    logger.warning(
+                        "Pipedream MCP credentials missing; set PIPEDREAM_CLIENT_ID and PIPEDREAM_CLIENT_SECRET to enable remote tools."
+                    )
+                    self._pd_missing_credentials_logged = True
                 return None
 
             resp = requests.post(
@@ -1172,13 +1175,19 @@ class MCPToolManager:
                 return None
             self._pd_access_token = access_token
             self._pd_token_expiry = datetime.now(UTC) + timedelta(seconds=expires_in)
+            if self._pd_missing_credentials_logged:
+                self._pd_missing_credentials_logged = False
             return access_token
         except Exception as e:
             logger.error(f"Failed to obtain Pipedream access token: {e}")
             return None
 
     def _pd_build_headers(self, mode: str, app_slug: Optional[str], external_user_id: str, conversation_id: str) -> Dict[str, str]:
-        token = self._get_pipedream_access_token() or ""
+        token = self._get_pipedream_access_token()
+        if not token:
+            raise RuntimeError(
+                "Pipedream access token unavailable; set PIPEDREAM_CLIENT_ID/PIPEDREAM_CLIENT_SECRET and try again."
+            )
         headers: Dict[str, str] = {
             "Authorization": f"Bearer {token}",
             "x-pd-project-id": getattr(settings, "PIPEDREAM_PROJECT_ID", ""),
@@ -1208,7 +1217,11 @@ class MCPToolManager:
             client = self._pd_agent_clients[cache_key]
             # Ensure Authorization header is current
             if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
-                token = self._get_pipedream_access_token() or ""
+                token = self._get_pipedream_access_token()
+                if not token:
+                    raise RuntimeError(
+                        "Pipedream access token unavailable; set PIPEDREAM_CLIENT_ID/PIPEDREAM_CLIENT_SECRET and try again."
+                    )
                 client.transport.headers["Authorization"] = f"Bearer {token}"
             return client
 
