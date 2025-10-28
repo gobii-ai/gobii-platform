@@ -57,37 +57,19 @@ function renderArray(values: JsonValue[], context: RenderContext): ReactNode {
   context.seen.add(values)
 
   const nextContext: RenderContext = { ...context, depth: context.depth + 1 }
-  const rows = values.map((item, index) => ({
+  const items = values.map((item, index) => ({
     index,
     content: renderValue(item, nextContext),
   }))
 
   return (
-    <div className="space-y-3 text-xs text-slate-600">
-      <table className="hidden w-full table-fixed border-collapse text-left sm:table">
-        <thead>
-          <tr className="bg-slate-100 text-slate-600">
-            <th className="w-16 border border-slate-200 px-3 py-2 font-semibold">#</th>
-            <th className="border border-slate-200 px-3 py-2 font-semibold">Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.index} className="align-top">
-              <th className="border border-slate-200 bg-slate-50 px-3 py-2 font-semibold text-slate-600 align-top">#{row.index}</th>
-              <td className="border border-slate-200 px-3 py-2">{row.content}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="space-y-2 sm:hidden">
-        {rows.map((row) => (
-          <div key={row.index} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-500">#{row.index}</div>
-            <div className="mt-1 text-xs text-slate-600">{row.content}</div>
-          </div>
-        ))}
-      </div>
+    <div className="space-y-2 text-xs text-slate-600">
+      {items.map((row) => (
+        <div key={row.index} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-500">#{row.index}</div>
+          <div className="mt-1 text-xs text-slate-600">{row.content}</div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -114,25 +96,13 @@ function renderObject(value: Record<string, unknown>, context: RenderContext): R
   }))
 
   return (
-    <div className="space-y-3 text-xs text-slate-600">
-      <table className="hidden w-full table-fixed border-collapse text-left sm:table">
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.key} className="align-top">
-              <th className="border border-slate-200 bg-slate-50 px-3 py-2 font-semibold text-slate-600 align-top">{row.key}</th>
-              <td className="border border-slate-200 px-3 py-2">{row.content}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="space-y-2 sm:hidden">
-        {rows.map((row) => (
-          <div key={row.key} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-500">{row.key}</div>
-            <div className="mt-1 text-xs text-slate-600">{row.content}</div>
-          </div>
-        ))}
-      </div>
+    <div className="space-y-2 text-xs text-slate-600">
+      {rows.map((row) => (
+        <div key={row.key} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-500">{row.key}</div>
+          <div className="mt-1 text-xs text-slate-600">{row.content}</div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -149,7 +119,7 @@ function renderValue(value: JsonValue, context: RenderContext): ReactNode {
 
 export function StructuredDataTable({ value, className, maxDepth = 8 }: StructuredDataTableProps) {
   const containerClasses = [
-    'structured-data-table max-h-60 overflow-auto rounded-xl border border-slate-200 bg-slate-50 px-2 shadow-inner sm:px-3',
+    'structured-data-table max-h-60 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-2 shadow-inner sm:p-2',
     className ?? '',
   ]
     .filter(Boolean)
