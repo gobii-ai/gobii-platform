@@ -27,6 +27,7 @@ class MCPServerConfigAdminTests(TestCase):
             "command": "npx",
             "command_args": [],
             "url": "",
+            "auth_method": MCPServerConfig.AuthMethod.NONE,
             "prefetch_apps": [],
             "metadata": {},
             "is_active": True,
@@ -86,6 +87,7 @@ class MCPServerConfigAdminTests(TestCase):
             "command": "npx",
             "command_args": '["-y", "@brightdata/mcp@2.6.0"]',
             "url": "",
+            "auth_method": MCPServerConfig.AuthMethod.BEARER_TOKEN,
             "prefetch_apps": '["sheets"]',
             "metadata": '{"env_fallback": {"API_TOKEN": "BRIGHT_DATA_TOKEN"}}',
             "is_active": "on",
@@ -106,6 +108,7 @@ class MCPServerConfigAdminTests(TestCase):
         self.assertEqual(config.headers, {"X-Test": "value"})
         self.assertEqual(config.command_args, ["-y", "@brightdata/mcp@2.6.0"])
         self.assertEqual(config.prefetch_apps, ["sheets"])
+        self.assertEqual(config.auth_method, MCPServerConfig.AuthMethod.BEARER_TOKEN)
 
     def test_reserved_identifier_blocked_for_non_platform(self):
         owner = get_user_model().objects.create_user(

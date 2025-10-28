@@ -1,15 +1,25 @@
 """Unit tests for MCP tool management functionality."""
 
+import asyncio
 import atexit
 import json
 import time
 import uuid
+from datetime import datetime, timedelta, UTC
 from contextlib import nullcontext
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 from django.test import TestCase, tag, override_settings
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
-from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentEnabledTool, MCPServerConfig
+from api.models import (
+    PersistentAgent,
+    BrowserUseAgent,
+    PersistentAgentEnabledTool,
+    MCPServerConfig,
+    MCPServerOAuthCredential,
+    PersistentAgentMCPServer,
+)
 from api.agent.tools.mcp_manager import (
     MCPToolManager,
     MCPToolInfo,
@@ -220,6 +230,7 @@ class MCPToolManagerTests(TestCase):
             command=None,
             args=[],
             url=http_config.url,
+            auth_method=http_config.auth_method,
             env=http_config.environment or {},
             headers=http_config.headers or {},
             prefetch_apps=[],
@@ -251,6 +262,140 @@ class MCPToolManagerTests(TestCase):
         )
 
         return agent
+
+    def test_register_http_server_includes_oauth_header(self):
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="notion",
+            display_name="Notion",
+            description="",
+            command=None,
+            args=[],
+            url="https://mcp.example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            env={},
+            headers={},
+            oauth_access_token="token-123",
+            oauth_token_type="Bearer",
+            oauth_expires_at=datetime.now(UTC) + timedelta(hours=1),
+            oauth_updated_at=datetime.now(UTC),
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        manager = MCPToolManager()
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+
+        async def _fake_fetch(*args, **kwargs):
+            return []
+
+        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
+                patch.object(manager, "_select_discovery_proxy_url", return_value=None), \
+                patch.object(manager, "_fetch_server_tools", new=_fake_fetch):
+            manager._register_server(runtime)
+        transport = manager._clients[runtime.config_id].transport
+        self.assertEqual(transport.headers.get("Authorization"), "Bearer token-123")
+
+    @tag("batch_mcp_tools")
+    @patch("api.agent.tools.mcp_manager.requests.post")
+    def test_build_runtime_refreshes_expired_oauth_token(self, mock_post):
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=get_user_model().objects.create_user(
+                username="oauth-user", email="oauth@example.com"
+            ),
+            name=f"notion-{uuid.uuid4().hex[:8]}",
+            display_name="Notion",
+            url="https://notion.example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+        )
+
+        credential = MCPServerOAuthCredential.objects.create(
+            server_config=config,
+            user=config.user,
+            client_id="client-123",
+        )
+        credential.client_secret = "secret-xyz"
+        credential.access_token = "expired-token"
+        credential.refresh_token = "refresh-123"
+        credential.token_type = "Bearer"
+        credential.expires_at = timezone.now() - timedelta(minutes=5)
+        credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
+        credential.save()
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+            "scope": "read:pages",
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        manager = MCPToolManager()
+        runtime = manager._build_runtime_from_config(config)
+
+        mock_post.assert_called_once_with(
+            "https://notion.example.com/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": "refresh-123",
+                "client_id": "client-123",
+                "client_secret": "secret-xyz",
+            },
+            timeout=manager.OAUTH_REFRESH_TIMEOUT_SECONDS,
+        )
+
+        self.assertEqual(runtime.oauth_access_token, "new-access")
+        self.assertEqual(runtime.oauth_token_type, "Bearer")
+        self.assertGreater(runtime.oauth_expires_at, timezone.now())
+
+        credential.refresh_from_db()
+        self.assertEqual(credential.access_token, "new-access")
+        self.assertEqual(credential.refresh_token, "new-refresh")
+        self.assertEqual(credential.token_type, "Bearer")
+        self.assertIn("last_refresh_response", credential.metadata)
+
+    @tag("batch_mcp_tools")
+    @patch("api.agent.tools.mcp_manager.requests.post")
+    def test_build_runtime_skips_refresh_when_token_valid(self, mock_post):
+        user = get_user_model().objects.create_user(
+            username="fresh-user",
+            email="fresh@example.com",
+        )
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name=f"fresh-notion-{uuid.uuid4().hex[:8]}",
+            display_name="Notion Fresh",
+            url="https://notion.example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+        )
+
+        credential = MCPServerOAuthCredential.objects.create(
+            server_config=config,
+            user=user,
+            client_id="client-789",
+        )
+        credential.client_secret = "secret-abc"
+        credential.access_token = "valid-token"
+        credential.refresh_token = "refresh-abc"
+        credential.token_type = "Bearer"
+        credential.expires_at = timezone.now() + timedelta(minutes=10)
+        credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
+        credential.save()
+
+        manager = MCPToolManager()
+        runtime = manager._build_runtime_from_config(config)
+
+        mock_post.assert_not_called()
+        self.assertEqual(runtime.oauth_access_token, "valid-token")
+        self.assertEqual(runtime.oauth_token_type, "Bearer")
         
     def test_default_enabled_tools_defined(self):
         """Test that default enabled tools list is defined."""
@@ -283,6 +428,58 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(result, new_loop)
         mock_new_loop.assert_called_once()
         mock_set_loop.assert_called_once_with(new_loop)
+        
+    def test_initialize_does_not_register_servers(self):
+        """Ensure initialize() avoids contacting MCP servers during refresh."""
+        with patch.object(self.manager, "_register_server") as mock_register:
+            self.manager.initialize(force=True)
+        mock_register.assert_not_called()
+        
+    def test_get_tools_for_agent_registers_accessible_servers_only(self):
+        """Ensure discovery runs only for servers the agent can access."""
+        User = get_user_model()
+        user = User.objects.create_user(username="lazy-agent@example.com")
+        browser_agent = create_test_browser_agent(user)
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="lazy-agent",
+            charter="Test charter",
+            browser_use_agent=browser_agent,
+        )
+
+        assigned_personal = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name=f"assigned-{uuid.uuid4().hex[:8]}",
+            display_name="Assigned Personal Server",
+            description="",
+            command="npx",
+            command_args=[],
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+        )
+        PersistentAgentMCPServer.objects.create(agent=agent, server_config=assigned_personal)
+
+        MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name=f"unassigned-{uuid.uuid4().hex[:8]}",
+            display_name="Unassigned Personal Server",
+            description="",
+            command="npx",
+            command_args=[],
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+        )
+
+        self.manager.initialize(force=True)
+        original_register = self.manager._register_server
+        with patch.object(self.manager, "_register_server", wraps=original_register) as mock_register:
+            tools = self.manager.get_tools_for_agent(agent)
+
+        self.assertEqual(tools, [])
+        registered_ids = {call.args[0].config_id for call in mock_register.call_args_list}
+        expected_ids = {str(self.server_config.id), str(assigned_personal.id)}
+        self.assertEqual(registered_ids, expected_ids)
+        self.assertEqual(mock_register.call_count, len(expected_ids))
         
     @patch('api.agent.tools.mcp_manager.MCPToolManager.initialize')
     def test_get_all_available_tools(self, mock_init):
@@ -361,6 +558,7 @@ class MCPToolManagerTests(TestCase):
             command=self.server_config.command or None,
             args=list(self.server_config.command_args or []),
             url=self.server_config.url or None,
+            auth_method=self.server_config.auth_method,
             env=self.server_config.environment or {},
             headers=self.server_config.headers or {},
             prefetch_apps=list(self.server_config.prefetch_apps or []),

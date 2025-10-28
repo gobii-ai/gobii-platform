@@ -77,6 +77,7 @@ class TestMCPToolBlacklist(TestCase):
                 command="test",
                 args=[],
                 url=None,
+                auth_method="none",
                 env={},
                 headers={},
                 prefetch_apps=[],

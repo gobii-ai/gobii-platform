@@ -168,6 +168,11 @@ class MCPServerConfigForm(forms.Form):
     display_name = forms.CharField(max_length=128)
     command = forms.CharField(max_length=255, required=False, help_text="Executable to launch (leave blank for HTTP servers).")
     url = forms.CharField(max_length=512, required=False, help_text="HTTP/S URL for remote MCP servers.")
+    auth_method = forms.ChoiceField(
+        choices=MCPServerConfig.AuthMethod.choices,
+        initial=MCPServerConfig.AuthMethod.NONE,
+        help_text="Select how Gobii should authenticate requests to this MCP server.",
+    )
     command_args = forms.JSONField(required=False, initial=list, empty_value=list, help_text="JSON array of command arguments, e.g. ['-y', '@pkg@1.0.0'].")
     metadata = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="Additional JSON metadata (optional).")
     environment = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="JSON object of environment variables.")
@@ -189,6 +194,7 @@ class MCPServerConfigForm(forms.Form):
             initial.setdefault('display_name', instance.display_name)
             initial.setdefault('command', instance.command)
             initial.setdefault('url', instance.url)
+            initial.setdefault('auth_method', instance.auth_method)
             initial.setdefault('command_args', instance.command_args or [])
             initial.setdefault('metadata', instance.metadata or {})
             initial.setdefault('environment', instance.environment or {})
@@ -206,6 +212,10 @@ class MCPServerConfigForm(forms.Form):
         display_widget.attrs.setdefault('x-model', 'displayName')
         if instance is None:
             display_widget.attrs.setdefault('x-on:input', 'slug = slugify($event.target.value)')
+        self.fields['url'].widget.attrs.setdefault('x-ref', 'serverUrl')
+        auth_widget = self.fields['auth_method'].widget
+        auth_widget.attrs.setdefault('x-ref', 'authMethod')
+        auth_widget.attrs.setdefault('x-model', 'authMethodValue')
 
         for name, field in self.fields.items():
             widget = field.widget
@@ -304,6 +314,7 @@ class MCPServerConfigForm(forms.Form):
         config.command = self.cleaned_data.get('command', '')
         config.command_args = self.cleaned_data.get('command_args') or []
         config.url = self.cleaned_data.get('url', '')
+        config.auth_method = self.cleaned_data.get('auth_method') or MCPServerConfig.AuthMethod.NONE
         if not self.allow_commands:
             config.command = ''
             config.command_args = []

@@ -16,7 +16,7 @@
     </a>
 
     <a href="{% url 'console-mcp-servers' %}"
-       class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-mcp-servers' or request.resolver_match.url_name == 'console-mcp-server-edit' %}bg-blue-50 text-blue-600{% else %}text-slate-700 hover:bg-gray-100 hover:text-blue-600{% endif %}">
+       class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-mcp-servers' %}bg-blue-50 text-blue-600{% else %}text-slate-700 hover:bg-gray-100 hover:text-blue-600{% endif %}">
       <i data-lucide="cog" class="flex-shrink-0 w-5 h-5"></i>
       Advanced
     </a>

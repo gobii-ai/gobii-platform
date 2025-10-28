@@ -584,5 +584,8 @@
   <img height="1" width="1" style="display:none;" alt="" src="https://px.ads.linkedin.com/collect/?pid={{ settings.LINKEDIN_PARTNER_ID }}&fmt=gif" />
   </noscript>
   {% endif %}
+
+  {# Allow pages to inject additional scripts after the global includes. #}
+  {% block extra_js %}{% endblock %}
 </body>
 </html>

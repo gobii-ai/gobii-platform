@@ -19,7 +19,7 @@ import fnmatch
 import contextlib
 import contextvars
 from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 
 import requests
@@ -31,9 +31,11 @@ from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
 from django.db.models import Max
+from django.utils import timezone
 
 from ...models import (
     MCPServerConfig,
+    MCPServerOAuthCredential,
     PersistentAgent,
     PersistentAgentEnabledTool,
     PipedreamConnectSession,
@@ -73,6 +75,7 @@ class MCPServerRuntime:
     command: Optional[str]
     args: List[str]
     url: Optional[str]
+    auth_method: str
     env: Dict[str, str]
     headers: Dict[str, str]
     prefetch_apps: List[str]
@@ -80,6 +83,10 @@ class MCPServerRuntime:
     organization_id: Optional[str]
     user_id: Optional[str]
     updated_at: Optional[datetime]
+    oauth_access_token: Optional[str] = field(default=None, repr=False)
+    oauth_token_type: Optional[str] = None
+    oauth_expires_at: Optional[datetime] = None
+    oauth_updated_at: Optional[datetime] = None
 
 
 @dataclass 
@@ -119,6 +126,10 @@ class MCPToolManager:
         "select_apps"
         # Add more blacklist patterns here as needed
     ]
+
+    # Buffer window before expiry where we will proactively refresh OAuth tokens
+    OAUTH_REFRESH_SAFETY_MARGIN = timedelta(minutes=2)
+    OAUTH_REFRESH_TIMEOUT_SECONDS = 15
     
     def __init__(self):
         self._clients: Dict[str, Client] = {}
@@ -193,7 +204,10 @@ class MCPToolManager:
     def _refresh_server_cache(self) -> None:
         from django.utils import timezone
 
-        configs = list(MCPServerConfig.objects.filter(is_active=True))
+        configs = list(
+            MCPServerConfig.objects.filter(is_active=True)
+            .select_related("oauth_credential")
+        )
         logger.info("Loaded %d active MCP server configs", len(configs))
 
         new_cache: Dict[str, MCPServerRuntime] = {}
@@ -206,29 +220,22 @@ class MCPToolManager:
             if cfg.updated_at and (latest_seen is None or cfg.updated_at > latest_seen):
                 latest_seen = cfg.updated_at
 
-        # Dispose clients no longer present or updated
-        current_ids = set(new_cache.keys())
         existing_ids = set(self._server_cache.keys())
+        current_ids = set(new_cache.keys())
 
         removed_ids = existing_ids - current_ids
         for config_id in removed_ids:
             self._discard_client(config_id)
 
-        # Detect updated configurations (based on timestamp)
-        failed_configs: List[str] = []
-        for config_id, runtime in list(new_cache.items()):
+        for config_id, runtime in new_cache.items():
             prior = self._server_cache.get(config_id)
-            if prior and prior.updated_at == runtime.updated_at:
+            if not prior:
                 continue
+            prior_oauth_updated = getattr(prior, "oauth_updated_at", None)
+            if prior.updated_at == runtime.updated_at and prior_oauth_updated == runtime.oauth_updated_at:
+                continue
+            logger.debug("Invalidating cached MCP runtime for %s due to updated configuration", runtime.name)
             self._discard_client(config_id)
-            try:
-                self._register_server(runtime)
-            except Exception as exc:
-                logger.error("Failed to register MCP server %s: %s", runtime.name, exc)
-                failed_configs.append(config_id)
-
-        for config_id in failed_configs:
-            new_cache.pop(config_id, None)
 
         self._server_cache = new_cache
         self._last_refresh_marker = latest_seen or timezone.now()
@@ -241,12 +248,103 @@ class MCPToolManager:
             except Exception:
                 logger.debug("Error closing MCP client for %s", config_id, exc_info=True)
         self._tools_cache.pop(config_id, None)
+    def _update_refresh_marker(self, runtime: MCPServerRuntime) -> None:
+        marker = runtime.updated_at or timezone.now()
+        if self._last_refresh_marker is None or marker > self._last_refresh_marker:
+            self._last_refresh_marker = marker
+
+    def _ensure_runtime_registered(self, runtime: MCPServerRuntime) -> bool:
+        """Ensure the given runtime has an active client and cached tool list."""
+        config_id = runtime.config_id
+        if config_id in self._clients and config_id in self._tools_cache:
+            return True
+        try:
+            self._register_server(runtime)
+        except Exception:
+            logger.exception("Failed to register MCP server %s", runtime.name)
+            return False
+        return True
+
+    def _safe_register_runtime(self, runtime: MCPServerRuntime) -> bool:
+        try:
+            self._register_server(runtime)
+        except Exception:
+            logger.exception("Failed to register MCP server %s", runtime.name)
+            return False
+        self._server_cache[runtime.config_id] = runtime
+        self._update_refresh_marker(runtime)
+        return True
+
+    def refresh_server(self, config_id: str) -> None:
+        if not config_id:
+            return
+        if not self._initialized:
+            return
+
+        existing_runtime = self._server_cache.get(config_id)
+        self._discard_client(config_id)
+        self._server_cache.pop(config_id, None)
+        self._pd_agent_clients.clear()
+
+        try:
+            cfg = (
+                MCPServerConfig.objects.filter(id=config_id, is_active=True)
+                .select_related("oauth_credential")
+                .first()
+            )
+        except Exception:
+            logger.exception("Failed to load MCP server %s during refresh", config_id)
+            if existing_runtime:
+                self._safe_register_runtime(existing_runtime)
+            return
+
+        if not cfg:
+            return
+
+        runtime = self._build_runtime_from_config(cfg)
+        if self._safe_register_runtime(runtime):
+            return
+
+        if existing_runtime:
+            logger.warning(
+                "Reverting to cached MCP server runtime for %s after refresh failure",
+                config_id,
+            )
+            self._safe_register_runtime(existing_runtime)
+
+    def remove_server(self, config_id: str) -> None:
+        if not config_id:
+            return
+        self._discard_client(config_id)
+        self._server_cache.pop(config_id, None)
+        self._pd_agent_clients.clear()
 
     def _build_runtime_from_config(self, cfg: MCPServerConfig) -> MCPServerRuntime:
         env = dict(cfg.environment or {})
         headers = dict(cfg.headers or {})
         prefetch = list(cfg.prefetch_apps or [])
         metadata = cfg.metadata or {}
+        oauth_access_token: Optional[str] = None
+        oauth_token_type: Optional[str] = None
+        oauth_expires_at: Optional[datetime] = None
+        oauth_updated_at: Optional[datetime] = None
+
+        try:
+            credential = cfg.oauth_credential
+        except MCPServerOAuthCredential.DoesNotExist:
+            credential = None
+        except Exception:
+            logger.exception("Failed to load OAuth credential for MCP server %s", cfg.id)
+            credential = None
+
+        if credential:
+            credential = self._maybe_refresh_oauth_credential(cfg, credential)
+            token_value = (credential.access_token or "").strip()
+            token_type_value = (credential.token_type or "").strip()
+            oauth_access_token = token_value or None
+            oauth_token_type = token_type_value or None
+            oauth_expires_at = credential.expires_at
+            oauth_updated_at = credential.updated_at
 
         fallback_map = metadata.get('env_fallback', {}) if isinstance(metadata, dict) else {}
         for key, env_var in fallback_map.items():
@@ -264,15 +362,144 @@ class MCPToolManager:
             command=cfg.command or None,
             args=list(cfg.command_args or []),
             url=cfg.url or None,
+            auth_method=cfg.auth_method,
             env=env,
             headers=headers,
+            oauth_access_token=oauth_access_token,
+            oauth_token_type=oauth_token_type,
+            oauth_expires_at=oauth_expires_at,
+            oauth_updated_at=oauth_updated_at,
             prefetch_apps=prefetch,
             scope=cfg.scope,
             organization_id=str(cfg.organization_id) if cfg.organization_id else None,
             user_id=str(cfg.user_id) if cfg.user_id else None,
             updated_at=cfg.updated_at,
         )
-    
+
+    def _maybe_refresh_oauth_credential(
+        self,
+        cfg: MCPServerConfig,
+        credential: MCPServerOAuthCredential | None,
+    ) -> MCPServerOAuthCredential | None:
+        """Refresh an OAuth credential when the stored access token is expired or near expiry."""
+
+        if not credential or cfg.auth_method != MCPServerConfig.AuthMethod.OAUTH2:
+            return credential
+
+        refresh_token = (credential.refresh_token or "").strip()
+        if not refresh_token:
+            return credential
+
+        expires_at = credential.expires_at
+        now = timezone.now()
+        if expires_at and expires_at > now + self.OAUTH_REFRESH_SAFETY_MARGIN:
+            return credential
+
+        metadata = credential.metadata if isinstance(credential.metadata, dict) else {}
+        cfg_metadata = cfg.metadata if isinstance(cfg.metadata, dict) else {}
+        token_endpoint = (metadata.get("token_endpoint") or cfg_metadata.get("token_endpoint") or "").strip()
+        if not token_endpoint:
+            logger.warning(
+                "OAuth credential for MCP server %s lacks a token endpoint; skipping refresh",
+                cfg.id,
+            )
+            return credential
+
+        request_data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+
+        client_id = (credential.client_id or cfg_metadata.get("client_id") or "").strip()
+        if client_id:
+            request_data["client_id"] = client_id
+
+        client_secret = (credential.client_secret or cfg_metadata.get("client_secret") or "").strip()
+        if client_secret:
+            request_data["client_secret"] = client_secret
+
+        try:
+            response = requests.post(
+                token_endpoint,
+                data=request_data,
+                timeout=self.OAUTH_REFRESH_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            logger.error(
+                "Failed to refresh OAuth token for MCP server %s: %s",
+                cfg.id,
+                exc,
+            )
+            return credential
+
+        try:
+            token_payload = response.json()
+        except ValueError:
+            logger.error(
+                "Token refresh response for MCP server %s was not valid JSON",
+                cfg.id,
+            )
+            return credential
+
+        new_access_token = (token_payload.get("access_token") or "").strip()
+        if not new_access_token:
+            logger.error(
+                "Token refresh for MCP server %s did not return an access token",
+                cfg.id,
+            )
+            return credential
+
+        update_fields = ["access_token_encrypted"]
+        credential.access_token = new_access_token
+
+        new_refresh_token = (token_payload.get("refresh_token") or "").strip()
+        if new_refresh_token:
+            credential.refresh_token = new_refresh_token
+            update_fields.append("refresh_token_encrypted")
+
+        new_id_token = (token_payload.get("id_token") or "").strip()
+        if new_id_token:
+            credential.id_token = new_id_token
+            update_fields.append("id_token_encrypted")
+
+        token_type = (token_payload.get("token_type") or "").strip()
+        if token_type:
+            credential.token_type = token_type
+            update_fields.append("token_type")
+
+        scope = (token_payload.get("scope") or "").strip()
+        if scope:
+            credential.scope = scope
+            update_fields.append("scope")
+
+        expires_in_raw = token_payload.get("expires_in")
+        if expires_in_raw is not None:
+            try:
+                expires_seconds = int(expires_in_raw)
+                credential.expires_at = now + timedelta(seconds=max(expires_seconds, 0))
+            except (TypeError, ValueError):
+                credential.expires_at = None
+            update_fields.append("expires_at")
+
+        metadata_update = dict(metadata)
+        metadata_update["last_refresh_response"] = {
+            key: value
+            for key, value in token_payload.items()
+            if key not in {"access_token", "refresh_token", "id_token"}
+        }
+        credential.metadata = metadata_update
+        update_fields.append("metadata")
+
+        credential.save(update_fields=list(dict.fromkeys(update_fields)))
+        credential.refresh_from_db()
+        logger.info(
+            "Refreshed OAuth token for MCP server %s (credential updated at %s)",
+            cfg.id,
+            credential.updated_at,
+        )
+        return credential
+
     def _build_httpx_client_factory(self):
         def factory(
             headers: Optional[dict[str, str]] = None,
@@ -291,6 +518,21 @@ class MCPToolManager:
             return httpx.AsyncClient(**client_kwargs)
 
         return factory
+
+    def _build_auth_headers(self, server: MCPServerRuntime) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        if server.auth_method == MCPServerConfig.AuthMethod.OAUTH2:
+            token_value = (server.oauth_access_token or "").strip()
+            if not token_value:
+                logger.info(
+                    "MCP server '%s' is configured for OAuth 2.0 but no access token is stored",
+                    server.name,
+                )
+                return headers
+            token_type_raw = (server.oauth_token_type or "Bearer").strip() or "Bearer"
+            token_type = "Bearer" if token_type_raw.lower() == "bearer" else token_type_raw
+            headers["Authorization"] = f"{token_type} {token_value}"
+        return headers
 
     def _select_discovery_proxy_url(self, server: MCPServerRuntime) -> Optional[str]:
         if not server.url:
@@ -373,6 +615,11 @@ class MCPToolManager:
                     "Pipedream discovery initializing with app slug '%s' and sub-agent mode",
                     prefetch_csv,
                 )
+
+            else:
+                auth_headers = self._build_auth_headers(server)
+                if auth_headers:
+                    headers.update(auth_headers)
 
             transport = StreamableHttpTransport(
                 url=server.url,
@@ -547,6 +794,11 @@ class MCPToolManager:
 
         tools: List[MCPToolInfo] = []
         for config_id in desired_ids:
+            runtime = self._server_cache.get(config_id)
+            if not runtime:
+                continue
+            if not self._ensure_runtime_registered(runtime):
+                continue
             server_tools = self._tools_cache.get(config_id)
             if server_tools:
                 tools.extend(server_tools)
@@ -631,6 +883,11 @@ class MCPToolManager:
         server_name = info.server_name
         actual_tool_name = info.tool_name
         runtime = self._server_cache.get(info.config_id)
+        if runtime and not self._ensure_runtime_registered(runtime):
+            return {
+                "status": "error",
+                "message": f"MCP server '{server_name}' is not available",
+            }
 
         proxy_url = None
         proxy_error: Optional[str] = None
