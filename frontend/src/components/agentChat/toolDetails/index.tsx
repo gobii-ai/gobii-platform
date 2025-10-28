@@ -2,6 +2,7 @@ import { Fragment } from 'react'
 import type { ReactNode } from 'react'
 
 import { MarkdownViewer } from '../../common/MarkdownViewer'
+import { StructuredDataTable } from '../../common/StructuredDataTable'
 import { looksLikeHtml, sanitizeHtml } from '../../../util/sanitize'
 import { describeSchedule } from '../../../util/schedule'
 import type { ScheduleDescription } from '../../../util/schedule'
@@ -110,6 +111,106 @@ function KeyValueList({ items }: { items: Array<{ label: string; value: ReactNod
   )
 }
 
+function tryParseJson(content: string): unknown | null {
+  const trimmed = content.trim()
+  if (!trimmed) return null
+  if (trimmed.length < 2) return null
+  const firstChar = trimmed[0]
+  if (!['{', '['].includes(firstChar)) {
+    return null
+  }
+  const expectedClosing = firstChar === '{' ? '}' : ']'
+  if (!trimmed.endsWith(expectedClosing)) {
+    return null
+  }
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+}
+
+type NormalizeContext = {
+  depth: number
+  maxDepth: number
+  seen: WeakSet<object>
+}
+
+function createNormalizeContext(maxDepth = 6): NormalizeContext {
+  return {
+    depth: 0,
+    maxDepth,
+    seen: new WeakSet<object>(),
+  }
+}
+
+function normalizeStructuredValue(value: unknown, context: NormalizeContext): unknown {
+  if (value === null || value === undefined) {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    if (context.depth >= context.maxDepth) {
+      return value
+    }
+    const parsed = tryParseJson(value)
+    if (parsed !== null) {
+      return normalizeStructuredValue(parsed, { ...context, depth: context.depth + 1 })
+    }
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    if (context.seen.has(value)) {
+      return value
+    }
+    context.seen.add(value)
+    if (context.depth >= context.maxDepth) {
+      return value
+    }
+    const nextDepth = context.depth + 1
+    let mutated = false
+    const normalized = value.map((item) => {
+      const normalizedItem = normalizeStructuredValue(item, { ...context, depth: nextDepth })
+      if (normalizedItem !== item) {
+        mutated = true
+      }
+      return normalizedItem
+    })
+    return mutated ? normalized : value
+  }
+
+  if (isRecord(value)) {
+    if (context.seen.has(value)) {
+      return value
+    }
+    context.seen.add(value)
+    if (context.depth >= context.maxDepth) {
+      return value
+    }
+    const nextDepth = context.depth + 1
+    let mutated = false
+    const entries = Object.entries(value)
+    const normalizedEntries: Array<[string, unknown]> = entries.map(([key, child]) => {
+      const normalizedChild = normalizeStructuredValue(child, { ...context, depth: nextDepth })
+      if (normalizedChild !== child) {
+        mutated = true
+      }
+      return [key, normalizedChild]
+    })
+    if (!mutated) {
+      return value
+    }
+    const normalizedObject: Record<string, unknown> = {}
+    for (const [key, child] of normalizedEntries) {
+      normalizedObject[key] = child
+    }
+    return normalizedObject
+  }
+
+  return value
+}
+
 export function GenericToolDetail({ entry }: ToolDetailProps) {
   const parameters =
     entry.parameters && typeof entry.parameters === 'object' && !Array.isArray(entry.parameters)
@@ -122,6 +223,15 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
     entry.result && typeof entry.result === 'object'
       ? (entry.result as Record<string, unknown> | unknown[])
       : null
+  const normalizedParameters = parameters ? (normalizeStructuredValue(parameters, createNormalizeContext()) as Record<string, unknown>) : null
+  const parsedJsonResult = stringResult ? tryParseJson(stringResult) : null
+  const structuredResult = objectResult ?? parsedJsonResult
+  const normalizedStructuredResult =
+    structuredResult !== null && structuredResult !== undefined
+      ? normalizeStructuredValue(structuredResult, createNormalizeContext())
+      : null
+  const hasStructuredResult = normalizedStructuredResult !== null && normalizedStructuredResult !== undefined
+  const showStringResult = stringResult && !parsedJsonResult
   return (
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList
@@ -132,12 +242,10 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
       />
       {showParameters ? (
         <Section title="Parameters">
-          <pre className="max-h-56 overflow-auto rounded-xl bg-slate-900/95 p-3 text-xs text-slate-100 shadow-inner">
-            {stringify(parameters)}
-          </pre>
+          <StructuredDataTable value={normalizedParameters ?? parameters} />
         </Section>
       ) : null}
-      {stringResult ? (
+      {showStringResult ? (
         <Section title="Result">
           {htmlResult ? (
             <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: htmlResult }} />
@@ -146,11 +254,9 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
           )}
         </Section>
       ) : null}
-      {!stringResult && objectResult ? (
+      {hasStructuredResult ? (
         <Section title="Result">
-          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
-            {stringify(objectResult)}
-          </pre>
+          <StructuredDataTable value={normalizedStructuredResult ?? structuredResult} />
         </Section>
       ) : null}
     </div>
