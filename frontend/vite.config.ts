@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => ({
       },
     }),
   ],
-  base: mode === 'development' ? '/' : '/static/',
+  base: mode === 'development' ? '/' : '/static/frontend/',
   resolve: {
     alias: {
       '@': resolve(projectRootDir, './src'),
