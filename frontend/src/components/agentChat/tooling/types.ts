@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import type { ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
 
 export type ToolDetailComponent = (props: ToolDetailProps) => ReactElement
@@ -11,7 +12,7 @@ export type ToolEntryDisplay = {
   label: string
   caption?: string | null
   timestamp?: string | null
-  iconPaths: string[]
+  icon: LucideIcon
   iconBgClass: string
   iconColorClass: string
   parameters: Record<string, unknown> | null
@@ -23,6 +24,12 @@ export type ToolEntryDisplay = {
   detailComponent: ToolDetailComponent
   meta?: ToolCallEntry['meta']
   sourceEntry: ToolCallEntry
+  mcpInfo?: {
+    serverSlug: string
+    serverLabel: string
+    toolId: string
+    toolLabel: string
+  }
 }
 
 export type ToolClusterDisplay = {
@@ -45,7 +52,7 @@ export type ToolClusterTransform = ToolClusterDisplay & {
 
 export type ToolDescriptorTransform = {
   label?: string
-  iconPaths?: string[]
+  icon?: LucideIcon
   iconBgClass?: string
   iconColorClass?: string
   caption?: string | null
@@ -59,7 +66,7 @@ export type ToolDescriptor = {
   name: string
   aliases?: string[]
   label: string
-  iconPaths: string[]
+  icon: LucideIcon
   iconBgClass: string
   iconColorClass: string
   detailComponent: ToolDetailComponent

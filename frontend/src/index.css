@@ -14,3 +14,30 @@
 #gobii-frontend-root {
   min-height: 100%;
 }
+
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 100vh;
+}
+
+.app-loading__spinner {
+  width: 56px;
+  height: 56px;
+  color: #0074d4;
+  animation: app-loading-rotate 0.72s linear infinite;
+}
+
+@keyframes app-loading-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loading__spinner {
+    animation-duration: 1.2s;
+  }
+}

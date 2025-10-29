@@ -1,5 +1,6 @@
+import { Waypoints } from 'lucide-react'
 import { resolveDetailComponent } from '../toolDetails'
-import { isPlainObject } from '../../../util/objectUtils'
+import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
 import type { ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
 import type {
   ToolClusterTransform,
@@ -14,6 +15,80 @@ import {
 } from '../../tooling/toolMetadata'
 
 const TOOL_DESCRIPTORS = buildToolDescriptorMap(resolveDetailComponent)
+
+function toTitleCase(value: string): string {
+  return value
+    .split(/[\s_\-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function pickString(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim().length) {
+    return value.trim()
+  }
+  return null
+}
+
+function deriveMcpInfo(toolName: string | null | undefined, rawResult: unknown): ToolEntryDisplay['mcpInfo'] | null {
+  if (!toolName) {
+    return null
+  }
+
+  const normalizedName = toolName.trim()
+  const lower = normalizedName.toLowerCase()
+
+  let serverSlug: string | null = null
+  let toolId: string | null = null
+
+  if (lower.startsWith('mcp_')) {
+    const remainder = normalizedName.slice(4)
+    const parts = remainder.split('_')
+    if (parts.length > 1) {
+      serverSlug = parts[0]
+      toolId = parts.slice(1).join('_')
+    }
+  }
+
+  const resultObject = parseResultObject(rawResult)
+  if (!serverSlug && resultObject) {
+    serverSlug =
+      pickString(resultObject['server']) ??
+      pickString(resultObject['server_name']) ??
+      pickString(resultObject['provider']) ??
+      (isPlainObject(resultObject['metadata'])
+        ? pickString((resultObject['metadata'] as Record<string, unknown>)['server'])
+        : null)
+  }
+
+  if (!toolId && resultObject) {
+    toolId =
+      pickString(resultObject['tool']) ??
+      pickString(resultObject['tool_name']) ??
+      pickString(resultObject['toolName']) ??
+      (isPlainObject(resultObject['metadata'])
+        ? pickString((resultObject['metadata'] as Record<string, unknown>)['tool'])
+        : null)
+  }
+
+  if (!toolId) {
+    toolId = normalizedName.startsWith('mcp_') && serverSlug
+      ? normalizedName.slice(4 + serverSlug.length + 1)
+      : normalizedName
+  }
+
+  if (!serverSlug) {
+    return null
+  }
+
+  return {
+    serverSlug,
+    serverLabel: toTitleCase(serverSlug),
+    toolId,
+    toolLabel: toTitleCase(toolId),
+  }
+}
 
 function descriptorFor(toolName: string | null | undefined): ToolDescriptor {
   const normalized = (toolName ?? '').toLowerCase()
@@ -44,16 +119,31 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
   const transform = descriptor.derive?.(entry, parameters) || {}
 
   const caption = transform.caption ?? deriveCaptionFallback(entry, parameters)
+  const mcpInfo = deriveMcpInfo(toolName, entry.result)
+  const isDefaultDescriptor = descriptor.name === 'default'
+
+  const baseLabel = transform.label ?? descriptor.label
+  const baseCaption = caption ?? descriptor.label
+  const detailComponent = transform.detailComponent ?? descriptor.detailComponent
+  const shouldUseGenericMcpDisplay = Boolean(mcpInfo && isDefaultDescriptor)
+
+  const finalLabel = shouldUseGenericMcpDisplay ? 'MCP Tool' : baseLabel
+  const finalCaption =
+    shouldUseGenericMcpDisplay && (mcpInfo?.serverLabel || mcpInfo?.toolLabel)
+      ? [mcpInfo?.serverLabel, mcpInfo?.toolLabel].filter(Boolean).join(' • ')
+      : baseCaption
+  const finalDetailComponent = shouldUseGenericMcpDisplay ? resolveDetailComponent('mcpTool') : detailComponent
+  const finalIcon = shouldUseGenericMcpDisplay ? Waypoints : transform.icon ?? descriptor.icon
 
   return {
     id: entry.id,
     clusterCursor,
     cursor: entry.cursor,
     toolName,
-    label: transform.label ?? descriptor.label,
-    caption: caption ?? descriptor.label,
+    label: finalLabel,
+    caption: finalCaption,
     timestamp: entry.timestamp ?? null,
-    iconPaths: transform.iconPaths ?? descriptor.iconPaths,
+    icon: finalIcon,
     iconBgClass: transform.iconBgClass ?? descriptor.iconBgClass,
     iconColorClass: transform.iconColorClass ?? descriptor.iconColorClass,
     parameters,
@@ -62,9 +152,10 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
     summary: transform.summary ?? entry.summary ?? null,
     charterText: transform.charterText ?? entry.charterText ?? null,
     sqlStatements: transform.sqlStatements ?? entry.sqlStatements,
-    detailComponent: transform.detailComponent ?? descriptor.detailComponent,
+    detailComponent: finalDetailComponent,
     meta: entry.meta,
     sourceEntry: entry,
+    mcpInfo: mcpInfo ?? undefined,
   }
 }
 

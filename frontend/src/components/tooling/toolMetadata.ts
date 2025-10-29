@@ -1,3 +1,28 @@
+import {
+  Workflow,
+  FileCheck2,
+  CalendarClock,
+  Database,
+  DatabaseZap,
+  ClipboardList,
+  BrainCircuit,
+  Search,
+  Network,
+  FileText,
+  FilePen,
+  Globe,
+  ContactRound,
+  Mail,
+  MessageSquareText,
+  MessageCircle,
+  MessageSquareDot,
+  BotMessageSquare,
+  Webhook,
+  KeyRound,
+  ScanText,
+  BrainCog,
+  type LucideIcon,
+} from 'lucide-react'
 import { summarizeSchedule } from '../../util/schedule'
 import { parseResultObject } from '../../util/objectUtils'
 import type { ToolCallEntry } from '../agentChat/types'
@@ -27,7 +52,7 @@ export type ToolMetadataConfig = {
   name: string
   aliases?: string[]
   label: string
-  iconPaths: string[]
+  icon: LucideIcon
   iconBgClass: string
   iconColorClass: string
   detailKind: string
@@ -51,10 +76,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'update_charter',
     label: 'Assignment updated',
-    iconPaths: [
-      'M9 12h5M9 16h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
-      'M9.5 13.75l2 2L17 10',
-    ],
+    icon: FileCheck2,
     iconBgClass: 'bg-indigo-100',
     iconColorClass: 'text-indigo-600',
     detailKind: 'updateCharter',
@@ -69,11 +91,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'update_schedule',
     label: 'Schedule updated',
-    iconPaths: [
-      'M8 7V3m8 4V3m-9 8h10m-12 8h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
-      'M15.5 16.5a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0z',
-      'M15.5 16.5L13.75 15.25',
-    ],
+    icon: CalendarClock,
     iconBgClass: 'bg-sky-100',
     iconColorClass: 'text-sky-600',
     detailKind: 'updateSchedule',
@@ -88,11 +106,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'sqlite_batch',
     label: 'Database query',
-    iconPaths: [
-      'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7',
-      'M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4',
-      'M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4',
-    ],
+    icon: Database,
     iconBgClass: 'bg-emerald-100',
     iconColorClass: 'text-emerald-600',
     detailKind: 'sqliteBatch',
@@ -105,9 +119,59 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'enable_database',
+    label: 'Database enabled',
+    icon: DatabaseZap,
+    iconBgClass: 'bg-emerald-50',
+    iconColorClass: 'text-emerald-600',
+    detailKind: 'enableDatabase',
+    derive(entry) {
+      const resultObject = parseResultObject(entry.result)
+      const messageValue = resultObject?.['message']
+      const statusValue = resultObject?.['status']
+      const managerValue = resultObject?.['tool_manager']
+
+      const message = coerceString(messageValue)
+      const status = coerceString(statusValue)
+      const manager =
+        managerValue && typeof managerValue === 'object' && !Array.isArray(managerValue)
+          ? (managerValue as Record<string, unknown>)
+          : null
+
+      const toStringList = (value: unknown): string[] => {
+        if (!Array.isArray(value)) return []
+        return (value as unknown[])
+          .map((item) => (typeof item === 'string' && item.trim().length > 0 ? item : null))
+          .filter((item): item is string => Boolean(item))
+      }
+
+      const enabledList = toStringList(manager?.['enabled'])
+      const alreadyEnabledList = toStringList(manager?.['already_enabled'])
+
+      const summaryPieces: string[] = []
+      if (status) {
+        summaryPieces.push(status === 'ok' ? 'Enabled' : status)
+      }
+      if (enabledList.length) {
+        summaryPieces.push(`Enabled: ${enabledList.join(', ')}`)
+      } else if (alreadyEnabledList.length) {
+        summaryPieces.push(`Already enabled: ${alreadyEnabledList.join(', ')}`)
+      }
+
+      const summaryText = summaryPieces.length ? truncate(summaryPieces.join(' • '), 96) : null
+      const label = message && /already/i.test(message) ? 'Database already enabled' : 'Database enabled'
+
+      return {
+        label,
+        caption: message ? truncate(message, 56) : entry.caption ?? label,
+        summary: summaryText ?? message ?? entry.summary ?? null,
+      }
+    },
+  },
+  {
     name: 'api_task',
     label: 'API task',
-    iconPaths: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+    icon: ClipboardList,
     iconBgClass: 'bg-slate-100',
     iconColorClass: 'text-slate-600',
     detailKind: 'default',
@@ -120,10 +184,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'agent_runtime',
     label: 'Agent runtime',
-    iconPaths: [
-      'M12 6v6l4 2',
-      'M4 12a8 8 0 1116 0 8 8 0 01-16 0z',
-    ],
+    icon: BrainCircuit,
     iconBgClass: 'bg-slate-100',
     iconColorClass: 'text-slate-600',
     detailKind: 'default',
@@ -137,7 +198,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     name: 'search_tools',
     aliases: ['search_web', 'web_search', 'search'],
     label: 'Web search',
-    iconPaths: ['M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'],
+    icon: Search,
     iconBgClass: 'bg-blue-100',
     iconColorClass: 'text-blue-600',
     detailKind: 'search',
@@ -167,7 +228,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     name: 'api_call',
     aliases: ['http_request', 'http'],
     label: 'API request',
-    iconPaths: ['M8 12h.01', 'M12 12h.01', 'M16 12h.01', 'M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z'],
+    icon: Network,
     iconBgClass: 'bg-cyan-100',
     iconColorClass: 'text-cyan-600',
     detailKind: 'apiRequest',
@@ -184,7 +245,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     name: 'read_file',
     aliases: ['file_read'],
     label: 'File access',
-    iconPaths: ['M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'],
+    icon: FileText,
     iconBgClass: 'bg-orange-100',
     iconColorClass: 'text-orange-600',
     detailKind: 'fileRead',
@@ -197,7 +258,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     name: 'write_file',
     aliases: ['file_write'],
     label: 'File update',
-    iconPaths: ['M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z'],
+    icon: FilePen,
     iconBgClass: 'bg-green-100',
     iconColorClass: 'text-green-600',
     detailKind: 'fileWrite',
@@ -209,7 +270,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'spawn_web_task',
     label: 'Browser task',
-    iconPaths: ['M4 5h16', 'M4 9h16', 'M8 13h8', 'M8 17h5', 'M4 19h12a2 2 0 002-2V5a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2z'],
+    icon: Globe,
     iconBgClass: 'bg-violet-100',
     iconColorClass: 'text-violet-600',
     detailKind: 'browserTask',
@@ -226,11 +287,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'request_contact_permission',
     label: 'Contact permission',
-    iconPaths: [
-      'M8.5 11A3.5 3.5 0 1112 7.5 3.5 3.5 0 018.5 11z',
-      'M15.5 11A3.5 3.5 0 1119 7.5 3.5 3.5 0 0115.5 11z',
-      'M5 18a5 5 0 015-5h0a5 5 0 014.472 2.778M19 21l-3-3 3-3 3 3-3 3z',
-    ],
+    icon: ContactRound,
     iconBgClass: 'bg-rose-100',
     iconColorClass: 'text-rose-600',
     detailKind: 'contactPermission',
@@ -281,10 +338,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'send_email',
     label: 'Email sent',
-    iconPaths: [
-      'M3 8l9 6 9-6',
-      'M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
-    ],
+    icon: Mail,
     iconBgClass: 'bg-blue-100',
     iconColorClass: 'text-blue-600',
     detailKind: 'default',
@@ -318,11 +372,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'send_sms',
     label: 'SMS sent',
-    iconPaths: [
-      'M20 4H4a2 2 0 00-2 2v9a2 2 0 002 2h4l4 4 4-4h4a2 2 0 002-2V6a2 2 0 00-2-2z',
-      'M7 9h10',
-      'M7 13h6',
-    ],
+    icon: MessageSquareText,
     iconBgClass: 'bg-emerald-100',
     iconColorClass: 'text-emerald-600',
     detailKind: 'default',
@@ -355,11 +405,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'send_web_message',
     label: 'Web message sent',
-    iconPaths: [
-      'M4 6h16v9a2 2 0 01-2 2H9l-5 4V6z',
-      'M8 10h8',
-      'M8 13h5',
-    ],
+    icon: MessageCircle,
     iconBgClass: 'bg-violet-100',
     iconColorClass: 'text-violet-600',
     detailKind: 'default',
@@ -382,11 +428,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'send_chat_message',
     label: 'Chat message sent',
-    iconPaths: [
-      'M5 5h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-4 4v-4H5a2 2 0 01-2-2V7a2 2 0 012-2z',
-      'M8 9h8',
-      'M8 12h5',
-    ],
+    icon: MessageSquareDot,
     iconBgClass: 'bg-sky-100',
     iconColorClass: 'text-sky-600',
     detailKind: 'default',
@@ -406,11 +448,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'send_agent_message',
     label: 'Peer message sent',
-    iconPaths: [
-      'M3 5a2 2 0 012-2h6l3 3h5a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V5z',
-      'M8 11h8',
-      'M8 14h5',
-    ],
+    icon: BotMessageSquare,
     iconBgClass: 'bg-amber-100',
     iconColorClass: 'text-amber-600',
     detailKind: 'default',
@@ -430,12 +468,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'send_webhook_event',
     label: 'Webhook sent',
-    iconPaths: [
-      'M4 4h16a2 2 0 012 2v6a2 2 0 01-2 2h-5l-4 4v-4H4a2 2 0 01-2-2V6a2 2 0 012-2z',
-      'M8 9h8',
-      'M8 13h5',
-      'M12 4v4',
-    ],
+    icon: Webhook,
     iconBgClass: 'bg-orange-100',
     iconColorClass: 'text-orange-600',
     detailKind: 'default',
@@ -475,11 +508,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'secure_credentials_request',
     label: 'Credentials request',
-    iconPaths: [
-      'M8 11V7a4 4 0 118 0v4',
-      'M5 11h14v10H5z',
-      'M12 15v2',
-    ],
+    icon: KeyRound,
     iconBgClass: 'bg-amber-100',
     iconColorClass: 'text-amber-600',
     detailKind: 'secureCredentials',
@@ -525,7 +554,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'mcp_brightdata_scrape_as_markdown',
     label: 'Web snapshot',
-    iconPaths: ['M4 4h16v12H4z', 'M8 20h8', 'M10 16v4', 'M14 16v4'],
+    icon: ScanText,
     iconBgClass: 'bg-fuchsia-100',
     iconColorClass: 'text-fuchsia-600',
     detailKind: 'brightDataSnapshot',
@@ -534,7 +563,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     name: 'think',
     aliases: ['reasoning'],
     label: 'Analysis',
-    iconPaths: ['M9.663 17h4.673', 'M12 3v1', 'M18.364 5.636l-.707.707', 'M21 12h-1', 'M4 12H3', 'M6.343 6.343l-.707-.707', 'M9.172 15.243a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z'],
+    icon: BrainCog,
     iconBgClass: 'bg-yellow-100',
     iconColorClass: 'text-yellow-600',
     detailKind: 'analysis',
@@ -551,7 +580,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
 export const DEFAULT_TOOL_METADATA: ToolMetadataConfig = {
   name: 'default',
   label: 'Agent action',
-  iconPaths: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+  icon: Workflow,
   iconBgClass: 'bg-slate-100',
   iconColorClass: 'text-slate-600',
   detailKind: 'default',
@@ -582,7 +611,7 @@ export function buildToolDescriptorMap(
       name: config.name,
       aliases: config.aliases,
       label: config.label,
-      iconPaths: config.iconPaths,
+      icon: config.icon,
       iconBgClass: config.iconBgClass,
       iconColorClass: config.iconColorClass,
       skip: config.skip,
