@@ -178,6 +178,8 @@ jobs:
             tag: batch_agent_lifecycle
           - batch: agent_short_description
             tag: batch_agent_short_description
+          - batch: agent_avatar
+            tag: batch_agent_avatar
           - batch: schedule
             tag: batch_schedule
           - batch: owner_billing

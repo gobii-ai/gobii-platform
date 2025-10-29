@@ -7,6 +7,7 @@ from django.core.mail import send_mail
 from django.utils.html import strip_tags
 from django.utils.html import format_html
 from django.views.generic import TemplateView, ListView, View, DetailView
+from django.core.files.storage import default_storage
 from django.views.generic.edit import FormMixin
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
@@ -34,6 +35,7 @@ from api.services.dedicated_proxy_service import (
     is_multi_assign_enabled,
 )
 from api.agent.short_description import build_listing_description
+from api.agent.avatar import maybe_schedule_agent_avatar
 
 from api.models import (
     ApiKey,
@@ -1660,6 +1662,15 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             agent.listing_description = description
             agent.listing_description_source = source
             agent.is_initializing = source == "placeholder"
+
+            if agent.avatar_storage_path:
+                try:
+                    agent.avatar_url = default_storage.url(agent.avatar_storage_path)
+                except Exception:
+                    agent.avatar_url = None
+            else:
+                agent.avatar_url = None
+
             agent.pending_transfer_invite = AgentTransferInvite.objects.filter(
                 agent=agent,
                 status=AgentTransferInvite.Status.PENDING,
@@ -2269,6 +2280,14 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context = super().get_context_data(**kwargs)
         agent = self.get_object()
         
+        if agent.avatar_storage_path:
+            try:
+                context['agent_avatar_url'] = default_storage.url(agent.avatar_storage_path)
+            except Exception:
+                context['agent_avatar_url'] = None
+        else:
+            context['agent_avatar_url'] = None
+
         # Find the primary email endpoint for this agent
         primary_email = agent.comms_endpoints.filter(
             channel=CommsChannel.EMAIL, is_primary=True
@@ -3046,7 +3065,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         browser_agent_fields_to_update.append('name')
 
                 # Update charter if it changed
+                charter_changed = False
                 if agent.charter != new_charter:
+                    charter_changed = True
                     agent.charter = new_charter
                     agent_fields_to_update.append('charter')
 
@@ -3083,6 +3104,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     agent.save(update_fields=agent_fields_to_update)
                 if browser_agent is not None and browser_agent_fields_to_update:
                     browser_agent.save(update_fields=browser_agent_fields_to_update)
+
+                if charter_changed and agent.charter.strip():
+                    maybe_schedule_agent_avatar(agent)
 
                 # If agent was soft-expired, restore schedule (from snapshot if missing) and mark active
                 if agent.life_state == PersistentAgent.LifeState.EXPIRED and agent.is_active:

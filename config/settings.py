@@ -347,6 +347,16 @@ VITE_MANIFEST_PATH = Path(env('VITE_MANIFEST_PATH', default=str(BASE_DIR / 'stat
 MEDIA_URL = "/media/"
 MEDIA_ROOT = env('MEDIA_ROOT', default=BASE_DIR / 'mediafiles')
 
+# Persistent agent avatar generation defaults
+AGENT_AVATAR_BASE_IMAGE_PATH = env(
+    "AGENT_AVATAR_BASE_IMAGE_PATH",
+    default=str(BASE_DIR / "static" / "images" / "gobii-fish.png"),
+)
+AGENT_AVATAR_STORAGE_PREFIX = env(
+    "AGENT_AVATAR_STORAGE_PREFIX",
+    default="agent_avatars",
+)
+
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",

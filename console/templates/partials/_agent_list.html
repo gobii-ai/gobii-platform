@@ -56,9 +56,15 @@
          <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/20 via-purple-500/10 to-indigo-600/20"></div>
          
          <!-- Agent Icon -->
+         {% if agent.avatar_url %}
+         <div class="relative z-10 mb-4">
+           <img src="{{ agent.avatar_url }}" alt="{{ agent.name }} avatar" class="size-20 rounded-full border-2 border-white/40 shadow-lg object-cover">
+         </div>
+         {% else %}
          <div class="relative z-10 flex justify-center items-center size-16 bg-white/20 rounded-full backdrop-blur-sm border border-white/30 mb-4">
            <i aria-hidden="true" data-lucide="zap" class="w-8 h-8 text-white"></i>
          </div>
+         {% endif %}
          
          <!-- Agent Name -->
          <h3 class="relative z-10 text-lg font-semibold text-white text-center px-4">{{ agent.name }}</h3>

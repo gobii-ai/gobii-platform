@@ -45,6 +45,7 @@ from .budget import (
 )
 from .llm_utils import run_completion
 from ..short_description import maybe_schedule_short_description
+from ..avatar import maybe_schedule_agent_avatar
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from tasks.services import TaskCreditService
 from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
@@ -971,6 +972,14 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         except Exception:
             logger.exception(
                 "Failed to evaluate short description scheduling for agent %s",
+                persistent_agent_id,
+            )
+
+        try:
+            maybe_schedule_agent_avatar(agent)
+        except Exception:
+            logger.exception(
+                "Failed to evaluate avatar scheduling for agent %s",
                 persistent_agent_id,
             )
 

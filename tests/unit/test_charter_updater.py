@@ -34,7 +34,10 @@ class CharterUpdaterToolTests(TestCase):
         with patch(
             "api.agent.tools.charter_updater.maybe_schedule_short_description",
             return_value=True,
-        ) as mock_schedule:
+        ) as mock_schedule, patch(
+            "api.agent.tools.charter_updater.maybe_schedule_agent_avatar",
+            return_value=True,
+        ) as mock_avatar:
             response = execute_update_charter(
                 self.agent,
                 {"new_charter": new_charter},
@@ -43,6 +46,7 @@ class CharterUpdaterToolTests(TestCase):
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.charter, new_charter)
         mock_schedule.assert_called_once_with(self.agent)
+        mock_avatar.assert_called_once_with(self.agent)
         self.assertEqual(
             response,
             {

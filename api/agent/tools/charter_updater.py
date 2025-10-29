@@ -9,6 +9,7 @@ from typing import Dict, Any
 
 from ...models import PersistentAgent
 from ..short_description import maybe_schedule_short_description
+from ..avatar import maybe_schedule_agent_avatar
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         agent.charter = new_charter.strip()
         agent.save(update_fields=["charter"])
         maybe_schedule_short_description(agent)
+        maybe_schedule_agent_avatar(agent)
         return {
             "status": "ok",
             "message": "Charter updated successfully.",

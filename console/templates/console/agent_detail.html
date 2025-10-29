@@ -38,6 +38,28 @@
 
         <!-- Grid Layout -->
         <div class="grid sm:grid-cols-12 gap-4 sm:gap-6">
+          <!-- Agent Avatar -->
+          <div class="sm:col-span-3">
+            <span class="inline-block text-sm font-medium text-gray-800 mt-2.5">Agent Avatar</span>
+          </div>
+          <div class="sm:col-span-9">
+            {% if agent_avatar_url %}
+              <div class="flex items-center gap-4">
+                <img src="{{ agent_avatar_url }}" alt="{{ agent.name }} avatar" class="size-20 rounded-xl border border-gray-200 shadow-sm object-cover">
+                <p class="text-xs text-gray-500">This avatar was generated from the charter. Update the charter to refresh its look.</p>
+              </div>
+            {% else %}
+              <div class="flex items-center gap-3">
+                <div class="size-16 rounded-full bg-gray-100 flex items-center justify-center border border-dashed border-gray-300">
+                  <i aria-hidden="true" data-lucide="sparkles" class="w-6 h-6 text-gray-400"></i>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-gray-700">Avatar is generating…</p>
+                  <p class="text-xs text-gray-500">Once the charter is set, a custom avatar appears here automatically.</p>
+                </div>
+              </div>
+            {% endif %}
+          </div>
           
           <!-- Agent Name Section -->
           <div class="sm:col-span-3">

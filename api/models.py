@@ -2449,6 +2449,21 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="SHA256 of the charter currently pending short description generation.",
     )
+    avatar_storage_path = models.CharField(
+        max_length=512,
+        blank=True,
+        help_text="Storage path for the generated avatar image.",
+    )
+    avatar_generation_requested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when avatar generation was requested.",
+    )
+    avatar_generated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the most recent successful avatar generation.",
+    )
     schedule = models.CharField(
         max_length=128,
         null=True,
