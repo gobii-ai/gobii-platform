@@ -12,7 +12,7 @@ from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from api.models import PaidPlanIntent, PersistentAgent
-from api.agent.short_description import build_listing_description
+from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
 from config.stripe_config import get_stripe_settings
@@ -212,6 +212,10 @@ class HomePage(TemplateView):
                 agent.listing_description = description
                 agent.listing_description_source = source
                 agent.is_initializing = source == "placeholder"
+
+                mini_description, mini_source = build_mini_description(agent)
+                agent.mini_description = mini_description
+                agent.mini_description_source = mini_source
 
                 if getattr(agent, "life_state", "active") == PersistentAgent.LifeState.EXPIRED:
                     agent.status_label = "Expired"

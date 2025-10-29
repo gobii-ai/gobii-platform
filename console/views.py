@@ -33,7 +33,7 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyUnavailableError,
     is_multi_assign_enabled,
 )
-from api.agent.short_description import build_listing_description
+from api.agent.short_description import build_listing_description, build_mini_description
 
 from api.models import (
     ApiKey,
@@ -1660,6 +1660,10 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             agent.listing_description = description
             agent.listing_description_source = source
             agent.is_initializing = source == "placeholder"
+
+            mini_description, mini_source = build_mini_description(agent)
+            agent.mini_description = mini_description
+            agent.mini_description_source = mini_source
             agent.pending_transfer_invite = AgentTransferInvite.objects.filter(
                 agent=agent,
                 status=AgentTransferInvite.Status.PENDING,
@@ -1684,7 +1688,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 and remaining < Decimal("1")
             )
 
-        context['persistent_agents'] = persistent_agents
+            context['persistent_agents'] = persistent_agents
 
         context['has_agents'] = bool(persistent_agents)
 

@@ -44,7 +44,10 @@ from .budget import (
     set_current_context as set_budget_context,
 )
 from .llm_utils import run_completion
-from ..short_description import maybe_schedule_short_description
+from ..short_description import (
+    maybe_schedule_mini_description,
+    maybe_schedule_short_description,
+)
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from tasks.services import TaskCreditService
 from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
@@ -971,6 +974,14 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         except Exception:
             logger.exception(
                 "Failed to evaluate short description scheduling for agent %s",
+                persistent_agent_id,
+            )
+
+        try:
+            maybe_schedule_mini_description(agent)
+        except Exception:
+            logger.exception(
+                "Failed to evaluate mini description scheduling for agent %s",
                 persistent_agent_id,
             )
 

@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
-from api.agent.short_description import build_listing_description
+from api.agent.short_description import build_listing_description, build_mini_description
 from .models import (
     ApiKey,
     BrowserUseAgent,
@@ -21,10 +21,20 @@ class BrowserUseAgentListSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
     listing_description = serializers.SerializerMethodField()
     listing_description_source = serializers.SerializerMethodField()
+    mini_description = serializers.SerializerMethodField()
+    mini_description_source = serializers.SerializerMethodField()
 
     class Meta:
         model = BrowserUseAgent
-        fields = ['id', 'name', 'created_at', 'listing_description', 'listing_description_source']
+        fields = [
+            'id',
+            'name',
+            'created_at',
+            'listing_description',
+            'listing_description_source',
+            'mini_description',
+            'mini_description_source',
+        ]
         ref_name = "AgentList" # Optional: for explicit component naming
 
     def _get_listing_tuple(self, obj):
@@ -41,15 +51,41 @@ class BrowserUseAgentListSerializer(serializers.ModelSerializer):
         _, source = self._get_listing_tuple(obj)
         return source
 
+    def _get_mini_tuple(self, obj):
+        persistent = getattr(obj, 'persistent_agent', None)
+        if not persistent:
+            return "Agent", "placeholder"
+        return build_mini_description(persistent)
+
+    def get_mini_description(self, obj):
+        description, _ = self._get_mini_tuple(obj)
+        return description
+
+    def get_mini_description_source(self, obj):
+        _, source = self._get_mini_tuple(obj)
+        return source
+
 class BrowserUseAgentSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
     user_email = serializers.ReadOnlyField(source='user.email')
     listing_description = serializers.SerializerMethodField()
     listing_description_source = serializers.SerializerMethodField()
+    mini_description = serializers.SerializerMethodField()
+    mini_description_source = serializers.SerializerMethodField()
 
     class Meta:
         model = BrowserUseAgent
-        fields = ['id', 'user_email', 'name', 'created_at', 'updated_at', 'listing_description', 'listing_description_source']
+        fields = [
+            'id',
+            'user_email',
+            'name',
+            'created_at',
+            'updated_at',
+            'listing_description',
+            'listing_description_source',
+            'mini_description',
+            'mini_description_source',
+        ]
         read_only_fields = ('id', 'user_email', 'created_at', 'updated_at') # 'name' is now writable
         ref_name = "AgentDetail" # Optional: for explicit component naming
 
@@ -65,6 +101,20 @@ class BrowserUseAgentSerializer(serializers.ModelSerializer):
 
     def get_listing_description_source(self, obj):
         _, source = self._get_listing_tuple(obj)
+        return source
+
+    def _get_mini_tuple(self, obj):
+        persistent = getattr(obj, 'persistent_agent', None)
+        if not persistent:
+            return "Agent", "placeholder"
+        return build_mini_description(persistent)
+
+    def get_mini_description(self, obj):
+        description, _ = self._get_mini_tuple(obj)
+        return description
+
+    def get_mini_description_source(self, obj):
+        _, source = self._get_mini_tuple(obj)
         return source
 
 class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):

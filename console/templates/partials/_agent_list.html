@@ -100,7 +100,9 @@
         {% endif %}
          <!-- Charter (truncated) -->
          <div class="flex-1">
-           {% if agent.listing_description_source == "placeholder" %}
+           {% if agent.mini_description and agent.mini_description_source != "placeholder" %}
+           <p class="text-sm text-gray-600 font-semibold">{{ agent.mini_description }}</p>
+           {% elif agent.listing_description_source == "placeholder" %}
            <p class="text-sm text-gray-400 italic">{{ agent.listing_description }}</p>
            {% else %}
            <p class="text-sm text-gray-600" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">
