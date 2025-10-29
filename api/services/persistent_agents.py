@@ -171,20 +171,23 @@ class PersistentAgentProvisioningService:
                         ) from exc
                     persistent_agent.save(update_fields=updates)
 
-            try:
-                maybe_schedule_short_description(persistent_agent)
-            except Exception:
-                logger.exception(
-                    "Failed to schedule short description generation during provisioning for agent %s",
-                    persistent_agent.id,
-                )
-            try:
-                maybe_schedule_agent_tags(persistent_agent)
-            except Exception:
-                logger.exception(
-                    "Failed to schedule tag generation during provisioning for agent %s",
-                    persistent_agent.id,
-                )
+            def _schedule_charter_artifacts() -> None:
+                try:
+                    maybe_schedule_short_description(persistent_agent)
+                except Exception:
+                    logger.exception(
+                        "Failed to schedule short description generation during provisioning for agent %s",
+                        persistent_agent.id,
+                    )
+                try:
+                    maybe_schedule_agent_tags(persistent_agent)
+                except Exception:
+                    logger.exception(
+                        "Failed to schedule tag generation during provisioning for agent %s",
+                        persistent_agent.id,
+                    )
+
+            transaction.on_commit(_schedule_charter_artifacts)
 
             return ProvisioningResult(
                 agent=persistent_agent,

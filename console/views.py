@@ -3091,20 +3091,23 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     browser_agent.save(update_fields=browser_agent_fields_to_update)
 
                 if 'charter' in agent_fields_to_update:
-                    try:
-                        maybe_schedule_short_description(agent)
-                    except Exception:
-                        logger.exception(
-                            "Failed to schedule short description generation after charter update for agent %s",
-                            agent.id,
-                        )
-                    try:
-                        maybe_schedule_agent_tags(agent)
-                    except Exception:
-                        logger.exception(
-                            "Failed to schedule tag generation after charter update for agent %s",
-                            agent.id,
-                        )
+                    def _schedule_charter_artifacts() -> None:
+                        try:
+                            maybe_schedule_short_description(agent)
+                        except Exception:
+                            logger.exception(
+                                "Failed to schedule short description generation after charter update for agent %s",
+                                agent.id,
+                            )
+                        try:
+                            maybe_schedule_agent_tags(agent)
+                        except Exception:
+                            logger.exception(
+                                "Failed to schedule tag generation after charter update for agent %s",
+                                agent.id,
+                            )
+
+                    transaction.on_commit(_schedule_charter_artifacts)
 
                 # If agent was soft-expired, restore schedule (from snapshot if missing) and mark active
                 if agent.life_state == PersistentAgent.LifeState.EXPIRED and agent.is_active:
