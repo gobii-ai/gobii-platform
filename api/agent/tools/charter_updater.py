@@ -12,6 +12,7 @@ from ..short_description import (
     maybe_schedule_mini_description,
     maybe_schedule_short_description,
 )
+from ..tags import maybe_schedule_agent_tags
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         agent.save(update_fields=["charter"])
         maybe_schedule_short_description(agent)
         maybe_schedule_mini_description(agent)
+        maybe_schedule_agent_tags(agent)
         return {
             "status": "ok",
             "message": "Charter updated successfully.",
