@@ -10,6 +10,59 @@ logger = logging.getLogger(__name__)
 
 MAX_TAGS = 5
 MAX_TAG_LENGTH = 64
+_WRAP_CHARS = '`"\'[]{}(),.;:'
+
+
+def strip_code_fence(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned.startswith("```"):
+        return cleaned
+
+    remainder = cleaned[3:]
+    closing_index = remainder.rfind("```")
+    if closing_index != -1:
+        body = remainder[:closing_index]
+    else:
+        body = remainder
+
+    body = body.strip()
+    if not body:
+        return body
+
+    if "\n" in body:
+        first_line, rest = body.split("\n", 1)
+        if rest and first_line and len(first_line.split()) == 1:
+            body = rest
+    else:
+        parts = body.split(None, 1)
+        if len(parts) == 2 and parts[0].isalpha():
+            body = parts[1]
+
+    return body.strip()
+
+
+def _normalize_token(token: str) -> str:
+    cleaned = " ".join(token.split())
+    cleaned = strip_code_fence(cleaned)
+    cleaned = cleaned.strip()
+
+    # Remove language prefixes like `json`.
+    if cleaned.lower().startswith("json "):
+        cleaned = cleaned[5:].strip()
+
+    cleaned = cleaned.strip(_WRAP_CHARS).strip()
+    # If we still have wrapping brackets/quotes, strip again.
+    cleaned = cleaned.strip(_WRAP_CHARS).strip()
+
+    # Remove lingering ``` fragments.
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3].rstrip()
+        cleaned = cleaned.strip(_WRAP_CHARS).strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:].lstrip()
+        cleaned = cleaned.strip(_WRAP_CHARS).strip()
+
+    return cleaned
 
 
 def normalize_tags(raw_tags: Iterable[str]) -> List[str]:
@@ -20,7 +73,7 @@ def normalize_tags(raw_tags: Iterable[str]) -> List[str]:
     for tag in raw_tags:
         if not isinstance(tag, str):
             continue
-        cleaned = " ".join(tag.split()).strip()
+        cleaned = _normalize_token(tag)
         if not cleaned:
             continue
         if len(cleaned) > MAX_TAG_LENGTH:
@@ -74,4 +127,4 @@ def maybe_schedule_agent_tags(agent: PersistentAgent) -> bool:
         return False
 
 
-__all__ = ["MAX_TAGS", "normalize_tags", "maybe_schedule_agent_tags"]
+__all__ = ["MAX_TAGS", "normalize_tags", "maybe_schedule_agent_tags", "strip_code_fence"]

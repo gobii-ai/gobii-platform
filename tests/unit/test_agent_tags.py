@@ -4,7 +4,10 @@ from unittest.mock import patch
 
 from api.agent.short_description import compute_charter_hash
 from api.agent.tags import maybe_schedule_agent_tags
-from api.agent.tasks.agent_tags import generate_agent_tags_task
+from api.agent.tasks.agent_tags import (
+    _extract_tags,
+    generate_agent_tags_task,
+)
 from api.models import BrowserUseAgent, PersistentAgent
 
 
@@ -76,3 +79,34 @@ class AgentTagGenerationTests(TestCase):
         self.assertEqual(agent.tags, [])
         self.assertEqual(agent.tags_charter_hash, "")
         self.assertEqual(agent.tags_requested_hash, "")
+
+    def test_extract_tags_handles_code_block_json(self):
+        content = """```json
+["Personal Assistant", "Task Automation", "Communication"]
+```"""
+        tags = _extract_tags(content)
+        self.assertEqual(tags, ["Personal Assistant", "Task Automation", "Communication"])
+
+    def test_existing_tags_are_normalized_without_rescheduling(self):
+        agent = self._create_agent()
+        agent.tags = [
+            '```json ["personal assistant"',
+            '"task automation"',
+            '"communication"',
+            '"research"',
+            '"scheduling"] ```',
+        ]
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.tags_charter_hash = charter_hash
+        agent.save(update_fields=["tags", "tags_charter_hash"])
+
+        with patch("api.agent.tasks.agent_tags.generate_agent_tags_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_agent_tags(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+        agent.refresh_from_db()
+        self.assertEqual(
+            agent.tags,
+            ["personal assistant", "task automation", "communication", "research", "scheduling"],
+        )
