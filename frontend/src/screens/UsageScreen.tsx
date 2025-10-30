@@ -24,6 +24,7 @@ import {
   getAnchorDay,
   shiftBillingRange,
   shiftCustomRangeByDays,
+  clampRangeToMax,
 } from '../components/usage/utils'
 
 
@@ -56,17 +57,6 @@ export function UsageScreen() {
   const setAgentsLoading = useUsageStore((state) => state.setAgentsLoading)
   const setAgentsData = useUsageStore((state) => state.setAgentsData)
   const setAgentsError = useUsageStore((state) => state.setAgentsError)
-
-  // Only request summary data when a concrete range has been selected.
-  const queryInput = useMemo<UsageSummaryQueryInput>(() => {
-    if (appliedRange?.start && appliedRange?.end) {
-      return {
-        from: appliedRange.start.toString(),
-        to: appliedRange.end.toString(),
-      }
-    }
-    return {}
-  }, [appliedRange])
 
   // Agents are stable enough that we cache them globally and reuse between tabs.
   const agentsQuery = useQuery({
@@ -222,13 +212,6 @@ export function UsageScreen() {
     }
   }, [])
 
-  const handleCustomRangePress = useCallback(() => {
-    if (effectiveRange) {
-      setCalendarRange(cloneRange(effectiveRange))
-    }
-    setPickerOpen(true)
-  }, [effectiveRange])
-
   const handleAgentSelectionChange = useCallback((ids: Set<string>) => {
     setSelectedAgentIds(new Set(ids))
   }, [])
@@ -242,13 +225,55 @@ export function UsageScreen() {
   )
   const isViewingCurrentBilling = selectionMode === 'billing' && isCurrentSelection
 
+  const shouldClampToToday =
+    selectionMode === 'billing' &&
+    (isCurrentSelection || (!initialPeriodRef.current && !appliedRange && Boolean(summaryRange)))
+
   const maxCalendarValue = useMemo(() => {
-    if (!isViewingCurrentBilling) {
+    if (!shouldClampToToday) {
       return null
     }
     const timezone = summary?.period.timezone ?? getLocalTimeZone()
     return today(timezone)
-  }, [isViewingCurrentBilling, summary?.period.timezone])
+  }, [shouldClampToToday, summary?.period.timezone])
+
+  const boundedEffectiveRange = useMemo<DateRangeValue | null>(() => {
+    if (!effectiveRange) {
+      return null
+    }
+    if (!maxCalendarValue) {
+      return effectiveRange
+    }
+    return clampRangeToMax(effectiveRange, maxCalendarValue)
+  }, [effectiveRange, maxCalendarValue])
+
+  const boundedSummaryRange = useMemo<DateRangeValue | null>(() => {
+    if (!summaryRange) {
+      return null
+    }
+    if (!maxCalendarValue) {
+      return summaryRange
+    }
+    return clampRangeToMax(summaryRange, maxCalendarValue)
+  }, [maxCalendarValue, summaryRange])
+
+  const queryInput = useMemo<UsageSummaryQueryInput>(() => {
+    if (boundedEffectiveRange?.start && boundedEffectiveRange?.end) {
+      return {
+        from: boundedEffectiveRange.start.toString(),
+        to: boundedEffectiveRange.end.toString(),
+      }
+    }
+    return {}
+  }, [boundedEffectiveRange])
+
+  const handleCustomRangePress = useCallback(() => {
+    const sourceRange = boundedEffectiveRange ?? effectiveRange
+    if (sourceRange) {
+      setCalendarRange(cloneRange(sourceRange))
+    }
+    setPickerOpen(true)
+  }, [boundedEffectiveRange, effectiveRange])
 
   // Format the header caption so it calls out the active context and timezone.
   const periodInfo = useMemo<PeriodInfo>(() => {
@@ -292,7 +317,7 @@ export function UsageScreen() {
           onOpenChange={handlePickerOpenChange}
           onCustomRangePress={handleCustomRangePress}
           calendarRange={calendarRange}
-          effectiveRange={effectiveRange}
+          effectiveRange={boundedEffectiveRange}
           onCalendarChange={(range) => setCalendarRange(range)}
           onRangeComplete={(range) => applyRange(range, 'custom')}
           onPrevious={() => handleShift('previous')}
@@ -317,22 +342,22 @@ export function UsageScreen() {
       <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray}/>
 
       <UsageTrendSection
-        effectiveRange={effectiveRange}
-        fallbackRange={summaryRange}
+        effectiveRange={boundedEffectiveRange}
+        fallbackRange={boundedSummaryRange}
         timezone={summary?.period.timezone}
         agentIds={selectedAgentArray}
       />
 
       <UsageToolChart
-        effectiveRange={effectiveRange}
-        fallbackRange={summaryRange}
+        effectiveRange={boundedEffectiveRange}
+        fallbackRange={boundedSummaryRange}
         agentIds={selectedAgentArray}
         timezone={summary?.period.timezone}
       />
 
       <UsageAgentLeaderboard
-        effectiveRange={effectiveRange}
-        fallbackRange={summaryRange}
+        effectiveRange={boundedEffectiveRange}
+        fallbackRange={boundedSummaryRange}
         agentIds={selectedAgentArray}
       />
 

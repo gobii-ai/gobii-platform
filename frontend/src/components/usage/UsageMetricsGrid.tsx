@@ -81,15 +81,15 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
   const resolvedSummary = data ?? summary
 
   const periodDayCount = useMemo(() => {
-    if (!resolvedSummary) {
+    const from = queryInput.from ?? resolvedSummary?.period.start
+    const to = queryInput.to ?? resolvedSummary?.period.end
+    if (!from || !to) {
       return null
     }
 
-    const { start, end } = resolvedSummary.period
-
     try {
-      const startDate = parseDate(start)
-      const endDate = parseDate(end)
+      const startDate = parseDate(from)
+      const endDate = parseDate(to)
       const startJulian = startDate.calendar.toJulianDay(startDate)
       const endJulian = endDate.calendar.toJulianDay(endDate)
       const span = endJulian - startJulian + 1
@@ -98,7 +98,7 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
       console.error('Failed to compute period length in days', error)
       return null
     }
-  }, [resolvedSummary])
+  }, [queryInput.from, queryInput.to, resolvedSummary])
 
   const cards = useMemo<MetricCard[]>(() => {
     return metricDefinitions.map((metric) => {
