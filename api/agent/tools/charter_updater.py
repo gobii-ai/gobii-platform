@@ -8,7 +8,10 @@ import logging
 from typing import Dict, Any
 
 from ...models import PersistentAgent
-from ..short_description import maybe_schedule_short_description
+from ..short_description import (
+    maybe_schedule_mini_description,
+    maybe_schedule_short_description,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,7 @@ def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         agent.charter = new_charter.strip()
         agent.save(update_fields=["charter"])
         maybe_schedule_short_description(agent)
+        maybe_schedule_mini_description(agent)
         return {
             "status": "ok",
             "message": "Charter updated successfully.",

@@ -6,8 +6,10 @@ from unittest.mock import patch
 
 from api.agent.short_description import (
     compute_charter_hash,
+    maybe_schedule_mini_description,
     maybe_schedule_short_description,
 )
+from api.agent.tasks.mini_description import generate_agent_mini_description_task
 from api.agent.tasks.short_description import generate_agent_short_description_task
 from api.models import BrowserUseAgent, PersistentAgent
 
@@ -81,3 +83,53 @@ class AgentShortDescriptionTests(TestCase):
         self.assertEqual(agent.short_description, "")
         self.assertEqual(agent.short_description_charter_hash, "")
         self.assertEqual(agent.short_description_requested_hash, "")
+
+    def test_maybe_schedule_mini_description_skips_without_charter(self) -> None:
+        agent = self._create_agent(charter="  ")
+        with patch("api.agent.tasks.mini_description.generate_agent_mini_description_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_mini_description(agent)
+        self.assertFalse(scheduled)
+        self.assertFalse(mocked_delay.called)
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description_requested_hash, "")
+
+    def test_maybe_schedule_mini_description_enqueues_when_missing(self) -> None:
+        agent = self._create_agent()
+        with patch("api.agent.tasks.mini_description.generate_agent_mini_description_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_mini_description(agent)
+        self.assertTrue(scheduled)
+        agent.refresh_from_db()
+        expected_hash = compute_charter_hash(agent.charter)
+        self.assertEqual(agent.mini_description_requested_hash, expected_hash)
+        mocked_delay.assert_called_once_with(str(agent.id), expected_hash)
+
+    def test_generate_mini_description_updates_fields(self) -> None:
+        agent = self._create_agent()
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.mini_description_requested_hash = charter_hash
+        agent.save(update_fields=["mini_description_requested_hash"])
+
+        with patch("api.agent.tasks.mini_description._generate_via_llm", return_value="Sales leads generator"):
+            generate_agent_mini_description_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description, "Sales leads generator")
+        self.assertEqual(agent.mini_description_charter_hash, charter_hash)
+        self.assertEqual(agent.mini_description_requested_hash, "")
+
+    def test_generate_mini_description_skips_when_charter_changed(self) -> None:
+        agent = self._create_agent()
+        old_hash = compute_charter_hash(agent.charter)
+        agent.mini_description_requested_hash = old_hash
+        agent.save(update_fields=["mini_description_requested_hash"])
+
+        agent.charter = "New responsibilities"
+        agent.save(update_fields=["charter"])
+
+        with patch("api.agent.tasks.mini_description._generate_via_llm", return_value="Updated summary"):
+            generate_agent_mini_description_task.run(str(agent.id), old_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description, "")
+        self.assertEqual(agent.mini_description_charter_hash, "")
+        self.assertEqual(agent.mini_description_requested_hash, "")

@@ -2449,6 +2449,21 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="SHA256 of the charter currently pending short description generation.",
     )
+    mini_description = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="Generated ultra-short summary of the agent charter for compact displays.",
+    )
+    mini_description_charter_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter used to generate mini_description.",
+    )
+    mini_description_requested_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter currently pending mini description generation.",
+    )
     schedule = models.CharField(
         max_length=128,
         null=True,
