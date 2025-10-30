@@ -707,6 +707,10 @@ def handle_subscription_event(event, **kwargs):
                             'plan': PlanNames.FREE,
                         },
                     )
+                except Exception:
+                    logger.exception("Failed to update user subscription in analytics for user %s", owner.id)
+                    
+                try:
                     Analytics.track_event(
                         user_id=owner.id,
                         event=AnalyticsEvent.SUBSCRIPTION_CANCELLED,
