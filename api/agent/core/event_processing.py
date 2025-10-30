@@ -1251,7 +1251,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
             try:
                 failover_configs = get_llm_config_with_failover(
                     agent_id=str(agent.id),
-                    token_count=fitted_token_count
+                    token_count=fitted_token_count,
+                    agent=agent,
                 )
             except LLMNotConfiguredError:
                 logger.warning(
@@ -1755,6 +1756,7 @@ def _build_prompt_context(
             agent_id=str(agent.id),
             token_count=0,
             allow_unconfigured=True,
+            agent=agent,
         )
     except LLMNotConfiguredError:
         failover_configs = None

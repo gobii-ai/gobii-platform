@@ -2936,6 +2936,8 @@ from .models import (
     PersistentTokenRange,
     PersistentLLMTier,
     PersistentTierEndpoint,
+    PersistentPremiumLLMTier,
+    PersistentPremiumTierEndpoint,
     EmbeddingsModelEndpoint,
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
@@ -2943,6 +2945,8 @@ from .models import (
     BrowserLLMPolicy,
     BrowserLLMTier,
     BrowserTierEndpoint,
+    BrowserPremiumLLMTier,
+    BrowserPremiumTierEndpoint,
 )
 
 
@@ -3050,6 +3054,28 @@ class PersistentLLMTierAdmin(admin.ModelAdmin):
     list_display = ("token_range", "order", "description")
     list_filter = ("token_range",)
     inlines = [PersistentTierEndpointInline]
+
+if settings.GOBII_PROPRIETARY_MODE:
+
+    class PersistentPremiumTierEndpointInline(admin.TabularInline):
+        model = PersistentPremiumTierEndpoint
+        extra = 0
+
+    @admin.register(PersistentPremiumLLMTier)
+    class PersistentPremiumLLMTierAdmin(admin.ModelAdmin):
+        list_display = ("token_range", "order", "description")
+        list_filter = ("token_range",)
+        inlines = [PersistentPremiumTierEndpointInline]
+
+    class BrowserPremiumTierEndpointInline(admin.TabularInline):
+        model = BrowserPremiumTierEndpoint
+        extra = 0
+
+    @admin.register(BrowserPremiumLLMTier)
+    class BrowserPremiumLLMTierAdmin(admin.ModelAdmin):
+        list_display = ("policy", "order", "description")
+        list_filter = ("policy",)
+        inlines = [BrowserPremiumTierEndpointInline]
 
 
 @admin.register(PersistentTokenRange)

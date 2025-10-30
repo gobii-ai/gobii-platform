@@ -7,7 +7,11 @@ def clear_llm_db():
     PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
     PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
     PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
+    PersistentPremiumLLMTier = apps.get_model('api', 'PersistentPremiumLLMTier')
+    PersistentPremiumTierEndpoint = apps.get_model('api', 'PersistentPremiumTierEndpoint')
 
+    PersistentPremiumTierEndpoint.objects.all().delete()
+    PersistentPremiumLLMTier.objects.all().delete()
     PersistentTierEndpoint.objects.all().delete()
     PersistentLLMTier.objects.all().delete()
     PersistentTokenRange.objects.all().delete()
