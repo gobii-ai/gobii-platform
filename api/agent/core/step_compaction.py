@@ -428,10 +428,7 @@ def llm_summarise_steps(
     ]
 
     try:
-        model, params = get_summarization_llm_config(
-            agent=agent,
-            agent_id=str(agent.id) if agent else None,
-        )
+        model, params = get_summarization_llm_config(agent=agent)
 
         if model.startswith("openai"):
             if safety_identifier:

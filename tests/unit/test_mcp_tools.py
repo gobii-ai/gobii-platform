@@ -878,7 +878,7 @@ class MCPToolFunctionsTests(TestCase):
         mock_get_config.assert_called_once()
         kwargs = mock_get_config.call_args.kwargs
         self.assertIs(kwargs.get("agent"), self.agent)
-        self.assertEqual(kwargs.get("agent_id"), str(self.agent.id))
+        self.assertNotIn("agent_id", kwargs)
 
     @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
     @patch('api.agent.tools.search_tools.get_mcp_manager')

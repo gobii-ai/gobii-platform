@@ -281,7 +281,7 @@ class TestLLMFailover(TestCase):
         agent = self._make_agent_stub(plan_id="startup", days_since_joined=60)
 
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-premium"}, clear=True):
-            model, params = get_summarization_llm_config(agent=agent, agent_id=str(agent.id))
+            model, params = get_summarization_llm_config(agent=agent)
 
         self.assertEqual(model, seeded["premium_endpoint"].litellm_model)
         self.assertIn("temperature", params)
