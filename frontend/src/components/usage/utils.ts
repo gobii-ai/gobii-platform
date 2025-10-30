@@ -47,14 +47,8 @@ export const shiftCustomRangeByDays = (range: DateRangeValue, days: number): Dat
 })
 
 export const clampRangeToMax = (range: DateRangeValue, max: DateValue): DateRangeValue => {
-  const cappedEnd = range.end.compare(max) > 0 ? max.copy() : range.end.copy()
-  let cappedStart = range.start.compare(cappedEnd) > 0 ? cappedEnd.copy() : range.start.copy()
-
-  // Ensure the start does not exceed the provided max, even if the original start was already beyond it.
-  if (cappedStart.compare(max) > 0) {
-    cappedStart = max.copy()
-  }
-
+  const cappedEnd = range.end.compare(max) > 0 ? max : range.end
+  const cappedStart = range.start.compare(cappedEnd) > 0 ? cappedEnd : range.start
   return {
     start: cappedStart,
     end: cappedEnd,

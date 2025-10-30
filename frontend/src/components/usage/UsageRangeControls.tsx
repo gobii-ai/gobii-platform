@@ -52,15 +52,10 @@ export function UsageRangeControls(props: UsageRangeControlsProps) {
   } = props
 
   const selection = calendarRange ?? effectiveRange
-  const displayRange = (() => {
-    if (!selection) {
-      return null
-    }
-    if (maxValue && selection.start && selection.end) {
-      return clampRangeToMax(selection, maxValue)
-    }
-    return selection
-  })()
+  const displayRange =
+    selection && selection.start && selection.end && maxValue
+      ? clampRangeToMax(selection, maxValue)
+      : selection
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-3">
