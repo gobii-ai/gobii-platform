@@ -35,8 +35,6 @@ class TestLLMFailover(TestCase):
         PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
         PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
         PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
-        PersistentPremiumLLMTier = apps.get_model('api', 'PersistentPremiumLLMTier')
-        PersistentPremiumTierEndpoint = apps.get_model('api', 'PersistentPremiumTierEndpoint')
 
         provider = LLMProvider.objects.create(
             key='anthropic',
@@ -65,8 +63,8 @@ class TestLLMFailover(TestCase):
         PersistentTierEndpoint.objects.create(tier=standard_tier, endpoint=standard_endpoint, weight=1.0)
 
         if include_premium:
-            premium_tier = PersistentPremiumLLMTier.objects.create(token_range=token_range, order=1)
-            PersistentPremiumTierEndpoint.objects.create(tier=premium_tier, endpoint=premium_endpoint, weight=1.0)
+            premium_tier = PersistentLLMTier.objects.create(token_range=token_range, order=1, is_premium=True)
+            PersistentTierEndpoint.objects.create(tier=premium_tier, endpoint=premium_endpoint, weight=1.0)
 
         return {
             "premium_endpoint": premium_endpoint,

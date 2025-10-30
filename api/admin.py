@@ -2936,8 +2936,6 @@ from .models import (
     PersistentTokenRange,
     PersistentLLMTier,
     PersistentTierEndpoint,
-    PersistentPremiumLLMTier,
-    PersistentPremiumTierEndpoint,
     EmbeddingsModelEndpoint,
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
@@ -2945,8 +2943,6 @@ from .models import (
     BrowserLLMPolicy,
     BrowserLLMTier,
     BrowserTierEndpoint,
-    BrowserPremiumLLMTier,
-    BrowserPremiumTierEndpoint,
 )
 
 
@@ -3047,35 +3043,14 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
 class PersistentTierEndpointInline(admin.TabularInline):
     model = PersistentTierEndpoint
     extra = 0
+    readonly_fields = ("is_premium",)
 
 
 @admin.register(PersistentLLMTier)
 class PersistentLLMTierAdmin(admin.ModelAdmin):
-    list_display = ("token_range", "order", "description")
-    list_filter = ("token_range",)
+    list_display = ("token_range", "order", "description", "is_premium")
+    list_filter = ("token_range", "is_premium")
     inlines = [PersistentTierEndpointInline]
-
-if settings.GOBII_PROPRIETARY_MODE:
-
-    class PersistentPremiumTierEndpointInline(admin.TabularInline):
-        model = PersistentPremiumTierEndpoint
-        extra = 0
-
-    @admin.register(PersistentPremiumLLMTier)
-    class PersistentPremiumLLMTierAdmin(admin.ModelAdmin):
-        list_display = ("token_range", "order", "description")
-        list_filter = ("token_range",)
-        inlines = [PersistentPremiumTierEndpointInline]
-
-    class BrowserPremiumTierEndpointInline(admin.TabularInline):
-        model = BrowserPremiumTierEndpoint
-        extra = 0
-
-    @admin.register(BrowserPremiumLLMTier)
-    class BrowserPremiumLLMTierAdmin(admin.ModelAdmin):
-        list_display = ("policy", "order", "description")
-        list_filter = ("policy",)
-        inlines = [BrowserPremiumTierEndpointInline]
 
 
 @admin.register(PersistentTokenRange)
@@ -3111,14 +3086,14 @@ class BrowserModelEndpointAdmin(admin.ModelAdmin):
 class BrowserTierEndpointInline(admin.TabularInline):
     model = BrowserTierEndpoint
     extra = 0
+    readonly_fields = ("is_premium",)
 
 
 @admin.register(BrowserLLMTier)
 class BrowserLLMTierAdmin(admin.ModelAdmin):
-    list_display = ("policy", "order", "description")
-    list_filter = ("policy",)
+    list_display = ("policy", "order", "description", "is_premium")
+    list_filter = ("policy", "is_premium")
     inlines = [BrowserTierEndpointInline]
-
 
 @admin.register(BrowserLLMPolicy)
 class BrowserLLMPolicyAdmin(admin.ModelAdmin):

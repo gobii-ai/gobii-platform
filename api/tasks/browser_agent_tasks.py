@@ -326,7 +326,7 @@ def _resolve_browser_provider_priority_from_db():
         if not active:
             return None
         tiers = []
-        for tier in BrowserLLMTier.objects.filter(policy=active).order_by('order'):
+        for tier in BrowserLLMTier.objects.filter(policy=active, is_premium=False).order_by('order'):
             entries = []
             for te in BrowserTierEndpoint.objects.filter(tier=tier).select_related('endpoint__provider').all():
                 endpoint = te.endpoint

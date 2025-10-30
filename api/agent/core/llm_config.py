@@ -472,15 +472,9 @@ def get_llm_config_with_failover(
         LLMNotConfiguredError: If no providers are available with valid API keys (unless allow_unconfigured=True)
     """
     # Always attempt DB-backed configuration first; fallback to legacy when empty
-    premium_tier_model = None
     try:
         PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
         PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
-        if getattr(settings, "GOBII_PROPRIETARY_MODE", False):
-            try:
-                premium_tier_model = apps.get_model('api', 'PersistentPremiumLLMTier')
-            except LookupError:
-                premium_tier_model = None
 
         token_range = (
             PersistentTokenRange.objects
@@ -511,8 +505,11 @@ def get_llm_config_with_failover(
                     agent_instance = None
             prefer_premium = _should_prioritize_premium(agent_instance)
 
-        if prefer_premium and premium_tier_model is not None:
-            premium_tiers = premium_tier_model.objects.filter(token_range=token_range).order_by("order")
+        if prefer_premium:
+            premium_tiers = PersistentLLMTier.objects.filter(
+                token_range=token_range,
+                is_premium=True,
+            ).order_by("order")
             premium_configs = _collect_failover_configs(
                 premium_tiers,
                 token_range_name=token_range.name,
@@ -522,7 +519,10 @@ def get_llm_config_with_failover(
                 _cache_bootstrap_status(False)
                 return premium_configs
 
-        standard_tiers = PersistentLLMTier.objects.filter(token_range=token_range).order_by("order")
+        standard_tiers = PersistentLLMTier.objects.filter(
+            token_range=token_range,
+            is_premium=False,
+        ).order_by("order")
         standard_configs = _collect_failover_configs(
             standard_tiers,
             token_range_name=token_range.name,
