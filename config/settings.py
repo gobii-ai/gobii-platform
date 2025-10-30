@@ -333,6 +333,16 @@ DATABASES = {
     }
 }
 
+POSTGRES_USE_POOLER = env.bool("POSTGRES_USE_POOLER", default=False)
+if POSTGRES_USE_POOLER:
+    # PgBouncer transaction pooling hands out a fresh backend connection per transaction.
+    # Disable Django's persistent connections so each request obtains a new pooled session.
+    DATABASES["default"]["CONN_MAX_AGE"] = 0
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = False
+    # Server-side cursors are incompatible with transaction pooling because PgBouncer may
+    # move backend connections between transactions.
+    DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
+
 # ────────── Static & media ──────────
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
