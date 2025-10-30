@@ -45,3 +45,12 @@ export const shiftCustomRangeByDays = (range: DateRangeValue, days: number): Dat
   start: range.start.add({ days }),
   end: range.end.add({ days }),
 })
+
+export const clampRangeToMax = (range: DateRangeValue, max: DateValue): DateRangeValue => {
+  const cappedEnd = range.end.compare(max) > 0 ? max : range.end
+  const cappedStart = range.start.compare(cappedEnd) > 0 ? cappedEnd : range.start
+  return {
+    start: cappedStart,
+    end: cappedEnd,
+  }
+}
