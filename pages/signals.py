@@ -24,7 +24,7 @@ from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
-from constants.plans import PlanNamesChoices
+from constants.plans import PlanNames, PlanNamesChoices
 from tasks.services import TaskCreditService
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -219,6 +219,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             'email'      : user.email,
             'username'   : user.username or '',
             'date_joined': user.date_joined.isoformat(),
+            'plan': PlanNames.FREE,
         }
 
         def _decode_cookie_value(raw: str | None) -> str:
@@ -425,7 +426,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             request.session.pop('signup_email_hash', None)
 
         event_properties = {
-            'plan': 'free',
+            'plan': PlanNames.FREE,
             'date_joined': user.date_joined.isoformat(),
             **{f'{k}_first': v for k, v in first_touch.items()},
             **{f'{k}_last': v for k, v in last_touch.items()},
@@ -700,11 +701,18 @@ def handle_subscription_event(event, **kwargs):
 
             if owner_type == "user":
                 try:
+                    Analytics.identify(
+                        owner.id,
+                        {
+                            'plan': PlanNames.FREE,
+                        },
+                    )
                     Analytics.track_event(
                         user_id=owner.id,
                         event=AnalyticsEvent.SUBSCRIPTION_CANCELLED,
                         source=AnalyticsSource.WEB,
                         properties={
+                            'plan': PlanNames.FREE,
                             'stripe.subscription_id': getattr(sub, 'id', None),
                         },
                     )

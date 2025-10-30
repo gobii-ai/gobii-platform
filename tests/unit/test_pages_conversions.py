@@ -14,6 +14,7 @@ from pages.conversions import (
 )
 from pages.tasks import send_facebook_signup_conversion, send_reddit_signup_conversion
 from pages.context_processors import analytics as analytics_context, show_signup_tracking as tracking_context
+from constants.plans import PlanNames
 
 
 @tag('batch_marketing_conversions')
@@ -34,7 +35,7 @@ class ConversionPayloadTests(SimpleTestCase):
             fbc='fb.1.1234567890.AbCd',
             fbp='fb.1.1700000000.111111',
             fbclid='fbclid-123',
-            custom_data={'plan': 'free'},
+            custom_data={'plan': PlanNames.FREE},
             campaign={'source': 'newsletter'},
             value=0.0,
             currency='USD',
@@ -64,7 +65,7 @@ class ConversionPayloadTests(SimpleTestCase):
         self.assertEqual(user_data['subscription_id'], 'fbclid-123')
 
         self.assertIn('custom_data', fb_event)
-        self.assertEqual(fb_event['custom_data']['plan'], 'free')
+        self.assertEqual(fb_event['custom_data']['plan'], PlanNames.FREE)
         self.assertEqual(fb_event['custom_data']['source'], 'newsletter')
         self.assertEqual(fb_event['custom_data']['currency'], 'USD')
         self.assertEqual(fb_event['custom_data']['value'], 0.0)
@@ -79,7 +80,7 @@ class ConversionPayloadTests(SimpleTestCase):
             ip_address='198.51.100.9',
             user_agent='pytest-agent/1.0',
             click_ids={'click_id': 'rdt-123'},
-            custom_data={'plan': 'free'},
+            custom_data={'plan': PlanNames.FREE},
             campaign={'utm_source': 'reddit'},
         )
 
@@ -93,7 +94,7 @@ class ConversionPayloadTests(SimpleTestCase):
         self.assertEqual(reddit_event['user']['email'], email_hash)
         self.assertEqual(reddit_event['user']['ip_address'], '198.51.100.9')
         self.assertEqual(reddit_event['context']['click_id'], 'rdt-123')
-        self.assertEqual(reddit_event['custom_data']['plan'], 'free')
+        self.assertEqual(reddit_event['custom_data']['plan'], PlanNames.FREE)
         self.assertEqual(reddit_event['custom_data']['utm_source'], 'reddit')
 
     def test_build_conversion_event_accepts_datetime(self):

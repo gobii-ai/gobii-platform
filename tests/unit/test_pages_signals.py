@@ -10,7 +10,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 
 from api.models import UserBilling, Organization, UserAttribution
 from api.models import UserBilling, Organization, ProxyServer, DedicatedProxyAllocation
-from constants.plans import PlanNamesChoices
+from constants.plans import PlanNames, PlanNamesChoices
 from pages.signals import handle_subscription_event, handle_user_signed_up
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
 from constants.stripe import (
@@ -83,6 +83,7 @@ class UserSignedUpSignalTests(TestCase):
 
         identify_call = mock_identify.call_args.kwargs
         traits = identify_call["traits"]
+        self.assertEqual(traits["plan"], PlanNames.FREE)
         self.assertEqual(traits["utm_source_first"], "first-source")
         self.assertEqual(traits["utm_medium_first"], "first-medium")
         self.assertEqual(traits["utm_source_last"], "last-source")
@@ -106,6 +107,7 @@ class UserSignedUpSignalTests(TestCase):
         properties = track_call["properties"]
         context_campaign = track_call["context"]["campaign"]
 
+        self.assertEqual(properties["plan"], PlanNames.FREE)
         self.assertEqual(properties["utm_source_first"], "first-source")
         self.assertEqual(properties["utm_source_last"], "last-source")
         self.assertEqual(context_campaign["source"], "last-source")
@@ -275,6 +277,38 @@ class SubscriptionSignalTests(TestCase):
 
         mock_logger.assert_called_once()
         self.assertFalse(UserBilling.objects.filter(user=self.user).exists())
+
+    @tag("batch_pages")
+    def test_subscription_cancellation_updates_plan_trait(self):
+        payload = _build_event_payload(status="canceled")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.deleted")
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.status = "canceled"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.downgrade_owner_to_free_plan") as mock_downgrade, \
+            patch("pages.signals.DedicatedProxyService.release_for_owner") as mock_release, \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
+            patch("pages.signals.Analytics.track_event") as mock_track_event:
+
+            handle_subscription_event(event)
+
+        mock_downgrade.assert_called_once_with(self.user)
+        mock_release.assert_called_once_with(self.user)
+
+        mock_identify.assert_called_once()
+        identify_args, identify_kwargs = mock_identify.call_args
+        self.assertEqual(identify_args[0], self.user.id)
+        self.assertIn("plan", identify_args[1])
+        self.assertEqual(identify_args[1]["plan"], PlanNames.FREE)
+        self.assertEqual(identify_kwargs, {})
+
+        mock_track_event.assert_called_once()
+        track_kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(track_kwargs["properties"]["plan"], PlanNames.FREE)
 
     @tag("batch_pages")
     def test_dedicated_ip_allocation_from_subscription(self):
