@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {useQuery} from '@tanstack/react-query'
-import {parseDate} from '@internationalized/date'
+import {getLocalTimeZone, parseDate, today} from '@internationalized/date'
 
 import {
   UsagePeriodHeader,
@@ -242,6 +242,14 @@ export function UsageScreen() {
   )
   const isViewingCurrentBilling = selectionMode === 'billing' && isCurrentSelection
 
+  const maxCalendarValue = useMemo(() => {
+    if (!isViewingCurrentBilling) {
+      return null
+    }
+    const timezone = summary?.period.timezone ?? getLocalTimeZone()
+    return today(timezone)
+  }, [isViewingCurrentBilling, summary?.period.timezone])
+
   // Format the header caption so it calls out the active context and timezone.
   const periodInfo = useMemo<PeriodInfo>(() => {
     if (summary) {
@@ -294,6 +302,7 @@ export function UsageScreen() {
           hasInitialRange={hasInitialRange}
           isCurrentSelection={isCurrentSelection}
           isViewingCurrentBilling={isViewingCurrentBilling}
+          maxValue={maxCalendarValue}
           agentSelectorProps={{
             agents,
             status: agentsStatus,

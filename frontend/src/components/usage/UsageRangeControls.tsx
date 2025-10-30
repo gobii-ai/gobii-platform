@@ -9,6 +9,9 @@ import {
   RangeCalendar,
 } from 'react-aria-components'
 
+import type { DateValue } from '@internationalized/date'
+
+import { clampRangeToMax } from './utils'
 import type { DateRangeValue } from './types'
 
 type UsageRangeControlsProps = {
@@ -26,6 +29,7 @@ type UsageRangeControlsProps = {
   hasInitialRange: boolean
   isCurrentSelection: boolean
   isViewingCurrentBilling: boolean
+  maxValue?: DateValue | null
 }
 
 export function UsageRangeControls(props: UsageRangeControlsProps) {
@@ -44,7 +48,19 @@ export function UsageRangeControls(props: UsageRangeControlsProps) {
     hasInitialRange,
     isCurrentSelection,
     isViewingCurrentBilling,
+    maxValue,
   } = props
+
+  const selection = calendarRange ?? effectiveRange
+  const displayRange = (() => {
+    if (!selection) {
+      return null
+    }
+    if (maxValue && selection.start && selection.end) {
+      return clampRangeToMax(selection, maxValue)
+    }
+    return selection
+  })()
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-3">
@@ -83,7 +99,7 @@ export function UsageRangeControls(props: UsageRangeControlsProps) {
           <Dialog className="p-4">
             <RangeCalendar
               aria-label="Select billing period"
-              value={(calendarRange ?? effectiveRange) ?? undefined}
+              value={displayRange ?? undefined}
               onChange={(range) => {
                 if (range?.start && range?.end) {
                   onRangeComplete(range as DateRangeValue)
@@ -92,6 +108,7 @@ export function UsageRangeControls(props: UsageRangeControlsProps) {
                 }
               }}
               visibleDuration={{ months: 1 }}
+              maxValue={maxValue ?? undefined}
               className="flex flex-col gap-3"
             >
               <header className="flex items-center justify-between gap-2">
