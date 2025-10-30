@@ -12,7 +12,7 @@ external network calls.
 """
 from __future__ import annotations
 
-from typing import Callable, List, Sequence
+from typing import Callable, List, Sequence, Optional
 
 from django.conf import settings
 from django.db import transaction
@@ -201,6 +201,8 @@ def llm_summarise_comms(
     previous: str,
     messages: Sequence[PersistentAgentMessage],
     safety_identifier: str | None = None,
+    *,
+    agent: Optional[PersistentAgent] = None,
 ) -> str:
     """Summarise *previous* + *messages* via an LLM (LiteLLM).
 
@@ -241,7 +243,10 @@ def llm_summarise_comms(
     ]
 
     try:
-        model, params = get_summarization_llm_config()
+        model, params = get_summarization_llm_config(
+            agent=agent,
+            agent_id=str(agent.id) if agent else None,
+        )
 
         if model.startswith("openai"):
             # GPT-4.1 is currently the only model supporting the `safety_identifier`

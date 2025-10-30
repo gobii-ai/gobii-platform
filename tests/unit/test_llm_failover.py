@@ -17,6 +17,7 @@ from api.agent.core.llm_config import (
     LLMNotConfiguredError,
     invalidate_llm_bootstrap_cache,
     get_provider_config,
+    get_summarization_llm_config,
 )
 from api.openrouter import DEFAULT_API_BASE
 from tests.utils.llm_seed import seed_persistent_basic, clear_llm_db
@@ -272,6 +273,18 @@ class TestLLMFailover(TestCase):
 
         self.assertTrue(configs)
         self.assertEqual(configs[0][0], seeded["premium_endpoint"].key)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_summarization_prefers_premium_tier(self):
+        clear_llm_db()
+        seeded = self._seed_premium_setup(include_premium=True)
+        agent = self._make_agent_stub(plan_id="startup", days_since_joined=60)
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-premium"}, clear=True):
+            model, params = get_summarization_llm_config(agent=agent, agent_id=str(agent.id))
+
+        self.assertEqual(model, seeded["premium_endpoint"].litellm_model)
+        self.assertIn("temperature", params)
 
 
 @tag("batch_event_llm")

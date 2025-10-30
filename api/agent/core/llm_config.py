@@ -542,7 +542,11 @@ def get_llm_config_with_failover(
     )
 
 
-def get_summarization_llm_config() -> Tuple[str, dict]:
+def get_summarization_llm_config(
+    *,
+    agent: Any | None = None,
+    agent_id: str | None = None,
+) -> Tuple[str, dict]:
     """
     Get LiteLLM configuration specifically for summarization tasks.
 
@@ -553,7 +557,16 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
         Tuple of (model_name, litellm_params)
     """
     # DB-only: pick primary config and adjust temperature for summarisation
-    configs = get_llm_config_with_failover(token_count=0)
+    if agent_id is None and agent is not None:
+        possible_id = getattr(agent, "id", None)
+        if possible_id is not None:
+            agent_id = str(possible_id)
+
+    configs = get_llm_config_with_failover(
+        agent_id=agent_id,
+        token_count=0,
+        agent=agent,
+    )
     _provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm
     params = {

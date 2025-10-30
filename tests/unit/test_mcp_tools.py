@@ -844,6 +844,42 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result.get("enabled_tools"), ["mcp_brightdata_scrape", "mcp_brightdata_search"]) 
         mock_enable_batch.assert_called_once()
 
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_passes_agent_to_failover(self, mock_get_config, mock_get_manager, mock_run_completion, mock_enable_tools):
+        """search_tools should pass agent context when fetching failover configs."""
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = [
+            MCPToolInfo(self.config_id, "builtin_sample", "builtin", "sample", "Sample tool", {}),
+        ]
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [
+            (
+                "openai",
+                "openai/gpt-4o",
+                {"temperature": 0.1},
+            )
+        ]
+
+        msg = MagicMock()
+        msg.content = "No tool calls"
+        setattr(msg, "tool_calls", [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "test query")
+        self.assertEqual(result["status"], "success")
+        mock_get_config.assert_called_once()
+        kwargs = mock_get_config.call_args.kwargs
+        self.assertIs(kwargs.get("agent"), self.agent)
+        self.assertEqual(kwargs.get("agent_id"), str(self.agent.id))
+
     @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
     @patch('api.agent.tools.search_tools.get_mcp_manager')
     @patch('api.agent.tools.search_tools.run_completion')

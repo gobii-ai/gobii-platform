@@ -123,7 +123,11 @@ def _search_with_llm(
     )
 
     try:
-        failover_configs = get_llm_config_with_failover()
+        agent_id = str(agent.id) if agent and getattr(agent, "id", None) else None
+        failover_configs = get_llm_config_with_failover(
+            agent=agent,
+            agent_id=agent_id,
+        )
         last_exc: Optional[Exception] = None
         for idx, (provider, model, params) in enumerate(failover_configs):
             try:
