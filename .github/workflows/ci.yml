@@ -329,3 +329,72 @@ jobs:
           files: all-results/**/*.xml
           check_name: "Combined Test Results"
           comment_mode: off
+
+  trigger-preview:
+    name: Dispatch Preview Deployment
+    runs-on: ubuntu-latest
+    needs: [tests]
+    if: >
+      github.event_name == 'pull_request' &&
+      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          installation_retrieval_mode: repository
+          installation_retrieval_payload: gobii-ai/gobii
+
+      - name: Notify infra repo
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          repository: gobii-ai/gobii
+          event-type: preview-ready
+          client-payload: |
+            {
+              "owner": "${{ github.repository_owner }}",
+              "repo": "${{ github.event.repository.name }}",
+              "pr_number": ${{ github.event.pull_request.number }},
+              "head_sha": "${{ github.event.pull_request.head.sha }}",
+              "head_ref": "${{ github.event.pull_request.head.ref }}",
+              "html_url": "${{ github.event.pull_request.html_url }}",
+              "trigger_run_id": ${{ github.run_id }},
+              "trigger_run_attempt": ${{ github.run_attempt }},
+              "actor": "${{ github.actor }}"
+            }
+
+  trigger-staging:
+    name: Dispatch Staging Deployment
+    runs-on: ubuntu-latest
+    needs: [tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          installation_retrieval_mode: repository
+          installation_retrieval_payload: gobii-ai/gobii
+
+      - name: Notify infra repo
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          repository: gobii-ai/gobii
+          event-type: staging-ready
+          client-payload: |
+            {
+              "owner": "${{ github.repository_owner }}",
+              "repo": "${{ github.event.repository.name }}",
+              "ref": "${{ github.ref }}",
+              "head_sha": "${{ github.sha }}",
+              "trigger_run_id": ${{ github.run_id }},
+              "trigger_run_attempt": ${{ github.run_attempt }},
+              "pusher": "${{ github.actor }}",
+              "compare_url": "${{ github.event.compare || '' }}"
+            }
