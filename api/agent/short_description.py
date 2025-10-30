@@ -99,11 +99,11 @@ def build_mini_description(
     if mini:
         return mini, "mini"
 
-    short = prepare_mini_description(getattr(agent, "short_description", ""))
+    short = _normalize_text(getattr(agent, "short_description", ""))
     if short:
         return short, "short"
 
-    charter = prepare_mini_description(getattr(agent, "charter", ""))
+    charter = _normalize_text(getattr(agent, "charter", ""))
     if charter:
         return charter, "charter"
 

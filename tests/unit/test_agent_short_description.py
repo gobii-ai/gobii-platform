@@ -5,6 +5,7 @@ from django.test import TestCase, tag
 from unittest.mock import patch
 
 from api.agent.short_description import (
+    build_mini_description,
     compute_charter_hash,
     maybe_schedule_mini_description,
     maybe_schedule_short_description,
@@ -133,3 +134,40 @@ class AgentShortDescriptionTests(TestCase):
         self.assertEqual(agent.mini_description, "")
         self.assertEqual(agent.mini_description_charter_hash, "")
         self.assertEqual(agent.mini_description_requested_hash, "")
+
+    def test_build_mini_description_uses_mini_when_available(self) -> None:
+        agent = self._create_agent()
+        agent.mini_description = "Helpful research assistant"
+        agent.save(update_fields=["mini_description"])
+
+        mini, source = build_mini_description(agent)
+
+        self.assertEqual(mini, "Helpful research assistant")
+        self.assertEqual(source, "mini")
+
+    def test_build_mini_description_does_not_truncate_short_fallback(self) -> None:
+        agent = self._create_agent()
+        agent.short_description = "Legacy agent with extensive context preserved in the full summary"
+        agent.save(update_fields=["short_description"])
+
+        mini, source = build_mini_description(agent)
+
+        self.assertEqual(
+            mini,
+            "Legacy agent with extensive context preserved in the full summary",
+        )
+        self.assertEqual(source, "short")
+
+    def test_build_mini_description_does_not_truncate_charter_fallback(self) -> None:
+        charter = "Assist leadership with quarterly planning and cross-functional coordination"
+        agent = self._create_agent(charter=charter)
+        agent.short_description = ""
+        agent.save(update_fields=["short_description"])
+
+        mini, source = build_mini_description(agent)
+
+        self.assertEqual(
+            mini,
+            "Assist leadership with quarterly planning and cross-functional coordination",
+        )
+        self.assertEqual(source, "charter")
