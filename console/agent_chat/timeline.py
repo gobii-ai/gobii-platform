@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone as dt_timezone
 import re
 import uuid
-from typing import Iterable, Literal, Sequence
+from typing import Iterable, Literal, Sequence, Mapping
 
 from django.contrib.humanize.templatetags.humanize import naturaltime
 from django.db.models import Q
@@ -166,12 +166,23 @@ def _microsecond_epoch(dt: datetime) -> int:
     return int(dt_utc.timestamp() * 1_000_000)
 
 
-def _friendly_tool_label(tool_name: str | None) -> str:
+def _load_tool_label_map(tool_names: Iterable[str | None]) -> dict[str, str]:
+    """Fetch display labels for the provided tool names in a single query."""
+    unique_names = {name for name in tool_names if name}
+    if not unique_names:
+        return {}
+    return {
+        tool_name: display_name
+        for tool_name, display_name in ToolFriendlyName.objects.filter(tool_name__in=unique_names)
+        .values_list("tool_name", "display_name")
+    }
+
+
+def _friendly_tool_label(tool_name: str | None, labels: Mapping[str, str] | None = None) -> str:
     if not tool_name:
         return "Tool call"
-    lookup = ToolFriendlyName.objects.filter(tool_name=tool_name).values_list("display_name", flat=True).first()
-    if lookup:
-        return lookup
+    if labels and tool_name in labels:
+        return labels[tool_name]
     return tool_name.replace("_", " ").title()
 
 
@@ -319,12 +330,12 @@ def _serialize_message(env: MessageEnvelope) -> dict:
     }
 
 
-def _serialize_step_entry(env: StepEnvelope) -> dict:
+def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     step = env.step
     tool_call = env.tool_call
     tool_name = tool_call.tool_name or ""
     meta = _tool_icon_for(tool_name)
-    meta["label"] = _friendly_tool_label(tool_name)
+    meta["label"] = _friendly_tool_label(tool_name, labels)
     return {
         "id": str(step.id),
         "cursor": env.cursor.encode(),
@@ -337,8 +348,8 @@ def _serialize_step_entry(env: StepEnvelope) -> dict:
     }
 
 
-def _build_cluster(entries: Sequence[StepEnvelope]) -> dict:
-    serialized_entries = [_serialize_step_entry(env) for env in entries]
+def _build_cluster(entries: Sequence[StepEnvelope], labels: Mapping[str, str]) -> dict:
+    serialized_entries = [_serialize_step_entry(env, labels) for env in entries]
     earliest = entries[0]
     latest = entries[-1]
     return {
@@ -642,6 +653,10 @@ def fetch_timeline_window(
     # Ensure chronological order for presentation
     truncated.sort(key=lambda env: env.sort_key)
 
+    tool_label_map = _load_tool_label_map(
+        env.tool_call.tool_name for env in truncated if isinstance(env, StepEnvelope) and env.tool_call
+    )
+
     timeline_events: list[dict] = []
     cluster_buffer: list[StepEnvelope] = []
     for env in truncated:
@@ -649,11 +664,11 @@ def fetch_timeline_window(
             cluster_buffer.append(env)
             continue
         if cluster_buffer:
-            timeline_events.append(_build_cluster(cluster_buffer))
+            timeline_events.append(_build_cluster(cluster_buffer, tool_label_map))
             cluster_buffer = []
         timeline_events.append(_serialize_message(env))
     if cluster_buffer:
-        timeline_events.append(_build_cluster(cluster_buffer))
+        timeline_events.append(_build_cluster(cluster_buffer, tool_label_map))
 
     oldest_cursor = truncated[0].cursor if truncated else None
     newest_cursor = truncated[-1].cursor if truncated else None
@@ -682,7 +697,10 @@ def serialize_step_entry(step: PersistentAgentStep) -> dict:
     envelopes = _envelop_steps([step])
     if not envelopes:
         raise ValueError("Step does not include a tool call")
-    return _serialize_step_entry(envelopes[0])
+    label_map = _load_tool_label_map(
+        [envelopes[0].tool_call.tool_name] if envelopes[0].tool_call else []
+    )
+    return _serialize_step_entry(envelopes[0], label_map)
 
 
 def compute_processing_status(agent: PersistentAgent) -> bool:
@@ -694,4 +712,7 @@ def build_tool_cluster_from_steps(steps: Sequence[PersistentAgentStep]) -> dict:
     envelopes = _envelop_steps(steps)
     if not envelopes:
         raise ValueError("No tool calls available")
-    return _build_cluster(envelopes)
+    label_map = _load_tool_label_map(
+        env.tool_call.tool_name for env in envelopes if env.tool_call
+    )
+    return _build_cluster(envelopes, label_map)
