@@ -392,7 +392,7 @@
         return;
       }
 
-      const scenarios = [
+      const baseScenarios = [
         ' find 200 ideal customers and their emails.',
         ' keep my Salesforce pipeline clean every day.',
         ' watch new YC and seed startups and add founders to my sheet weekly.',
@@ -411,7 +411,37 @@
         " track flights to my destination and alert me when they're cheap."
       ];
 
-      let scenarioIndex = 0;
+      function shuffle(list) {
+        const array = [...list];
+        for (let i = array.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+      }
+
+      let scenarioQueue = [];
+      let currentScenario = '';
+      let lastScenario = '';
+
+      function refillQueue() {
+        scenarioQueue = shuffle(baseScenarios);
+        if (scenarioQueue.length > 1 && scenarioQueue[0] === lastScenario) {
+          [scenarioQueue[0], scenarioQueue[1]] = [scenarioQueue[1], scenarioQueue[0]];
+        }
+      }
+
+      function pickNextScenario() {
+        if (!scenarioQueue.length) {
+          refillQueue();
+        }
+        currentScenario = scenarioQueue.shift();
+        lastScenario = currentScenario;
+      }
+
+      refillQueue();
+      pickNextScenario();
+
       let charIndex = 0;
       let isDeleting = false;
 
@@ -437,8 +467,6 @@
           return;
         }
 
-        const currentScenario = scenarios[scenarioIndex];
-
         if (!isDeleting && charIndex <= currentScenario.length) {
           ghostText.textContent = currentScenario.slice(0, charIndex);
           charIndex += 1;
@@ -461,7 +489,7 @@
 
         if (isDeleting && charIndex === 0) {
           isDeleting = false;
-          scenarioIndex = (scenarioIndex + 1) % scenarios.length;
+          pickNextScenario();
           setTimeout(typeLoop, 300);
           return;
         }
