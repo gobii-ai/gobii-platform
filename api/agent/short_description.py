@@ -99,14 +99,6 @@ def build_mini_description(
     if mini:
         return mini, "mini"
 
-    short = _normalize_text(getattr(agent, "short_description", ""))
-    if short:
-        return short, "short"
-
-    charter = _normalize_text(getattr(agent, "charter", ""))
-    if charter:
-        return charter, "charter"
-
     return fallback_message, "placeholder"
 
 
