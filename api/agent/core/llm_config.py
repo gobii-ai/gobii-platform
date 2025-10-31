@@ -10,6 +10,7 @@ The configuration uses a similar pattern to browser use tasks for consistency.
 import os
 import logging
 import random
+from datetime import timedelta
 from typing import Dict, List, Tuple, Any, Optional
 
 from django.apps import apps
@@ -17,8 +18,10 @@ from django.core.cache import cache
 from django.db import connection
 from django.db.models import Q
 from django.conf import settings
+from django.utils import timezone
 
 from api.openrouter import get_attribution_headers
+from util.subscription_helper import get_owner_plan
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,50 @@ def _apply_required_temperature(model: str, params: Dict[str, Any]) -> None:
             "Adjusting temperature for model %s from %s to %s", model, current_temp, required_temp
         )
     params["temperature"] = required_temp
+
+
+_PREMIUM_PLAN_IDS = {"pro", "org", "scale", "startup", "org_team"}
+_PREMIUM_PLAN_NAMES = {"pro", "org", "scale"}
+_PREMIUM_ACCOUNT_AGE_DAYS = 30
+
+
+def _should_prioritize_premium(agent: Any) -> bool:
+    """Return True when the provided agent should prefer premium LLM tiers."""
+
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        return False
+    if agent is None:
+        return False
+
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    plan = None
+    if owner is not None:
+        try:
+            plan = get_owner_plan(owner)
+        except Exception:
+            logger.debug(
+                "Failed to resolve owner plan for agent %s",
+                getattr(agent, "id", None),
+                exc_info=True,
+            )
+    plan_id = str(plan.get("id", "")).lower() if plan else ""
+    plan_name = str(plan.get("name", "")).lower() if plan else ""
+    if plan_id in _PREMIUM_PLAN_IDS or plan_name in _PREMIUM_PLAN_NAMES:
+        return True
+
+    user = getattr(agent, "user", None)
+    date_joined = getattr(user, "date_joined", None) if user is not None else None
+    if date_joined is not None:
+        try:
+            if date_joined >= timezone.now() - timedelta(days=_PREMIUM_ACCOUNT_AGE_DAYS):
+                return True
+        except Exception:
+            logger.debug(
+                "Unable to evaluate account age for agent %s",
+                getattr(agent, "id", None),
+                exc_info=True,
+            )
+    return False
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -271,12 +318,137 @@ def get_available_providers(provider_tiers: List[List[Tuple[str, float]]] = None
     return available
 
 
+def _collect_failover_configs(
+    tiers,
+    *,
+    token_range_name: str,
+    tier_label: str,
+) -> List[Tuple[str, str, dict]]:
+    """Build failover configurations from the provided tier queryset."""
+
+    failover_configs: List[Tuple[str, str, dict]] = []
+    for tier in tiers:
+        endpoints_with_weights = []
+        for te in tier.tier_endpoints.select_related("endpoint__provider").all():
+            endpoint = te.endpoint
+            provider = endpoint.provider
+            if not (provider.enabled and endpoint.enabled):
+                continue
+            has_admin_key = bool(provider.api_key_encrypted)
+            has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
+            raw_model = endpoint.litellm_model or ""
+            has_api_base = bool(getattr(endpoint, "api_base", None))
+            provider_backend = getattr(provider, "browser_backend", "")
+            is_openai_backend = provider_backend in ("OPENAI", "OPENAI_COMPAT")
+            should_auto_prefix = (
+                is_openai_backend
+                and has_api_base
+                and raw_model
+                and "/" not in raw_model
+            )
+            if should_auto_prefix:
+                effective_model = f"openai/{raw_model}"
+                logger.info(
+                    "Auto-prefixed OpenAI-compatible model: endpoint=%s provider=%s "
+                    "original_model=%s prefixed_model=%s api_base=%s tier_type=%s",
+                    endpoint.key,
+                    provider.key,
+                    raw_model,
+                    effective_model,
+                    endpoint.api_base,
+                    tier_label,
+                )
+            else:
+                effective_model = raw_model
+
+            is_openai_compat = effective_model.startswith("openai/") and has_api_base
+            if not (has_admin_key or has_env_key or is_openai_compat):
+                logger.info(
+                    "DB LLM skip endpoint (no key): range=%s tier=%s tier_type=%s "
+                    "endpoint=%s provider=%s model=%s api_base=%s",
+                    token_range_name,
+                    tier.order,
+                    tier_label,
+                    endpoint.key,
+                    provider.key,
+                    effective_model,
+                    getattr(endpoint, "api_base", "") or "",
+                )
+                continue
+            endpoints_with_weights.append((endpoint, provider, te.weight, effective_model))
+
+        if not endpoints_with_weights:
+            continue
+
+        remaining = endpoints_with_weights.copy()
+        while remaining:
+            weights = [r[2] for r in remaining]
+            selected_idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
+            endpoint, provider, _weight, effective_model = remaining.pop(selected_idx)
+
+            params: Dict[str, Any] = {"temperature": 0.1}
+            try:
+                effective_key = None
+                if provider.api_key_encrypted:
+                    from api.encryption import SecretsEncryption
+                    effective_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
+                if not effective_key and provider.env_var_name:
+                    effective_key = os.getenv(provider.env_var_name)
+                if effective_key:
+                    params["api_key"] = effective_key
+                else:
+                    if endpoint.litellm_model.startswith("openai/") and getattr(endpoint, "api_base", None):
+                        params["api_key"] = "sk-noauth"
+            except Exception:
+                logger.debug("Unable to determine API key for endpoint %s", endpoint.key, exc_info=True)
+            if endpoint.temperature_override is not None:
+                params["temperature"] = float(endpoint.temperature_override)
+            if provider.key == "google":
+                vertex_project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
+                vertex_location = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
+                params.update(
+                    {
+                        "vertex_project": vertex_project,
+                        "vertex_location": vertex_location,
+                    }
+                )
+            if provider.key == "openrouter":
+                headers = get_attribution_headers()
+                if headers:
+                    params["extra_headers"] = headers
+
+            if effective_model.startswith("openai/") and getattr(endpoint, "api_base", None):
+                params["api_base"] = endpoint.api_base
+                logger.info(
+                    "DB LLM endpoint configured with api_base: endpoint=%s provider=%s "
+                    "model=%s api_base=%s has_key=%s tier_type=%s",
+                    endpoint.key,
+                    provider.key,
+                    effective_model,
+                    endpoint.api_base,
+                    bool(params.get("api_key")),
+                    tier_label,
+                )
+
+            _apply_required_temperature(effective_model, params)
+
+            params_with_hints = dict(params)
+            params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
+            params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
+            params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
+
+            failover_configs.append((endpoint.key, effective_model, params_with_hints))
+
+    return failover_configs
+
+
 def get_llm_config_with_failover(
     provider_tiers: List[List[Tuple[str, float]]] = None,
     agent_id: str = None,
     token_count: int = 0,
     *,
     allow_unconfigured: bool = False,
+    agent: Any | None = None,
 ) -> List[Tuple[str, str, dict]]:
     """
     Get LLM configurations for tiered failover with token-based tier selection.
@@ -287,6 +459,8 @@ def get_llm_config_with_failover(
         agent_id: Optional agent ID for logging
         token_count: Token count for automatic tier selection (default: 0).
                     Used to select appropriate tier when provider_tiers is None.
+        agent: Optional agent instance (or None). When provided (or resolvable via
+            agent_id) and running in proprietary mode, premium tiers may be preferred.
         
     Returns:
         List of (provider_name, model_name, litellm_params) tuples in failover order
@@ -299,8 +473,6 @@ def get_llm_config_with_failover(
         PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
         PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
 
-        
-
         token_range = (
             PersistentTokenRange.objects
             .filter(min_tokens__lte=token_count)
@@ -312,129 +484,54 @@ def get_llm_config_with_failover(
         token_range = None
 
     if token_range is not None:
-        failover_configs: List[Tuple[str, str, dict]] = []
-        tiers = PersistentLLMTier.objects.filter(token_range=token_range).order_by('order')
-        for tier_idx, tier in enumerate(tiers, start=1):
-            # Build usable endpoints in this tier
-            endpoints_with_weights = []
-            for te in tier.tier_endpoints.select_related('endpoint__provider').all():
-                endpoint = te.endpoint
-                provider = endpoint.provider
-                if not (provider.enabled and endpoint.enabled):
-                    continue
-                # Effective key present?
-                has_admin_key = bool(provider.api_key_encrypted)
-                has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
-                # Determine the effective model name, auto-prefixing OpenAI-compatible endpoints when needed
-                raw_model = endpoint.litellm_model or ""
-                has_api_base = bool(getattr(endpoint, 'api_base', None))
-                provider_backend = getattr(provider, 'browser_backend', '')
-                is_openai_backend = provider_backend in ("OPENAI", "OPENAI_COMPAT")
-                should_auto_prefix = (
-                    is_openai_backend
-                    and has_api_base
-                    and raw_model
-                    and '/' not in raw_model
-                )
-                if should_auto_prefix:
-                    effective_model = f"openai/{raw_model}"
-                    logger.info(
-                        "Auto-prefixed OpenAI-compatible model: endpoint=%s provider=%s original_model=%s prefixed_model=%s api_base=%s",
-                        endpoint.key,
-                        provider.key,
-                        raw_model,
-                        effective_model,
-                        endpoint.api_base,
-                    )
-                else:
-                    effective_model = raw_model
-
-                # Allow OpenAI-compatible endpoints with no key (api_base + openai/ prefix)
-                is_openai_compat = effective_model.startswith('openai/') and has_api_base
-                if not (has_admin_key or has_env_key or is_openai_compat):
-                    # Skip endpoints that truly require a key but none is configured
-                    logger.info(
-                        "DB LLM skip endpoint (no key): range=%s tier=%s endpoint=%s provider=%s model=%s api_base=%s",
-                        token_range.name,
-                        tier.order,
-                        endpoint.key,
-                        provider.key,
-                        effective_model,
-                        getattr(endpoint, 'api_base', '') or ''
-                    )
-                    continue
-                endpoints_with_weights.append((endpoint, provider, te.weight, effective_model))
-
-            if not endpoints_with_weights:
-                continue
-
-            remaining = endpoints_with_weights.copy()
-            while remaining:
-                weights = [r[2] for r in remaining]
-                selected_idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
-                endpoint, provider, _w, effective_model = remaining.pop(selected_idx)
-
-                params: Dict[str, Any] = {"temperature": 0.1}
-                # Inject API key directly into LiteLLM params (DB-only routing).
+        agent_instance = agent
+        prefer_premium = False
+        if getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+            if agent_instance is None and agent_id:
                 try:
-                    effective_key = None
-                    if provider.api_key_encrypted:
-                        from api.encryption import SecretsEncryption
-                        effective_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
-                    if not effective_key and provider.env_var_name:
-                        effective_key = os.getenv(provider.env_var_name)
-                    if effective_key:
-                        params["api_key"] = effective_key
-                    else:
-                        # For OpenAI-compatible proxies that allow no auth, pass a dummy key
-                        if endpoint.litellm_model.startswith('openai/') and getattr(endpoint, 'api_base', None):
-                            params["api_key"] = "sk-noauth"
-                except Exception:
-                    pass
-                if endpoint.temperature_override is not None:
-                    params["temperature"] = float(endpoint.temperature_override)
-                if provider.key == 'google':
-                    vertex_project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
-                    vertex_location = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
-                    params.update({
-                        "vertex_project": vertex_project,
-                        "vertex_location": vertex_location,
-                    })
-                if provider.key == 'openrouter':
-                    headers = get_attribution_headers()
-                    if headers:
-                        params["extra_headers"] = headers
-
-                # Support OpenAI-compatible endpoints for persistent agents via LiteLLM
-                # When using an OpenAI-compatible proxy, set litellm_model to 'openai/<your-model>'
-                # and configure api_base on the endpoint (e.g., http://vllm-host:port/v1)
-                if effective_model.startswith('openai/') and getattr(endpoint, 'api_base', None):
-                    params["api_base"] = endpoint.api_base
-                    logger.info(
-                        "DB LLM endpoint configured with api_base: endpoint=%s provider=%s model=%s api_base=%s has_key=%s",
-                        endpoint.key,
-                        provider.key,
-                        effective_model,
-                        endpoint.api_base,
-                        bool(params.get('api_key')),
+                    PersistentAgent = apps.get_model('api', 'PersistentAgent')
+                    agent_instance = (
+                        PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
                     )
-
-                _apply_required_temperature(effective_model, params)
-
-                # Add tool-choice capability hint for callers (not passed to litellm)
-                params_with_hints = dict(params)
-                params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
-                params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
-                # Expose whether the endpoint prefers parallel tool-calling. This is a caller hint.
-                try:
-                    params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
                 except Exception:
-                    params_with_hints["use_parallel_tool_calls"] = True
-                failover_configs.append((endpoint.key, effective_model, params_with_hints))
+                    logger.debug(
+                        "Unable to resolve agent %s for premium tier routing",
+                        agent_id,
+                        exc_info=True,
+                    )
+                    agent_instance = None
+            prefer_premium = _should_prioritize_premium(agent_instance)
 
-        if failover_configs:
+        combined_configs: List[Tuple[str, str, dict]] = []
+
+        if prefer_premium:
+            premium_tiers = PersistentLLMTier.objects.filter(
+                token_range=token_range,
+                is_premium=True,
+            ).order_by("order")
+            premium_configs = _collect_failover_configs(
+                premium_tiers,
+                token_range_name=token_range.name,
+                tier_label="premium",
+            )
+            if premium_configs:
+                combined_configs.extend(premium_configs)
+
+        standard_tiers = PersistentLLMTier.objects.filter(
+            token_range=token_range,
+            is_premium=False,
+        ).order_by("order")
+        standard_configs = _collect_failover_configs(
+            standard_tiers,
+            token_range_name=token_range.name,
+            tier_label="standard",
+        )
+        if standard_configs:
+            combined_configs.extend(standard_configs)
+
+        if combined_configs:
             _cache_bootstrap_status(False)
-            return failover_configs
+            return combined_configs
 
     if allow_unconfigured:
         _cache_bootstrap_status(True)
@@ -446,7 +543,11 @@ def get_llm_config_with_failover(
     )
 
 
-def get_summarization_llm_config() -> Tuple[str, dict]:
+def get_summarization_llm_config(
+    *,
+    agent: Any | None = None,
+    agent_id: str | None = None,
+) -> Tuple[str, dict]:
     """
     Get LiteLLM configuration specifically for summarization tasks.
 
@@ -457,7 +558,16 @@ def get_summarization_llm_config() -> Tuple[str, dict]:
         Tuple of (model_name, litellm_params)
     """
     # DB-only: pick primary config and adjust temperature for summarisation
-    configs = get_llm_config_with_failover(token_count=0)
+    if agent_id is None and agent is not None:
+        possible_id = getattr(agent, "id", None)
+        if possible_id is not None:
+            agent_id = str(possible_id)
+
+    configs = get_llm_config_with_failover(
+        agent_id=agent_id,
+        token_count=0,
+        agent=agent,
+    )
     _provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm
     params = {

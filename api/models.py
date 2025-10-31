@@ -1315,13 +1315,19 @@ class PersistentLLMTier(models.Model):
     token_range = models.ForeignKey(PersistentTokenRange, on_delete=models.CASCADE, related_name="tiers")
     order = models.PositiveIntegerField(help_text="1-based order within the range")
     description = models.CharField(max_length=256, blank=True)
+    is_premium = models.BooleanField(
+        default=False,
+        help_text="Marks tiers reserved for premium routing.",
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["token_range__min_tokens", "order"]
-        unique_together = (("token_range", "order"),)
+        unique_together = (("token_range", "order", "is_premium"),)
 
     def __str__(self):
-        return f"{self.token_range.name} tier {self.order}"
+        tier_type = "premium" if bool(self.is_premium) else "standard"
+        return f"{self.token_range.name} {tier_type} tier {self.order}"
 
 
 class PersistentTierEndpoint(models.Model):
@@ -1331,13 +1337,24 @@ class PersistentTierEndpoint(models.Model):
     tier = models.ForeignKey(PersistentLLMTier, on_delete=models.CASCADE, related_name="tier_endpoints")
     endpoint = models.ForeignKey(PersistentModelEndpoint, on_delete=models.CASCADE, related_name="in_tiers")
     weight = models.FloatField(help_text="Relative weight within the tier; > 0")
+    is_premium = models.BooleanField(
+        default=False,
+        help_text="Matches the premium status of the associated tier.",
+        editable=False,
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["tier__order", "endpoint__key"]
         unique_together = (("tier", "endpoint"),)
 
     def __str__(self):
-        return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
+        tier_type = "premium" if self.tier.is_premium else "standard"
+        return f"{self.tier} → {self.endpoint.key} [{tier_type}] (w={self.weight})"
+
+    def save(self, *args, **kwargs):
+        self.is_premium = bool(self.tier.is_premium)
+        super().save(*args, **kwargs)
 
 
 class EmbeddingsModelEndpoint(models.Model):
@@ -1478,13 +1495,19 @@ class BrowserLLMTier(models.Model):
     policy = models.ForeignKey(BrowserLLMPolicy, on_delete=models.CASCADE, related_name="tiers")
     order = models.PositiveIntegerField(help_text="1-based order within the policy")
     description = models.CharField(max_length=256, blank=True)
+    is_premium = models.BooleanField(
+        default=False,
+        help_text="Marks tiers reserved for premium browser routing.",
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["policy__name", "order"]
-        unique_together = (("policy", "order"),)
+        unique_together = (("policy", "order", "is_premium"),)
 
     def __str__(self):
-        return f"{self.policy.name} tier {self.order}"
+        tier_type = "premium" if bool(self.is_premium) else "standard"
+        return f"{self.policy.name} {tier_type} tier {self.order}"
 
 
 class BrowserTierEndpoint(models.Model):
@@ -1494,13 +1517,24 @@ class BrowserTierEndpoint(models.Model):
     tier = models.ForeignKey(BrowserLLMTier, on_delete=models.CASCADE, related_name="tier_endpoints")
     endpoint = models.ForeignKey(BrowserModelEndpoint, on_delete=models.CASCADE, related_name="in_tiers")
     weight = models.FloatField(help_text="Relative weight within the tier; > 0")
+    is_premium = models.BooleanField(
+        default=False,
+        help_text="Matches the premium status of the associated browser tier.",
+        editable=False,
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["tier__order", "endpoint__key"]
         unique_together = (("tier", "endpoint"),)
 
     def __str__(self):
-        return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
+        tier_type = "premium" if self.tier.is_premium else "standard"
+        return f"{self.tier} → {self.endpoint.key} [{tier_type}] (w={self.weight})"
+
+    def save(self, *args, **kwargs):
+        self.is_premium = bool(self.tier.is_premium)
+        super().save(*args, **kwargs)
 
 
 class DecodoCredential(models.Model):

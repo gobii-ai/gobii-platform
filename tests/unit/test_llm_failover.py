@@ -1,9 +1,15 @@
 """Unit tests for LLM failover (DB-only)."""
 import os
+import uuid
+from datetime import timedelta
+from types import SimpleNamespace
 from unittest import mock
 
 from django.apps import apps
+from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
+from django.utils import timezone
+
 from api.agent.core.llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
@@ -11,6 +17,7 @@ from api.agent.core.llm_config import (
     LLMNotConfiguredError,
     invalidate_llm_bootstrap_cache,
     get_provider_config,
+    get_summarization_llm_config,
 )
 from api.openrouter import DEFAULT_API_BASE
 from tests.utils.llm_seed import seed_persistent_basic, clear_llm_db
@@ -21,6 +28,70 @@ class TestLLMFailover(TestCase):
     def setUp(self):  # noqa: D401
         super().setUp()
         invalidate_llm_bootstrap_cache()
+
+    def _seed_premium_setup(self, include_premium: bool = True):
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+        PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+        PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='anthropic',
+            display_name='Anthropic',
+            enabled=True,
+            env_var_name='ANTHROPIC_API_KEY',
+            browser_backend='ANTHROPIC',
+        )
+        premium_endpoint = PersistentModelEndpoint.objects.create(
+            key='anthropic_premium',
+            provider=provider,
+            enabled=True,
+            litellm_model='anthropic/premium-model',
+            supports_tool_choice=True,
+        )
+        standard_endpoint = PersistentModelEndpoint.objects.create(
+            key='anthropic_standard',
+            provider=provider,
+            enabled=True,
+            litellm_model='anthropic/standard-model',
+            supports_tool_choice=True,
+        )
+
+        token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
+        standard_tier = PersistentLLMTier.objects.create(token_range=token_range, order=1)
+        PersistentTierEndpoint.objects.create(tier=standard_tier, endpoint=standard_endpoint, weight=1.0)
+
+        if include_premium:
+            premium_tier = PersistentLLMTier.objects.create(token_range=token_range, order=1, is_premium=True)
+            PersistentTierEndpoint.objects.create(tier=premium_tier, endpoint=premium_endpoint, weight=1.0)
+
+        return {
+            "premium_endpoint": premium_endpoint,
+            "standard_endpoint": standard_endpoint,
+        }
+
+    def _make_agent_stub(self, *, plan_id: str = "free", days_since_joined: int | None = 60):
+        UserModel = get_user_model()
+        user = UserModel.objects.create_user(
+            username=f"user-{uuid.uuid4().hex[:8]}",
+            email=f"{uuid.uuid4().hex[:8]}@example.com",
+            password="test-pass",
+        )
+        if days_since_joined is not None:
+            user.date_joined = timezone.now() - timedelta(days=days_since_joined)
+            user.save(update_fields=["date_joined"])
+
+        UserBilling = apps.get_model('api', 'UserBilling')
+        billing, created = UserBilling.objects.get_or_create(
+            user=user,
+            defaults={"subscription": plan_id},
+        )
+        if not created and billing.subscription != plan_id:
+            billing.subscription = plan_id
+            billing.save(update_fields=["subscription"])
+
+        return SimpleNamespace(id=uuid.uuid4(), user=user, organization=None)
 
     def test_simple_config_anthropic_primary(self):
         seed_persistent_basic(include_openrouter=False)
@@ -152,6 +223,66 @@ class TestLLMFailover(TestCase):
         _, model, params = configs[0]
         self.assertEqual(model, 'openai/gpt-5')
         self.assertEqual(params.get("temperature"), 1.0)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_premium_tiers_preferred_for_paid_plan(self):
+        clear_llm_db()
+        seeded = self._seed_premium_setup(include_premium=True)
+        agent = self._make_agent_stub(plan_id="startup", days_since_joined=60)
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-premium"}, clear=True):
+            configs = get_llm_config_with_failover(
+                token_count=0,
+                agent=agent,
+                agent_id=str(agent.id),
+            )
+
+        self.assertTrue(configs)
+        self.assertEqual(configs[0][0], seeded["premium_endpoint"].key)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_premium_plan_falls_back_without_premium_tier(self):
+        clear_llm_db()
+        seeded = self._seed_premium_setup(include_premium=False)
+        agent = self._make_agent_stub(plan_id="startup", days_since_joined=45)
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-standard"}, clear=True):
+            configs = get_llm_config_with_failover(
+                token_count=0,
+                agent=agent,
+                agent_id=str(agent.id),
+            )
+
+        self.assertTrue(configs)
+        self.assertEqual(configs[0][0], seeded["standard_endpoint"].key)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_new_account_prefers_premium_tier(self):
+        clear_llm_db()
+        seeded = self._seed_premium_setup(include_premium=True)
+        agent = self._make_agent_stub(plan_id="free", days_since_joined=5)
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-premium"}, clear=True):
+            configs = get_llm_config_with_failover(
+                token_count=0,
+                agent=agent,
+                agent_id=str(agent.id),
+            )
+
+        self.assertTrue(configs)
+        self.assertEqual(configs[0][0], seeded["premium_endpoint"].key)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_summarization_prefers_premium_tier(self):
+        clear_llm_db()
+        seeded = self._seed_premium_setup(include_premium=True)
+        agent = self._make_agent_stub(plan_id="startup", days_since_joined=60)
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-premium"}, clear=True):
+            model, params = get_summarization_llm_config(agent=agent)
+
+        self.assertEqual(model, seeded["premium_endpoint"].litellm_model)
+        self.assertIn("temperature", params)
 
 
 @tag("batch_event_llm")

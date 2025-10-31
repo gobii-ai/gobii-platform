@@ -24,6 +24,7 @@ from django.db.utils import OperationalError
 
 from observability import traced, trace
 from ..agent.core.budget import AgentBudgetManager
+from ..agent.core.llm_config import _should_prioritize_premium as should_prioritize_premium
 from ..agent.files.filespace_service import get_or_create_default_filespace
 from ..models import (
     BrowserUseAgentTask,
@@ -302,7 +303,7 @@ PROVIDER_PRIORITY: List[List[Any]] = getattr(
 DEFAULT_GOOGLE_MODEL = getattr(settings, "GOOGLE_LLM_MODEL", "gemini-2.5-pro")
 
 
-def _resolve_browser_provider_priority_from_db():
+def _resolve_browser_provider_priority_from_db(*, prefer_premium: bool = False):
     """Return DB-configured browser tiers as a list of tiers with endpoint dicts.
 
     Each tier is a list of dicts: {
@@ -325,46 +326,61 @@ def _resolve_browser_provider_priority_from_db():
         active = BrowserLLMPolicy.objects.filter(is_active=True).first()
         if not active:
             return None
-        tiers = []
-        for tier in BrowserLLMTier.objects.filter(policy=active).order_by('order'):
-            entries = []
-            for te in BrowserTierEndpoint.objects.filter(tier=tier).select_related('endpoint__provider').all():
-                endpoint = te.endpoint
-                provider = endpoint.provider
-                if not (provider.enabled and endpoint.enabled):
-                    continue
-                has_admin_key = bool(provider.api_key_encrypted)
-                has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
-                # Resolve effective API key
-                api_key = None
-                if has_admin_key:
-                    try:
-                        from api.encryption import SecretsEncryption
-                        api_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
-                    except Exception:
-                        api_key = None
-                if api_key is None and has_env_key:
-                    api_key = os.getenv(provider.env_var_name)
-                # Allow OPENAI_COMPAT without a real key by sending a dummy key when base_url is set
-                if not api_key and provider.browser_backend == 'OPENAI_COMPAT' and endpoint.browser_base_url:
-                    api_key = 'sk-noauth'
-                if not api_key:
-                    continue
-                entries.append({
-                    'provider_key': provider.key,
-                    'endpoint_key': endpoint.key,
-                    'weight': float(te.weight),
-                    'browser_model': endpoint.browser_model,
-                    'base_url': endpoint.browser_base_url or '',
-                    'max_output_tokens': endpoint.max_output_tokens,
-                    'backend': provider.browser_backend,
-                    'supports_vision': bool(getattr(endpoint, 'supports_vision', False)),
-                    'api_key': api_key,
-                    'has_key': True,
-                })
-            if entries:
-                tiers.append(entries)
-        return tiers or None
+        def collect_tiers(is_premium: bool) -> list[list[dict[str, Any]]]:
+            tiers: list[list[dict[str, Any]]] = []
+            for tier in BrowserLLMTier.objects.filter(policy=active, is_premium=is_premium).order_by('order'):
+                entries = []
+                for te in BrowserTierEndpoint.objects.filter(tier=tier).select_related('endpoint__provider').all():
+                    endpoint = te.endpoint
+                    provider = endpoint.provider
+                    if not (provider.enabled and endpoint.enabled):
+                        continue
+                    has_admin_key = bool(provider.api_key_encrypted)
+                    has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
+                    # Resolve effective API key
+                    api_key = None
+                    if has_admin_key:
+                        try:
+                            from api.encryption import SecretsEncryption
+                            api_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
+                        except Exception:
+                            api_key = None
+                    if api_key is None and has_env_key:
+                        api_key = os.getenv(provider.env_var_name)
+                    # Allow OPENAI_COMPAT without a real key by sending a dummy key when base_url is set
+                    if not api_key and provider.browser_backend == 'OPENAI_COMPAT' and endpoint.browser_base_url:
+                        api_key = 'sk-noauth'
+                    if not api_key:
+                        continue
+                    entries.append({
+                        'provider_key': provider.key,
+                        'endpoint_key': endpoint.key,
+                        'weight': float(te.weight),
+                        'browser_model': endpoint.browser_model,
+                        'base_url': endpoint.browser_base_url or '',
+                        'max_output_tokens': endpoint.max_output_tokens,
+                        'backend': provider.browser_backend,
+                        'supports_vision': bool(getattr(endpoint, 'supports_vision', False)),
+                        'api_key': api_key,
+                        'has_key': True,
+                        'is_premium': is_premium,
+                    })
+                if entries:
+                    tiers.append(entries)
+            return tiers
+
+        ordered_tiers: list[list[dict[str, Any]]] = []
+
+        if prefer_premium:
+            premium_tiers = collect_tiers(True)
+            if premium_tiers:
+                ordered_tiers.extend(premium_tiers)
+
+        standard_tiers = collect_tiers(False)
+        if standard_tiers:
+            ordered_tiers.extend(standard_tiers)
+
+        return ordered_tiers or None
     except Exception:
         return None
 
@@ -1412,8 +1428,30 @@ def _process_browser_use_task_core(
                 logger.warning("Failed to register custom actions for task %s: %s", task_obj.id, str(exc))
 
             with traced("Execute Agent") as agent_span:
+                agent_context = None
+                if persistent_agent_id:
+                    try:
+                        agent_context = (
+                            PersistentAgent.objects.select_related("user", "organization").get(id=persistent_agent_id)
+                        )
+                    except PersistentAgent.DoesNotExist:
+                        logger.debug(
+                            "Persistent agent %s not found for browser task %s when evaluating premium tiers",
+                            persistent_agent_id,
+                            task_obj.id,
+                        )
+                if agent_context is None and task_obj.agent:
+                    try:
+                        agent_context = task_obj.agent.persistent_agent
+                    except PersistentAgent.DoesNotExist:
+                        agent_context = None
+
+                prefer_premium = should_prioritize_premium(agent_context)
+                if prefer_premium:
+                    agent_span.set_attribute("browser_tier.prefer_premium", True)
+
                 # Resolve provider priority from DB only (no legacy fallback)
-                db_priority = _resolve_browser_provider_priority_from_db()
+                db_priority = _resolve_browser_provider_priority_from_db(prefer_premium=prefer_premium)
                 if not db_priority:
                     # Allow tests that patch _execute_agent_with_failover to proceed
                     # by passing a no-op DB-shaped tier. In production, this path

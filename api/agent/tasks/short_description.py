@@ -24,9 +24,9 @@ def _clear_requested_hash(agent_id: str, expected_hash: str) -> None:
     ).update(short_description_requested_hash="")
 
 
-def _generate_via_llm(charter: str) -> str:
+def _generate_via_llm(agent: PersistentAgent, charter: str) -> str:
     try:
-        model, params = get_summarization_llm_config()
+        model, params = get_summarization_llm_config(agent=agent)
     except Exception as exc:
         logger.warning("No summarization model available for short description: %s", exc)
         return ""
@@ -91,7 +91,7 @@ def generate_agent_short_description_task(self, persistent_agent_id: str, charte
         )
         return
 
-    short_desc = _generate_via_llm(charter)
+    short_desc = _generate_via_llm(agent, charter)
     if not short_desc:
         short_desc = charter
 

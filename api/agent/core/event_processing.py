@@ -11,6 +11,7 @@ import json
 import logging
 import math
 from datetime import datetime, timezone, timedelta
+from functools import partial
 from decimal import Decimal
 from typing import List, Tuple, Union, Optional
 from uuid import UUID, uuid4
@@ -1251,7 +1252,8 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
             try:
                 failover_configs = get_llm_config_with_failover(
                     agent_id=str(agent.id),
-                    token_count=fitted_token_count
+                    token_count=fitted_token_count,
+                    agent=agent,
                 )
             except LLMNotConfiguredError:
                 logger.warning(
@@ -1737,12 +1739,12 @@ def _build_prompt_context(
     safety_id = agent.user.id if agent.user else None
     ensure_steps_compacted(
         agent=agent,
-        summarise_fn=llm_summarise_steps,
+        summarise_fn=partial(llm_summarise_steps, agent=agent),
         safety_identifier=safety_id,
     )
     ensure_comms_compacted(
         agent=agent,
-        summarise_fn=llm_summarise_comms,
+        summarise_fn=partial(llm_summarise_comms, agent=agent),
         safety_identifier=safety_id,
     )
 
@@ -1755,6 +1757,7 @@ def _build_prompt_context(
             agent_id=str(agent.id),
             token_count=0,
             allow_unconfigured=True,
+            agent=agent,
         )
     except LLMNotConfiguredError:
         failover_configs = None

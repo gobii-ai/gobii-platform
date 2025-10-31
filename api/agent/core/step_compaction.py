@@ -391,7 +391,13 @@ def _default_summarise(previous: str, steps: Sequence[StepData], safety_identifi
 #  Optional LiteLLM-powered summariser                                         
 # --------------------------------------------------------------------------- #
 
-def llm_summarise_steps(previous: str, steps: Sequence[StepData], safety_identifier: str | None = None) -> str:
+def llm_summarise_steps(
+    previous: str,
+    steps: Sequence[StepData],
+    safety_identifier: str | None = None,
+    *,
+    agent: Optional[PersistentAgent] = None,
+) -> str:
     """Summarise *previous* + *steps* via LiteLLM.
 
     This is the primary summarisation function used in production.  Unit-tests
@@ -422,7 +428,7 @@ def llm_summarise_steps(previous: str, steps: Sequence[StepData], safety_identif
     ]
 
     try:
-        model, params = get_summarization_llm_config()
+        model, params = get_summarization_llm_config(agent=agent)
 
         if model.startswith("openai"):
             if safety_identifier:
