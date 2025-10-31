@@ -1,7 +1,7 @@
 {#{% load widget_tweaks %}#}
 <!-- Agent Contact Form Component (Step 2) -->
-<div class="gobii-card-base">
-  <div class="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-blue-50"></div>
+<div class="gobii-card-base relative overflow-hidden">
+  <div class="pointer-events-none absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-blue-50"></div>
   <div class="relative p-8 sm:p-10">
     <form method="post" id="create_agent_form">
       {% csrf_token %}
