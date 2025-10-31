@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% load static %}
 {% load waffle_tags %}
-{% block title %}Gobii – Instantly spawn a team of always-on, web browsing agents.{% endblock %}
+{% block title %}Gobii | Create 24/7 Digital Workers That Automate Your Web Tasks{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="Deploy always-on pretrained workers that handle outreach, research, and operations for you. Spawn a Gobii agent in minutes and keep work moving around the clock.">
+  <meta name="description" content="Create your own Gobii digital worker to automate prospecting, research, and repetitive web browsing tasks around the clock so you can focus on strategy.">
   <style>
     .game-of-life-panel {
       position: relative;
@@ -69,6 +69,91 @@
       border-radius: 0.75rem;
       transform: translateZ(0);
       -webkit-transform: translateZ(0);
+    }
+
+    .magic-cta {
+      position: relative;
+      overflow: hidden;
+      transform: translateZ(0);
+      box-shadow: 0 18px 32px -20px rgba(59, 130, 246, 0.55);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      animation: softPulse 4.2s ease-in-out infinite;
+    }
+
+    .magic-cta::before {
+      content: "";
+      position: absolute;
+      inset: -40%;
+      background: radial-gradient(circle at center, rgba(147, 197, 253, 0.4), rgba(59, 130, 246, 0));
+      opacity: 0.35;
+      transform: scale(0.9);
+      animation: glowBloom 6s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .magic-cta::after {
+      content: "";
+      position: absolute;
+      top: -160%;
+      left: 0;
+      width: 35%;
+      height: 420%;
+      background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.15) 30%, rgba(255, 255, 255, 0.65) 50%, rgba(255, 255, 255, 0.15) 70%, transparent 100%);
+      transform: translateX(-140%) rotate(18deg);
+      animation: shimmerSweep 5.8s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .magic-cta:hover {
+      transform: translateY(-1px) scale(1.01);
+      box-shadow: 0 20px 38px -18px rgba(37, 99, 235, 0.6);
+    }
+
+    @keyframes softPulse {
+      0%, 100% {
+        filter: brightness(1);
+      }
+      45% {
+        filter: brightness(1.06);
+      }
+    }
+
+    @keyframes glowBloom {
+      0%, 100% {
+        opacity: 0.35;
+        transform: scale(0.92);
+      }
+      50% {
+        opacity: 0.6;
+        transform: scale(1.05);
+      }
+    }
+
+    @keyframes shimmerSweep {
+      0% {
+        transform: translateX(-140%) rotate(18deg);
+        opacity: 0;
+      }
+      20% {
+        opacity: 0.75;
+      }
+      45% {
+        transform: translateX(140%) rotate(18deg);
+        opacity: 0;
+      }
+      100% {
+        transform: translateX(160%) rotate(18deg);
+        opacity: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .magic-cta,
+      .magic-cta::before,
+      .magic-cta::after {
+        animation: none !important;
+        transition: none;
+      }
     }
   </style>
 {% endblock %}
@@ -140,7 +225,7 @@
                   
                   <button
                     type="submit"
-                    class="group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 border border-transparent text-white text-sm font-semibold rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
+                    class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 border border-transparent text-white text-sm font-semibold rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
 
                   >
                     Create Your Worker
