@@ -435,10 +435,7 @@ def _collect_failover_configs(
             params_with_hints = dict(params)
             params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
             params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
-            try:
-                params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
-            except Exception:
-                params_with_hints["use_parallel_tool_calls"] = True
+            params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
 
             failover_configs.append((endpoint.key, effective_model, params_with_hints))
 
