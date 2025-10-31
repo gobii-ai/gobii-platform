@@ -369,15 +369,18 @@ def _resolve_browser_provider_priority_from_db(*, prefer_premium: bool = False):
                     tiers.append(entries)
             return tiers
 
+        ordered_tiers: list[list[dict[str, Any]]] = []
+
         if prefer_premium:
             premium_tiers = collect_tiers(True)
             if premium_tiers:
-                return premium_tiers
+                ordered_tiers.extend(premium_tiers)
 
         standard_tiers = collect_tiers(False)
         if standard_tiers:
-            return standard_tiers
-        return None
+            ordered_tiers.extend(standard_tiers)
+
+        return ordered_tiers or None
     except Exception:
         return None
 

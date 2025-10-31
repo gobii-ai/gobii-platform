@@ -502,6 +502,8 @@ def get_llm_config_with_failover(
                     agent_instance = None
             prefer_premium = _should_prioritize_premium(agent_instance)
 
+        combined_configs: List[Tuple[str, str, dict]] = []
+
         if prefer_premium:
             premium_tiers = PersistentLLMTier.objects.filter(
                 token_range=token_range,
@@ -513,8 +515,7 @@ def get_llm_config_with_failover(
                 tier_label="premium",
             )
             if premium_configs:
-                _cache_bootstrap_status(False)
-                return premium_configs
+                combined_configs.extend(premium_configs)
 
         standard_tiers = PersistentLLMTier.objects.filter(
             token_range=token_range,
@@ -526,8 +527,11 @@ def get_llm_config_with_failover(
             tier_label="standard",
         )
         if standard_configs:
+            combined_configs.extend(standard_configs)
+
+        if combined_configs:
             _cache_bootstrap_status(False)
-            return standard_configs
+            return combined_configs
 
     if allow_unconfigured:
         _cache_bootstrap_status(True)
