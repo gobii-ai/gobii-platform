@@ -34,6 +34,7 @@ from api.services.dedicated_proxy_service import (
     is_multi_assign_enabled,
 )
 from api.agent.short_description import build_listing_description, build_mini_description
+from api.agent.tags import maybe_schedule_agent_tags
 
 from api.models import (
     ApiKey,
@@ -1664,6 +1665,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             mini_description, mini_source = build_mini_description(agent)
             agent.mini_description = mini_description
             agent.mini_description_source = mini_source
+            agent.display_tags = agent.tags if isinstance(agent.tags, list) else []
             agent.pending_transfer_invite = AgentTransferInvite.objects.filter(
                 agent=agent,
                 status=AgentTransferInvite.Status.PENDING,
@@ -1688,7 +1690,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 and remaining < Decimal("1")
             )
 
-            context['persistent_agents'] = persistent_agents
+        context['persistent_agents'] = persistent_agents
 
         context['has_agents'] = bool(persistent_agents)
 
@@ -3087,6 +3089,25 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     agent.save(update_fields=agent_fields_to_update)
                 if browser_agent is not None and browser_agent_fields_to_update:
                     browser_agent.save(update_fields=browser_agent_fields_to_update)
+
+                if 'charter' in agent_fields_to_update:
+                    def _schedule_charter_artifacts() -> None:
+                        try:
+                            maybe_schedule_short_description(agent)
+                        except Exception:
+                            logger.exception(
+                                "Failed to schedule short description generation after charter update for agent %s",
+                                agent.id,
+                            )
+                        try:
+                            maybe_schedule_agent_tags(agent)
+                        except Exception:
+                            logger.exception(
+                                "Failed to schedule tag generation after charter update for agent %s",
+                                agent.id,
+                            )
+
+                    transaction.on_commit(_schedule_charter_artifacts)
 
                 # If agent was soft-expired, restore schedule (from snapshot if missing) and mark active
                 if agent.life_state == PersistentAgent.LifeState.EXPIRED and agent.is_active:

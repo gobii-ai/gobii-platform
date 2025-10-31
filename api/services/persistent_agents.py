@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -7,9 +8,14 @@ from django.db import IntegrityError, transaction
 from agent_namer import AgentNameGenerator
 from agents.services import PretrainedWorkerTemplateService, AgentService
 
+from api.agent.short_description import maybe_schedule_short_description
+from api.agent.tags import maybe_schedule_agent_tags
 from api.models import BrowserUseAgent, PersistentAgent
 from config import settings
 from constants.plans import PlanNamesChoices
+
+
+logger = logging.getLogger(__name__)
 
 
 class PersistentAgentProvisioningError(Exception):
@@ -164,6 +170,24 @@ class PersistentAgentProvisioningService:
                             cls._normalize_validation_error(exc)
                         ) from exc
                     persistent_agent.save(update_fields=updates)
+
+            def _schedule_charter_artifacts() -> None:
+                try:
+                    maybe_schedule_short_description(persistent_agent)
+                except Exception:
+                    logger.exception(
+                        "Failed to schedule short description generation during provisioning for agent %s",
+                        persistent_agent.id,
+                    )
+                try:
+                    maybe_schedule_agent_tags(persistent_agent)
+                except Exception:
+                    logger.exception(
+                        "Failed to schedule tag generation during provisioning for agent %s",
+                        persistent_agent.id,
+                    )
+
+            transaction.on_commit(_schedule_charter_artifacts)
 
             return ProvisioningResult(
                 agent=persistent_agent,
