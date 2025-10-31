@@ -1,0 +1,38 @@
+name: Preview Cleanup Dispatch
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch Preview Cleanup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          installation_retrieval_mode: repository
+          installation_retrieval_payload: gobii-ai/gobii
+
+      - name: Notify infra repo for cleanup
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          repository: gobii-ai/gobii
+          event-type: preview-cleanup
+          client-payload: |
+            {
+              "owner": "${{ github.repository_owner }}",
+              "repo": "${{ github.event.repository.name }}",
+              "pr_number": ${{ github.event.pull_request.number }},
+              "merged": ${{ github.event.pull_request.merged }},
+              "trigger_run_id": ${{ github.run_id }},
+              "trigger_run_attempt": ${{ github.run_attempt }}
+            }
