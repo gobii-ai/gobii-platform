@@ -85,41 +85,42 @@
       {% endif %}
 
       <!-- Form Fields -->
-      <div class="max-w-2xl mx-auto space-y-4">
+      <div class="max-w-2xl mx-auto space-y-6">
 
         <!-- Contact Method Cards (Stacked) -->
-        <div class="space-y-4">
+        <div class="space-y-5">
 
           <!-- Email Card -->
-          <div class="bg-gray-50 border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200" id="email-card">
+          <div class="contact-option-card group relative rounded-2xl p-6 sm:p-7 shadow-sm transition-all duration-300" id="email-card">
+            <span class="contact-option-card__accent pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-400/60 via-sky-400/60 to-indigo-500/60 opacity-70 transition-opacity duration-300 group-hover:opacity-100"></span>
             <!-- Email Header with Toggle -->
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <div class="flex items-center justify-center w-10 h-10 rounded-lg">
-                  <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="flex items-center justify-between gap-4">
+              <div class="flex items-center gap-3 sm:gap-4">
+                <div class="flex items-center justify-center w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-500 shadow-inner">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
                   </svg>
                 </div>
                 <div>
-                  <h3 class="font-semibold text-gray-900">Email</h3>
+                  <h3 class="font-semibold text-slate-900">Email</h3>
                 </div>
               </div>
 
               <!-- Email Toggle Switch -->
               <label class="relative inline-flex items-center cursor-pointer">
                 {{ form.email_enabled }}
-                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                <div class="w-11 h-6 bg-indigo-100/80 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-indigo-100/70 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
               </label>
             </div>
 
             <!-- Email Input Section -->
             <div class="email-content transition-opacity duration-200 mt-4" id="email-content">
-              <label for="{{ form.contact_endpoint_email.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+              <label for="{{ form.contact_endpoint_email.id_for_label }}" class="block text-sm font-medium text-slate-700 mb-2">
                 {{ form.contact_endpoint_email.label }}
               </label>
               <div class="relative">
-                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                  <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-indigo-400">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
                   </svg>
                 </div>
@@ -131,62 +132,71 @@
                 </div>
               {% endif %}
               {% if form.contact_endpoint_email.help_text %}
-                <p class="text-xs text-gray-500 mt-2">{{ form.contact_endpoint_email.help_text }}</p>
+                <p class="text-xs text-slate-500 mt-2">{{ form.contact_endpoint_email.help_text }}</p>
               {% endif %}
             </div>
           </div>
 
           <!-- SMS Card -->
-          <div class="bg-gray-50 border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200" id="sms-card">
+          <div class="contact-option-card group relative rounded-2xl p-6 sm:p-7 shadow-sm transition-all duration-300" id="sms-card">
+            <span class="contact-option-card__accent pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-400/60 via-sky-400/60 to-indigo-500/60 opacity-70 transition-opacity duration-300 group-hover:opacity-100"></span>
             <!-- SMS Header with Toggle -->
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <div class="flex items-center justify-center w-10 h-10 rounded-lg">
-                  <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="flex items-center justify-between gap-4">
+              <div class="flex items-center gap-3 sm:gap-4">
+                <div class="flex items-center justify-center w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-500 shadow-inner">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
                   </svg>
                 </div>
                 <div>
-                  <h3 class="font-semibold text-gray-900">SMS</h3>
+                  <h3 class="font-semibold text-slate-900">SMS</h3>
                 </div>
               </div>
 
               <!-- SMS Toggle Switch -->
               <label class="relative inline-flex items-center cursor-pointer">
                 {{ form.sms_enabled }}
-                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                <div class="w-11 h-6 bg-indigo-100/80 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-indigo-100/70 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
               </label>
             </div>
 
             <!-- SMS Content Section -->
             <div class="sms-content transition-opacity duration-200 mt-4" id="sms-content">
-              <p class="block text-sm font-medium text-gray-700 mb-2">Your phone number:</p>
+              <p class="block text-sm font-medium text-slate-700 mb-2">Your phone number:</p>
               {% include "partials/_sms_form.html" %}
             </div>
           </div>
         </div>
 
         <!-- Preferred Contact Method -->
-        <div class="bg-gray-50 border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200" id="sms-card">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <div class="flex items-center justify-center w-10 h-10 rounded-lg">
-                  <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="contact-option-card group relative rounded-2xl p-6 sm:p-7 shadow-sm transition-all duration-300" id="preferred-contact-card">
+            <span class="contact-option-card__accent pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-400/60 via-sky-400/60 to-indigo-500/60 opacity-70 transition-opacity duration-300 group-hover:opacity-100"></span>
+            <div class="flex items-center justify-between gap-4">
+              <div class="flex items-center gap-3 sm:gap-4">
+                <div class="flex items-center justify-center w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-500 shadow-inner">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <circle cx="12" cy="12" r="10" stroke-width="2"/>
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/>
                   </svg>
                 </div>
                 <div>
-                  <h3 class="font-semibold text-gray-900">Primary Contact Method</h3>
-                  <p class="text-sm text-gray-500">Choose your preferred method for communications:</p>
+                  <h3 class="font-semibold text-slate-900">Primary Contact Method</h3>
+                  <p class="text-sm text-slate-500">Choose your preferred method for communications:</p>
                 </div>
               </div>
 
             </div>
             <!-- Preferred Contact Method -->
-          <div class="my-4">
-                {{ form.preferred_contact_method }}
+          <div class="mt-6">
+            <div class="relative">
+              <div class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-indigo-400">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8l7 4 7-4" />
+                </svg>
               </div>
+              {{ form.preferred_contact_method }}
+            </div>
+          </div>
         </div>
 
 
@@ -287,6 +297,12 @@
     const emailContent = document.querySelector('#email-content');
     const smsInput = document.querySelector('#phone_number_input');
     const verifySmsButton = document.querySelector('#id_verification_code');
+    const emailCard = document.getElementById('email-card');
+    const smsCard = document.getElementById('sms-card');
+
+    if (!smsCheckbox || !emailCheckbox) {
+      return;
+    }
 
     // Check if the phone number is verified
     const verified = !!document.querySelector('#sms-verification-form .phone-number-static');
@@ -317,6 +333,15 @@
     if (verifySmsButton) {
       // If the SMS checkbox is checked, ensure the verify button is required when SMS is enabled, if on the page
       verifySmsButton.required = smsCheckbox.checked; // Add or remove disabled attribute based on checkbox state
+    }
+
+    if (emailCard) {
+      emailCard.classList.toggle('is-disabled', !emailCheckbox.checked);
+    }
+
+    if (smsCard) {
+      const dimSmsCard = !verified || !smsCheckbox.checked;
+      smsCard.classList.toggle('is-disabled', dimSmsCard);
     }
 
     //Show hide SMS card based on the checkbox state

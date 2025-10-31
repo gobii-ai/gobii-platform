@@ -369,7 +369,7 @@ class PersistentAgentContactForm(forms.Form):
         initial='email',
         required=True,
         widget=forms.Select(attrs={
-            'class': 'py-3 px-4 block w-full border-gray-300 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+            'class': 'py-3 ps-12 pe-4 block w-full rounded-xl border border-indigo-100 bg-white/90 text-base text-slate-700 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-indigo-100 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none'
         }),
         label='Preferred Contact Method',
         help_text='How would you like your agent to contact you?'
@@ -379,7 +379,7 @@ class PersistentAgentContactForm(forms.Form):
         widget=forms.EmailInput(
             attrs={
                 'placeholder': 'your.email@example.com',
-                'class': 'py-3 px-4 ps-11 block w-full rounded-xl border-gray-300 bg-white/80 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-base placeholder:text-gray-400'
+                'class': 'py-3 pe-4 ps-11 block w-full rounded-xl border border-indigo-100 bg-white/90 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-indigo-100 text-base text-slate-700 placeholder:text-slate-400 transition-all duration-200'
             },
         ),
         required=False,
