@@ -5,8 +5,8 @@
   <div class="space-y-1">
     <a href="{% url 'console-home' %}" 
        class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-home' %}bg-blue-50 text-blue-600{% else %}text-slate-700 hover:bg-gray-100 hover:text-blue-600{% endif %}">
-      <i data-lucide="house" class="flex-shrink-0 w-5 h-5"></i>
-      Dashboard
+      <i data-lucide="bar-chart-2" class="flex-shrink-0 w-5 h-5"></i>
+      Analytics
     </a>
 
     <a href="{% url 'api_keys' %}"

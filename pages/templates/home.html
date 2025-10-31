@@ -109,7 +109,15 @@
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
               <!-- Unified input + button container -->
-              <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white transition-colors duration-200">
+              <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white transition-colors duration-200 relative">
+                <!-- Typing prompt overlay -->
+                <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
+                  <div>
+                    <span>I want my Gobii to</span>
+                    <span id="charter-ghost-text"> find 200 ideal customers and their emails.</span>
+                  </div>
+                </div>
+
                 <!-- Textarea -->
                 {{ agent_charter_form.charter }}
 
@@ -135,7 +143,7 @@
                     class="group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 border border-transparent text-white text-sm font-semibold rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
 
                   >
-                    Automate This Task
+                    Create Your Worker
                     <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
                     </svg>
@@ -287,8 +295,96 @@
       </div>
       {% endif %}
     </div>
-
   </section>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const textarea = document.getElementById('id_charter');
+      const ghostWrapper = document.getElementById('charter-ghost');
+      const ghostText = document.getElementById('charter-ghost-text');
+
+      if (!textarea || !ghostWrapper || !ghostText) {
+        return;
+      }
+
+      const scenarios = [
+        ' find 200 ideal customers and their emails.',
+        ' keep my Salesforce pipeline clean every day.',
+        ' watch new YC and seed startups and add founders to my sheet weekly.',
+        ' track competitor pricing and plan changes daily.',
+        ' pull fresh contacts from company sites and press releases each night.',
+        ' monitor RFP portals for AI and automation opportunities to bid on.',
+        " watch job boards for 'Senior Data Engineer' roles and auto-apply with my profile.",
+        ' track vendor status pages and alert me when SLAs slip.',
+        ' collect buyer intent posts on LinkedIn and Reddit and draft outreach.',
+        ' watch competitor changelogs and docs and summarize product moves weekly.',
+        ' track ecommerce competitors for stock and price changes daily.',
+        ' monitor fintech and regulatory sites and summarize what affects us.',
+        ' help me find a new place to rent.',
+        ' help me find a vacation house.',
+        ' watch for price drops on my wishlist items.',
+        " track flights to my destination and alert me when they're cheap."
+      ];
+
+      let scenarioIndex = 0;
+      let charIndex = 0;
+      let isDeleting = false;
+
+      ghostText.textContent = '';
+
+      function toggleGhostVisibility() {
+        const hasValue = textarea.value.trim().length > 0;
+        ghostWrapper.classList.toggle('opacity-0', hasValue);
+        ghostWrapper.classList.toggle('invisible', hasValue);
+        ghostWrapper.setAttribute('aria-hidden', hasValue ? 'true' : 'false');
+      }
+
+      textarea.addEventListener('input', toggleGhostVisibility);
+      textarea.addEventListener('focus', toggleGhostVisibility);
+      textarea.addEventListener('blur', toggleGhostVisibility);
+
+      toggleGhostVisibility();
+
+      function typeLoop() {
+        const hasValue = textarea.value.trim().length > 0;
+        if (hasValue) {
+          setTimeout(typeLoop, 400);
+          return;
+        }
+
+        const currentScenario = scenarios[scenarioIndex];
+
+        if (!isDeleting && charIndex <= currentScenario.length) {
+          ghostText.textContent = currentScenario.slice(0, charIndex);
+          charIndex += 1;
+          setTimeout(typeLoop, 30 + Math.random() * 15);
+          return;
+        }
+
+        if (!isDeleting && charIndex > currentScenario.length) {
+          isDeleting = true;
+          setTimeout(typeLoop, 1500);
+          return;
+        }
+
+        if (isDeleting && charIndex > 0) {
+          charIndex -= 1;
+          ghostText.textContent = currentScenario.slice(0, charIndex);
+          setTimeout(typeLoop, 18 + Math.random() * 10);
+          return;
+        }
+
+        if (isDeleting && charIndex === 0) {
+          isDeleting = false;
+          scenarioIndex = (scenarioIndex + 1) % scenarios.length;
+          setTimeout(typeLoop, 300);
+          return;
+        }
+      }
+
+      setTimeout(typeLoop, 400);
+    });
+  </script>
 
   <!-- Employee Directory Section -->
   <section id="pretrained-workers" class="relative pt-12 pb-16 scroll-mt-32">

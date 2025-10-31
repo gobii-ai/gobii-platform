@@ -1615,6 +1615,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context['pin_console_nav'] = True
         
         # Define a prefetch for the primary email endpoint to avoid N+1 queries
         primary_email_prefetch = models.Prefetch(

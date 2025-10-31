@@ -2,7 +2,7 @@
 {% load waffle_tags %}
 
 <!-- Console Sub-Navigation Panel - Visible on medium and large screens -->
-<aside class="gobii-card-base hidden md:block sticky top-20 self-start min-w-64 w-64 flex-shrink-0 p-4 mx-4 my-4 overflow-y-auto">
+<aside class="gobii-card-base hidden md:block {% if pin_console_nav %}md:sticky md:top-20{% else %}md:relative{% endif %} self-start min-w-64 w-64 flex-shrink-0 p-4 mx-4 my-4 {% if pin_console_nav %}md:max-h-[calc(100vh-5rem)] overflow-y-auto{% else %}overflow-y-auto{% endif %}">
   <!-- Context Switcher -->
   {% flag "organizations" %}
   <div class="mb-4">
@@ -14,8 +14,8 @@
   <nav id="console-submenu" class="space-y-1" x-data="navigationMenu()">
     <a href="{% url 'console-home' %}" 
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-home' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <i aria-hidden="true" data-lucide="house" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
-      Dashboard
+      <i aria-hidden="true" data-lucide="bar-chart-2" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
+      Analytics
     </a>
     <a href="{% url 'agents' %}"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'agents' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">

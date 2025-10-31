@@ -66,8 +66,8 @@
         <nav class="py-2">
           <a href="{% url 'console-home' %}" 
              class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'console-home' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
-            <i data-lucide="house" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
-            Dashboard
+            <i data-lucide="bar-chart-2" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
+            Analytics
           </a>
           <a href="{% url 'agents' %}"
             class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'agents' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">

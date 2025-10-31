@@ -25,7 +25,7 @@
         {% endif %}
 
         {% if request.user.is_authenticated %}
-          <a href="{% url 'console-home' %}" class="text-slate-700 hover:text-blue-600">Dashboard</a>
+          <a href="{% url 'agents' %}" class="text-slate-700 hover:text-blue-600">My Agents</a>
           <!-- User Profile Dropdown (Desktop) -->
           <div x-data="{ open: false }" class="relative inline-flex">
             <button @click="open = !open"
@@ -192,7 +192,7 @@
         {% endif %}
         
         {% if request.user.is_authenticated %}
-          <a href="{% url 'console-home' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Dashboard</a>
+          <a href="{% url 'agents' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">My Agents</a>
           
           <div class="mt-4 pt-4 border-t border-gray-200">
             <div class="flex items-center gap-3 px-3 mb-3">
