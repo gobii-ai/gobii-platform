@@ -93,7 +93,7 @@ class HomePage(TemplateView):
                 hero_text = escape(hero_text)  # Escape HTML to prevent XSS
                 hero_text = hero_text.replace(
                     "{blue}",
-                    '<span class="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">'
+                    '<span class="bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent">'
                 ).replace(
                     "{/blue}",
                     '</span>'

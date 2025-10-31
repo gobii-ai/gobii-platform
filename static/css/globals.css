@@ -3,10 +3,8 @@
     background-color: rgb(255 255 255 / 0.8);
     -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
-    border: 1px solid rgb(255 255 255 / 0.6);
     box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 10px 10px -5px rgb(0 0 0 / 0.04);
     border-radius: 0.75rem;
-    overflow: hidden;
 }
 
 .gobii-card-hoverable {
@@ -26,4 +24,53 @@
 .gobii-card-hoverable:hover {
     box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
     transform: translateY(-0.125rem);
+}
+
+.contact-option-card {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1rem;
+    background: linear-gradient(145deg, rgb(252 253 255 / 0.94), rgb(237 244 255 / 0.9));
+    border: 1px solid rgb(99 102 241 / 0.14);
+    box-shadow: 0 20px 40px -24px rgb(99 102 241 / 0.45);
+    transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease, background 200ms ease;
+}
+
+.contact-option-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at top, rgb(79 70 229 / 0.16), transparent 60%);
+    opacity: 0;
+    transition: opacity 200ms ease;
+}
+
+.contact-option-card > * {
+    position: relative;
+    z-index: 1;
+}
+
+.contact-option-card:hover {
+    transform: translateY(-2px);
+    border-color: rgb(79 70 229 / 0.26);
+    box-shadow: 0 24px 48px -28px rgb(79 70 229 / 0.55);
+    background: linear-gradient(145deg, rgb(255 255 255 / 0.96), rgb(232 240 255 / 0.93));
+}
+
+.contact-option-card:hover::before {
+    opacity: 1;
+}
+
+.contact-option-card.is-disabled {
+    border-color: rgb(203 213 225 / 0.6);
+    box-shadow: none;
+    background: linear-gradient(145deg, rgb(248 250 252 / 0.9), rgb(237 242 247 / 0.85));
+}
+
+.contact-option-card.is-disabled::before {
+    opacity: 0;
+}
+
+.contact-option-card.is-disabled .contact-option-card__accent {
+    opacity: 0.2 !important;
 }

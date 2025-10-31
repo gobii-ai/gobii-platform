@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% load static %}
 {% load waffle_tags %}
-{% block title %}Gobii – Instantly spawn a team of always-on, web browsing agents.{% endblock %}
+{% block title %}Gobii | Create 24/7 Digital Workers That Automate Your Web Tasks{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="Deploy always-on pretrained workers that handle outreach, research, and operations for you. Spawn a Gobii agent in minutes and keep work moving around the clock.">
+  <meta name="description" content="Create your own Gobii digital worker to automate prospecting, research, and repetitive web browsing tasks around the clock so you can focus on strategy.">
   <style>
     .game-of-life-panel {
       position: relative;
@@ -57,13 +57,11 @@
     .game-of-life-content {
       position: relative;
       z-index: 3;
-      backdrop-filter: blur(1px);
     }
 
     /* Pure white background for input areas */
     .game-of-life-content .bg-white {
       background: #ffffff;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
     }
 
     /* Ensure crisp edges on rounded corners */
@@ -71,6 +69,91 @@
       border-radius: 0.75rem;
       transform: translateZ(0);
       -webkit-transform: translateZ(0);
+    }
+
+    .magic-cta {
+      position: relative;
+      overflow: hidden;
+      transform: translateZ(0);
+      box-shadow: 0 18px 32px -20px rgba(139, 92, 246, 0.55);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      animation: softPulse 4.2s ease-in-out infinite;
+    }
+
+    .magic-cta::before {
+      content: "";
+      position: absolute;
+      inset: -40%;
+      background: radial-gradient(circle at center, rgba(196, 181, 253, 0.45), rgba(124, 58, 237, 0));
+      opacity: 0.35;
+      transform: scale(0.9);
+      animation: glowBloom 6s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .magic-cta::after {
+      content: "";
+      position: absolute;
+      top: -160%;
+      left: 0;
+      width: 35%;
+      height: 420%;
+      background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.15) 30%, rgba(255, 255, 255, 0.65) 50%, rgba(255, 255, 255, 0.15) 70%, transparent 100%);
+      transform: translateX(-140%) rotate(18deg);
+      animation: shimmerSweep 5.8s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .magic-cta:hover {
+      transform: translateY(-1px) scale(1.01);
+      box-shadow: 0 20px 38px -18px rgba(109, 40, 217, 0.58);
+    }
+
+    @keyframes softPulse {
+      0%, 100% {
+        filter: brightness(1);
+      }
+      45% {
+        filter: brightness(1.06);
+      }
+    }
+
+    @keyframes glowBloom {
+      0%, 100% {
+        opacity: 0.35;
+        transform: scale(0.92);
+      }
+      50% {
+        opacity: 0.6;
+        transform: scale(1.05);
+      }
+    }
+
+    @keyframes shimmerSweep {
+      0% {
+        transform: translateX(-140%) rotate(18deg);
+        opacity: 0;
+      }
+      20% {
+        opacity: 0.75;
+      }
+      45% {
+        transform: translateX(140%) rotate(18deg);
+        opacity: 0;
+      }
+      100% {
+        transform: translateX(160%) rotate(18deg);
+        opacity: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .magic-cta,
+      .magic-cta::before,
+      .magic-cta::after {
+        animation: none !important;
+        transition: none;
+      }
     }
   </style>
 {% endblock %}
@@ -111,7 +194,15 @@
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
               <!-- Unified input + button container -->
-              <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white transition-colors duration-200">
+              <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white transition-colors duration-200 relative">
+                <!-- Typing prompt overlay -->
+                <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
+                  <div>
+                    <span>I want my Gobii to</span>
+                    <span id="charter-ghost-text"> find 200 ideal customers and their emails.</span>
+                  </div>
+                </div>
+
                 <!-- Textarea -->
                 {{ agent_charter_form.charter }}
 
@@ -134,10 +225,10 @@
                   
                   <button
                     type="submit"
-                    class="group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 border border-transparent text-white text-sm font-semibold rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
+                    class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
 
                   >
-                    Spawn
+                    Create Your Worker
                     <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
                     </svg>
@@ -289,8 +380,124 @@
       </div>
       {% endif %}
     </div>
-
   </section>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const textarea = document.getElementById('id_charter');
+      const ghostWrapper = document.getElementById('charter-ghost');
+      const ghostText = document.getElementById('charter-ghost-text');
+
+      if (!textarea || !ghostWrapper || !ghostText) {
+        return;
+      }
+
+      const baseScenarios = [
+        ' find 200 ideal customers and their emails.',
+        ' keep my Salesforce pipeline clean every day.',
+        ' watch new YC and seed startups and add founders to my sheet weekly.',
+        ' track competitor pricing and plan changes daily.',
+        ' pull fresh contacts from company sites and press releases each night.',
+        ' monitor RFP portals for AI and automation opportunities to bid on.',
+        " watch job boards for 'Senior Data Engineer' roles and auto-apply with my profile.",
+        ' track vendor status pages and alert me when SLAs slip.',
+        ' collect buyer intent posts on LinkedIn and Reddit and draft outreach.',
+        ' watch competitor changelogs and docs and summarize product moves weekly.',
+        ' track ecommerce competitors for stock and price changes daily.',
+        ' monitor fintech and regulatory sites and summarize what affects us.',
+        ' help me find a new place to rent.',
+        ' help me find a vacation house.',
+        ' watch for price drops on my wishlist items.',
+        " track flights to my destination and alert me when they're cheap."
+      ];
+
+      function shuffle(list) {
+        const array = [...list];
+        for (let i = array.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+      }
+
+      let scenarioQueue = [];
+      let currentScenario = '';
+      let lastScenario = '';
+
+      function refillQueue() {
+        scenarioQueue = shuffle(baseScenarios);
+        if (scenarioQueue.length > 1 && scenarioQueue[0] === lastScenario) {
+          [scenarioQueue[0], scenarioQueue[1]] = [scenarioQueue[1], scenarioQueue[0]];
+        }
+      }
+
+      function pickNextScenario() {
+        if (!scenarioQueue.length) {
+          refillQueue();
+        }
+        currentScenario = scenarioQueue.shift();
+        lastScenario = currentScenario;
+      }
+
+      refillQueue();
+      pickNextScenario();
+
+      let charIndex = 0;
+      let isDeleting = false;
+
+      ghostText.textContent = '';
+
+      function toggleGhostVisibility() {
+        const hasValue = textarea.value.trim().length > 0;
+        ghostWrapper.classList.toggle('opacity-0', hasValue);
+        ghostWrapper.classList.toggle('invisible', hasValue);
+        ghostWrapper.setAttribute('aria-hidden', hasValue ? 'true' : 'false');
+      }
+
+      textarea.addEventListener('input', toggleGhostVisibility);
+      textarea.addEventListener('focus', toggleGhostVisibility);
+      textarea.addEventListener('blur', toggleGhostVisibility);
+
+      toggleGhostVisibility();
+
+      function typeLoop() {
+        const hasValue = textarea.value.trim().length > 0;
+        if (hasValue) {
+          setTimeout(typeLoop, 400);
+          return;
+        }
+
+        if (!isDeleting && charIndex <= currentScenario.length) {
+          ghostText.textContent = currentScenario.slice(0, charIndex);
+          charIndex += 1;
+          setTimeout(typeLoop, 30 + Math.random() * 15);
+          return;
+        }
+
+        if (!isDeleting && charIndex > currentScenario.length) {
+          isDeleting = true;
+          setTimeout(typeLoop, 1500);
+          return;
+        }
+
+        if (isDeleting && charIndex > 0) {
+          charIndex -= 1;
+          ghostText.textContent = currentScenario.slice(0, charIndex);
+          setTimeout(typeLoop, 18 + Math.random() * 10);
+          return;
+        }
+
+        if (isDeleting && charIndex === 0) {
+          isDeleting = false;
+          pickNextScenario();
+          setTimeout(typeLoop, 300);
+          return;
+        }
+      }
+
+      setTimeout(typeLoop, 400);
+    });
+  </script>
 
   <!-- Employee Directory Section -->
   <section id="pretrained-workers" class="relative pt-12 pb-16 scroll-mt-32">
@@ -402,156 +609,263 @@
           ctx,
           width: 0,
           height: 0,
-          cols: 0,
-          rows: 0,
-          cellSize: 14,
-          grid: new Uint8Array(0),
-          next: new Uint8Array(0),
-          fade: new Float32Array(0),
-          tick: 0,
+          dpr: 1,
           running: true,
           raf: null,
           lastFrame: 0,
+          waveLayers: [],
+          shimmer: [],
+          ripples: [],
           resizeTimer: null,
           ro: null,
           io: null,
           pointerCooldown: 0,
+          lastAutoRipple: 0,
+          autoRippleDelay: 2600,
         };
 
-        const index = (x, y) => y * state.cols + x;
+        const palette = [
+          { top: '#4338ca', bottom: '#6366f1' },
+          { top: '#2563eb', bottom: '#7c3aed' },
+          { top: '#0ea5e9', bottom: '#6366f1' },
+        ];
 
-        function applyResolution() {
+        function initWaves() {
+          const depth = palette.length;
+          state.waveLayers = palette.map((colors, index) => {
+            const layerIndex = index + 1;
+            const depthFactor = layerIndex / depth;
+            return {
+              base: 0.5 + depthFactor * 0.18,
+              amplitude: 18 + depthFactor * 18,
+              frequency: 0.8 + depthFactor * 0.9,
+              phase: Math.random() * Math.PI * 2,
+              speed: 0.45 + depthFactor * 0.24,
+              opacity: 0.28 + depthFactor * 0.22,
+              colorTop: colors.top,
+              colorBottom: colors.bottom,
+            };
+          });
+        }
+
+        function initShimmer() {
+          const glintCount = Math.max(8, Math.round(state.width / 120));
+          state.shimmer = Array.from({ length: glintCount }, () => ({
+            position: Math.random() * 1.4 - 0.2,
+            y: 0.28 + Math.random() * 0.46,
+            speed: 0.16 + Math.random() * 0.14,
+            alpha: 0.15 + Math.random() * 0.12,
+            width: 0.05 + Math.random() * 0.09,
+            phase: Math.random() * Math.PI * 2,
+          }));
+        }
+
+        function resize() {
           const rect = panel.getBoundingClientRect();
-          state.width = Math.max(240, rect.width || panel.offsetWidth || 240);
-          state.height = Math.max(200, rect.height || panel.offsetHeight || 200);
-          const dpr = Math.min(2, window.devicePixelRatio || 1);
+          state.width = Math.max(1, Math.floor(rect.width || panel.offsetWidth || 1));
+          state.height = Math.max(1, Math.floor(rect.height || panel.offsetHeight || 1));
+          const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
           canvas.width = Math.round(state.width * dpr);
           canvas.height = Math.round(state.height * dpr);
           canvas.style.width = `${state.width}px`;
           canvas.style.height = `${state.height}px`;
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.scale(dpr, dpr);
-          ctx.imageSmoothingEnabled = false;
+          ctx.imageSmoothingEnabled = true;
+          state.dpr = dpr;
+          initWaves();
+          initShimmer();
         }
 
-        function rebuildGrid() {
-          state.cellSize = Math.max(12, Math.min(18, Math.floor(state.width / 34)));
-          state.cols = Math.max(26, Math.floor(state.width / state.cellSize));
-          state.rows = Math.max(18, Math.floor(state.height / state.cellSize));
-          const total = state.cols * state.rows;
-          state.grid = new Uint8Array(total);
-          state.next = new Uint8Array(total);
-          state.fade = new Float32Array(total);
-          for (let i = 0; i < total; i++) {
-            if (Math.random() < 0.28) {
-              state.grid[i] = 1;
-              state.fade[i] = 0.9;
+        function ease(t) {
+          return 1 - Math.pow(1 - t, 3);
+        }
+
+        function updateRipples(delta) {
+          state.ripples = state.ripples
+            .map((ripple) => {
+              const age = ripple.age + delta;
+              const radius = ripple.radius + delta * ripple.growthRate;
+              const strength = ripple.strength * Math.exp(-delta * ripple.damping);
+              return { ...ripple, age, radius, strength };
+            })
+            .filter((ripple) => ripple.strength > 0.018);
+        }
+
+        function rippleOffset(x, baseY) {
+          let offset = 0;
+          state.ripples.forEach((ripple) => {
+            const dx = x - ripple.x;
+            const dy = baseY - ripple.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance > ripple.radius) {
+              return;
             }
-          }
-          state.tick = 0;
+            const influence = 1 - distance / ripple.radius;
+            const wave = Math.sin(distance / ripple.wavelength - ripple.age * ripple.waveSpeed);
+            offset += wave * ripple.strength * ease(influence);
+          });
+          return offset;
         }
 
-        function resize() {
-          applyResolution();
-          rebuildGrid();
-        }
-
-        function neighborCount(x, y) {
-          const cols = state.cols;
-          const rows = state.rows;
-          const left = (x + cols - 1) % cols;
-          const right = (x + 1) % cols;
-          const up = (y + rows - 1) % rows;
-          const down = (y + 1) % rows;
-          return (
-            state.grid[index(left, up)] +
-            state.grid[index(x, up)] +
-            state.grid[index(right, up)] +
-            state.grid[index(left, y)] +
-            state.grid[index(right, y)] +
-            state.grid[index(left, down)] +
-            state.grid[index(x, down)] +
-            state.grid[index(right, down)]
-          );
-        }
-
-        function sprinkle(strength = 0.18) {
-          const total = state.grid.length;
-          const drops = Math.max(1, Math.floor(total * strength * 0.2));
-          for (let i = 0; i < drops; i++) {
-            const spot = Math.floor(Math.random() * total);
-            state.grid[spot] = 1;
-            state.fade[spot] = 0.95;
-          }
-        }
-
-        function step() {
-          let alive = 0;
-          for (let y = 0; y < state.rows; y++) {
-            for (let x = 0; x < state.cols; x++) {
-              const spot = index(x, y);
-              const present = state.grid[spot];
-              const neighbors = neighborCount(x, y);
-              let nextCell;
-              if (present) {
-                nextCell = neighbors === 2 || neighbors === 3 ? 1 : 0;
-              } else {
-                nextCell = neighbors === 3 ? 1 : 0;
-              }
-              state.next[spot] = nextCell;
-              if (nextCell) {
-                alive++;
-                state.fade[spot] = Math.min(1, state.fade[spot] + 0.35);
-              } else {
-                state.fade[spot] *= 0.9;
-              }
-            }
-          }
-          if (alive < state.grid.length * 0.05 || state.tick % 200 === 0) {
-            sprinkle(0.25);
-          }
-          const temp = state.grid;
-          state.grid = state.next;
-          state.next = temp;
-          state.tick += 1;
-        }
-
-        function draw() {
-          ctx.clearRect(0, 0, state.width, state.height);
-          ctx.fillStyle = 'rgba(248, 250, 255, 0.25)';
+        function drawBackground(time) {
+          const t = time * 0.0003;
+          const gradient = ctx.createLinearGradient(0, 0, 0, state.height);
+          gradient.addColorStop(0, `rgba(99, 102, 241, ${0.55 + Math.sin(t) * 0.08})`);
+          gradient.addColorStop(0.32, 'rgba(129, 140, 248, 0.65)');
+          gradient.addColorStop(0.75, 'rgba(59, 130, 246, 0.65)');
+          gradient.addColorStop(1, `rgba(15, 23, 42, ${0.78 - Math.cos(t * 0.8) * 0.06})`);
+          ctx.fillStyle = gradient;
           ctx.fillRect(0, 0, state.width, state.height);
-          const gap = Math.max(1, state.cellSize * 0.18);
-          const inner = state.cellSize - gap;
-          let pointer = 0;
-          for (let y = 0; y < state.rows; y++) {
-            for (let x = 0; x < state.cols; x++, pointer++) {
-              const intensity = state.fade[pointer];
-              if (intensity < 0.05) continue;
-              const px = x * state.cellSize + gap * 0.5;
-              const py = y * state.cellSize + gap * 0.5;
-              const baseAlpha = 0.24 + intensity * 0.4;
-              const accentAlpha = 0.1 + intensity * 0.22;
-              ctx.fillStyle = `rgba(99, 102, 241, ${baseAlpha})`;
-              ctx.fillRect(px, py, inner, inner);
-              ctx.fillStyle = `rgba(56, 189, 248, ${accentAlpha})`;
-              ctx.fillRect(px + inner * 0.28, py + inner * 0.28, inner * 0.44, inner * 0.44);
-              ctx.fillStyle = `rgba(255, 255, 255, ${0.08 + intensity * 0.1})`;
-              ctx.fillRect(px + inner * 0.15, py + inner * 0.15, inner * 0.3, inner * 0.3);
+        }
+
+        function drawColorWash(time) {
+          const shift = Math.sin(time * 0.00018) * state.width * 0.25;
+          const gradient = ctx.createLinearGradient(shift, 0, state.width + shift, state.height);
+          gradient.addColorStop(0, 'rgba(14, 165, 233, 0.16)');
+          gradient.addColorStop(0.35, 'rgba(129, 140, 248, 0.24)');
+          gradient.addColorStop(0.7, 'rgba(244, 114, 182, 0.18)');
+          gradient.addColorStop(1, 'rgba(124, 58, 237, 0.24)');
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 0.85;
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, state.width, state.height);
+          ctx.restore();
+        }
+
+        function drawWaves(time, delta) {
+          const seconds = delta;
+          state.waveLayers.forEach((layer, index) => {
+            layer.phase += layer.speed * seconds;
+            const gradientDrift = Math.sin(time * 0.00022 + index) * 0.12;
+            const baseY = state.height * (layer.base + gradientDrift * 0.1);
+            const amplitude = layer.amplitude * (0.75 + Math.sin(time * 0.0004 + index) * 0.32);
+            const step = Math.max(1.5, state.width / 180);
+            ctx.beginPath();
+            ctx.moveTo(0, state.height);
+            ctx.lineTo(0, baseY);
+            for (let x = 0; x <= state.width; x += step) {
+              const progress = x / state.width;
+              const multiphase = layer.frequency * (1 + Math.sin(time * 0.00025 + progress * 2) * 0.12);
+              const wave = Math.sin(progress * Math.PI * 2 * multiphase + layer.phase);
+              let y = baseY + wave * amplitude;
+              y += rippleOffset(x, y);
+              ctx.lineTo(x, y);
             }
+            ctx.lineTo(state.width, state.height);
+            ctx.closePath();
+            const fill = ctx.createLinearGradient(0, baseY - amplitude * 1.6, 0, state.height + 20);
+            fill.addColorStop(0, layer.colorTop);
+            fill.addColorStop(1, layer.colorBottom);
+            ctx.save();
+            ctx.globalAlpha = layer.opacity;
+            ctx.fillStyle = fill;
+            ctx.fill();
+            ctx.restore();
+          });
+        }
+
+        function drawShimmer(time, delta) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          state.shimmer.forEach((glint) => {
+            glint.position += glint.speed * delta * 0.24;
+            if (glint.position > 1.4) {
+              glint.position = -0.2;
+              glint.y = 0.26 + Math.random() * 0.48;
+              glint.alpha = 0.14 + Math.random() * 0.12;
+              glint.width = 0.05 + Math.random() * 0.12;
+              glint.phase = Math.random() * Math.PI * 2;
+            }
+            const x = glint.position * state.width;
+            const y = glint.y * state.height + Math.sin(time * 0.001 + glint.phase) * 5;
+            const half = state.width * glint.width;
+            const gradient = ctx.createLinearGradient(x - half, y, x + half, y);
+            gradient.addColorStop(0, 'rgba(255,255,255,0)');
+            gradient.addColorStop(0.45, `rgba(255,255,255,${glint.alpha})`);
+            gradient.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x - half, y - 1.5, half * 2, 3);
+          });
+          ctx.restore();
+        }
+
+        function autoRipple(time) {
+          if (!state.lastAutoRipple) {
+            state.lastAutoRipple = time;
+            return;
+          }
+          if (time - state.lastAutoRipple < state.autoRippleDelay) {
+            return;
+          }
+          state.lastAutoRipple = time + Math.random() * 800;
+          const x = state.width * (0.2 + Math.random() * 0.6);
+          const y = state.height * (0.35 + Math.random() * 0.4);
+          addRipple(x, y, 3.6 + Math.random() * 2);
+        }
+
+        function addRipple(x, y, strength) {
+          state.ripples.push({
+            x,
+            y,
+            age: 0,
+            radius: 28,
+            strength,
+            growthRate: 58,
+            damping: 1.8,
+            wavelength: 24,
+            waveSpeed: 6.4,
+          });
+          if (state.ripples.length > 12) {
+            state.ripples.shift();
           }
         }
 
-        function frame(time) {
-          if (!state.running) return;
+        function pointerPosition(evt) {
+          const rect = canvas.getBoundingClientRect();
+          if (evt.touches && evt.touches.length) {
+            return {
+              x: evt.touches[0].clientX - rect.left,
+              y: evt.touches[0].clientY - rect.top,
+            };
+          }
+          return {
+            x: evt.clientX - rect.left,
+            y: evt.clientY - rect.top,
+          };
+        }
+
+        function seedRipple(event) {
+          const now = performance.now();
+          if (now - state.pointerCooldown < 140) {
+            return;
+          }
+          state.pointerCooldown = now;
+          const { x, y } = pointerPosition(event);
+          addRipple(x, y, 5.4);
+        }
+
+        function frame(now) {
+          if (!state.running) {
+            state.raf = requestAnimationFrame(frame);
+            return;
+          }
           if (!state.lastFrame) {
-            state.lastFrame = time;
+            state.lastFrame = now;
           }
-          const delta = time - state.lastFrame;
-          if (delta > 90) {
-            step();
-            draw();
-            state.lastFrame = time;
-          }
+          const deltaMs = now - state.lastFrame;
+          const delta = deltaMs / 1000;
+          state.lastFrame = now;
+
+          autoRipple(now);
+          updateRipples(delta);
+          ctx.clearRect(0, 0, state.width, state.height);
+          drawBackground(now);
+          drawColorWash(now);
+          drawWaves(now, delta);
+          drawShimmer(now, delta);
+
           state.raf = requestAnimationFrame(frame);
         }
 
@@ -567,7 +881,7 @@
               state.running = true;
             }
             state.raf = requestAnimationFrame(frame);
-          }, 60);
+          }, 80);
         }
 
         resize();
@@ -599,19 +913,10 @@
           state.io.observe(panel);
         }
 
-        const pointerThrottle = 220;
-        const seedPointer = () => {
-          const now = performance.now();
-          if (now - state.pointerCooldown > pointerThrottle) {
-            sprinkle(0.12);
-            state.pointerCooldown = now;
-          }
-        };
-
-        panel.addEventListener('mousemove', seedPointer, { passive: true });
-        panel.addEventListener('touchmove', seedPointer, { passive: true });
+        const pointerOptions = { passive: true };
+        panel.addEventListener('mousemove', seedRipple, pointerOptions);
+        panel.addEventListener('touchmove', seedRipple, pointerOptions);
       }
-
       document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.game-of-life-panel').forEach(initGameOfLife);
       });

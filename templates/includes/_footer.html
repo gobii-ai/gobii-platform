@@ -7,7 +7,7 @@
         {% if settings.GOBII_PROPRIETARY_MODE %}
           <li><a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a></li>
         {% endif %}
-        <li><a href="/console/" class="text-slate-700 hover:text-blue-600">Dashboard</a></li>
+        <li><a href="{% url 'agents' %}" class="text-slate-700 hover:text-blue-600">My Agents</a></li>
         <li><a href="https://github.com/gobii-ai/gobii-platform" class="text-slate-700 hover:text-blue-600" title="Self-Host Gobii">Self-Host</a></li>
       </ul>
     </div>
