@@ -76,9 +76,9 @@ def _extract_tags(content: str) -> List[str]:
     return normalize_tags(parsed)
 
 
-def _generate_via_llm(charter: str) -> List[str]:
+def _generate_via_llm(agent: PersistentAgent, charter: str) -> List[str]:
     try:
-        model, params = get_summarization_llm_config()
+        model, params = get_summarization_llm_config(agent=agent)
     except Exception as exc:
         logger.warning("No summarization model available for tag generation: %s", exc)
         return []
@@ -88,7 +88,7 @@ def _generate_via_llm(charter: str) -> List[str]:
             "role": "system",
             "content": (
                 "You label AI agents so they are easy to discover. "
-                "Given an agent charter, reply with a JSON array containing three to five short tags. "
+                "Given an agent charter, reply with a JSON array containing exactly three short tags. "
                 "Each tag should be at most three words, written in title case, and focus on capabilities "
                 "or audiences. Do not include explanations or additional text."
             ),
@@ -145,7 +145,7 @@ def generate_agent_tags_task(self, persistent_agent_id: str, charter_hash: str) 
         )
         return
 
-    tags = _generate_via_llm(charter)
+    tags = _generate_via_llm(agent, charter)
     PersistentAgent.objects.filter(id=agent.id).update(
         tags=tags,
         tags_charter_hash=current_hash if tags else "",

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from unittest.mock import patch
@@ -6,6 +8,7 @@ from api.agent.short_description import compute_charter_hash
 from api.agent.tags import maybe_schedule_agent_tags
 from api.agent.tasks.agent_tags import (
     _extract_tags,
+    _generate_via_llm,
     generate_agent_tags_task,
 )
 from api.models import BrowserUseAgent, PersistentAgent
@@ -108,5 +111,21 @@ class AgentTagGenerationTests(TestCase):
         agent.refresh_from_db()
         self.assertEqual(
             agent.tags,
-            ["personal assistant", "task automation", "communication", "research", "scheduling"],
+            ["personal assistant", "task automation", "communication"],
         )
+
+    def test_generate_via_llm_uses_agent_for_llm_config(self):
+        agent = self._create_agent()
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='["Ops","Support","Insights"]'))]
+        )
+
+        with patch("api.agent.tasks.agent_tags.get_summarization_llm_config", return_value=("model", {})) as mocked_config, patch(
+            "api.agent.tasks.agent_tags.run_completion", return_value=response
+        ):
+            tags = _generate_via_llm(agent, agent.charter)
+
+        self.assertEqual(tags, ["Ops", "Support", "Insights"])
+        mocked_config.assert_called_once()
+        _, kwargs = mocked_config.call_args
+        self.assertIs(kwargs.get("agent"), agent)

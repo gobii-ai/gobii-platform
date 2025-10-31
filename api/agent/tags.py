@@ -8,7 +8,7 @@ from api.models import PersistentAgent
 
 logger = logging.getLogger(__name__)
 
-MAX_TAGS = 5
+MAX_TAGS = 3
 MAX_TAG_LENGTH = 64
 _WRAP_CHARS = '`"\'[]{}(),.;:'
 
