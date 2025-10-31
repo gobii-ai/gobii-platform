@@ -315,6 +315,12 @@ DATABASES = {
         # and may perform ORM work only at the end. This reduces reconnect churn while
         # still allowing the DB/infra to reap very old connections.
         "CONN_MAX_AGE": env.int("DJANGO_DB_CONN_MAX_AGE", default=600),  # 10 minutes
+        # Server-side cursors do not play well with pooled connections; disable them
+        # when pooling is active (default) unless explicitly overridden.
+        "DISABLE_SERVER_SIDE_CURSORS": env.bool(
+            "DJANGO_DB_DISABLE_SERVER_SIDE_CURSORS",
+            default=True
+        ),
         # Validate recycled connections automatically when re-used by Django
         # (Django will perform a cheap "SELECT 1" on reuse if needed).
         "CONN_HEALTH_CHECKS": True,
