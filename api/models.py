@@ -2498,6 +2498,21 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="SHA256 of the charter currently pending mini description generation.",
     )
+    tags = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of descriptive tags generated from the charter to aid discovery.",
+    )
+    tags_charter_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter used to generate tags.",
+    )
+    tags_requested_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter currently pending tag generation.",
+    )
     schedule = models.CharField(
         max_length=128,
         null=True,
@@ -2623,6 +2638,16 @@ class PersistentAgent(models.Model):
                 ScheduleParser.parse(self.schedule)
             except ValueError as e:
                 raise ValidationError({'schedule': str(e)})
+        tags = getattr(self, "tags", None) or []
+        if not isinstance(tags, list):
+            raise ValidationError({"tags": "Tags must be provided as a list of strings."})
+        if len(tags) > 5:
+            raise ValidationError({"tags": "At most 5 tags may be assigned to an agent."})
+        for tag in tags:
+            if not isinstance(tag, str) or not tag.strip():
+                raise ValidationError({"tags": "Each tag must be a non-empty string."})
+            if len(tag.strip()) > 64:
+                raise ValidationError({"tags": "Tags must be 64 characters or fewer."})
 
     def _validate_org_seats(self):
         billing = getattr(self.organization, "billing", None)
