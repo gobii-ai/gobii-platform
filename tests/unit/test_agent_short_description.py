@@ -145,20 +145,17 @@ class AgentShortDescriptionTests(TestCase):
         self.assertEqual(mini, "Helpful research assistant")
         self.assertEqual(source, "mini")
 
-    def test_build_mini_description_does_not_truncate_short_fallback(self) -> None:
+    def test_build_mini_description_uses_placeholder_when_only_short(self) -> None:
         agent = self._create_agent()
         agent.short_description = "Legacy agent with extensive context preserved in the full summary"
         agent.save(update_fields=["short_description"])
 
         mini, source = build_mini_description(agent)
 
-        self.assertEqual(
-            mini,
-            "Legacy agent with extensive context preserved in the full summary",
-        )
-        self.assertEqual(source, "short")
+        self.assertEqual(mini, "Agent")
+        self.assertEqual(source, "placeholder")
 
-    def test_build_mini_description_does_not_truncate_charter_fallback(self) -> None:
+    def test_build_mini_description_uses_placeholder_when_only_charter(self) -> None:
         charter = "Assist leadership with quarterly planning and cross-functional coordination"
         agent = self._create_agent(charter=charter)
         agent.short_description = ""
@@ -166,8 +163,5 @@ class AgentShortDescriptionTests(TestCase):
 
         mini, source = build_mini_description(agent)
 
-        self.assertEqual(
-            mini,
-            "Assist leadership with quarterly planning and cross-functional coordination",
-        )
-        self.assertEqual(source, "charter")
+        self.assertEqual(mini, "Agent")
+        self.assertEqual(source, "placeholder")
