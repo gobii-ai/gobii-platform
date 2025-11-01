@@ -1,84 +1,133 @@
-from datetime import datetime, timezone
+from marketing_events.providers.base import post_json
 
-from .base import post_json
-
+ALLOWED_METADATA_KEYS = {"conversion_id", "value", "currency", "item_count", "products"}
+ALLOWED_PRODUCT_KEYS = {"id", "category"}  # 'name' is not accepted
 
 class RedditCAPI:
-    def __init__(self, ad_account: str, token: str):
-        self.ad_account = ad_account
+    def __init__(self, pixel_id: str, token: str):
+        # Reddit calls this a Pixel ID in the URL path
+        self.pixel_id = pixel_id
         self.token = token
-        # https://ads-api.reddit.com/api/v3/pixels/a2_hb27sv7t5pa6/conversion_events
-        self.url = f"https://ads-api.reddit.com/api/v3/pixels/{ad_account}/conversion_events"
+        self.url = f"https://ads-api.reddit.com/api/v3/pixels/{pixel_id}/conversion_events"
 
-    def _map_event_name(self, name: str) -> str:
-        # map internal names to Reddit's expected names when applicable
+    def _clean_metadata(self, raw: dict) -> dict:
+        meta = {k: v for k, v in (raw or {}).items() if k in ALLOWED_METADATA_KEYS and v not in (None, "", [])}
+        # Normalize products if present
+        if "products" in meta and isinstance(meta["products"], list):
+            cleaned = []
+            for p in meta["products"]:
+                if isinstance(p, dict):
+                    cleaned.append({k: p[k] for k in ALLOWED_PRODUCT_KEYS if k in p})
+            meta["products"] = cleaned
+            if not meta["products"]:
+                meta.pop("products")
+        return meta
+
+
+    def _map_event_name(self, name: str) -> str | None:
+        # Map your internal names to Reddit tracking types
         mapping = {
-            "CompleteRegistration": "SignUp",
-            "Subscribe": "Purchase",
+            "CompleteRegistration": "SIGN_UP",
+            "Subscribe": "PURCHASE",
+            # add more as needed:
+            # "AddToCart": "ADD_TO_CART",
+            # "Lead": "LEAD",
         }
-        return mapping.get(name, name)
+        return mapping.get(name)
+
+    @staticmethod
+    def _to_millis(ts: int | float | str) -> int:
+        # Accept seconds or milliseconds, return milliseconds
+        if ts is None:
+            return None
+        if isinstance(ts, str):
+            ts = float(ts)
+        ts = int(ts)
+        return ts if ts >= 10**12 else ts * 1000
 
     def send(self, evt: dict):
+        # Honor consent
         if not evt.get("consent", True):
             return
+
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
-        custom_event = False
-        name = self._map_event_name(evt["event_name"])
 
-        if name is None:
-            custom_event = True
-            name = evt["event_name"]
+        # Determine event type
+        internal_name = evt.get("event_name")
+        mapped = self._map_event_name(internal_name)
+        is_custom = mapped is None
 
-        event_at = evt["event_time"]
-
-        match_keys = {}
-        if evt["ids"]["em"]:
-            match_keys["email"] = evt["ids"]["em"]
-        if evt["ids"]["ph"]:
-            match_keys["phone"] = evt["ids"]["ph"]
-        if evt["ids"]["external_id"]:
-            match_keys["external_id"] = evt["ids"]["external_id"]
-        if evt["network"]["rdt_cid"]:
-            match_keys["rdt_click_id"] = evt["network"]["rdt_cid"]
-        if evt["network"]["client_ip"]:
-            match_keys["ip_address"] = evt["network"]["client_ip"]
-
-        metadata = {
-            key: value
-            for key, value in (evt["properties"] or {}).items()
-            if value not in (None, "", [])
-        }
-        metadata.pop("event_time", None)
-        metadata.pop("event_id", None)
-
-        body = {
-            "event_at": event_at,
-            "test_mode": bool((evt["properties"] or {}).get("test_mode", False)),
-            "type": {}
+        event_type = {
+            "tracking_type": "CUSTOM" if is_custom else mapped,
         }
 
-        if custom_event:
-            body["type"]["tracking_type"] = "CUSTOM"
-            body["type"]["custom_event_name"] = name
+        if is_custom:
+            # Reddit requires a name when using CUSTOM
+            event_type["custom_event_name"] = internal_name
+
+        # Build user identifiers (Reddit supports hashed email/phone, external_id, ip, user_agent, and click id)
+        user = {}
+        ids = evt.get("ids", {}) or {}
+        net = evt.get("network", {}) or {}
+
+        if ids.get("em"):
+            user["email"] = ids["em"]               # SHA-256, lowercase email
+        if ids.get("ph"):
+            user["phone"] = ids["ph"]               # SHA-256 E.164
+        if ids.get("external_id"):
+            user["external_id"] = ids["external_id"]  # SHA-256
+        if net.get("client_ip"):
+            user["ip_address"] = net["client_ip"]
+        if net.get("user_agent"):
+            user["user_agent"] = net["user_agent"]
+        if net.get("rdt_cid"):
+            # Reddit click id for attribution (preferred when present)
+            click_id = net["rdt_cid"]
         else:
-            body["type"]["tracking_type"] = name
+            click_id = None
 
-        if match_keys:
-            body["match_keys"] = match_keys
-        if metadata:
-            body["event_metadata"] = metadata
+        # Clean properties into metadata
+        props = (evt.get("properties") or {}).copy()
+        test_mode = bool(props.pop("test_mode", False))
+        props.pop("event_time", None)
+        props.pop("event_id", None)
 
-        body = {
-            "data": {
-                "events": [body],
-                "metadata": {
-                    "conversion_id": evt["event_id"],
-                }
-            }
+        metadata = {k: v for k, v in props.items() if v not in (None, "", [])}
+
+        # Event timestamp
+        event_at_ms = self._to_millis(evt.get("event_time"))
+
+        # Reddit recommends WEBSITE/APP; default to WEBSITE for server events
+        action_source = evt.get("action_source") or "WEBSITE"
+
+        # Reddit deduplication id; place it on the event itself
+        conversion_id = evt.get("event_id")
+
+        props = (evt.get("properties") or {}).copy()
+        test_mode = bool(props.pop("test_mode", False))
+        props.pop("event_time", None);
+        props.pop("event_id", None)
+
+        metadata = self._clean_metadata({
+            **props,
+            "conversion_id": evt.get("event_id"),  # keep for dedupe
+            # add value/currency/item_count/products if you have them
+        })
+
+
+        event_obj = {
+            "event_at": event_at_ms,
+            "type": event_type,
+            "metadata": metadata or {},
+            "user": user,
+            "action_source": action_source,
         }
+        if click_id:
+            event_obj["click_id"] = click_id
 
-        response = post_json(self.url, json=body, headers=headers)
-        return response
+        payload = {"data": {"events": [event_obj]}}
+
+        return post_json(self.url, json=payload, headers=headers)
