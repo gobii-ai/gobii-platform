@@ -24,12 +24,12 @@ def enqueue_marketing_event(self, payload: dict):
     with trace_event(evt):
         for provider in get_providers():
             try:
-                provider.send(evt)
+                response = provider.send(evt)
             except TemporaryError:
                 raise
-            except PermanentError:
+            except PermanentError as e:
                 logging.getLogger(__name__).warning(
-                    "PermanentError sending marketing event",
+                    f"PermanentError sending marketing event: {e}",
                     exc_info=True,
                 )
                 continue
