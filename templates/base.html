@@ -494,6 +494,8 @@
       const options = {
         external_id : signupUserId || "{{ user.id|default_if_none:'' }}",
         em          : "{{ analytics.data.email_hash }}",
+        currency    : "USD",
+        value       : 0.00,
       };
 
       if (signupEventId) {
