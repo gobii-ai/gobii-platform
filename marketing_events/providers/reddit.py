@@ -91,24 +91,8 @@ class RedditCAPI:
 
         # Clean properties into metadata
         props = (evt.get("properties") or {}).copy()
-        test_mode = bool(props.pop("test_mode", False))
+        props.pop("test_mode", False)  # This property is not used in the Reddit payload
         props.pop("event_time", None)
-        props.pop("event_id", None)
-
-        metadata = {k: v for k, v in props.items() if v not in (None, "", [])}
-
-        # Event timestamp
-        event_at_ms = self._to_millis(evt.get("event_time"))
-
-        # Reddit recommends WEBSITE/APP; default to WEBSITE for server events
-        action_source = evt.get("action_source") or "WEBSITE"
-
-        # Reddit deduplication id; place it on the event itself
-        conversion_id = evt.get("event_id")
-
-        props = (evt.get("properties") or {}).copy()
-        test_mode = bool(props.pop("test_mode", False))
-        props.pop("event_time", None);
         props.pop("event_id", None)
 
         metadata = self._clean_metadata({
@@ -116,6 +100,12 @@ class RedditCAPI:
             "conversion_id": evt.get("event_id"),  # keep for dedupe
             # add value/currency/item_count/products if you have them
         })
+
+        # Event timestamp
+        event_at_ms = self._to_millis(evt.get("event_time"))
+
+        # Reddit recommends WEBSITE/APP; default to WEBSITE for server events
+        action_source = evt.get("action_source") or "WEBSITE"
 
 
         event_obj = {
