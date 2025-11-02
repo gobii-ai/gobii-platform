@@ -14,7 +14,8 @@ If a provider’s credentials are missing the task will skip it automatically.
 
 ## What `capi` does
 
-1. Builds a payload from the supplied `user`, `properties`, and optional request/context.
+1. Exits immediately unless `GOBII_PROPRIETARY_MODE` is truthy (matching legacy behavior).
+2. Builds a payload from the supplied `user`, `properties`, and optional request/context.
 2. Hashes identifiers (`id`, `email`, `phone`) with SHA-256 and normalizes click metadata/UTMs.
 3. Generates `event_id` (UUID4) and `event_time` (epoch seconds) when not provided.
 4. Enqueues the `enqueue_marketing_event` Celery task which fans out to the active providers with retries on transient failures.
