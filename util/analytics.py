@@ -129,6 +129,7 @@ class AnalyticsEvent(StrEnum):
     SUBSCRIPTION_CREATED = 'Subscription Created'
     SUBSCRIPTION_UPDATED = 'Subscription Updated'
     SUBSCRIPTION_CANCELLED = 'Subscription Cancelled'
+    SUBSCRIPTION_RENEWED = 'Subscription Renewed'
 
     # SMS Events
     SMS_VERIFICATION_CODE_SENT = 'SMS - Verification Code Sent'
