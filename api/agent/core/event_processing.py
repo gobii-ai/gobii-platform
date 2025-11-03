@@ -13,7 +13,7 @@ import math
 from datetime import datetime, timezone, timedelta
 from functools import partial
 from decimal import Decimal
-from typing import List, Tuple, Union, Optional, Dict, Any
+from typing import List, Tuple, Union, Optional, Dict, Any, Sequence
 from uuid import UUID, uuid4
 
 import litellm
@@ -24,7 +24,7 @@ from opentelemetry import baggage, trace
 from pottery import Redlock
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction, close_old_connections
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 from django.core.files.base import ContentFile
@@ -2750,19 +2750,30 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     # Collect structured events with their components grouped together
     structured_events: List[Tuple[datetime, str, dict]] = []  # (timestamp, event_type, components)
 
-    # Include most recent completed browser tasks as structured events
-    completed_tasks = (
-        BrowserUseAgentTask.objects.filter(
-            agent=agent.browser_use_agent,
-            status__in=[
-                BrowserUseAgentTask.StatusChoices.COMPLETED,
-                BrowserUseAgentTask.StatusChoices.FAILED,
-                BrowserUseAgentTask.StatusChoices.CANCELLED,
-            ]
+    completed_tasks: Sequence[BrowserUseAgentTask]
+    browser_agent_id = getattr(agent, "browser_use_agent_id", None)
+    if browser_agent_id:
+        completed_tasks_qs = (
+            BrowserUseAgentTask.objects.filter(
+                agent_id=browser_agent_id,
+                status__in=[
+                    BrowserUseAgentTask.StatusChoices.COMPLETED,
+                    BrowserUseAgentTask.StatusChoices.FAILED,
+                    BrowserUseAgentTask.StatusChoices.CANCELLED,
+                ],
+            )
+            .order_by("-updated_at")
+            .prefetch_related(
+                Prefetch(
+                    "steps",
+                    queryset=BrowserUseAgentTaskStep.objects.filter(is_result=True).order_by("id"),
+                    to_attr="result_steps_prefetched",
+                )
+            )
         )
-        .order_by("-updated_at")[:TOOL_CALL_HISTORY_LIMIT]
-        .prefetch_related("steps")
-    )
+        completed_tasks = list(completed_tasks_qs[:TOOL_CALL_HISTORY_LIMIT])
+    else:
+        completed_tasks = []
 
     # format steps (group meta/params/result components together)
     for s in steps:
@@ -2855,7 +2866,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         components = {
             "meta": f"[{t.updated_at.isoformat()}] Browser task (id={t.id}) completed with status '{t.status}': {t.prompt}"
         }
-        result_step = t.steps.filter(is_result=True).first()
+        result_steps = getattr(t, "result_steps_prefetched", None)
+        result_step = result_steps[0] if result_steps else None
         if result_step and result_step.result_value:
             components["result"] = json.dumps(result_step.result_value)
         
@@ -2978,17 +2990,20 @@ __all__ = ["process_agent_events"]
 
 def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
     """Add individual sections for each browser task to the provided promptree group."""
-    import json
-    from ...models import BrowserUseAgentTask
-    
     # ALL active tasks (no limit since we enforce max 5 during creation)
-    active_tasks = BrowserUseAgentTask.objects.filter(
-        agent=agent.browser_use_agent,
-        status__in=[
-            BrowserUseAgentTask.StatusChoices.PENDING,
-            BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
-        ]
-    ).order_by('created_at')
+    browser_agent_id = getattr(agent, "browser_use_agent_id", None)
+    if browser_agent_id:
+        active_tasks = list(
+            BrowserUseAgentTask.objects.filter(
+                agent_id=browser_agent_id,
+                status__in=[
+                    BrowserUseAgentTask.StatusChoices.PENDING,
+                    BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+                ],
+            ).order_by("created_at")
+        )
+    else:
+        active_tasks = []
     
 
     
