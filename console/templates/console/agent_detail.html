@@ -7,7 +7,9 @@
   <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
     <div class="px-6 py-4 border-b border-gray-200/70 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div>
-        <h1 class="text-2xl font-semibold text-gray-800">Agent Configuration</h1>
+        <h1 class="text-2xl font-semibold text-gray-800" id="agent-name-heading">
+          {{ agent.name|default:"Agent" }} Settings
+        </h1>
         <p class="text-sm text-gray-500 mt-1">Manage your agent settings and preferences</p>
         <a href="{% url 'agents' %}" class="group inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
           <i aria-hidden="true" data-lucide="arrow-left" class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform"></i>
@@ -927,6 +929,17 @@ document.addEventListener('DOMContentLoaded', function () {
     field.addEventListener('input', evaluateDirtyState);
     field.addEventListener('change', evaluateDirtyState);
   });
+
+  const nameField = form.querySelector('#agent-name');
+  const nameHeading = document.getElementById('agent-name-heading');
+  if (nameField && nameHeading) {
+    const updateHeading = () => {
+      const value = (nameField.value || '').trim();
+      nameHeading.textContent = `${value || 'Untitled Agent'} Settings`;
+    };
+    nameField.addEventListener('input', updateHeading);
+    updateHeading();
+  }
 
   evaluateDirtyState();
 
