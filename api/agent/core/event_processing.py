@@ -263,7 +263,12 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     
     # Rough estimates for other content
     # History: estimate based on recent steps and comms
-    recent_steps = PersistentAgentStep.objects.filter(agent=agent).order_by('-created_at')[:10]
+    recent_steps = (
+        PersistentAgentStep.objects.filter(agent=agent)
+        .select_related("tool_call")
+        .only("description", "tool_call__result")
+        .order_by('-created_at')[:10]
+    )
     for step in recent_steps:
         # Add description length
         if step.description:
@@ -277,7 +282,11 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
             # This step doesn't have a tool call, which is fine
             pass
     
-    recent_comms = PersistentAgentMessage.objects.filter(owner_agent=agent).order_by('-timestamp')[:5]
+    recent_comms = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent)
+        .only("body")
+        .order_by('-timestamp')[:5]
+    )
     for comm in recent_comms:
         if comm.body:
             total_length += len(comm.body)
