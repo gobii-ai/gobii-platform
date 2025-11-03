@@ -62,13 +62,16 @@ _PREMIUM_PLAN_NAMES = {"pro", "org", "scale"}
 _PREMIUM_ACCOUNT_AGE_DAYS = 30
 
 
-def _should_prioritize_premium(agent: Any) -> bool:
+def _should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) -> bool:
     """Return True when the provided agent should prefer premium LLM tiers."""
 
     if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
         return False
     if agent is None:
         return False
+
+    if is_first_loop:
+        return True
 
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
     plan = None
@@ -449,6 +452,7 @@ def get_llm_config_with_failover(
     *,
     allow_unconfigured: bool = False,
     agent: Any | None = None,
+    is_first_loop: bool | None = None,
 ) -> List[Tuple[str, str, dict]]:
     """
     Get LLM configurations for tiered failover with token-based tier selection.
@@ -461,6 +465,7 @@ def get_llm_config_with_failover(
                     Used to select appropriate tier when provider_tiers is None.
         agent: Optional agent instance (or None). When provided (or resolvable via
             agent_id) and running in proprietary mode, premium tiers may be preferred.
+        is_first_loop: Whether this is the first run of the agent (brand-new)
         
     Returns:
         List of (provider_name, model_name, litellm_params) tuples in failover order
@@ -500,7 +505,10 @@ def get_llm_config_with_failover(
                         exc_info=True,
                     )
                     agent_instance = None
-            prefer_premium = _should_prioritize_premium(agent_instance)
+            prefer_premium = _should_prioritize_premium(
+                agent_instance,
+                is_first_loop=is_first_loop,
+            )
 
         combined_configs: List[Tuple[str, str, dict]] = []
 

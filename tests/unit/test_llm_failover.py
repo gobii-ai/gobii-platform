@@ -273,6 +273,71 @@ class TestLLMFailover(TestCase):
         self.assertEqual(configs[0][0], seeded["premium_endpoint"].key)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_first_loop_prefers_premium(self):
+        clear_llm_db()
+        seeded = self._seed_premium_setup(include_premium=True)
+
+        UserModel = get_user_model()
+        user = UserModel.objects.create_user(
+            username=f"first-loop-{uuid.uuid4().hex[:8]}",
+            email=f"first-loop-{uuid.uuid4().hex[:8]}@example.com",
+            password="secret-pass",
+        )
+        user.date_joined = timezone.now() - timedelta(days=90)
+        user.save(update_fields=["date_joined"])
+
+        UserBilling = apps.get_model('api', 'UserBilling')
+        billing, created = UserBilling.objects.get_or_create(
+            user=user,
+            defaults={"subscription": "free"},
+        )
+        if not created and billing.subscription != "free":
+            billing.subscription = "free"
+            billing.save(update_fields=["subscription"])
+
+        BrowserUseAgent = apps.get_model('api', 'BrowserUseAgent')
+        PersistentAgent = apps.get_model('api', 'PersistentAgent')
+        PersistentAgentStep = apps.get_model('api', 'PersistentAgentStep')
+        PersistentAgentSystemStep = apps.get_model('api', 'PersistentAgentSystemStep')
+
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="LoopBA")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="LoopAgent",
+            charter="first loop test",
+            browser_use_agent=browser_agent,
+        )
+
+        configs: list[tuple[str, str, dict]] = []
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-premium"}, clear=True):
+            configs = get_llm_config_with_failover(
+                token_count=0,
+                agent=agent,
+                agent_id=str(agent.id),
+                is_first_loop=True,
+            )
+
+        self.assertTrue(configs)
+        self.assertEqual(configs[0][0], seeded["premium_endpoint"].key)
+
+        recorded_step = PersistentAgentStep.objects.create(agent=agent, description="Process events")
+        PersistentAgentSystemStep.objects.create(
+            step=recorded_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-premium"}, clear=True):
+            configs_after = get_llm_config_with_failover(
+                token_count=0,
+                agent=agent,
+                agent_id=str(agent.id),
+                is_first_loop=False,
+            )
+
+        self.assertTrue(configs_after)
+        self.assertEqual(configs_after[0][0], seeded["standard_endpoint"].key)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_summarization_prefers_premium_tier(self):
         clear_llm_db()
         seeded = self._seed_premium_setup(include_premium=True)

@@ -128,6 +128,7 @@ class TestEventProcessingTokenCounting(TestCase):
                     agent_id=str(self.test_agent.id),
                     token_count=0,
                     allow_unconfigured=True,
+                    is_first_loop=False,
                 )
 
                 self.assertIsInstance(messages, list)
