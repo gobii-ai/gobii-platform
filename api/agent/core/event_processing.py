@@ -13,7 +13,7 @@ import math
 from datetime import datetime, timezone, timedelta
 from functools import partial
 from decimal import Decimal
-from typing import List, Tuple, Union, Optional
+from typing import List, Tuple, Union, Optional, Dict, Any
 from uuid import UUID, uuid4
 
 import litellm
@@ -522,7 +522,12 @@ def _has_sufficient_daily_credit(state: dict, cost: Decimal | None) -> bool:
         return False
 
 
-def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -> bool|Decimal:
+def _ensure_credit_for_tool(
+    agent: PersistentAgent,
+    tool_name: str,
+    span=None,
+    credit_snapshot: Optional[Dict[str, Any]] = None,
+) -> bool | Decimal:
     """Ensure the agent's owner has a task credit and consume it just-in-time.
 
     Returns True if execution may proceed; False if insufficient or consumption fails.
@@ -549,18 +554,30 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         # Fallback to default single-task cost when lookup fails
         cost = get_default_task_credit_cost()
 
-    try:
-        available = TaskCreditService.get_user_task_credits_available(owner_user)
-    except Exception as e:
-        logger.error(
-            "Credit availability check (in-loop) failed for agent %s (user %s): %s",
-            agent.id,
-            owner_user.id,
-            str(e),
-        )
-        available = None
+    if credit_snapshot is not None and "available" in credit_snapshot:
+        available = credit_snapshot.get("available")
+    else:
+        try:
+            available = TaskCreditService.get_user_task_credits_available(owner_user)
+        except Exception as e:
+            logger.error(
+                "Credit availability check (in-loop) failed for agent %s (user %s): %s",
+                agent.id,
+                owner_user.id,
+                str(e),
+            )
+            available = None
+        if credit_snapshot is not None:
+            credit_snapshot["available"] = available
 
-    daily_state = _get_agent_daily_credit_state(agent)
+    daily_state = None
+    if credit_snapshot is not None and isinstance(credit_snapshot.get("daily_state"), dict):
+        daily_state = credit_snapshot["daily_state"]
+    if daily_state is None:
+        daily_state = _get_agent_daily_credit_state(agent)
+        if credit_snapshot is not None:
+            credit_snapshot["daily_state"] = daily_state
+
     daily_limit = daily_state.get("limit")
     daily_remaining = daily_state.get("remaining")
 
@@ -712,6 +729,9 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
                 exc,
             )
         else:
+            if credit_snapshot is not None:
+                credit_snapshot["daily_state"] = updated_state
+                credit_snapshot.pop("available", None)
             if span is not None:
                 try:
                     remaining_after = updated_state.get("remaining")
@@ -970,6 +990,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         logger.debug("Failed to broadcast processing state at start for agent %s: %s", persistent_agent_id, e)
 
     # Exit early in proprietary mode if the agent's owner has no credits
+    credit_snapshot: Optional[Dict[str, Any]] = None
     try:
 
         if is_llm_bootstrap_required():
@@ -1062,6 +1083,10 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                 daily_state = _get_agent_daily_credit_state(agent)
                 daily_limit = daily_state.get("limit")
                 daily_remaining = daily_state.get("remaining")
+                credit_snapshot = {
+                    "available": available,
+                    "daily_state": daily_state,
+                }
                 try:
                     span.set_attribute(
                         "credit_check.daily_limit",
@@ -1135,7 +1160,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     span.set_attribute('processing_step.id', str(processing_step.id))
     span.set_attribute('processing.is_first_run', is_first_run)
 
-    cumulative_token_usage = _run_agent_loop(agent, is_first_run=is_first_run)
+    cumulative_token_usage = _run_agent_loop(agent, is_first_run=is_first_run, credit_snapshot=credit_snapshot)
 
     # Update system step with cumulative token usage
     sys_step.notes = "simplified"
@@ -1180,7 +1205,12 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     return agent
 
 @tracer.start_as_current_span("Agent Loop")
-def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
+def _run_agent_loop(
+    agent: PersistentAgent,
+    *,
+    is_first_run: bool,
+    credit_snapshot: Optional[Dict[str, Any]] = None,
+) -> dict:
     """The core tool‑calling loop for a persistent agent.
     
     Returns:
@@ -1249,6 +1279,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                 max_iterations=MAX_AGENT_LOOP_ITERATIONS,
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
+                daily_credit_state=credit_snapshot["daily_state"] if credit_snapshot else None,
             )
             prompt_archive_attached = False
 
@@ -1426,7 +1457,12 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                             # Do not consume credits or record a step for ignored sleep
                             continue
                         # All tool calls are sleep; consume credits once per call and record step
-                        credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
+                        credits_consumed = _ensure_credit_for_tool(
+                            agent,
+                            tool_name,
+                            span=tool_span,
+                            credit_snapshot=credit_snapshot,
+                        )
                         if not credits_consumed:
                             return cumulative_token_usage
                         # Create sleep step with token usage if available
@@ -1452,7 +1488,12 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
 
                     all_calls_sleep = False
                     # Ensure credit is available and consume just-in-time for actionable tools
-                    credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
+                    credits_consumed = _ensure_credit_for_tool(
+                        agent,
+                        tool_name,
+                        span=tool_span,
+                        credit_snapshot=credit_snapshot,
+                    )
                     if not credits_consumed:
                         # Credit insufficient or consumption failed; halt processing
                         return cumulative_token_usage
@@ -1748,6 +1789,7 @@ def _build_prompt_context(
     max_iterations: int = MAX_AGENT_LOOP_ITERATIONS,
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
+    daily_credit_state: Optional[dict] = None,
 ) -> tuple[List[dict], int, Optional[UUID]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
@@ -1916,7 +1958,8 @@ def _build_prompt_context(
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
 
-    daily_credit_state = _get_agent_daily_credit_state(agent)
+    if daily_credit_state is None:
+        daily_credit_state = _get_agent_daily_credit_state(agent)
     _add_budget_awareness_sections(
         critical_group,
         current_iteration=current_iteration,
