@@ -41,51 +41,64 @@ class ProactiveActivationService:
         now = timezone.now()
         redis_client = cls._get_redis_client()
 
-        candidates = cls._eligible_agents(now)
         triggered_results: List[ProactiveTriggerResult] = []
         seen_users: set[str] = set()
+        offset = 0
+        chunk_size = cls.SCAN_LIMIT
 
-        for agent in candidates:
-            if agent.user_id in seen_users:
-                continue
-            if not cls._is_rollout_enabled_for_agent(agent):
-                logger.debug(
-                    "Skipping proactive trigger for agent %s because rollout flag '%s' is inactive",
-                    agent.id,
-                    cls.ROLLOUT_FLAG_NAME,
-                )
-                continue
-            if not cls._recent_activity_cooldown_satisfied(agent, now):
-                continue
-            has_credit, credit_remaining = cls._has_required_daily_credit(agent)
-            if not has_credit:
-                logger.debug("Skipping proactive trigger for agent %s due to insufficient daily credits", agent.id)
-                continue
-            effective_min_interval = cls._effective_min_interval_minutes()
-            if not cls._min_interval_satisfied(agent, now, effective_min_interval):
-                continue
-            if not cls._acquire_user_gate(redis_client, agent.user_id, effective_min_interval):
-                continue
+        while len(triggered_results) < batch:
+            candidates = cls._eligible_agents(now, limit=chunk_size, offset=offset)
+            if not candidates:
+                break
 
-            metadata = cls._build_metadata(now, remaining_credits=credit_remaining)
+            for agent in candidates:
+                if agent.user_id in seen_users:
+                    continue
+                if not cls._is_rollout_enabled_for_agent(agent):
+                    logger.debug(
+                        "Skipping proactive trigger for agent %s because rollout flag '%s' is inactive",
+                        agent.id,
+                        cls.ROLLOUT_FLAG_NAME,
+                    )
+                    continue
+                if not cls._recent_activity_cooldown_satisfied(agent, now):
+                    continue
+                has_credit, credit_remaining = cls._has_required_daily_credit(agent)
+                if not has_credit:
+                    logger.debug("Skipping proactive trigger for agent %s due to insufficient daily credits", agent.id)
+                    continue
+                effective_min_interval = cls._effective_min_interval_minutes()
+                if not cls._min_interval_satisfied(agent, now, effective_min_interval):
+                    continue
+                if not cls._acquire_user_gate(redis_client, agent.user_id, effective_min_interval):
+                    continue
 
-            try:
-                result = cls._record_trigger(agent, now, metadata)
-            except Exception:
-                logger.exception("Failed to record proactive trigger for agent %s", agent.id)
-                cls._release_user_gate(redis_client, agent.user_id)
-                continue
+                metadata = cls._build_metadata(now, remaining_credits=credit_remaining)
 
-            triggered_results.append(result)
-            seen_users.add(agent.user_id)
+                try:
+                    result = cls._record_trigger(agent, now, metadata)
+                except Exception:
+                    logger.exception("Failed to record proactive trigger for agent %s", agent.id)
+                    cls._release_user_gate(redis_client, agent.user_id)
+                    continue
+
+                triggered_results.append(result)
+                seen_users.add(agent.user_id)
+
+                if len(triggered_results) >= batch:
+                    break
 
             if len(triggered_results) >= batch:
+                break
+
+            offset += len(candidates)
+            if len(candidates) < chunk_size:
                 break
 
         return [result.agent for result in triggered_results]
 
     @classmethod
-    def _eligible_agents(cls, now: datetime) -> Sequence[PersistentAgent]:
+    def _eligible_agents(cls, now: datetime, *, limit: int | None, offset: int = 0) -> Sequence[PersistentAgent]:
         """Return a ranked list of potentially eligible agents."""
         day_start = now.astimezone(timezone.get_current_timezone()).replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -106,8 +119,14 @@ class ProactiveActivationService:
                     distinct=True,
                 )
             )
-            .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")[: cls.SCAN_LIMIT]
+            .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")
         )
+
+        if limit is not None:
+            end = offset + limit
+            qs = qs[offset:end]
+        elif offset:
+            qs = qs[offset:]
 
         return list(qs)
 
