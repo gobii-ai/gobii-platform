@@ -18,6 +18,6 @@ def capi(user, event_name, properties=None, request=None, context=None):
             "email": getattr(user, "email", None),
             "phone": getattr(user, "phone", None),
         },
-        "context": (context or {}) | extract_click_context(request),
+        "context": (extract_click_context(request) or {}) | (context or {}),
     }
     enqueue_marketing_event.delay(payload)
