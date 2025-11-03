@@ -526,9 +526,17 @@
   <!-- Agent Contacts (Peer Links) -->
   <div class="gobii-card-base">
     <div class="p-6 sm:p-8 space-y-6">
-      <div>
-        <h2 class="text-lg font-semibold text-gray-800">MCP Servers</h2>
-        <p class="text-sm text-gray-500">Platform and organization MCP servers are always enabled for this agent. Configure optional personal servers below.</p>
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-gray-800">MCP Servers</h2>
+          <p class="text-sm text-gray-500">Platform and organization MCP servers are always enabled for this agent. Configure optional personal servers below.</p>
+        </div>
+        {% if current_context.type == 'personal' or can_manage_org_agents %}
+        <button type="button" onclick="window.location.href='{% url 'console-mcp-servers' %}'" class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700 sm:self-start">
+          <i aria-hidden="true" data-lucide="plus" class="w-4 h-4"></i>
+          Add MCP Server
+        </button>
+        {% endif %}
       </div>
 
       {% if inherited_mcp_servers %}
