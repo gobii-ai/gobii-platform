@@ -12,6 +12,7 @@ from api.models import UserBilling, Organization, UserAttribution
 from api.models import UserBilling, Organization, ProxyServer, DedicatedProxyAllocation
 from constants.plans import PlanNames, PlanNamesChoices
 from pages.signals import handle_subscription_event, handle_user_signed_up
+from util.analytics import AnalyticsEvent
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
@@ -222,11 +223,13 @@ class SubscriptionSignalTests(TestCase):
 
     @tag("batch_pages")
     def test_subscription_anchor_updates_from_stripe(self):
-        payload = _build_event_payload()
+        payload = _build_event_payload(billing_reason="subscription_create")
         event = _build_djstripe_event(payload)
 
         fresh_user = User.objects.get(pk=self.user.pk)
         sub = self._mock_subscription(current_period_day=17, subscriber=fresh_user)
+        sub.stripe_data['billing_reason'] = "subscription_create"
+        sub.billing_reason = "subscription_create"
 
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
@@ -250,7 +253,36 @@ class SubscriptionSignalTests(TestCase):
         self.assertFalse(kwargs.get("update_anchor", True))
         mock_identify.assert_called_once()
         mock_track_event.assert_called_once()
+        track_kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.SUBSCRIPTION_CREATED)
+        self.assertEqual(track_kwargs["properties"]["plan"], PlanNamesChoices.STARTUP.value)
         mock_logger_exception.assert_not_called()
+
+    @tag("batch_pages")
+    def test_subscription_cycle_emits_renewed_event(self):
+        payload = _build_event_payload(billing_reason="subscription_cycle")
+        event = _build_djstripe_event(payload)
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=15, subscriber=fresh_user)
+        sub.stripe_data['billing_reason'] = "subscription_cycle"
+        sub.billing_reason = "subscription_cycle"
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
+            patch("pages.signals.Analytics.track_event") as mock_track_event:
+
+            handle_subscription_event(event)
+
+        mock_identify.assert_called_once()
+        mock_track_event.assert_called_once()
+        track_kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.SUBSCRIPTION_RENEWED)
+        self.assertEqual(track_kwargs["properties"]["plan"], PlanNamesChoices.STARTUP.value)
 
     @tag("batch_pages")
     def test_missing_user_billing_logs_exception(self):

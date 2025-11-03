@@ -28,6 +28,8 @@ from constants.plans import PlanNames, PlanNamesChoices
 from tasks.services import TaskCreditService
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from marketing_events.api import capi
+from marketing_events.context import extract_click_context
 import logging
 import stripe
 
@@ -498,62 +500,48 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             logger.info("Analytics tracking successful for signup.")
             return
 
-        conversion_payload = {
-            'event_name': 'SignUp',
-            'event_id': event_id,
-            'event_time': event_timestamp_unix,
-            'action_source': 'website',
-            'email': user.email,
-            'first_name': user.first_name or '',
-            'last_name': user.last_name or '',
-            'external_id': str(user.id),
-            'ip_address': Analytics.get_client_ip(request),
-            'user_agent': request.META.get('HTTP_USER_AGENT', ''),
-            'event_source_url': request.build_absolute_uri(request.get_full_path()),
-            'fbc': fbc_cookie,
-            'fbp': fbp_cookie,
-            'fbclid': fbclid_cookie,
-            'click_ids': {
+        def enqueue_conversion_tasks():
+            marketing_properties = {
+                k: v
+                for k, v in event_properties.items()
+                if v not in (None, '', [])
+            }
+            marketing_properties.update(
+                {
+                    'event_id': event_id,
+                    'event_time': event_timestamp_unix,
+                }
+            )
+            additional_click_ids = {
                 key: value
                 for key in CLICK_ID_PARAMS
                 if (value := (last_click.get(key) or first_click.get(key)))
-            },
-            'custom_data': {
-                k: v
-                for k, v in event_properties.items()
-                if v not in (None, '', []) and k not in {'fbc', 'fbp', 'fbclid'}
-            },
-            'campaign': campaign_context,
-            'utm': {
+            }
+            marketing_context = extract_click_context(request)
+            if additional_click_ids:
+                marketing_context['click_ids'] = {
+                    **additional_click_ids,
+                    **(marketing_context.get('click_ids') or {}),
+                }
+            utm_context = {
                 **{f'{k}_first': v for k, v in first_touch.items() if v},
                 **{f'{k}_last': v for k, v in last_touch.items() if v},
-            },
-        }
-
-        def enqueue_conversion_tasks():
-            from pages.tasks import (
-                send_facebook_signup_conversion,
-                send_reddit_signup_conversion,
+            }
+            if utm_context:
+                marketing_context['utm'] = {
+                    **utm_context,
+                    **(marketing_context.get('utm') or {}),
+                }
+            if campaign_context:
+                marketing_context['campaign'] = campaign_context
+            marketing_context['consent'] = True
+            capi(
+                user=user,
+                event_name='CompleteRegistration',
+                properties=marketing_properties,
+                request=None,
+                context=marketing_context,
             )
-
-            facebook_ready = getattr(settings, 'FACEBOOK_PIXEL_ID', '') and getattr(settings, 'FACEBOOK_ACCESS_TOKEN', '')
-            reddit_ready = (
-                getattr(settings, 'REDDIT_ADVERTISER_ID', '')
-                or getattr(settings, 'REDDIT_PIXEL_ID', '')
-            ) and (
-                getattr(settings, 'REDDIT_ACCESS_TOKEN', '')
-                or (
-                    getattr(settings, 'REDDIT_CLIENT_ID', '')
-                    and getattr(settings, 'REDDIT_CLIENT_SECRET', '')
-                    and getattr(settings, 'REDDIT_REFRESH_TOKEN', '')
-                )
-            )
-
-            if facebook_ready:
-                send_facebook_signup_conversion.delay(conversion_payload)
-
-            if reddit_ready:
-                send_reddit_signup_conversion.delay(conversion_payload)
 
         transaction.on_commit(enqueue_conversion_tasks)
 
@@ -838,15 +826,25 @@ def handle_subscription_event(event, **kwargs):
                     'plan': plan_value,
                 })
 
-                Analytics.track_event(
-                    user_id=owner.id,
-                    event=AnalyticsEvent.SUBSCRIPTION_CREATED,
-                    source=AnalyticsSource.WEB,
-                    properties={
-                        'plan': plan_value,
-                        'stripe.invoice_id': invoice_id,
-                    }
-                )
+                event_properties = {
+                    'plan': plan_value,
+                }
+                if invoice_id:
+                    event_properties['stripe.invoice_id'] = invoice_id
+
+                analytics_event = None
+                if billing_reason == 'subscription_create':
+                    analytics_event = AnalyticsEvent.SUBSCRIPTION_CREATED
+                elif billing_reason == 'subscription_cycle':
+                    analytics_event = AnalyticsEvent.SUBSCRIPTION_RENEWED
+
+                if analytics_event:
+                    Analytics.track_event(
+                        user_id=owner.id,
+                        event=analytics_event,
+                        source=AnalyticsSource.WEB,
+                        properties=event_properties,
+                    )
             else:
                 seats = 0
                 try:
