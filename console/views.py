@@ -82,6 +82,80 @@ from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG
 
 
+def _clamp_color(value: int) -> int:
+    return max(0, min(255, value))
+
+
+def _hex_to_rgb_components(hex_color: str) -> tuple[int, int, int]:
+    normalized = (hex_color or "").strip().lstrip("#")
+    if len(normalized) != 6:
+        return (0, 116, 212)
+    return tuple(int(normalized[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _rgb_to_hex(r: int, g: int, b: int) -> str:
+    return f"#{_clamp_color(r):02X}{_clamp_color(g):02X}{_clamp_color(b):02X}"
+
+
+def _adjust_hex(hex_color: str, ratio: float) -> str:
+    r, g, b = _hex_to_rgb_components(hex_color)
+    if ratio >= 0:
+        r = _clamp_color(int(r + (255 - r) * ratio))
+        g = _clamp_color(int(g + (255 - g) * ratio))
+        b = _clamp_color(int(b + (255 - b) * ratio))
+    else:
+        ratio = abs(ratio)
+        r = _clamp_color(int(r * (1 - ratio)))
+        g = _clamp_color(int(g * (1 - ratio)))
+        b = _clamp_color(int(b * (1 - ratio)))
+    return _rgb_to_hex(r, g, b)
+
+
+def _build_agent_gradient(hex_color: str) -> str:
+    base = (hex_color or "#0074D4").upper()
+    lighter = _adjust_hex(base, 0.35)
+    darker = _adjust_hex(base, -0.25)
+    return f"background-image: linear-gradient(135deg, {lighter} 0%, {base} 55%, {darker} 100%); background-color: {base};"
+
+
+def _relative_luminance(hex_color: str) -> float:
+    r, g, b = _hex_to_rgb_components(hex_color)
+
+    def _normalize(channel: int) -> float:
+        c = channel / 255.0
+        if c <= 0.03928:
+            return c / 12.92
+        return ((c + 0.055) / 1.055) ** 2.4
+
+    r_lin = _normalize(r)
+    g_lin = _normalize(g)
+    b_lin = _normalize(b)
+    return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+
+
+def _text_palette_for_hex(hex_color: str) -> dict[str, str]:
+    luminance = _relative_luminance(hex_color)
+    # Threshold chosen to meet WCAG contrast guidance for normal text (~4.5:1).
+    use_light = luminance <= 0.55
+    if use_light:
+        return {
+            "primary": "text-white",
+            "secondary": "text-white/70",
+            "status": "text-white/80",
+            "badge": "bg-white/20 text-white border border-white/40",
+            "icon": "text-white",
+            "link_hover": "hover:text-white",
+        }
+    return {
+        "primary": "text-slate-900",
+        "secondary": "text-slate-700",
+        "status": "text-slate-800",
+        "badge": "bg-black/5 text-slate-800 border border-black/10",
+        "icon": "text-slate-900",
+        "link_hover": "hover:text-slate-900",
+    }
+
+
 def _resolve_dedicated_ip_pricing(plan):
     plan = plan or {}
     currency = plan.get("currency")
@@ -1637,13 +1711,13 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             # Show organization's agents
             persistent_agents = PersistentAgent.objects.filter(
                 organization_id=current_context.get('id')
-            ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+            ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
             persistent_agents = PersistentAgent.objects.filter(
                 user=self.request.user,
                 organization__isnull=True  # Only personal agents
-            ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+            ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
         persistent_agents = list(persistent_agents)
         today = timezone.localdate()
@@ -1662,6 +1736,18 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             agent.listing_description = description
             agent.listing_description_source = source
             agent.is_initializing = source == "placeholder"
+            color_hex = agent.get_display_color().upper()
+            agent.display_color_hex = color_hex
+            agent.card_gradient_style = _build_agent_gradient(color_hex)
+            agent.icon_background_hex = _adjust_hex(color_hex, 0.55)
+            agent.icon_border_hex = _adjust_hex(color_hex, -0.25)
+            palette = _text_palette_for_hex(color_hex)
+            agent.header_text_class = palette["primary"]
+            agent.header_subtext_class = palette["secondary"]
+            agent.header_status_class = palette["status"]
+            agent.header_badge_class = palette["badge"]
+            agent.header_icon_class = palette["icon"]
+            agent.header_link_hover_class = palette["link_hover"]
 
             mini_description, mini_source = build_mini_description(agent)
             agent.mini_description = mini_description

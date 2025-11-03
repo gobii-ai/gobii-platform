@@ -64,32 +64,37 @@
      <div class="gobii-card-hoverable group flex flex-col h-full"
           data-agent-search="{{ agent.name|default:''|escape }} {{ agent.listing_description|default:''|escape }} {{ tag_blob|default:''|escape }}">
        <!-- Card Header -->
-       <div class="h-52 flex flex-col justify-center items-center bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 relative overflow-hidden">
+       <div class="h-52 flex flex-col justify-center items-center relative overflow-hidden"
+            style="{{ agent.card_gradient_style|default:'' }}">
          <!-- Background Pattern -->
-         <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/20 via-purple-500/10 to-indigo-600/20"></div>
+         <div class="absolute inset-0 opacity-20"
+              style="background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.35), transparent 55%);"></div>
+         <div class="absolute inset-0 opacity-10"
+              style="background: radial-gradient(circle at 80% 0%, rgba(255, 255, 255, 0.25), transparent 60%);"></div>
          
          <!-- Agent Icon -->
-         <div class="relative z-10 flex justify-center items-center size-16 bg-white/20 rounded-full backdrop-blur-sm border border-white/30 mb-4">
-           <i aria-hidden="true" data-lucide="zap" class="w-8 h-8 text-white"></i>
+         <div class="relative z-10 flex justify-center items-center size-16 rounded-full backdrop-blur-sm border mb-4"
+              style="background-color: {{ agent.icon_background_hex }}; border-color: {{ agent.icon_border_hex }};">
+           <i aria-hidden="true" data-lucide="zap" class="w-8 h-8 {{ agent.header_icon_class }}"></i>
          </div>
          
          <!-- Agent Name -->
-         <h3 class="relative z-10 text-lg font-semibold text-white text-center px-4">{{ agent.name }}</h3>
+         <h3 class="relative z-10 text-lg font-semibold {{ agent.header_text_class }} text-center px-4">{{ agent.name }}</h3>
 
          <!-- Primary Email -->
          {% with primary_email=agent.primary_email_endpoints.0 %}
            {% if primary_email %}
-             <div class="relative z-10 flex items-center gap-1.5 text-xs text-white/70 mt-1">
+             <div class="relative z-10 flex items-center gap-1.5 text-xs {{ agent.header_subtext_class }} mt-1">
                <i aria-hidden="true" data-lucide="mail" class="w-4 h-4"></i>
-               <a href="mailto:{{ primary_email.address }}" class="font-light hover:text-white transition-colors">{{ primary_email.address }}</a>
+               <a href="mailto:{{ primary_email.address }}" class="font-light transition-colors {{ agent.header_link_hover_class }}">{{ primary_email.address }}</a>
              </div>
            {% endif %}
          {% endwith %}
          
          <!-- Status Indicator -->
-         <div class="relative z-10 mt-2 flex items-center gap-2">
+         <div class="relative z-10 mt-2 flex items-center gap-2 {{ agent.header_status_class }}">
            <span class="size-2 {% if agent.is_active %}bg-green-300{% else %}bg-gray-300{% endif %} rounded-full"></span>
-           <span class="text-xs font-medium text-white/80 uppercase tracking-wide">
+           <span class="text-xs font-medium uppercase tracking-wide">
              {% if agent.is_active %}Active{% else %}Paused{% endif %}
            </span>
           {% comment %}
@@ -97,7 +102,7 @@
           {% endcomment %}
          </div>
          {% if agent.pending_transfer_invite %}
-         <div class="relative z-10 mt-2 inline-flex items-center gap-2 bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full border border-white/40">
+         <div class="relative z-10 mt-2 inline-flex items-center gap-2 text-xs font-semibold px-3 py-1 rounded-full {{ agent.header_badge_class }}">
            <i aria-hidden="true" data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
            <span>Transfer Pending</span>
          </div>

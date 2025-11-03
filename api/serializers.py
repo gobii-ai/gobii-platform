@@ -328,7 +328,6 @@ class PersistentAgentListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
         ref_name = "PersistentAgentList"
 
-
 class PreferredEndpointInputField(serializers.Field):
     default_error_messages = {
         'invalid_choice': 'preferred_contact_endpoint must be "email", "sms", or a valid endpoint id.',
