@@ -161,11 +161,18 @@ def _build_event_payload(
     billing_reason="subscription_update",
     product="prod_123",
     extra_items=None,
+    unit_amount=2999,
+    currency="usd",
 ):
     items_data = [
         {
             "plan": {"usage_type": usage_type},
-            "price": {"product": product},
+            "price": {
+                "product": product,
+                "unit_amount": unit_amount,
+                "unit_amount_decimal": str(unit_amount) if unit_amount is not None else None,
+                "currency": currency,
+            },
             "quantity": quantity,
         }
     ]
@@ -207,6 +214,11 @@ class SubscriptionSignalTests(TestCase):
         self.billing.billing_cycle_anchor = 1
         self.billing.save(update_fields=["billing_cycle_anchor"])
 
+        self._capi_patcher = patch("pages.signals.capi")
+        self.mock_capi = self._capi_patcher.start()
+        self.addCleanup(self._capi_patcher.stop)
+        self.mock_capi.reset_mock()
+
     def _mock_subscription(self, current_period_day: int, *, subscriber=None):
         aware_start = timezone.make_aware(datetime(2025, 9, current_period_day, 8, 0, 0), timezone=dt_timezone.utc)
         aware_end = timezone.make_aware(datetime(2025, 10, current_period_day, 8, 0, 0), timezone=dt_timezone.utc)
@@ -223,6 +235,7 @@ class SubscriptionSignalTests(TestCase):
 
     @tag("batch_pages")
     def test_subscription_anchor_updates_from_stripe(self):
+        self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_create")
         event = _build_djstripe_event(payload)
 
@@ -258,8 +271,23 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(track_kwargs["properties"]["plan"], PlanNamesChoices.STARTUP.value)
         mock_logger_exception.assert_not_called()
 
+        self.mock_capi.assert_called_once()
+        capi_kwargs = self.mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "Subscribe")
+        self.assertIsNone(capi_kwargs["request"])
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
+        self.assertEqual(props["subscription_id"], "sub_123")
+        self.assertAlmostEqual(props["value"], 29.99, places=2)
+        self.assertEqual(props["currency"], "USD")
+        self.assertNotIn("renewal", props)
+        context = capi_kwargs["context"]
+        self.assertIsNotNone(context)
+        self.assertTrue(context.get("consent"))
+
     @tag("batch_pages")
     def test_subscription_cycle_emits_renewed_event(self):
+        self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_cycle")
         event = _build_djstripe_event(payload)
 
@@ -284,8 +312,20 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(track_kwargs["event"], AnalyticsEvent.SUBSCRIPTION_RENEWED)
         self.assertEqual(track_kwargs["properties"]["plan"], PlanNamesChoices.STARTUP.value)
 
+        self.mock_capi.assert_called_once()
+        capi_kwargs = self.mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "Subscribe")
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
+        self.assertEqual(props["subscription_id"], "sub_123")
+        self.assertTrue(props.get("renewal"))
+        self.assertAlmostEqual(props["value"], 29.99, places=2)
+        self.assertEqual(props["currency"], "USD")
+        self.assertTrue(capi_kwargs["context"].get("consent"))
+
     @tag("batch_pages")
     def test_missing_user_billing_logs_exception(self):
+        self.mock_capi.reset_mock()
         payload = _build_event_payload()
         event = _build_djstripe_event(payload)
 
@@ -309,9 +349,13 @@ class SubscriptionSignalTests(TestCase):
 
         mock_logger.assert_called_once()
         self.assertFalse(UserBilling.objects.filter(user=self.user).exists())
+        self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
     def test_subscription_cancellation_updates_plan_trait(self):
+        self.mock_capi.reset_mock()
+        self.billing.subscription = PlanNames.STARTUP
+        self.billing.save(update_fields=["subscription"])
         payload = _build_event_payload(status="canceled")
         event = _build_djstripe_event(payload, event_type="customer.subscription.deleted")
 
@@ -321,6 +365,7 @@ class SubscriptionSignalTests(TestCase):
 
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
             patch("pages.signals.downgrade_owner_to_free_plan") as mock_downgrade, \
             patch("pages.signals.DedicatedProxyService.release_for_owner") as mock_release, \
             patch("pages.signals.Analytics.identify") as mock_identify, \
@@ -342,8 +387,22 @@ class SubscriptionSignalTests(TestCase):
         track_kwargs = mock_track_event.call_args.kwargs
         self.assertEqual(track_kwargs["properties"]["plan"], PlanNames.FREE)
 
+        self.mock_capi.assert_called_once()
+        capi_kwargs = self.mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "CancelSubscription")
+        self.assertIsNone(capi_kwargs["request"])
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["plan"], PlanNames.STARTUP)
+        self.assertEqual(props["subscription_id"], "sub_123")
+        self.assertEqual(props["status"], "canceled")
+        self.assertEqual(props["churn_stage"], "voluntary")
+        self.assertNotIn("currency", props)
+        self.assertNotIn("value", props)
+        self.assertTrue(capi_kwargs["context"].get("consent"))
+
     @tag("batch_pages")
     def test_dedicated_ip_allocation_from_subscription(self):
+        self.mock_capi.reset_mock()
         dedicated_item = {
             "plan": {"usage_type": "licensed"},
             "price": {"id": "price_dedicated", "product": "prod_dedicated"},
@@ -379,9 +438,11 @@ class SubscriptionSignalTests(TestCase):
 
         self.assertEqual(mock_allocate.call_count, 2)
         mock_release.assert_not_called()
+        self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
     def test_dedicated_ip_release_on_quantity_decrease(self):
+        self.mock_capi.reset_mock()
         proxy = ProxyServer.objects.create(
             name="Dedicated",
             proxy_type=ProxyServer.ProxyType.HTTP,
@@ -426,9 +487,11 @@ class SubscriptionSignalTests(TestCase):
         mock_allocate.assert_not_called()
         mock_release.assert_called_once()
         self.assertEqual(mock_release.call_args.kwargs.get("limit"), 1)
+        self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
     def test_dedicated_ip_release_on_cancellation(self):
+        self.mock_capi.reset_mock()
         payload = _build_event_payload()
         event = _build_djstripe_event(payload, event_type="customer.subscription.deleted")
 
@@ -447,6 +510,7 @@ class SubscriptionSignalTests(TestCase):
             handle_subscription_event(event)
 
         mock_release.assert_called_once_with(self.user)
+        self.mock_capi.assert_called_once()
 
 
 @tag("batch_pages")
@@ -458,6 +522,10 @@ class SubscriptionSignalOrganizationTests(TestCase):
         billing.stripe_customer_id = "cus_org"
         billing.subscription = PlanNamesChoices.ORG_TEAM.value
         billing.save(update_fields=["stripe_customer_id", "subscription"])
+        capi_patcher = patch("pages.signals.capi")
+        self.addCleanup(capi_patcher.stop)
+        self.mock_capi = capi_patcher.start()
+        self.mock_capi.reset_mock()
         patcher = patch("pages.signals.stripe.Subscription.retrieve")
         self.addCleanup(patcher.stop)
         self.mock_subscription_retrieve = patcher.start()
@@ -493,6 +561,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_create_sets_seats_and_grants(self, mock_sync, mock_plan, mock_grant, mock_item_create):
+        self.mock_capi.reset_mock()
         sub, payload = self._mock_subscription(quantity=2, billing_reason=None)
         mock_sync.return_value = sub
         mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
@@ -521,12 +590,14 @@ class SubscriptionSignalOrganizationTests(TestCase):
         _, kwargs = mock_grant.call_args
         self.assertEqual(kwargs.get("seats"), 2)
         self.assertEqual(kwargs.get("invoice_id"), invoice_payload["id"])
+        self.mock_capi.assert_not_called()
 
     @patch("pages.signals.stripe.SubscriptionItem.create")
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_create_with_existing_seats_grants_delta(self, mock_sync, mock_plan, mock_grant, mock_item_create):
+        self.mock_capi.reset_mock()
         billing = self.org.billing
         billing.purchased_seats = 3
         billing.save(update_fields=["purchased_seats"])
@@ -555,12 +626,14 @@ class SubscriptionSignalOrganizationTests(TestCase):
         _, kwargs = mock_grant.call_args
         self.assertEqual(kwargs.get("seats"), 2)
         self.assertEqual(kwargs.get("invoice_id"), "")
+        self.mock_capi.assert_not_called()
 
     @patch("pages.signals.stripe.SubscriptionItem.create")
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_update_grants_difference(self, mock_sync, mock_plan, mock_grant, mock_item_create):
+        self.mock_capi.reset_mock()
         billing = self.org.billing
         billing.purchased_seats = 2
         billing.save(update_fields=["purchased_seats"])
@@ -591,12 +664,14 @@ class SubscriptionSignalOrganizationTests(TestCase):
         _, kwargs = mock_grant.call_args
         self.assertEqual(kwargs.get("seats"), 1)
         self.assertEqual(kwargs.get("invoice_id"), "")
+        self.mock_capi.assert_not_called()
 
     @patch("pages.signals.stripe.SubscriptionItem.create")
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_update_decrease_no_grant(self, mock_sync, mock_plan, mock_grant, mock_item_create):
+        self.mock_capi.reset_mock()
         billing = self.org.billing
         billing.purchased_seats = 3
         billing.save(update_fields=["purchased_seats"])
@@ -622,12 +697,14 @@ class SubscriptionSignalOrganizationTests(TestCase):
         billing.refresh_from_db()
         self.assertEqual(billing.purchased_seats, 1)
         mock_grant.assert_not_called()
+        self.mock_capi.assert_not_called()
 
     @patch("pages.signals.stripe.SubscriptionItem.create")
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_cycle_renews_with_replace_current(self, mock_sync, mock_plan, mock_grant, mock_item_create):
+        self.mock_capi.reset_mock()
         billing = self.org.billing
         billing.purchased_seats = 3
         billing.billing_cycle_anchor = 17
@@ -659,11 +736,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
         self.assertEqual(call_kwargs.get("invoice_id"), payload["latest_invoice"])
         self.assertTrue(call_kwargs.get("replace_current"))
         self.assertIs(call_kwargs.get("subscription"), sub)
+        self.mock_capi.assert_not_called()
 
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_adds_overage_item_when_missing(self, mock_sync, mock_plan, mock_grant):
+        self.mock_capi.reset_mock()
         sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_update")
         payload["items"]["data"][0]["price"]["id"] = "price_org_team"
         mock_sync.return_value = sub
@@ -689,11 +768,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
         mock_sub_retrieve.assert_called_once_with(sub.id, expand=["items.data.price"])
         mock_item_create.assert_called_once_with(subscription=sub.id, price="price_overage")
         mock_grant.assert_called_once()
+        self.mock_capi.assert_not_called()
 
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_skips_overage_item_when_present(self, mock_sync, mock_plan, mock_grant):
+        self.mock_capi.reset_mock()
         sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_update")
         payload_items = payload["items"]["data"]
         payload_items[0]["price"]["id"] = "price_org_team"
@@ -723,11 +804,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
             handle_subscription_event(event)
 
         mock_item_create.assert_not_called()
+        self.mock_capi.assert_not_called()
 
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_detach_pending_skips_overage_create(self, mock_sync, mock_plan, mock_grant):
+        self.mock_capi.reset_mock()
         sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_update")
         payload["items"]["data"][0]["price"]["id"] = "price_org_team"
         payload["metadata"] = {ORG_OVERAGE_STATE_META_KEY: ORG_OVERAGE_STATE_DETACHED_PENDING}
@@ -758,11 +841,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         mock_item_create.assert_not_called()
         mock_modify.assert_not_called()
+        self.mock_capi.assert_not_called()
 
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
     @patch("pages.signals.get_plan_by_product_id")
     @patch("pages.signals.Subscription.sync_from_stripe_data")
     def test_subscription_detach_pending_clears_flag_when_item_present(self, mock_sync, mock_plan, mock_grant):
+        self.mock_capi.reset_mock()
         sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_update")
         payload_items = payload["items"]["data"]
         payload_items[0]["price"]["id"] = "price_org_team"
@@ -799,3 +884,4 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         mock_item_create.assert_not_called()
         mock_modify.assert_called_once_with(sub.id, metadata={ORG_OVERAGE_STATE_META_KEY: ""})
+        self.mock_capi.assert_not_called()

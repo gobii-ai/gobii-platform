@@ -2,6 +2,7 @@ import uuid
 import json
 import hashlib
 from datetime import timedelta, datetime, timezone as dt_timezone
+from decimal import Decimal, InvalidOperation
 from numbers import Number
 from typing import Any, Mapping
 from urllib.parse import unquote
@@ -118,8 +119,113 @@ def _coerce_bool(value: Any) -> bool | None:
         if lowered in {"false", "0", "no"}:
             return False
         return None
-    if isinstance(value, Number):
-        return bool(value)
+
+
+def _build_marketing_context_from_user(user) -> dict[str, Any]:
+    """Construct marketing context payload from persisted attribution data."""
+    context: dict[str, Any] = {"consent": True}
+    if not user:
+        return context
+
+    try:
+        attribution = user.attribution
+    except UserAttribution.DoesNotExist:
+        return context
+    except AttributeError:
+        return context
+
+    click_ids: dict[str, str] = {}
+    fbc = getattr(attribution, "fbc", "")
+    fbclid = getattr(attribution, "fbclid", "")
+    if fbc:
+        click_ids["fbc"] = fbc
+    if fbclid:
+        click_ids["fbclid"] = fbclid
+    if click_ids:
+        context["click_ids"] = click_ids
+
+    utm_candidates = {
+        "utm_source": getattr(attribution, "utm_source_last", None) or getattr(attribution, "utm_source_first", None),
+        "utm_medium": getattr(attribution, "utm_medium_last", None) or getattr(attribution, "utm_medium_first", None),
+        "utm_campaign": getattr(attribution, "utm_campaign_last", None) or getattr(attribution, "utm_campaign_first", None),
+        "utm_content": getattr(attribution, "utm_content_last", None) or getattr(attribution, "utm_content_first", None),
+        "utm_term": getattr(attribution, "utm_term_last", None) or getattr(attribution, "utm_term_first", None),
+    }
+    utm = {key: value for key, value in utm_candidates.items() if value}
+    if utm:
+        context["utm"] = utm
+
+    return context
+
+
+def _calculate_subscription_value(licensed_item: Mapping[str, Any] | None) -> tuple[float | None, str | None]:
+    """Return estimated total value (in major units) and currency for the licensed item."""
+    if not isinstance(licensed_item, Mapping):
+        return None, None
+
+    price = licensed_item.get("price") or {}
+    if not isinstance(price, Mapping):
+        price = {}
+
+    currency = price.get("currency")
+    amount = price.get("unit_amount")
+    if amount is None:
+        amount = price.get("unit_amount_decimal")
+
+    quantity = licensed_item.get("quantity")
+    if quantity in (None, ""):
+        quantity = 1
+
+    value: float | None = None
+    if amount is not None:
+        try:
+            amount_dec = Decimal(str(amount))
+            quantity_dec = Decimal(str(quantity))
+            value = float((amount_dec * quantity_dec) / Decimal("100"))
+        except (InvalidOperation, TypeError, ValueError):
+            value = None
+
+    if isinstance(currency, str):
+        currency = currency.upper()
+
+    return value, currency
+
+
+def _extract_plan_value_from_subscription(source: Mapping[str, Any] | None) -> str | None:
+    """Derive plan identifier from Stripe subscription payload when available."""
+    if not isinstance(source, Mapping):
+        return None
+
+    try:
+        items = (source.get("items") or {}).get("data", []) or []
+    except AttributeError:
+        items = []
+
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        plan_info = item.get("plan") or {}
+        if not isinstance(plan_info, Mapping):
+            continue
+        if plan_info.get("usage_type") != "licensed":
+            continue
+        price_info = item.get("price") or {}
+        if not isinstance(price_info, Mapping):
+            price_info = {}
+        product_id = price_info.get("product")
+        if not product_id:
+            continue
+        plan_config = get_plan_by_product_id(product_id)
+        if not plan_config:
+            continue
+        plan_id = plan_config.get("id")
+        if not plan_id:
+            continue
+        try:
+            return PlanNamesChoices(plan_id).value
+        except Exception:
+            return plan_id
+
     return None
 
 
@@ -668,6 +774,24 @@ def handle_subscription_event(event, **kwargs):
 
         span.set_attribute('subscription.owner.type', owner_type)
 
+        subscription_id = getattr(sub, "id", None)
+        marketing_context: dict[str, Any]
+        plan_before_cancellation = None
+        if owner_type == "user":
+            marketing_context = _build_marketing_context_from_user(owner)
+            if not marketing_context:
+                marketing_context = {"consent": True}
+            try:
+                plan_before_cancellation = owner.billing.subscription  # type: ignore[attr-defined]
+            except UserBilling.DoesNotExist:
+                plan_before_cancellation = None
+            except AttributeError:
+                plan_before_cancellation = None
+        else:
+            marketing_context = {}
+
+        source_data = stripe_sub if stripe_sub is not None else (getattr(sub, "stripe_data", {}) or {})
+
         # Handle explicit deletions (downgrade to free immediately)
         try:
             event_type = getattr(event, "type", "") or getattr(event, "event_type", "")
@@ -697,7 +821,7 @@ def handle_subscription_event(event, **kwargs):
                     )
                 except Exception:
                     logger.exception("Failed to update user subscription in analytics for user %s", owner.id)
-                    
+
                 try:
                     Analytics.track_event(
                         user_id=owner.id,
@@ -710,6 +834,28 @@ def handle_subscription_event(event, **kwargs):
                     )
                 except Exception:
                     logger.exception("Failed to track subscription cancellation for user %s", owner.id)
+
+                try:
+                    cancel_plan_value = _extract_plan_value_from_subscription(source_data) or plan_before_cancellation
+                    cancel_properties = {
+                        "plan": cancel_plan_value or PlanNames.FREE,
+                        "subscription_id": subscription_id,
+                        "status": "canceled",
+                        "churn_stage": "voluntary",
+                    }
+                    cancel_properties = {k: v for k, v in cancel_properties.items() if v is not None}
+                    capi(
+                        user=owner,
+                        event_name="CancelSubscription",
+                        properties=cancel_properties,
+                        request=None,
+                        context=marketing_context,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to enqueue marketing cancellation event for user %s",
+                        getattr(owner, "id", None),
+                    )
             else:
                 billing = organization_billing
                 if billing:
@@ -732,7 +878,6 @@ def handle_subscription_event(event, **kwargs):
 
         # Prefer explicit Stripe retrieve when present; otherwise use dj-stripe's cached payload
         # from the Subscription row. This allows the normal sync_from_stripe_data path to work.
-        source_data = stripe_sub if stripe_sub is not None else (getattr(sub, "stripe_data", {}) or {})
 
         current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
         cancel_at_dt = _coerce_datetime(_get_stripe_data_value(source_data, "cancel_at"))
@@ -845,6 +990,34 @@ def handle_subscription_event(event, **kwargs):
                         source=AnalyticsSource.WEB,
                         properties=event_properties,
                     )
+
+                    marketing_properties = {
+                        "plan": plan_value,
+                        "subscription_id": subscription_id,
+                    }
+                    value, currency = _calculate_subscription_value(licensed_item)
+                    if value is not None:
+                        marketing_properties["value"] = value
+                    if currency:
+                        marketing_properties["currency"] = currency
+                    if analytics_event == AnalyticsEvent.SUBSCRIPTION_RENEWED:
+                        marketing_properties["renewal"] = True
+
+                    marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
+
+                    try:
+                        capi(
+                            user=owner,
+                            event_name="Subscribe",
+                            properties=marketing_properties,
+                            request=None,
+                            context=marketing_context,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to enqueue marketing subscription event for user %s",
+                            getattr(owner, "id", None),
+                        )
             else:
                 seats = 0
                 try:
