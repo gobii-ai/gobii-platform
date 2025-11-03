@@ -779,8 +779,7 @@ def handle_subscription_event(event, **kwargs):
         plan_before_cancellation = None
         if owner_type == "user":
             marketing_context = _build_marketing_context_from_user(owner)
-            if not marketing_context:
-                marketing_context = {"consent": True}
+
             try:
                 plan_before_cancellation = owner.billing.subscription  # type: ignore[attr-defined]
             except UserBilling.DoesNotExist:
