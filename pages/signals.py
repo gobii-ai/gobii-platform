@@ -121,7 +121,7 @@ def _coerce_bool(value: Any) -> bool | None:
         return None
 
 
-def _build_marketing_context_from_user(user) -> dict[str, Any]:
+def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     """Construct marketing context payload from persisted attribution data."""
     context: dict[str, Any] = {"consent": True}
     if not user:
