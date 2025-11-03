@@ -29,6 +29,7 @@ class ProactiveActivationService:
 
     DEFAULT_BATCH_SIZE = 10
     SCAN_LIMIT = 50
+    MAX_AGENTS_TO_SCAN = 500
     ROLLOUT_FLAG_NAME = "proactive_agent_rollout"
     USER_COOLDOWN_FALLBACK_MINUTES = 360
     MIN_TRIGGER_INTERVAL_MINUTES = 7 * 24 * 60  # At most once per week
@@ -41,51 +42,85 @@ class ProactiveActivationService:
         now = timezone.now()
         redis_client = cls._get_redis_client()
 
-        candidates = cls._eligible_agents(now)
         triggered_results: List[ProactiveTriggerResult] = []
         seen_users: set[str] = set()
+        scanned_agent_ids: set[int] = set()
+        total_scanned = 0
+        chunk_size = cls.SCAN_LIMIT
 
-        for agent in candidates:
-            if agent.user_id in seen_users:
-                continue
-            if not cls._is_rollout_enabled_for_agent(agent):
+        while len(triggered_results) < batch:
+            if total_scanned >= cls.MAX_AGENTS_TO_SCAN:
                 logger.debug(
-                    "Skipping proactive trigger for agent %s because rollout flag '%s' is inactive",
-                    agent.id,
-                    cls.ROLLOUT_FLAG_NAME,
+                    "Stopping proactive trigger scan after reaching max of %s agents",
+                    cls.MAX_AGENTS_TO_SCAN,
                 )
-                continue
-            if not cls._recent_activity_cooldown_satisfied(agent, now):
-                continue
-            has_credit, credit_remaining = cls._has_required_daily_credit(agent)
-            if not has_credit:
-                logger.debug("Skipping proactive trigger for agent %s due to insufficient daily credits", agent.id)
-                continue
-            effective_min_interval = cls._effective_min_interval_minutes()
-            if not cls._min_interval_satisfied(agent, now, effective_min_interval):
-                continue
-            if not cls._acquire_user_gate(redis_client, agent.user_id, effective_min_interval):
-                continue
+                break
 
-            metadata = cls._build_metadata(now, remaining_credits=credit_remaining)
+            remaining_scan_budget = cls.MAX_AGENTS_TO_SCAN - total_scanned
+            current_limit = min(chunk_size, remaining_scan_budget)
+            candidates = cls._eligible_agents(now, limit=current_limit, exclude_ids=scanned_agent_ids)
+            if not candidates:
+                break
 
-            try:
-                result = cls._record_trigger(agent, now, metadata)
-            except Exception:
-                logger.exception("Failed to record proactive trigger for agent %s", agent.id)
-                cls._release_user_gate(redis_client, agent.user_id)
-                continue
+            for agent in candidates:
+                scanned_agent_ids.add(agent.id)
+                total_scanned += 1
 
-            triggered_results.append(result)
-            seen_users.add(agent.user_id)
+                if agent.user_id in seen_users:
+                    continue
+                if not cls._is_rollout_enabled_for_agent(agent):
+                    logger.debug(
+                        "Skipping proactive trigger for agent %s because rollout flag '%s' is inactive",
+                        agent.id,
+                        cls.ROLLOUT_FLAG_NAME,
+                    )
+                    continue
+                if not cls._recent_activity_cooldown_satisfied(agent, now):
+                    continue
+                has_credit, credit_remaining = cls._has_required_daily_credit(agent)
+                if not has_credit:
+                    logger.debug("Skipping proactive trigger for agent %s due to insufficient daily credits", agent.id)
+                    continue
+                effective_min_interval = cls._effective_min_interval_minutes()
+                if not cls._min_interval_satisfied(agent, now, effective_min_interval):
+                    continue
+                if not cls._acquire_user_gate(redis_client, agent.user_id, effective_min_interval):
+                    continue
+
+                metadata = cls._build_metadata(now, remaining_credits=credit_remaining)
+
+                try:
+                    result = cls._record_trigger(agent, now, metadata)
+                except Exception:
+                    logger.exception("Failed to record proactive trigger for agent %s", agent.id)
+                    cls._release_user_gate(redis_client, agent.user_id)
+                    continue
+
+                triggered_results.append(result)
+                seen_users.add(agent.user_id)
+
+                if len(triggered_results) >= batch:
+                    break
+
+                if total_scanned >= cls.MAX_AGENTS_TO_SCAN:
+                    break
 
             if len(triggered_results) >= batch:
+                break
+
+            if total_scanned >= cls.MAX_AGENTS_TO_SCAN or len(candidates) < chunk_size:
                 break
 
         return [result.agent for result in triggered_results]
 
     @classmethod
-    def _eligible_agents(cls, now: datetime) -> Sequence[PersistentAgent]:
+    def _eligible_agents(
+        cls,
+        now: datetime,
+        *,
+        limit: int | None,
+        exclude_ids: set[int] | None = None,
+    ) -> Sequence[PersistentAgent]:
         """Return a ranked list of potentially eligible agents."""
         day_start = now.astimezone(timezone.get_current_timezone()).replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -106,8 +141,14 @@ class ProactiveActivationService:
                     distinct=True,
                 )
             )
-            .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")[: cls.SCAN_LIMIT]
+            .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")
         )
+
+        if exclude_ids:
+            qs = qs.exclude(pk__in=exclude_ids)
+
+        if limit is not None:
+            qs = qs[:limit]
 
         return list(qs)
 

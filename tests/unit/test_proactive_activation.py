@@ -206,3 +206,98 @@ class ProactiveActivationServiceTests(TestCase):
             triggered = ProactiveActivationService.trigger_agents(batch_size=5)
 
         self.assertEqual(triggered, [])
+
+    @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent")
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_scans_additional_batches_when_rollout_disables_initial_candidates(self, mock_redis_client, mock_flag):
+        mock_redis_client.return_value = _FakeRedis()
+        # Ensure existing fixture agents do not appear in the candidate list.
+        PersistentAgent.objects.filter(pk__in=[self.agent_a.pk, self.agent_b.pk]).update(proactive_opt_in=False)
+
+        User = get_user_model()
+        stale_timestamp = timezone.now() - timedelta(days=3)
+        eligible_agents: list[PersistentAgent] = []
+        for idx in range(3):
+            user = User.objects.create_user(
+                username=f"proactive-scan-{idx}@example.com",
+                email=f"proactive-scan-{idx}@example.com",
+                password="password",
+            )
+            quota, _ = UserQuota.objects.get_or_create(user=user)
+            quota.agent_limit = 5
+            quota.save()
+            browser_agent = create_browser_agent_without_proxy(user, f"browser-scan-{idx}")
+            agent = PersistentAgent.objects.create(
+                user=user,
+                name=f"agent-scan-{idx}",
+                charter="Reach out",
+                schedule="@daily",
+                browser_use_agent=browser_agent,
+                proactive_opt_in=True,
+            )
+            PersistentAgent.objects.filter(pk=agent.pk).update(last_interaction_at=stale_timestamp)
+            agent.refresh_from_db()
+            eligible_agents.append(agent)
+
+        def flag_side_effect(agent):
+            if flag_side_effect.calls < 2:
+                flag_side_effect.calls += 1
+                return False
+            flag_side_effect.calls += 1
+            return True
+
+        flag_side_effect.calls = 0
+        mock_flag.side_effect = flag_side_effect
+
+        with patch.object(ProactiveActivationService, "SCAN_LIMIT", 1):
+            triggered = ProactiveActivationService.trigger_agents(batch_size=1)
+
+        self.assertEqual(len(triggered), 1)
+        self.assertEqual(triggered[0].id, eligible_agents[-1].id)
+
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_respects_max_agents_to_scan_limit(self, mock_redis_client):
+        mock_redis_client.return_value = _FakeRedis()
+        PersistentAgent.objects.filter(pk__in=[self.agent_a.pk, self.agent_b.pk]).update(proactive_opt_in=False)
+
+        User = get_user_model()
+        stale_timestamp = timezone.now() - timedelta(days=3)
+        for idx in range(4):
+            user = User.objects.create_user(
+                username=f"proactive-cap-{idx}@example.com",
+                email=f"proactive-cap-{idx}@example.com",
+                password="password",
+            )
+            quota, _ = UserQuota.objects.get_or_create(user=user)
+            quota.agent_limit = 5
+            quota.save()
+            browser_agent = create_browser_agent_without_proxy(user, f"browser-cap-{idx}")
+            agent = PersistentAgent.objects.create(
+                user=user,
+                name=f"agent-cap-{idx}",
+                charter="Stay in touch",
+                schedule="@daily",
+                browser_use_agent=browser_agent,
+                proactive_opt_in=True,
+            )
+            PersistentAgent.objects.filter(pk=agent.pk).update(last_interaction_at=stale_timestamp)
+
+        flag_calls = {"count": 0}
+
+        def flag_side_effect(agent):
+            flag_calls["count"] += 1
+            return False
+
+        with patch.object(ProactiveActivationService, "SCAN_LIMIT", 1), patch.object(
+            ProactiveActivationService,
+            "MAX_AGENTS_TO_SCAN",
+            2,
+        ), patch.object(
+            ProactiveActivationService,
+            "_is_rollout_enabled_for_agent",
+            side_effect=flag_side_effect,
+        ):
+            triggered = ProactiveActivationService.trigger_agents(batch_size=3)
+
+        self.assertEqual(triggered, [])
+        self.assertEqual(flag_calls["count"], 2)
