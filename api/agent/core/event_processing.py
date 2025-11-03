@@ -13,7 +13,7 @@ import math
 from datetime import datetime, timezone, timedelta
 from functools import partial
 from decimal import Decimal
-from typing import List, Tuple, Union, Optional
+from typing import List, Tuple, Union, Optional, Dict, Any, Sequence
 from uuid import UUID, uuid4
 
 import litellm
@@ -24,7 +24,7 @@ from opentelemetry import baggage, trace
 from pottery import Redlock
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction, close_old_connections
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 from django.core.files.base import ContentFile
@@ -50,11 +50,11 @@ from ..short_description import (
     maybe_schedule_short_description,
 )
 from ..tags import maybe_schedule_agent_tags
-from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
+from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms, RAW_MSG_LIMIT
 from tasks.services import TaskCreditService
 from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
 from util.constants.task_constants import TASKS_UNLIMITED
-from .step_compaction import llm_summarise_steps
+from .step_compaction import llm_summarise_steps, RAW_STEP_LIMIT
 from .llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
@@ -263,7 +263,12 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     
     # Rough estimates for other content
     # History: estimate based on recent steps and comms
-    recent_steps = PersistentAgentStep.objects.filter(agent=agent).order_by('-created_at')[:10]
+    recent_steps = (
+        PersistentAgentStep.objects.filter(agent=agent)
+        .select_related("tool_call")
+        .only("description", "tool_call__result")
+        .order_by('-created_at')[:10]
+    )
     for step in recent_steps:
         # Add description length
         if step.description:
@@ -277,7 +282,11 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
             # This step doesn't have a tool call, which is fine
             pass
     
-    recent_comms = PersistentAgentMessage.objects.filter(owner_agent=agent).order_by('-timestamp')[:5]
+    recent_comms = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent)
+        .only("body")
+        .order_by('-timestamp')[:5]
+    )
     for comm in recent_comms:
         if comm.body:
             total_length += len(comm.body)
@@ -513,7 +522,12 @@ def _has_sufficient_daily_credit(state: dict, cost: Decimal | None) -> bool:
         return False
 
 
-def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -> bool|Decimal:
+def _ensure_credit_for_tool(
+    agent: PersistentAgent,
+    tool_name: str,
+    span=None,
+    credit_snapshot: Optional[Dict[str, Any]] = None,
+) -> bool | Decimal:
     """Ensure the agent's owner has a task credit and consume it just-in-time.
 
     Returns True if execution may proceed; False if insufficient or consumption fails.
@@ -540,18 +554,30 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
         # Fallback to default single-task cost when lookup fails
         cost = get_default_task_credit_cost()
 
-    try:
-        available = TaskCreditService.get_user_task_credits_available(owner_user)
-    except Exception as e:
-        logger.error(
-            "Credit availability check (in-loop) failed for agent %s (user %s): %s",
-            agent.id,
-            owner_user.id,
-            str(e),
-        )
-        available = None
+    if credit_snapshot is not None and "available" in credit_snapshot:
+        available = credit_snapshot.get("available")
+    else:
+        try:
+            available = TaskCreditService.get_user_task_credits_available(owner_user)
+        except Exception as e:
+            logger.error(
+                "Credit availability check (in-loop) failed for agent %s (user %s): %s",
+                agent.id,
+                owner_user.id,
+                str(e),
+            )
+            available = None
+        if credit_snapshot is not None:
+            credit_snapshot["available"] = available
 
-    daily_state = _get_agent_daily_credit_state(agent)
+    daily_state = None
+    if credit_snapshot is not None and isinstance(credit_snapshot.get("daily_state"), dict):
+        daily_state = credit_snapshot["daily_state"]
+    if daily_state is None:
+        daily_state = _get_agent_daily_credit_state(agent)
+        if credit_snapshot is not None:
+            credit_snapshot["daily_state"] = daily_state
+
     daily_limit = daily_state.get("limit")
     daily_remaining = daily_state.get("remaining")
 
@@ -703,6 +729,9 @@ def _ensure_credit_for_tool(agent: PersistentAgent, tool_name: str, span=None) -
                 exc,
             )
         else:
+            if credit_snapshot is not None:
+                credit_snapshot["daily_state"] = updated_state
+                credit_snapshot.pop("available", None)
             if span is not None:
                 try:
                     remaining_after = updated_state.get("remaining")
@@ -814,6 +843,7 @@ def process_agent_events(
     lock = Redlock(key=lock_key, masters={redis_client}, auto_release_time=14400)  # 4 hour timeout to match Celery
 
     lock_acquired = False
+    processed_agent: Optional[PersistentAgent] = None
 
     try:
         # Try to acquire the lock with a small timeout. If this instance cannot get the lock
@@ -845,7 +875,7 @@ def process_agent_events(
             span.set_attribute("sqlite_db.temp_path", _sqlite_db_path)
 
             # Actual event processing logic (protected by the lock)
-            _process_agent_events_locked(persistent_agent_id, span)
+            processed_agent = _process_agent_events_locked(persistent_agent_id, span)
 
     except Exception as e:
         logger.error("Error during event processing for agent %s: %s", persistent_agent_id, str(e))
@@ -925,26 +955,43 @@ def process_agent_events(
         # Broadcast final processing state to websocket clients after all processing is complete
         try:
             from console.agent_chat.signals import _broadcast_processing
-            from api.models import PersistentAgent
-            agent_obj = PersistentAgent.objects.get(id=persistent_agent_id)
-            _broadcast_processing(agent_obj)
+
+            agent_obj = processed_agent
+            if agent_obj is None:
+                agent_obj = PersistentAgent.objects.filter(id=persistent_agent_id).first()
+            if agent_obj is not None:
+                _broadcast_processing(agent_obj)
         except Exception as e:
             logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
 
 
-def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) -> None:
+def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) -> Optional[PersistentAgent]:
     """Core event processing logic, called while holding the distributed lock."""
+    try:
+        agent = (
+            PersistentAgent.objects.select_related(
+                "user",
+                "preferred_contact_endpoint",
+                "browser_use_agent",
+            )
+            .prefetch_related("webhooks")
+            .get(id=persistent_agent_id)
+        )
+    except PersistentAgent.DoesNotExist:
+        logger.warning("Persistent agent %s not found; skipping processing.", persistent_agent_id)
+        return None
+
     # Broadcast processing state at start of processing (when lock is acquired)
     try:
         from console.agent_chat.signals import _broadcast_processing
-        agent_obj = PersistentAgent.objects.get(id=persistent_agent_id)
-        _broadcast_processing(agent_obj)
+
+        _broadcast_processing(agent)
     except Exception as e:
         logger.debug("Failed to broadcast processing state at start for agent %s: %s", persistent_agent_id, e)
 
     # Exit early in proprietary mode if the agent's owner has no credits
+    credit_snapshot: Optional[Dict[str, Any]] = None
     try:
-        agent = PersistentAgent.objects.get(id=persistent_agent_id)
 
         if is_llm_bootstrap_required():
             msg = "Agent execution paused: LLM configuration required."
@@ -969,7 +1016,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     notes="llm_configuration_missing",
                 )
 
-            return
+            return agent
 
         try:
             maybe_schedule_short_description(agent)
@@ -1032,10 +1079,14 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
                     span.add_event("Agent processing skipped - insufficient credits")
                     span.set_attribute("credit_check.sufficient", False)
-                    return
+                    return agent
                 daily_state = _get_agent_daily_credit_state(agent)
                 daily_limit = daily_state.get("limit")
                 daily_remaining = daily_state.get("remaining")
+                credit_snapshot = {
+                    "available": available,
+                    "daily_state": daily_state,
+                }
                 try:
                     span.set_attribute(
                         "credit_check.daily_limit",
@@ -1071,7 +1122,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
                     span.add_event("Agent processing skipped - daily credit limit reached")
                     span.set_attribute("credit_check.daily_limit_block", True)
-                    return
+                    return agent
             else:
                 # Agents without a linked user (system/automation) are not gated
                 span.add_event("Agent has no linked user; skipping credit gate")
@@ -1079,15 +1130,11 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
             # Non-proprietary mode: do not gate on credits
             span.add_event("Proprietary mode disabled; skipping credit gate")
 
-    except PersistentAgent.DoesNotExist:
-        logger.error(f"PersistentAgent {persistent_agent_id} does not exist")
-        span.add_event('Agent not found')
-        return
     except Exception as e:
         logger.error(f"Error during credit gate for agent {persistent_agent_id}: {str(e)}")
         span.add_event('Credit gate error')
         span.set_attribute('credit_check.error', str(e))
-        return
+        return agent
 
     # Determine whether this is the first processing run before recording the system step
     is_first_run = not PersistentAgentSystemStep.objects.filter(
@@ -1113,7 +1160,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     span.set_attribute('processing_step.id', str(processing_step.id))
     span.set_attribute('processing.is_first_run', is_first_run)
 
-    cumulative_token_usage = _run_agent_loop(agent, is_first_run=is_first_run)
+    cumulative_token_usage = _run_agent_loop(agent, is_first_run=is_first_run, credit_snapshot=credit_snapshot)
 
     # Update system step with cumulative token usage
     sys_step.notes = "simplified"
@@ -1155,9 +1202,15 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         ])
         sys_step.save(update_fields=["notes"])
 
+    return agent
 
 @tracer.start_as_current_span("Agent Loop")
-def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
+def _run_agent_loop(
+    agent: PersistentAgent,
+    *,
+    is_first_run: bool,
+    credit_snapshot: Optional[Dict[str, Any]] = None,
+) -> dict:
     """The core tool‑calling loop for a persistent agent.
     
     Returns:
@@ -1226,6 +1279,7 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                 max_iterations=MAX_AGENT_LOOP_ITERATIONS,
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
+                daily_credit_state=credit_snapshot["daily_state"] if credit_snapshot else None,
             )
             prompt_archive_attached = False
 
@@ -1403,7 +1457,12 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
                             # Do not consume credits or record a step for ignored sleep
                             continue
                         # All tool calls are sleep; consume credits once per call and record step
-                        credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
+                        credits_consumed = _ensure_credit_for_tool(
+                            agent,
+                            tool_name,
+                            span=tool_span,
+                            credit_snapshot=credit_snapshot,
+                        )
                         if not credits_consumed:
                             return cumulative_token_usage
                         # Create sleep step with token usage if available
@@ -1429,7 +1488,12 @@ def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
 
                     all_calls_sleep = False
                     # Ensure credit is available and consume just-in-time for actionable tools
-                    credits_consumed = _ensure_credit_for_tool(agent, tool_name, span=tool_span)
+                    credits_consumed = _ensure_credit_for_tool(
+                        agent,
+                        tool_name,
+                        span=tool_span,
+                        credit_snapshot=credit_snapshot,
+                    )
                     if not credits_consumed:
                         # Credit insufficient or consumption failed; halt processing
                         return cumulative_token_usage
@@ -1725,6 +1789,7 @@ def _build_prompt_context(
     max_iterations: int = MAX_AGENT_LOOP_ITERATIONS,
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
+    daily_credit_state: Optional[dict] = None,
 ) -> tuple[List[dict], int, Optional[UUID]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
@@ -1745,16 +1810,60 @@ def _build_prompt_context(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     safety_id = agent.user.id if agent.user else None
-    ensure_steps_compacted(
-        agent=agent,
-        summarise_fn=partial(llm_summarise_steps, agent=agent),
-        safety_identifier=safety_id,
-    )
-    ensure_comms_compacted(
-        agent=agent,
-        summarise_fn=partial(llm_summarise_comms, agent=agent),
-        safety_identifier=safety_id,
-    )
+    try:
+        step_limit = getattr(settings, "PA_RAW_STEP_LIMIT", RAW_STEP_LIMIT)
+    except Exception:
+        step_limit = RAW_STEP_LIMIT
+    try:
+        comm_limit = getattr(settings, "PA_RAW_MSG_LIMIT", RAW_MSG_LIMIT)
+    except Exception:
+        comm_limit = RAW_MSG_LIMIT
+
+    try:
+        last_step_snapshot = (
+            PersistentAgentStepSnapshot.objects.filter(agent=agent)
+            .only("snapshot_until")
+            .order_by("-snapshot_until")
+            .first()
+        )
+        step_lower_bound = last_step_snapshot.snapshot_until if last_step_snapshot else agent.created_at
+        step_recent_count = (
+            PersistentAgentStep.objects.filter(agent=agent, created_at__gt=step_lower_bound)
+            .order_by()
+            .count()
+        )
+    except (OperationalError, ObjectDoesNotExist, AttributeError):
+        step_recent_count = step_limit + 1  # fall back to running compaction
+
+    if step_recent_count > step_limit:
+        ensure_steps_compacted(
+            agent=agent,
+            summarise_fn=partial(llm_summarise_steps, agent=agent),
+            safety_identifier=safety_id,
+        )
+
+    try:
+        last_comm_snapshot = (
+            PersistentAgentCommsSnapshot.objects.filter(agent=agent)
+            .only("snapshot_until")
+            .order_by("-snapshot_until")
+            .first()
+        )
+        comm_lower_bound = last_comm_snapshot.snapshot_until if last_comm_snapshot else agent.created_at
+        comm_recent_count = (
+            PersistentAgentMessage.objects.filter(owner_agent=agent, timestamp__gt=comm_lower_bound)
+            .order_by()
+            .count()
+        )
+    except (OperationalError, ObjectDoesNotExist, AttributeError):
+        comm_recent_count = comm_limit + 1
+
+    if comm_recent_count > comm_limit:
+        ensure_comms_compacted(
+            agent=agent,
+            summarise_fn=partial(llm_summarise_comms, agent=agent),
+            safety_identifier=safety_id,
+        )
 
     # Get the model being used for accurate token counting
     # Note: We attempt to read DB-configured tiers with token_count=0 to pick
@@ -1893,7 +2002,8 @@ def _build_prompt_context(
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
 
-    daily_credit_state = _get_agent_daily_credit_state(agent)
+    if daily_credit_state is None:
+        daily_credit_state = _get_agent_daily_credit_state(agent)
     _add_budget_awareness_sections(
         critical_group,
         current_iteration=current_iteration,
@@ -2684,19 +2794,30 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     # Collect structured events with their components grouped together
     structured_events: List[Tuple[datetime, str, dict]] = []  # (timestamp, event_type, components)
 
-    # Include most recent completed browser tasks as structured events
-    completed_tasks = (
-        BrowserUseAgentTask.objects.filter(
-            agent=agent.browser_use_agent,
-            status__in=[
-                BrowserUseAgentTask.StatusChoices.COMPLETED,
-                BrowserUseAgentTask.StatusChoices.FAILED,
-                BrowserUseAgentTask.StatusChoices.CANCELLED,
-            ]
+    completed_tasks: Sequence[BrowserUseAgentTask]
+    browser_agent_id = getattr(agent, "browser_use_agent_id", None)
+    if browser_agent_id:
+        completed_tasks_qs = (
+            BrowserUseAgentTask.objects.filter(
+                agent_id=browser_agent_id,
+                status__in=[
+                    BrowserUseAgentTask.StatusChoices.COMPLETED,
+                    BrowserUseAgentTask.StatusChoices.FAILED,
+                    BrowserUseAgentTask.StatusChoices.CANCELLED,
+                ],
+            )
+            .order_by("-updated_at")
+            .prefetch_related(
+                Prefetch(
+                    "steps",
+                    queryset=BrowserUseAgentTaskStep.objects.filter(is_result=True).order_by("id"),
+                    to_attr="result_steps_prefetched",
+                )
+            )
         )
-        .order_by("-updated_at")[:TOOL_CALL_HISTORY_LIMIT]
-        .prefetch_related("steps")
-    )
+        completed_tasks = list(completed_tasks_qs[:TOOL_CALL_HISTORY_LIMIT])
+    else:
+        completed_tasks = []
 
     # format steps (group meta/params/result components together)
     for s in steps:
@@ -2789,7 +2910,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         components = {
             "meta": f"[{t.updated_at.isoformat()}] Browser task (id={t.id}) completed with status '{t.status}': {t.prompt}"
         }
-        result_step = t.steps.filter(is_result=True).first()
+        result_steps = getattr(t, "result_steps_prefetched", None)
+        result_step = result_steps[0] if result_steps else None
         if result_step and result_step.result_value:
             components["result"] = json.dumps(result_step.result_value)
         
@@ -2912,17 +3034,20 @@ __all__ = ["process_agent_events"]
 
 def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
     """Add individual sections for each browser task to the provided promptree group."""
-    import json
-    from ...models import BrowserUseAgentTask
-    
     # ALL active tasks (no limit since we enforce max 5 during creation)
-    active_tasks = BrowserUseAgentTask.objects.filter(
-        agent=agent.browser_use_agent,
-        status__in=[
-            BrowserUseAgentTask.StatusChoices.PENDING,
-            BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
-        ]
-    ).order_by('created_at')
+    browser_agent_id = getattr(agent, "browser_use_agent_id", None)
+    if browser_agent_id:
+        active_tasks = list(
+            BrowserUseAgentTask.objects.filter(
+                agent_id=browser_agent_id,
+                status__in=[
+                    BrowserUseAgentTask.StatusChoices.PENDING,
+                    BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+                ],
+            ).order_by("created_at")
+        )
+    else:
+        active_tasks = []
     
 
     
