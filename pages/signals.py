@@ -826,15 +826,25 @@ def handle_subscription_event(event, **kwargs):
                     'plan': plan_value,
                 })
 
-                Analytics.track_event(
-                    user_id=owner.id,
-                    event=AnalyticsEvent.SUBSCRIPTION_CREATED,
-                    source=AnalyticsSource.WEB,
-                    properties={
-                        'plan': plan_value,
-                        'stripe.invoice_id': invoice_id,
-                    }
-                )
+                event_properties = {
+                    'plan': plan_value,
+                }
+                if invoice_id:
+                    event_properties['stripe.invoice_id'] = invoice_id
+
+                analytics_event = None
+                if billing_reason == 'subscription_create':
+                    analytics_event = AnalyticsEvent.SUBSCRIPTION_CREATED
+                elif billing_reason == 'subscription_cycle':
+                    analytics_event = AnalyticsEvent.SUBSCRIPTION_RENEWED
+
+                if analytics_event:
+                    Analytics.track_event(
+                        user_id=owner.id,
+                        event=analytics_event,
+                        source=AnalyticsSource.WEB,
+                        properties=event_properties,
+                    )
             else:
                 seats = 0
                 try:
