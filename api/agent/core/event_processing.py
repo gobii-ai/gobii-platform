@@ -814,6 +814,7 @@ def process_agent_events(
     lock = Redlock(key=lock_key, masters={redis_client}, auto_release_time=14400)  # 4 hour timeout to match Celery
 
     lock_acquired = False
+    processed_agent: Optional[PersistentAgent] = None
 
     try:
         # Try to acquire the lock with a small timeout. If this instance cannot get the lock
@@ -845,7 +846,7 @@ def process_agent_events(
             span.set_attribute("sqlite_db.temp_path", _sqlite_db_path)
 
             # Actual event processing logic (protected by the lock)
-            _process_agent_events_locked(persistent_agent_id, span)
+            processed_agent = _process_agent_events_locked(persistent_agent_id, span)
 
     except Exception as e:
         logger.error("Error during event processing for agent %s: %s", persistent_agent_id, str(e))
@@ -925,26 +926,42 @@ def process_agent_events(
         # Broadcast final processing state to websocket clients after all processing is complete
         try:
             from console.agent_chat.signals import _broadcast_processing
-            from api.models import PersistentAgent
-            agent_obj = PersistentAgent.objects.get(id=persistent_agent_id)
-            _broadcast_processing(agent_obj)
+
+            agent_obj = processed_agent
+            if agent_obj is None:
+                agent_obj = PersistentAgent.objects.filter(id=persistent_agent_id).first()
+            if agent_obj is not None:
+                _broadcast_processing(agent_obj)
         except Exception as e:
             logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
 
 
-def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) -> None:
+def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) -> Optional[PersistentAgent]:
     """Core event processing logic, called while holding the distributed lock."""
+    try:
+        agent = (
+            PersistentAgent.objects.select_related(
+                "user",
+                "preferred_contact_endpoint",
+                "browser_use_agent",
+            )
+            .prefetch_related("webhooks")
+            .get(id=persistent_agent_id)
+        )
+    except PersistentAgent.DoesNotExist:
+        logger.warning("Persistent agent %s not found; skipping processing.", persistent_agent_id)
+        return None
+
     # Broadcast processing state at start of processing (when lock is acquired)
     try:
         from console.agent_chat.signals import _broadcast_processing
-        agent_obj = PersistentAgent.objects.get(id=persistent_agent_id)
-        _broadcast_processing(agent_obj)
+
+        _broadcast_processing(agent)
     except Exception as e:
         logger.debug("Failed to broadcast processing state at start for agent %s: %s", persistent_agent_id, e)
 
     # Exit early in proprietary mode if the agent's owner has no credits
     try:
-        agent = PersistentAgent.objects.get(id=persistent_agent_id)
 
         if is_llm_bootstrap_required():
             msg = "Agent execution paused: LLM configuration required."
@@ -969,7 +986,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     notes="llm_configuration_missing",
                 )
 
-            return
+            return agent
 
         try:
             maybe_schedule_short_description(agent)
@@ -1032,7 +1049,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
                     span.add_event("Agent processing skipped - insufficient credits")
                     span.set_attribute("credit_check.sufficient", False)
-                    return
+                    return agent
                 daily_state = _get_agent_daily_credit_state(agent)
                 daily_limit = daily_state.get("limit")
                 daily_remaining = daily_state.get("remaining")
@@ -1071,7 +1088,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
                     span.add_event("Agent processing skipped - daily credit limit reached")
                     span.set_attribute("credit_check.daily_limit_block", True)
-                    return
+                    return agent
             else:
                 # Agents without a linked user (system/automation) are not gated
                 span.add_event("Agent has no linked user; skipping credit gate")
@@ -1079,15 +1096,11 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
             # Non-proprietary mode: do not gate on credits
             span.add_event("Proprietary mode disabled; skipping credit gate")
 
-    except PersistentAgent.DoesNotExist:
-        logger.error(f"PersistentAgent {persistent_agent_id} does not exist")
-        span.add_event('Agent not found')
-        return
     except Exception as e:
         logger.error(f"Error during credit gate for agent {persistent_agent_id}: {str(e)}")
         span.add_event('Credit gate error')
         span.set_attribute('credit_check.error', str(e))
-        return
+        return agent
 
     # Determine whether this is the first processing run before recording the system step
     is_first_run = not PersistentAgentSystemStep.objects.filter(
@@ -1155,6 +1168,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         ])
         sys_step.save(update_fields=["notes"])
 
+    return agent
 
 @tracer.start_as_current_span("Agent Loop")
 def _run_agent_loop(agent: PersistentAgent, *, is_first_run: bool) -> dict:
