@@ -29,6 +29,7 @@ class ProactiveActivationService:
 
     DEFAULT_BATCH_SIZE = 10
     SCAN_LIMIT = 50
+    MAX_AGENTS_TO_SCAN = 500
     ROLLOUT_FLAG_NAME = "proactive_agent_rollout"
     USER_COOLDOWN_FALLBACK_MINUTES = 360
     MIN_TRIGGER_INTERVAL_MINUTES = 7 * 24 * 60  # At most once per week
@@ -43,15 +44,28 @@ class ProactiveActivationService:
 
         triggered_results: List[ProactiveTriggerResult] = []
         seen_users: set[str] = set()
-        offset = 0
+        scanned_agent_ids: set[int] = set()
+        total_scanned = 0
         chunk_size = cls.SCAN_LIMIT
 
         while len(triggered_results) < batch:
-            candidates = cls._eligible_agents(now, limit=chunk_size, offset=offset)
+            if total_scanned >= cls.MAX_AGENTS_TO_SCAN:
+                logger.debug(
+                    "Stopping proactive trigger scan after reaching max of %s agents",
+                    cls.MAX_AGENTS_TO_SCAN,
+                )
+                break
+
+            remaining_scan_budget = cls.MAX_AGENTS_TO_SCAN - total_scanned
+            current_limit = min(chunk_size, remaining_scan_budget)
+            candidates = cls._eligible_agents(now, limit=current_limit, exclude_ids=scanned_agent_ids)
             if not candidates:
                 break
 
             for agent in candidates:
+                scanned_agent_ids.add(agent.id)
+                total_scanned += 1
+
                 if agent.user_id in seen_users:
                     continue
                 if not cls._is_rollout_enabled_for_agent(agent):
@@ -88,17 +102,25 @@ class ProactiveActivationService:
                 if len(triggered_results) >= batch:
                     break
 
+                if total_scanned >= cls.MAX_AGENTS_TO_SCAN:
+                    break
+
             if len(triggered_results) >= batch:
                 break
 
-            offset += len(candidates)
-            if len(candidates) < chunk_size:
+            if total_scanned >= cls.MAX_AGENTS_TO_SCAN or len(candidates) < chunk_size:
                 break
 
         return [result.agent for result in triggered_results]
 
     @classmethod
-    def _eligible_agents(cls, now: datetime, *, limit: int | None, offset: int = 0) -> Sequence[PersistentAgent]:
+    def _eligible_agents(
+        cls,
+        now: datetime,
+        *,
+        limit: int | None,
+        exclude_ids: set[int] | None = None,
+    ) -> Sequence[PersistentAgent]:
         """Return a ranked list of potentially eligible agents."""
         day_start = now.astimezone(timezone.get_current_timezone()).replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -122,11 +144,11 @@ class ProactiveActivationService:
             .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")
         )
 
+        if exclude_ids:
+            qs = qs.exclude(pk__in=exclude_ids)
+
         if limit is not None:
-            end = offset + limit
-            qs = qs[offset:end]
-        elif offset:
-            qs = qs[offset:]
+            qs = qs[:limit]
 
         return list(qs)
 
