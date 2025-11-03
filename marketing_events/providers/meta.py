@@ -38,10 +38,12 @@ class MetaCAPI:
 
         test_mode = bool(getattr(settings, "FACEBOOK_CAPI_TEST_MODE", False))
         test_code = getattr(settings, "FACEBOOK_TEST_EVENT_CODE", "") or ""
-        if test_mode and isinstance(test_code, str) and test_code.strip():
-            event_payload["test_event_code"] = test_code.strip()
 
         body = {
             "data": [event_payload]
         }
+
+        if test_mode and isinstance(test_code, str) and test_code.strip():
+            body["test_event_code"] = test_code.strip()
+
         return post_json(self.url, json=body, params={"access_token": self.token})

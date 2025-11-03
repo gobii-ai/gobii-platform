@@ -1,3 +1,5 @@
+from django.conf import settings
+
 from marketing_events.providers.base import post_json
 
 ALLOWED_METADATA_KEYS = {"conversion_id", "value", "currency", "item_count", "products"}
@@ -119,5 +121,10 @@ class RedditCAPI:
             event_obj["click_id"] = click_id
 
         payload = {"data": {"events": [event_obj]}}
+
+        test_mode = bool(getattr(settings, "REDDIT_CAPI_TEST_MODE", False))
+        test_code = getattr(settings, "REDDIT_TEST_EVENT_CODE", "") or ""
+        if test_mode and isinstance(test_code, str) and test_code.strip():
+            payload["data"]["test_id"] = test_code.strip()
 
         return post_json(self.url, json=payload, headers=headers)
