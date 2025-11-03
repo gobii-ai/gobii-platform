@@ -1832,7 +1832,7 @@ def _build_prompt_context(
             .order_by()
             .count()
         )
-    except Exception:
+    except (OperationalError, ObjectDoesNotExist, AttributeError):
         step_recent_count = step_limit + 1  # fall back to running compaction
 
     if step_recent_count > step_limit:
@@ -1855,7 +1855,7 @@ def _build_prompt_context(
             .order_by()
             .count()
         )
-    except Exception:
+    except (OperationalError, ObjectDoesNotExist, AttributeError):
         comm_recent_count = comm_limit + 1
 
     if comm_recent_count > comm_limit:
