@@ -654,7 +654,7 @@ def fetch_timeline_window(
     truncated.sort(key=lambda env: env.sort_key)
 
     tool_label_map = _load_tool_label_map(
-        env.tool_call.tool_name for env in truncated if isinstance(env, StepEnvelope) and env.tool_call
+        env.tool_call.tool_name for env in truncated if isinstance(env, StepEnvelope)
     )
 
     timeline_events: list[dict] = []
