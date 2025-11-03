@@ -926,7 +926,7 @@ def handle_subscription_event(event, **kwargs):
         except Exception as e:
             logger.warning("Webhook: failed to inspect subscription items for %s: %s", sub.id, e)
 
-        # Proceed only when subscription is active and we found a licensed item
+        # Proceed only when the subscription is active and we found a licensed item
         span.set_attribute('subscription.status', str(sub.status))
         if sub.status == 'active' and licensed_item is not None:
             plan_id = (licensed_item.get("price", {}) or {}).get("product")
