@@ -1,4 +1,5 @@
 import hashlib
+import re
 import time
 import uuid
 
@@ -19,6 +20,12 @@ def _sha256_norm(s: str | None) -> str | None:
         return None
     return hashlib.sha256(s.strip().lower().encode("utf-8")).hexdigest()
 
+def _clean_phone(phone: str | None) -> str:
+    """Clean phone number to only contain numbers and '+' character."""
+    if not phone:
+        return ""
+    # Keep only digits and '+' character
+    return re.sub(r'[^0-9+]', '', phone)
 
 def normalize_event(payload: dict) -> dict:
     now = int(time.time())
@@ -31,6 +38,9 @@ def normalize_event(payload: dict) -> dict:
     click = ctx.get("click_ids") or {}
     page = ctx.get("page") or {}
 
+    # Clean phone number to default to empty string and filter characters
+    cleaned_phone = _clean_phone(user.get("phone"))
+
     return {
         "event_name": payload.get("event_name"),
         "event_time": event_time,
@@ -39,7 +49,7 @@ def normalize_event(payload: dict) -> dict:
         "ids": {
             "external_id": _sha256_norm(user.get("id")),
             "em": _sha256_norm(user.get("email")),
-            "ph": _sha256_norm(user.get("phone")),
+            "ph": _sha256_norm(cleaned_phone),
         },
         "network": {
             "client_ip": ctx.get("client_ip"),
