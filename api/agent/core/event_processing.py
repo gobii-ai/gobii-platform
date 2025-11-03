@@ -50,11 +50,11 @@ from ..short_description import (
     maybe_schedule_short_description,
 )
 from ..tags import maybe_schedule_agent_tags
-from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
+from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms, RAW_MSG_LIMIT
 from tasks.services import TaskCreditService
 from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
 from util.constants.task_constants import TASKS_UNLIMITED
-from .step_compaction import llm_summarise_steps
+from .step_compaction import llm_summarise_steps, RAW_STEP_LIMIT
 from .llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
@@ -1810,16 +1810,60 @@ def _build_prompt_context(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     safety_id = agent.user.id if agent.user else None
-    ensure_steps_compacted(
-        agent=agent,
-        summarise_fn=partial(llm_summarise_steps, agent=agent),
-        safety_identifier=safety_id,
-    )
-    ensure_comms_compacted(
-        agent=agent,
-        summarise_fn=partial(llm_summarise_comms, agent=agent),
-        safety_identifier=safety_id,
-    )
+    try:
+        step_limit = getattr(settings, "PA_RAW_STEP_LIMIT", RAW_STEP_LIMIT)
+    except Exception:
+        step_limit = RAW_STEP_LIMIT
+    try:
+        comm_limit = getattr(settings, "PA_RAW_MSG_LIMIT", RAW_MSG_LIMIT)
+    except Exception:
+        comm_limit = RAW_MSG_LIMIT
+
+    try:
+        last_step_snapshot = (
+            PersistentAgentStepSnapshot.objects.filter(agent=agent)
+            .only("snapshot_until")
+            .order_by("-snapshot_until")
+            .first()
+        )
+        step_lower_bound = last_step_snapshot.snapshot_until if last_step_snapshot else agent.created_at
+        step_recent_count = (
+            PersistentAgentStep.objects.filter(agent=agent, created_at__gt=step_lower_bound)
+            .order_by()
+            .count()
+        )
+    except Exception:
+        step_recent_count = step_limit + 1  # fall back to running compaction
+
+    if step_recent_count > step_limit:
+        ensure_steps_compacted(
+            agent=agent,
+            summarise_fn=partial(llm_summarise_steps, agent=agent),
+            safety_identifier=safety_id,
+        )
+
+    try:
+        last_comm_snapshot = (
+            PersistentAgentCommsSnapshot.objects.filter(agent=agent)
+            .only("snapshot_until")
+            .order_by("-snapshot_until")
+            .first()
+        )
+        comm_lower_bound = last_comm_snapshot.snapshot_until if last_comm_snapshot else agent.created_at
+        comm_recent_count = (
+            PersistentAgentMessage.objects.filter(owner_agent=agent, timestamp__gt=comm_lower_bound)
+            .order_by()
+            .count()
+        )
+    except Exception:
+        comm_recent_count = comm_limit + 1
+
+    if comm_recent_count > comm_limit:
+        ensure_comms_compacted(
+            agent=agent,
+            summarise_fn=partial(llm_summarise_comms, agent=agent),
+            safety_identifier=safety_id,
+        )
 
     # Get the model being used for accurate token counting
     # Note: We attempt to read DB-configured tiers with token_count=0 to pick
