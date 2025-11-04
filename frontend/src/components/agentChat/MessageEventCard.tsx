@@ -1,6 +1,7 @@
 import type { AgentMessage } from './types'
 import { MessageContent } from './MessageContent'
 import { formatRelativeTimestamp } from '../../util/time'
+import { buildUserChatPalette } from '../../util/color'
 
 const CHANNEL_LABELS: Record<string, string> = {
   email: 'Email',
@@ -21,9 +22,10 @@ type MessageEventCardProps = {
   eventCursor: string
   message: AgentMessage
   agentFirstName: string
+  agentColorHex?: string
 }
 
-export function MessageEventCard({ eventCursor, message, agentFirstName }: MessageEventCardProps) {
+export function MessageEventCard({ eventCursor, message, agentFirstName, agentColorHex }: MessageEventCardProps) {
   const isAgent = Boolean(message.isOutbound)
   const channel = (message.channel || 'web').toLowerCase()
   const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
@@ -62,33 +64,30 @@ export function MessageEventCard({ eventCursor, message, agentFirstName }: Messa
   }
 
   const relativeLabel = message.relativeTimestamp || formatRelativeTimestamp(message.timestamp) || ''
-  const contentTone = isPeer ? 'text-slate-800' : isAgent ? 'text-slate-800' : 'prose-invert text-white'
+  const palette = !isPeer && !isAgent ? buildUserChatPalette(agentColorHex) : null
+
+  const contentTone = isPeer ? 'text-slate-800' : isAgent ? 'text-slate-800' : ''
 
   const alignmentClass = isPeer ? 'is-agent' : isAgent ? 'is-agent' : 'is-user'
 
+  const channelTagBaseClass = 'ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide'
+  const channelTagClass = isPeer
+    ? `${channelTagBaseClass} border border-indigo-200 bg-indigo-50 text-indigo-600`
+    : isAgent
+      ? `${channelTagBaseClass} border border-indigo-100 bg-indigo-50 text-indigo-600`
+      : `${channelTagBaseClass} user-channel-badge`
+
+  const bubbleStyle = palette?.cssVars
+
   return (
     <article className={`timeline-event chat-event ${alignmentClass} ${isPeer ? 'is-peer' : ''}`} data-cursor={eventCursor}>
-      <div className={`chat-bubble ${bubbleTheme}`}>
+      <div className={`chat-bubble ${bubbleTheme}`} style={bubbleStyle}>
         <div className={`chat-author ${authorTheme}`}>
           {authorLabel}
-          {showChannelTag ? (
-            <span
-              className={`ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                isPeer
-                  ? 'border border-indigo-200 bg-indigo-50 text-indigo-600'
-                  : isAgent
-                    ? 'border border-indigo-100 bg-indigo-50 text-indigo-600'
-                    : 'border border-white/40 bg-white/10 text-white/80'
-              }`}
-            >
-              {channelLabel}
-            </span>
-          ) : null}
+          {showChannelTag ? <span className={channelTagClass}>{channelLabel}</span> : null}
         </div>
         <div
-          className={`chat-content prose prose-sm max-w-none leading-relaxed ${
-            contentTone
-          }`}
+          className={`chat-content prose prose-sm max-w-none leading-relaxed ${contentTone}`}
         >
           <MessageContent bodyHtml={message.bodyHtml} bodyText={message.bodyText} />
         </div>

@@ -7,9 +7,15 @@ type TimelineEventListProps = {
   agentFirstName: string
   events: TimelineEvent[]
   initialLoading?: boolean
+  agentColorHex?: string
 }
 
-export function TimelineEventList({ agentFirstName, events, initialLoading = false }: TimelineEventListProps) {
+export function TimelineEventList({
+  agentFirstName,
+  events,
+  initialLoading = false,
+  agentColorHex,
+}: TimelineEventListProps) {
   if (initialLoading) {
     return (
       <div className="timeline-loading-state flex items-center justify-center gap-3 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-purple-50/60 px-6 py-8 shadow-sm">
@@ -33,6 +39,7 @@ export function TimelineEventList({ agentFirstName, events, initialLoading = fal
               eventCursor={event.cursor}
               message={event.message}
               agentFirstName={agentFirstName}
+              agentColorHex={agentColorHex}
             />
           )
         }

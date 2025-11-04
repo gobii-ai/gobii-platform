@@ -28,6 +28,7 @@ const appName = mountNode.dataset.app ?? 'agent-chat'
 
 const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
+const agentColor = mountNode.dataset.agentColor || null
 
 let screen: ReactElement
 
@@ -36,7 +37,7 @@ switch (appName) {
     if (!agentId) {
       throw new Error('Agent identifier is required for the chat experience')
     }
-    screen = <AgentChatPage agentId={agentId} agentName={agentName} />
+    screen = <AgentChatPage agentId={agentId} agentName={agentName} agentColor={agentColor} />
     break
   case 'diagnostics':
     screen = <DiagnosticsScreen />

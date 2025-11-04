@@ -14,9 +14,10 @@ function deriveFirstName(agentName?: string | null): string {
 export type AgentChatPageProps = {
   agentId: string
   agentName?: string | null
+  agentColor?: string | null
 }
 
-export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
+export function AgentChatPage({ agentId, agentName, agentColor }: AgentChatPageProps) {
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
     timelineRef.current = node
@@ -27,6 +28,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   }, [])
 
   const initialize = useAgentChatStore((state) => state.initialize)
+  const agentColorHex = useAgentChatStore((state) => state.agentColorHex)
   const loadOlder = useAgentChatStore((state) => state.loadOlder)
   const loadNewer = useAgentChatStore((state) => state.loadNewer)
   const jumpToLatest = useAgentChatStore((state) => state.jumpToLatest)
@@ -61,8 +63,8 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
   useAgentChatSocket(agentId)
 
   useEffect(() => {
-    initialize(agentId)
-  }, [agentId, initialize])
+    initialize(agentId, { agentColorHex: agentColor })
+  }, [agentId, initialize, agentColor])
 
   const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
 
@@ -179,6 +181,7 @@ export function AgentChatPage({ agentId, agentName }: AgentChatPageProps) {
       <AgentChatLayout
         agentName={agentName || 'Agent'}
         agentFirstName={agentFirstName}
+        agentColorHex={agentColorHex || agentColor || undefined}
         events={events}
         hasMoreOlder={hasMoreOlder}
         hasMoreNewer={hasMoreNewer}
