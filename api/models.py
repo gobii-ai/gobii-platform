@@ -60,6 +60,10 @@ except Exception:  # pragma: no cover - optional dependency
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
+
+DEFAULT_AGENT_COLOR_HEX = "#0074d4"
+
+
 def generate_ulid() -> str:
     """Return a 26-character, time-ordered ULID string."""
     return str(ulid.new())
@@ -86,6 +90,7 @@ class AgentColor(models.Model):
     @classmethod
     def get_active_palette(cls) -> list["AgentColor"]:
         """Return the ordered, active palette."""
+        cls._seed_palette_if_needed()
         return list(cls.objects.filter(is_active=True).order_by("sort_order", "id"))
 
     @classmethod
@@ -123,6 +128,42 @@ class AgentColor(models.Model):
             if color.id not in used_color_ids:
                 return color
         return None
+
+    @classmethod
+    def _seed_palette_if_needed(cls) -> None:
+        """Populate the palette when migrations are disabled (e.g., unit tests)."""
+        try:
+            if cls.objects.exists():
+                return
+        except (ProgrammingError, OperationalError):
+            # Table does not exist yet (e.g., during migrations); skip seeding.
+            return
+
+        hex_value = cls._normalize_hex(DEFAULT_AGENT_COLOR_HEX)
+        if not hex_value:
+            return
+
+        with transaction.atomic():
+            cls.objects.update_or_create(
+                name="color_default",
+                defaults={
+                    "hex_value": hex_value,
+                    "sort_order": 0,
+                    "is_active": True,
+                },
+            )
+
+    @staticmethod
+    def _normalize_hex(raw_value: str | None) -> str | None:
+        normalized = (raw_value or "").strip()
+        if not normalized:
+            return None
+        if not normalized.startswith("#"):
+            normalized = f"#{normalized}"
+        normalized = normalized.upper()
+        if len(normalized) != 7:
+            return None
+        return normalized
 
 
 # ---------------------------------------------------------------------------
