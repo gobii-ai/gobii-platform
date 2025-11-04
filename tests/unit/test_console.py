@@ -1,9 +1,11 @@
+import json
 from decimal import Decimal
 
 from django.test import TestCase, Client, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from unittest.mock import patch
+from bs4 import BeautifulSoup
 
 
 @tag("batch_console_agents")
@@ -18,6 +20,14 @@ class ConsoleViewsTest(TestCase):
         )
         self.client = Client()
         self.client.login(email='test@example.com', password='testpass123')
+
+    def _get_agent_list_payload(self, response):
+        """Parse the embedded JSON payload that hydrates the React agent list."""
+        soup = BeautifulSoup(response.content, 'html.parser')
+        script = soup.find('script', id='persistent-agents-props')
+        self.assertIsNotNone(script, "Agent list payload script tag missing")
+        self.assertTrue(script.string, "Agent list payload script is empty")
+        return json.loads(script.string)
 
     @tag("batch_console_agents")
     def test_delete_persistent_agent_also_deletes_browser_agent(self):
@@ -313,7 +323,24 @@ class ConsoleViewsTest(TestCase):
 
         response = self.client.get(reverse('agents'))
         self.assertEqual(response.status_code, 200)
-        self.assertIn('List Agent is almost out of daily task credits', response.content.decode())
+        payload = self._get_agent_list_payload(response)
+        matching_agents = [item for item in payload['agents'] if item['name'] == 'List Agent']
+        self.assertTrue(matching_agents, "Serialized payload should include the created agent")
+        agent_data = matching_agents[0]
+        self.assertTrue(agent_data['dailyCreditLow'])
+        self.assertAlmostEqual(agent_data['dailyCreditRemaining'], 0.7, places=2)
+
+    @tag("batch_console_agents")
+    @patch('console.views.AgentService.has_agents_available', return_value=True)
+    @patch('console.views.AgentService.get_agents_available', return_value=5)
+    def test_agent_list_payload_includes_available_capacity(self, mock_get_available, _mock_has_available):
+        response = self.client.get(reverse('agents'))
+        self.assertEqual(response.status_code, 200)
+        payload = self._get_agent_list_payload(response)
+        self.assertIn('agentsAvailable', payload)
+        self.assertEqual(payload['agentsAvailable'], 5)
+        self.assertTrue(payload['canSpawnAgents'])
+        mock_get_available.assert_called()
 
     @tag("batch_console_agents")
     def test_agent_detail_allows_selecting_dedicated_ip(self):

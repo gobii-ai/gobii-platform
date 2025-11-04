@@ -1,10 +1,17 @@
 {% extends "console_page.html" %}
+{% load vite_tags %}
 
 {% block console_content %}
 {% include "partials/_pending_agent_transfers.html" %}
-{% if not has_agents %}
-  {% include "partials/_agent_empty_state.html" %}
-{% else %}
-  {% include "partials/_agent_list.html" %}
-{% endif %}
+<div id="gobii-frontend-root"
+     class="space-y-6 pb-6"
+     data-app="persistent-agents"
+     data-props-json-id="persistent-agents-props">
+</div>
+{{ agent_list_props|json_script:"persistent-agents-props" }}
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% vite_asset 'src/main.tsx' %}
 {% endblock %}

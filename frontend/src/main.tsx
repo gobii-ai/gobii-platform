@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from 'react-aria-components'
 import { Loader2 } from 'lucide-react'
+import type { PersistentAgentsScreenProps } from './screens/PersistentAgentsScreen'
 import './index.css'
 import './styles/consoleShell.css'
 
@@ -11,6 +12,7 @@ const AgentChatPage = lazy(async () => ({ default: (await import('./screens/Agen
 const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/DiagnosticsScreen')).DiagnosticsScreen }))
 const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
 const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageScreen')).UsageScreen }))
+const PersistentAgentsScreen = lazy(async () => ({ default: (await import('./screens/PersistentAgentsScreen')).PersistentAgentsScreen }))
 
 const LoadingFallback = () => (
   <div className="app-loading" role="status" aria-live="polite" aria-label="Loading">
@@ -32,6 +34,17 @@ const agentColor = mountNode.dataset.agentColor || null
 
 let screen: ReactElement
 
+function readJsonScript<T>(scriptId?: string): T {
+  if (!scriptId) {
+    throw new Error('JSON script identifier is required')
+  }
+  const script = document.getElementById(scriptId)
+  if (!script || !script.textContent) {
+    throw new Error(`JSON script ${scriptId} was not found`)
+  }
+  return JSON.parse(script.textContent) as T
+}
+
 switch (appName) {
   case 'agent-chat':
     if (!agentId) {
@@ -45,6 +58,12 @@ switch (appName) {
   case 'usage':
     screen = <UsageScreen />
     break
+  case 'persistent-agents': {
+    const propsId = mountNode.dataset.propsJsonId
+    const initialData = readJsonScript<PersistentAgentsScreenProps['initialData']>(propsId)
+    screen = <PersistentAgentsScreen initialData={initialData} />
+    break
+  }
   case 'mcp-servers': {
     const listUrl = mountNode.dataset.listUrl
     if (!listUrl) {

@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 import stripe
 from django.template.loader import render_to_string
@@ -10,7 +11,7 @@ from django.views.generic import TemplateView, ListView, View, DetailView
 from django.views.generic.edit import FormMixin
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
-from django.urls import reverse, reverse_lazy
+from django.urls import NoReverseMatch, reverse, reverse_lazy
 from django.contrib import messages
 from django.db import transaction, models, IntegrityError
 from django.db.models import Q
@@ -76,10 +77,13 @@ from util.subscription_helper import (
     calculate_extra_tasks_used_during_subscription_period,
     get_user_extra_task_limit,
     get_or_create_stripe_customer,
+    get_organization_plan,
+    has_unlimited_agents,
+    is_community_unlimited_mode,
 )
 from config import settings
 from config.stripe_config import get_stripe_settings
-from config.plans import PLAN_CONFIG
+from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
 
 
 def _clamp_color(value: int) -> int:
@@ -156,6 +160,30 @@ def _text_palette_for_hex(hex_color: str) -> dict[str, str]:
     }
 
 
+def _safe_getattr(source, attr: str, default=None):
+    if source is None:
+        return default
+    if isinstance(source, dict):
+        return source.get(attr, default)
+    return getattr(source, attr, default)
+
+
+def _first_endpoint_address(endpoints) -> str | None:
+    if not endpoints:
+        return None
+    endpoint = endpoints[0]
+    return getattr(endpoint, "address", None) or None
+
+
+def _coerce_decimal_to_float(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, InvalidOperation, ValueError):
+        return None
+
+
 def _resolve_dedicated_ip_pricing(plan):
     plan = plan or {}
     currency = plan.get("currency")
@@ -198,7 +226,7 @@ from .forms import (
 )
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
-from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.analytics import Analytics, AnalyticsCTAs, AnalyticsEvent, AnalyticsSource
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import ORGANIZATIONS
@@ -1687,6 +1715,109 @@ def task_result_view(request, task_id):
 class PersistentAgentsView(ConsoleViewMixin, TemplateView):
     template_name = "console/persistent_agents.html"
 
+    def _resolve_agent_capacity(self, context: dict[str, Any]) -> dict[str, Any]:
+        current_context = context.get('current_context', {})
+        membership = context.get('current_membership')
+        organization = None
+        owner = self.request.user
+        owner_type = 'user'
+
+        if current_context.get('type') == 'organization':
+            organization = getattr(membership, 'org', None)
+            if organization is None:
+                org_id = current_context.get('id')
+                if org_id:
+                    organization = Organization.objects.filter(id=org_id).first()
+            owner = organization
+            owner_type = 'organization'
+
+        if owner is None:
+            return {
+                'agents_available': 0,
+                'agents_unlimited': False,
+                'can_spawn_agents': False,
+            }
+
+        try:
+            agents_available = AgentService.get_agents_available(owner)
+        except Exception:
+            agents_available = 0
+
+        try:
+            can_spawn_agents = AgentService.has_agents_available(owner)
+        except Exception:
+            can_spawn_agents = False
+
+        community_unlimited = is_community_unlimited_mode()
+        if owner_type == 'organization':
+            plan = get_organization_plan(organization) if organization else None
+            agents_unlimited = community_unlimited or (plan and plan.get('agent_limit') == AGENTS_UNLIMITED)
+        else:
+            agents_unlimited = community_unlimited or has_unlimited_agents(owner)
+
+        return {
+            'agents_available': max(int(agents_available), 0),
+            'agents_unlimited': bool(agents_unlimited),
+            'can_spawn_agents': bool(can_spawn_agents),
+        }
+
+    def _serialize_agent_for_frontend(self, agent: PersistentAgent) -> dict[str, Any]:
+        display_tags = agent.display_tags if isinstance(agent.display_tags, list) else []
+        primary_email = _first_endpoint_address(getattr(agent, 'primary_email_endpoints', None))
+        primary_sms = _first_endpoint_address(getattr(agent, 'primary_sms_endpoints', None))
+        remaining = _coerce_decimal_to_float(getattr(agent, 'daily_credit_remaining', None))
+
+        return {
+            'id': str(agent.id),
+            'name': agent.name or '',
+            'listingDescription': agent.listing_description or '',
+            'listingDescriptionSource': getattr(agent, 'listing_description_source', None),
+            'miniDescription': agent.mini_description or '',
+            'miniDescriptionSource': getattr(agent, 'mini_description_source', None),
+            'displayTags': display_tags,
+            'isActive': bool(getattr(agent, 'is_active', False)),
+            'pendingTransfer': bool(getattr(agent, 'pending_transfer_invite', None)),
+            'primaryEmail': primary_email,
+            'primarySms': primary_sms,
+            'detailUrl': reverse('agent_detail', kwargs={'pk': agent.id}),
+            'chatUrl': reverse('agent_chat_shell', kwargs={'pk': agent.id}),
+            'cardGradientStyle': getattr(agent, 'card_gradient_style', '') or '',
+            'iconBackgroundHex': getattr(agent, 'icon_background_hex', '') or '',
+            'iconBorderHex': getattr(agent, 'icon_border_hex', '') or '',
+            'headerTextClass': getattr(agent, 'header_text_class', '') or '',
+            'headerSubtextClass': getattr(agent, 'header_subtext_class', '') or '',
+            'headerStatusClass': getattr(agent, 'header_status_class', '') or '',
+            'headerBadgeClass': getattr(agent, 'header_badge_class', '') or '',
+            'headerIconClass': getattr(agent, 'header_icon_class', '') or '',
+            'headerLinkHoverClass': getattr(agent, 'header_link_hover_class', '') or '',
+            'dailyCreditRemaining': remaining,
+            'dailyCreditLow': bool(getattr(agent, 'daily_credit_low', False)),
+        }
+
+    def _build_agent_list_props(self, context: dict[str, Any], agents: list[PersistentAgent]) -> dict[str, Any]:
+        capacity = self._resolve_agent_capacity(context)
+        can_spawn_agents = capacity['can_spawn_agents']
+        spawn_url = f"{reverse('pages:home')}?spawn=1"
+
+        upgrade_url = None
+        if settings.GOBII_PROPRIETARY_MODE:
+            try:
+                upgrade_url = reverse('proprietary:pricing')
+            except NoReverseMatch:
+                upgrade_url = None
+
+        return {
+            'agents': [self._serialize_agent_for_frontend(agent) for agent in agents],
+            'hasAgents': bool(agents),
+            'spawnAgentUrl': spawn_url,
+            'upgradeUrl': upgrade_url,
+            'canSpawnAgents': can_spawn_agents,
+            'showUpgradeCta': bool(upgrade_url) and settings.GOBII_PROPRIETARY_MODE and not can_spawn_agents,
+            'createFirstAgentEvent': AnalyticsCTAs.CTA_CREATE_FIRST_AGENT_CLICKED.value,
+            'agentsAvailable': capacity['agents_available'],
+            'agentsUnlimited': capacity['agents_unlimited'],
+        }
+
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1778,8 +1909,8 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             )
 
         context['persistent_agents'] = persistent_agents
-
         context['has_agents'] = bool(persistent_agents)
+        context['agent_list_props'] = self._build_agent_list_props(context, persistent_agents)
 
         pending_transfers_qs = AgentTransferInvite.objects.filter(
             status=AgentTransferInvite.Status.PENDING,
