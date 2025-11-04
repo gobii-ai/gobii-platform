@@ -1,6 +1,7 @@
 from django.core.exceptions import AppRegistryNotReady
 
 from config.stripe_config import get_stripe_settings
+from constants.plans import PlanNames
 
 
 # Python has no int min constant, so we define our own
@@ -10,7 +11,7 @@ MAX_AGENT_LIMIT = 1000  # TODO: Adjust once we have confidence scaling beyond th
 # NOTE: Keep this above AGENTS_UNLIMITED so comparisons using min() work correctly.
 
 PLAN_CONFIG = {
-    "free": {
+    PlanNames.FREE: {
         "id": "free",
         "monthly_task_credits": 100,
         "api_rate_limit": 60,
@@ -23,7 +24,7 @@ PLAN_CONFIG = {
         "max_contacts_per_agent": 3,
         "org": False
     },
-    "startup": {
+    PlanNames.STARTUP: {
         "id": "startup",
         "monthly_task_credits": 500,
         "api_rate_limit": 600,
@@ -39,7 +40,23 @@ PLAN_CONFIG = {
         "max_contacts_per_agent": 20,
         "org": False
     },
-    "org_team": {
+    PlanNames.SCALE: {
+        "id": PlanNames.SCALE,
+        "monthly_task_credits": 10000,
+        "api_rate_limit": 1500,
+        "product_id": "",
+        "dedicated_ip_product_id": "",
+        "dedicated_ip_price_id": "",
+        "dedicated_ip_price": 5,
+        "agent_limit": AGENTS_UNLIMITED,
+        "name": "Scale",
+        "description": "Scale plan with enhanced limits and support.",
+        "price": 250,
+        "currency": "USD",
+        "max_contacts_per_agent": 20,
+        "org": False
+    },
+    PlanNames.ORG_TEAM: {
         "id": "org_team",
         "monthly_task_credits": 2000,
         "credits_per_seat": 500,
@@ -70,19 +87,23 @@ def _refresh_plan_products() -> None:
     except AppRegistryNotReady:
         return
 
-    PLAN_CONFIG["startup"]["product_id"] = stripe_settings.startup_product_id or ""
-    PLAN_CONFIG["startup"]["dedicated_ip_product_id"] = stripe_settings.startup_dedicated_ip_product_id or ""
-    PLAN_CONFIG["startup"]["dedicated_ip_price_id"] = stripe_settings.startup_dedicated_ip_price_id or ""
+    PLAN_CONFIG[PlanNames.STARTUP]["product_id"] = stripe_settings.startup_product_id or ""
+    PLAN_CONFIG[PlanNames.STARTUP]["dedicated_ip_product_id"] = stripe_settings.startup_dedicated_ip_product_id or ""
+    PLAN_CONFIG[PlanNames.STARTUP]["dedicated_ip_price_id"] = stripe_settings.startup_dedicated_ip_price_id or ""
 
-    PLAN_CONFIG["org_team"]["product_id"] = stripe_settings.org_team_product_id or ""
-    PLAN_CONFIG["org_team"]["seat_price_id"] = stripe_settings.org_team_price_id or ""
-    PLAN_CONFIG["org_team"]["overage_price_id"] = (
+    PLAN_CONFIG[PlanNames.SCALE]["product_id"] = stripe_settings.scale_product_id or ""
+    PLAN_CONFIG[PlanNames.SCALE]["dedicated_ip_product_id"] = stripe_settings.scale_dedicated_ip_product_id or ""
+    PLAN_CONFIG[PlanNames.SCALE]["dedicated_ip_price_id"] = stripe_settings.scale_dedicated_ip_price_id or ""
+
+    PLAN_CONFIG[PlanNames.ORG_TEAM]["product_id"] = stripe_settings.org_team_product_id or ""
+    PLAN_CONFIG[PlanNames.ORG_TEAM]["seat_price_id"] = stripe_settings.org_team_price_id or ""
+    PLAN_CONFIG[PlanNames.ORG_TEAM]["overage_price_id"] = (
         stripe_settings.org_team_additional_task_price_id or ""
     )
-    PLAN_CONFIG["org_team"]["dedicated_ip_product_id"] = (
+    PLAN_CONFIG[PlanNames.ORG_TEAM]["dedicated_ip_product_id"] = (
         stripe_settings.org_team_dedicated_ip_product_id or ""
     )
-    PLAN_CONFIG["org_team"]["dedicated_ip_price_id"] = (
+    PLAN_CONFIG[PlanNames.ORG_TEAM]["dedicated_ip_price_id"] = (
         stripe_settings.org_team_dedicated_ip_price_id or ""
     )
 

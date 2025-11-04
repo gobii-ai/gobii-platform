@@ -2135,6 +2135,30 @@ class StripeConfig(models.Model):
         self.set_value("startup_product_id", value)
 
     @property
+    def scale_price_id(self) -> str:
+        return self.get_value("scale_price_id")
+
+    @scale_price_id.setter
+    def scale_price_id(self, value: str | None) -> None:
+        self.set_value("scale_price_id", value)
+
+    @property
+    def scale_additional_task_price_id(self) -> str:
+        return self.get_value("scale_additional_task_price_id")
+
+    @scale_additional_task_price_id.setter
+    def scale_additional_task_price_id(self, value: str | None) -> None:
+        self.set_value("scale_additional_task_price_id", value)
+
+    @property
+    def scale_product_id(self) -> str:
+        return self.get_value("scale_product_id")
+
+    @scale_product_id.setter
+    def scale_product_id(self, value: str | None) -> None:
+        self.set_value("scale_product_id", value)
+
+    @property
     def org_team_product_id(self) -> str:
         return self.get_value("org_team_product_id")
 
@@ -2173,6 +2197,22 @@ class StripeConfig(models.Model):
     @startup_dedicated_ip_price_id.setter
     def startup_dedicated_ip_price_id(self, value: str | None) -> None:
         self.set_value("startup_dedicated_ip_price_id", value)
+
+    @property
+    def scale_dedicated_ip_product_id(self) -> str:
+        return self.get_value("scale_dedicated_ip_product_id")
+
+    @scale_dedicated_ip_product_id.setter
+    def scale_dedicated_ip_product_id(self, value: str | None) -> None:
+        self.set_value("scale_dedicated_ip_product_id", value)
+
+    @property
+    def scale_dedicated_ip_price_id(self) -> str:
+        return self.get_value("scale_dedicated_ip_price_id")
+
+    @scale_dedicated_ip_price_id.setter
+    def scale_dedicated_ip_price_id(self, value: str | None) -> None:
+        self.set_value("scale_dedicated_ip_price_id", value)
 
     @property
     def org_team_dedicated_ip_product_id(self) -> str:

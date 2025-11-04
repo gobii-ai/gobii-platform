@@ -627,13 +627,17 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         customer = get_or_create_stripe_customer(user)
 
         price = 0.0
+        price_id = stripe_settings.startup_price_id
+        if not price_id:
+            raise Http404("Pro plan is not configured yet.")
         try:
-            price_object = Price.objects.get(id=stripe_settings.startup_price_id)
+            price_object = Price.objects.get(id=price_id)
             # unit_amount is in cents, convert to dollars
             if price_object.unit_amount is not None:
                 price = price_object.unit_amount / 100
         except Price.DoesNotExist:
-            logger.warning(f"Price with ID '{stripe_settings.startup_price_id}' does not exist in dj-stripe.")
+            logger.warning("Price with ID '%s' does not exist in dj-stripe.", price_id)
+            raise Http404("Pro plan pricing is not ready.")
         except Exception as e:
             logger.error(f"An unexpected error occurred while fetching price: {e}")
 
@@ -645,6 +649,16 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "eid": event_id,
         }
         success_url = f'{request.build_absolute_uri(reverse("console-home"))}?{urlencode(success_params)}'
+
+        line_items = [
+            {
+                "price": price_id,
+                "quantity": 1,
+            }
+        ]
+        additional_price_id = stripe_settings.startup_additional_task_price_id
+        if additional_price_id:
+            line_items.append({"price": additional_price_id})
 
         # 2️⃣  Kick off Checkout with the *existing* customer
         session = stripe.checkout.Session.create(
@@ -659,20 +673,74 @@ class StartupCheckoutView(LoginRequiredMixin, View):
                     "gobii_event_id": event_id,
                 }
             },
-            line_items=[
-                {
-                    "price": stripe_settings.startup_price_id,
-                    "quantity": 1,  # Fixed quantity for the base plan
-                },
-                {
-                    "price": stripe_settings.startup_additional_task_price_id,
-                },
-            ],
+            line_items=line_items,
         )
 
         # 3️⃣  No need to sync anything here.  The webhook events
         #     (customer.subscription.created, invoice.paid, etc.)
         #     will hit your handler and use sub.customer.subscriber == user.
+
+        return redirect(session.url)
+
+
+class ScaleCheckoutView(LoginRequiredMixin, View):
+    """Initiate Stripe Checkout for the Scale subscription plan."""
+
+    def get(self, request, *args, **kwargs):
+        _prepare_stripe_or_404()
+        stripe_settings = get_stripe_settings()
+
+        user = request.user
+
+        customer = get_or_create_stripe_customer(user)
+
+        price = 0.0
+        price_id = stripe_settings.scale_price_id
+        if not price_id:
+            raise Http404("Scale plan is not configured yet.")
+        try:
+            price_object = Price.objects.get(id=price_id)
+            if price_object.unit_amount is not None:
+                price = price_object.unit_amount / 100
+        except Price.DoesNotExist:
+            logger.warning("Price with ID '%s' does not exist in dj-stripe.", price_id)
+            raise Http404("Scale plan pricing is not ready.")
+        except Exception:
+            logger.exception("Unexpected error while fetching scale plan price %s", price_id)
+
+        event_id = f"scale-sub-{uuid.uuid4()}"
+
+        success_params = {
+            "subscribe_success": 1,
+            "p": f"{price:.2f}",
+            "eid": event_id,
+        }
+        success_url = f'{request.build_absolute_uri(reverse("console-home"))}?{urlencode(success_params)}'
+
+        line_items = [
+            {
+                "price": price_id,
+                "quantity": 1,
+            }
+        ]
+        additional_price_id = stripe_settings.scale_additional_task_price_id
+        if additional_price_id:
+            line_items.append({"price": additional_price_id})
+
+        session = stripe.checkout.Session.create(
+            customer=customer.id,
+            api_key=stripe.api_key,
+            success_url=success_url,
+            cancel_url=request.build_absolute_uri(reverse("pages:home")),
+            mode="subscription",
+            allow_promotion_codes=True,
+            subscription_data={
+                "metadata": {
+                    "gobii_event_id": event_id,
+                }
+            },
+            line_items=line_items,
+        )
 
         return redirect(session.url)
 

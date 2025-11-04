@@ -380,12 +380,32 @@ class StripeConfigForm(ModelForm):
         label="Startup product ID",
         required=False,
     )
+    scale_price_id = forms.CharField(
+        label="Scale base price ID",
+        required=False,
+    )
+    scale_additional_task_price_id = forms.CharField(
+        label="Scale additional task price ID",
+        required=False,
+    )
+    scale_product_id = forms.CharField(
+        label="Scale product ID",
+        required=False,
+    )
     startup_dedicated_ip_product_id = forms.CharField(
         label="Pro dedicated IP product ID",
         required=False,
     )
     startup_dedicated_ip_price_id = forms.CharField(
         label="Pro dedicated IP price ID",
+        required=False,
+    )
+    scale_dedicated_ip_product_id = forms.CharField(
+        label="Scale dedicated IP product ID",
+        required=False,
+    )
+    scale_dedicated_ip_price_id = forms.CharField(
+        label="Scale dedicated IP price ID",
         required=False,
     )
     org_team_product_id = forms.CharField(
@@ -443,8 +463,13 @@ class StripeConfigForm(ModelForm):
             self.fields["startup_price_id"].initial = instance.startup_price_id
             self.fields["startup_additional_task_price_id"].initial = instance.startup_additional_task_price_id
             self.fields["startup_product_id"].initial = instance.startup_product_id
+            self.fields["scale_price_id"].initial = instance.scale_price_id
+            self.fields["scale_additional_task_price_id"].initial = instance.scale_additional_task_price_id
+            self.fields["scale_product_id"].initial = instance.scale_product_id
             self.fields["startup_dedicated_ip_product_id"].initial = instance.startup_dedicated_ip_product_id
             self.fields["startup_dedicated_ip_price_id"].initial = instance.startup_dedicated_ip_price_id
+            self.fields["scale_dedicated_ip_product_id"].initial = instance.scale_dedicated_ip_product_id
+            self.fields["scale_dedicated_ip_price_id"].initial = instance.scale_dedicated_ip_price_id
             self.fields["org_team_product_id"].initial = instance.org_team_product_id
             self.fields["org_team_price_id"].initial = instance.org_team_price_id
             self.fields["org_team_additional_task_price_id"].initial = instance.org_team_additional_task_price_id
@@ -482,8 +507,13 @@ class StripeConfigForm(ModelForm):
             "startup_price_id",
             "startup_additional_task_price_id",
             "startup_product_id",
+            "scale_price_id",
+            "scale_additional_task_price_id",
+            "scale_product_id",
             "startup_dedicated_ip_product_id",
             "startup_dedicated_ip_price_id",
+            "scale_dedicated_ip_product_id",
+            "scale_dedicated_ip_price_id",
             "org_team_product_id",
             "org_team_price_id",
             "org_team_additional_task_price_id",

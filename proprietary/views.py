@@ -14,6 +14,7 @@ from django.core.mail import send_mail
 from proprietary.forms import SupportForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
 from util.subscription_helper import get_user_plan
+from constants.plans import PlanNames
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +37,23 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         # When true, we'll say Upgrade for Startup plan
         startup_cta_text = "Choose Pro"
+        scale_cta_text = "Choose Scale"
 
         if authenticated:
             # Check if the user has an active subscription
             try:
                 plan = get_user_plan(self.request.user)
+                plan_id = str(plan.get("id", "")).lower() if plan else ""
 
-                if plan is not None and plan["id"] == "free":
-                    startup_cta_text = "Upgrade to Pro"  # User is on free plan
-                elif plan is not None and plan["id"] == "startup":
+                if plan_id == PlanNames.FREE:
+                    startup_cta_text = "Upgrade to Pro"
+                    scale_cta_text = "Upgrade to Scale"
+                elif plan_id == PlanNames.STARTUP:
                     startup_cta_text = "Current Plan"
+                    scale_cta_text = "Upgrade to Scale"
+                elif plan_id == PlanNames.SCALE:
+                    startup_cta_text = "Switch to Pro"
+                    scale_cta_text = "Current Plan"
             except Exception:
                 logger.exception("Error checking user plan; defaulting to standard Startup CTA")
                 pass
@@ -108,9 +116,9 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                     "Priority work queue",
                     "1,500 requests/min API throughput",
                 ],
-                "cta": "Coming soon",
-                "cta_url": None,
-                "disabled": True,
+                "cta": scale_cta_text,
+                "cta_url": reverse("proprietary:scale_checkout"),
+                "disabled": False,
             },
         ]
 

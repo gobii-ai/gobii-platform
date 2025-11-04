@@ -141,6 +141,12 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "startup_product_id",
                     "startup_dedicated_ip_price_id",
                     "startup_dedicated_ip_product_id",
+                    "scale_price_id",
+                    "scale_additional_task_price_id",
+                    "scale_product_id",
+                    "scale_dedicated_ip_product_id",
+                    "scale_dedicated_ip_price_id",
+                    "org_team_product_id",
                 )
             },
         ),
