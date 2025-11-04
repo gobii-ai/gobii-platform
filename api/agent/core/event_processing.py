@@ -44,6 +44,7 @@ from .budget import (
     get_current_context as get_budget_context,
     set_current_context as set_budget_context,
 )
+from .processing_flags import clear_processing_queued_flag
 from .llm_utils import run_completion
 from ..short_description import (
     maybe_schedule_mini_description,
@@ -861,9 +862,11 @@ def process_agent_events(
             )
             span.add_event("Event processing skipped – lock acquisition failed (pending flag set)")
             span.set_attribute("lock.acquired", False)
+            clear_processing_queued_flag(persistent_agent_id)
             return
 
         lock_acquired = True
+        clear_processing_queued_flag(persistent_agent_id)
 
         logger.info("Acquired distributed lock for agent %s", persistent_agent_id)
         span.add_event("Distributed lock acquired")

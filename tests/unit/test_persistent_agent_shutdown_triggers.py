@@ -57,6 +57,14 @@ class PersistentAgentShutdownTriggersTests(TestCase):
                     agent.save(update_fields=["schedule"])
                 self.assertIn((str(agent.id), "CRON_DISABLED"), calls)
 
+                # 2b) Saving without a schedule should not re-trigger cleanup
+                calls.clear()
+                agent.refresh_from_db()
+                with transaction.atomic():
+                    agent.charter = "updated charter"
+                    agent.save(update_fields=["charter"])
+                self.assertNotIn((str(agent.id), "CRON_DISABLED"), calls)
+
                 # 3) Soft expire: life_state ACTIVE -> EXPIRED
                 calls.clear()
                 with transaction.atomic():

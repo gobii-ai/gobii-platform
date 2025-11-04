@@ -20,6 +20,7 @@ from api.models import (
     build_web_agent_address,
     build_web_user_address,
 )
+from api.agent.core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.services.web_sessions import start_web_session
 from util.analytics import AnalyticsEvent
@@ -299,6 +300,21 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(web_task.get("status"), BrowserUseAgentTask.StatusChoices.IN_PROGRESS)
         self.assertEqual(web_task.get("statusLabel"), task.get_status_display())
         self.assertEqual(web_task.get("promptPreview"), "Visit example.com")
+
+    @tag("batch_agent_chat")
+    def test_processing_status_reports_active_when_only_queued(self):
+        set_processing_queued_flag(self.agent.id)
+        try:
+            response = self.client.get(f"/console/api/agents/{self.agent.id}/processing/")
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(payload.get("processing_active"))
+
+            snapshot = payload.get("processing_snapshot") or {}
+            self.assertTrue(snapshot.get("active"))
+            self.assertEqual(snapshot.get("webTasks"), [])
+        finally:
+            clear_processing_queued_flag(self.agent.id)
 
 
     @tag("batch_agent_chat")
