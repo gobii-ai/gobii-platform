@@ -9,7 +9,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.validators import RegexValidator
 from django.db import IntegrityError, connection, models, transaction
 from django.db.models import UniqueConstraint, Q
-from django.db.models import UniqueConstraint, Sum
+from django.db.models import UniqueConstraint, Sum, Count
 from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -61,9 +61,6 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
 
-DEFAULT_AGENT_COLOR_HEX = "#0074d4"
-
-
 def generate_ulid() -> str:
     """Return a 26-character, time-ordered ULID string."""
     return str(ulid.new())
@@ -103,7 +100,7 @@ class AgentColor(models.Model):
 
     @classmethod
     def pick_for_owner(cls, *, user, organization=None) -> "AgentColor | None":
-        """Return the next available color for the owner, or None if exhausted."""
+        """Prefer a unique color for the owner; otherwise reuse the least-used palette color."""
         palette = cls.get_active_palette()
         if not palette:
             return None
@@ -123,47 +120,40 @@ class AgentColor(models.Model):
         else:
             qs = qs.filter(organization__isnull=True, user=user)
 
-        used_color_ids = set(qs.values_list("agent_color_id", flat=True))
+        usage_counts = {
+            row["agent_color_id"]: row["count"]
+            for row in qs.values("agent_color_id").annotate(count=Count("id"))
+        }
+
         for color in palette:
-            if color.id not in used_color_ids:
+            if usage_counts.get(color.id, 0) == 0:
                 return color
-        return None
+
+        least_used_color = min(
+            palette,
+            key=lambda color: (usage_counts.get(color.id, 0), color.sort_order, color.id),
+        )
+        return least_used_color
 
     @classmethod
     def _seed_palette_if_needed(cls) -> None:
         """Populate the palette when migrations are disabled (e.g., unit tests)."""
         try:
-            if cls.objects.exists():
+            if cls.objects.filter(is_active=True).exists():
                 return
         except (ProgrammingError, OperationalError):
             # Table does not exist yet (e.g., during migrations); skip seeding.
             return
 
-        hex_value = cls._normalize_hex(DEFAULT_AGENT_COLOR_HEX)
-        if not hex_value:
-            return
-
         with transaction.atomic():
             cls.objects.update_or_create(
-                name="color_default",
+                name=f"color_0",
                 defaults={
-                    "hex_value": hex_value,
+                    "hex_value": cls.DEFAULT_HEX,
                     "sort_order": 0,
                     "is_active": True,
                 },
             )
-
-    @staticmethod
-    def _normalize_hex(raw_value: str | None) -> str | None:
-        normalized = (raw_value or "").strip()
-        if not normalized:
-            return None
-        if not normalized.startswith("#"):
-            normalized = f"#{normalized}"
-        normalized = normalized.upper()
-        if len(normalized) != 7:
-            return None
-        return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -2734,16 +2724,6 @@ class PersistentAgent(models.Model):
                 name='unique_persistent_agent_org_name',
                 condition=models.Q(organization__isnull=False),
             ),
-            UniqueConstraint(
-                fields=['user', 'agent_color'],
-                name='unique_persistent_agent_user_color',
-                condition=models.Q(organization__isnull=True, agent_color__isnull=False),
-            ),
-            UniqueConstraint(
-                fields=['organization', 'agent_color'],
-                name='unique_persistent_agent_org_color',
-                condition=models.Q(organization__isnull=False, agent_color__isnull=False),
-            ),
         ]
 
     def clean(self):
@@ -2770,7 +2750,7 @@ class PersistentAgent(models.Model):
                 raise ValidationError({"tags": "Tags must be 64 characters or fewer."})
 
     def assign_agent_color(self, *, force: bool = False) -> None:
-        """Ensure the agent has a unique color for its owner."""
+        """Assign a color, preferring unused palette entries for this owner."""
         if self.agent_color_id and not force:
             return
         # Skip assignment when the colors table has not been created yet (e.g., historical migrations).
@@ -3264,35 +3244,7 @@ class PersistentAgent(models.Model):
                 kwargs["update_fields"] = update_fields_list
                 update_fields = update_fields_list
 
-        def _is_agent_color_conflict(error: IntegrityError) -> bool:
-            message = str(error)
-            return (
-                "unique_persistent_agent_user_color" in message
-                or "unique_persistent_agent_org_color" in message
-                or "api_persistentagent.organization_id, api_persistentagent.agent_color_id" in message
-                or "api_persistentagent.user_id, api_persistentagent.agent_color_id" in message
-            )
-
-        attempts = 0
-        max_attempts: int | None = None
-        while True:
-            try:
-                super().save(*args, **kwargs)
-                break
-            except IntegrityError as exc:
-                if not _is_agent_color_conflict(exc):
-                    raise
-                attempts += 1
-                if max_attempts is None:
-                    max_attempts = AgentColor.objects.filter(is_active=True).count()
-                if not max_attempts or attempts >= max_attempts:
-                    raise
-                self.assign_agent_color(force=True)
-                update_fields = kwargs.get("update_fields")
-                if update_fields is not None and "agent_color" not in update_fields:
-                    update_fields = list(update_fields)
-                    update_fields.append("agent_color")
-                    kwargs["update_fields"] = update_fields
+        super().save(*args, **kwargs)
 
         # If it's a new instance or a relevant field changed, schedule the
         # Redis side-effect to run only after a successful DB commit.

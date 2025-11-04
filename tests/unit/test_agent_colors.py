@@ -11,25 +11,6 @@ from api.models import (
     PersistentAgent,
 )
 
-TEST_AGENT_COLOR_PALETTE = [
-    "#0074D4",
-    "#705FE3",
-    "#B35E90",
-    "#90A7DC",
-    "#CA4166",
-    "#D7A31A",
-    "#C05200",
-    "#008D90",
-    "#008A47",
-    "#FF7999",
-    "#414656",
-    "#FFEECB",
-    "#A5ABBD",
-    "#8CED85",
-    "#E3F0FF",
-    "#877555",
-]
-
 User = get_user_model()
 
 
@@ -40,24 +21,11 @@ class PersistentAgentColorAssignmentTests(TestCase):
             email='owner@example.com',
             password='password123',
         )
+        AgentColor.objects.all().delete()
         self.palette_hex = {
-            hex_value.upper()
-            for hex_value in AgentColor.objects.values_list('hex_value', flat=True)
+            color.hex_value.upper()
+            for color in AgentColor.get_active_palette()
         }
-        if not self.palette_hex:
-            for index, hex_value in enumerate(TEST_AGENT_COLOR_PALETTE):
-                AgentColor.objects.update_or_create(
-                    name=f"color_{index + 1}",
-                    defaults={
-                        "hex_value": hex_value,
-                        "sort_order": index,
-                        "is_active": True,
-                    },
-                )
-            self.palette_hex = {
-                hex_value.upper()
-                for hex_value in AgentColor.objects.values_list('hex_value', flat=True)
-            }
 
     def _create_agent(self, user, name: str, organization: Organization | None = None) -> PersistentAgent:
         browser_agent = BrowserUseAgent.objects.create(
@@ -82,8 +50,9 @@ class PersistentAgentColorAssignmentTests(TestCase):
         self.assertIsNotNone(first_agent.agent_color_id)
         self.assertIsNotNone(second_agent.agent_color_id)
         self.assertNotEqual(first_agent.agent_color_id, second_agent.agent_color_id)
-        self.assertIn(first_agent.get_display_color().upper(), self.palette_hex)
+        self.assertEqual(first_agent.get_display_color().upper(), AgentColor.DEFAULT_HEX)
         self.assertIn(second_agent.get_display_color().upper(), self.palette_hex)
+        self.assertNotEqual(second_agent.get_display_color().upper(), AgentColor.DEFAULT_HEX)
 
     @tag('batch_agent_colors')
     @patch('api.models.AgentService.get_agents_available', return_value=10)
@@ -109,5 +78,6 @@ class PersistentAgentColorAssignmentTests(TestCase):
         self.assertIsNotNone(first_agent.agent_color_id)
         self.assertIsNotNone(second_agent.agent_color_id)
         self.assertNotEqual(first_agent.agent_color_id, second_agent.agent_color_id)
-        self.assertIn(first_agent.get_display_color().upper(), self.palette_hex)
+        self.assertEqual(first_agent.get_display_color().upper(), AgentColor.DEFAULT_HEX)
         self.assertIn(second_agent.get_display_color().upper(), self.palette_hex)
+        self.assertNotEqual(second_agent.get_display_color().upper(), AgentColor.DEFAULT_HEX)

@@ -37,8 +37,12 @@ def _seed_agent_colors(apps, schema_editor):
         seen.add(normalized)
         palette.append(normalized.upper())
 
+    if not palette:
+        palette = ["#0074D4"]
+
+    colors = []
     for index, hex_value in enumerate(palette):
-        AgentColor.objects.update_or_create(
+        color, _ = AgentColor.objects.update_or_create(
             name=f"color_{index + 1}",
             defaults={
                 "hex_value": hex_value,
@@ -46,8 +50,8 @@ def _seed_agent_colors(apps, schema_editor):
                 "is_active": True,
             },
         )
+        colors.append(color)
 
-    colors = list(AgentColor.objects.filter(is_active=True).order_by("sort_order", "id"))
     if not colors:
         return
 
@@ -63,13 +67,9 @@ def _seed_agent_colors(apps, schema_editor):
             grouped.setdefault(owner_id, []).append(agent)
 
         for owner_id, agents in grouped.items():
-            if len(agents) > palette_size:
-                raise RuntimeError(
-                    f"Owner {owner_id} has {len(agents)} agents but only {palette_size} colors are available. "
-                    "Add more agent colors before applying this migration."
-                )
             for index, agent in enumerate(agents):
-                PersistentAgent.objects.filter(pk=agent.pk).update(agent_color_id=color_ids[index])
+                color_id = color_ids[index % palette_size]
+                PersistentAgent.objects.filter(pk=agent.pk).update(agent_color_id=color_id)
 
     personal_agents = PersistentAgent.objects.filter(organization__isnull=True, agent_color__isnull=True)
     assign_queryset(personal_agents, "user_id")
@@ -104,14 +104,6 @@ class Migration(migrations.Migration):
             model_name='persistentagent',
             name='agent_color',
             field=models.ForeignKey(blank=True, help_text='UI accent color assigned to this agent.', null=True, on_delete=models.deletion.SET_NULL, related_name='persistent_agents', to='api.agentcolor'),
-        ),
-        migrations.AddConstraint(
-            model_name='persistentagent',
-            constraint=models.UniqueConstraint(condition=models.Q(('organization__isnull', True), ('agent_color__isnull', False)), fields=('user', 'agent_color'), name='unique_persistent_agent_user_color'),
-        ),
-        migrations.AddConstraint(
-            model_name='persistentagent',
-            constraint=models.UniqueConstraint(condition=models.Q(('organization__isnull', False), ('agent_color__isnull', False)), fields=('organization', 'agent_color'), name='unique_persistent_agent_org_color'),
         ),
         migrations.RunPython(_seed_agent_colors, migrations.RunPython.noop),
     ]
