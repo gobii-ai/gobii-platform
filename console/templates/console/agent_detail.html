@@ -5,13 +5,34 @@
 <div class="space-y-6 pb-6">
   <!-- Header -->
   <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
-    <div class="px-6 py-4 border-b border-gray-200/70">
+    <div class="px-6 py-4 border-b border-gray-200/70 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div>
-        <h1 class="text-2xl font-semibold text-gray-800">Agent Configuration</h1>
+        <h1 class="text-2xl font-semibold text-gray-800" id="agent-name-heading">
+          {{ agent.name|default:"Agent" }} Settings
+        </h1>
         <p class="text-sm text-gray-500 mt-1">Manage your agent settings and preferences</p>
-        <a href="{% url 'agents' %}" class="group flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
+        <a href="{% url 'agents' %}" class="group inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3">
           <i aria-hidden="true" data-lucide="arrow-left" class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform"></i>
           Back to Agents
+        </a>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <a href="{% url 'agent_chat_shell' pk=agent.id %}"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
+          <i aria-hidden="true" data-lucide="message-square" class="w-4 h-4"></i>
+          Web Chat
+        </a>
+        <a href="{% url 'agent_secrets' agent.id %}"
+           class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
+          <i aria-hidden="true" data-lucide="key-round" class="w-4 h-4"></i>
+          Secrets
+        </a>
+        <a href="{% url 'agent_email_settings' agent.id %}"
+           class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
+          <i aria-hidden="true" data-lucide="mail" class="w-4 h-4"></i>
+          Email Settings
         </a>
       </div>
     </div>
@@ -30,16 +51,27 @@
   </div>
   {% endif %}
 
-  <!-- Configuration -->
-  <form method="post">
+  <!-- General Settings -->
+  <form method="post" id="general-settings-form">
     {% csrf_token %}
-    <div class="gobii-card-base">
+    <details open class="gobii-card-base group" id="agent-identity">
+      <summary class="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
+        <div>
+          <h2 class="text-lg font-semibold text-gray-800">General Settings</h2>
+          <p class="text-sm text-gray-500">Core configuration and runtime controls.</p>
+        </div>
+        <i aria-hidden="true" data-lucide="chevron-down" class="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180"></i>
+      </summary>
       <div class="p-6 sm:p-8">
+
+        {% if show_allowlist %}
+          <input type="hidden" name="whitelist_policy" value="manual">
+        {% endif %}
 
         <!-- Grid Layout -->
         <div class="grid sm:grid-cols-12 gap-4 sm:gap-6">
           
-          <!-- Agent Name Section -->
+          <!-- Agent Name -->
           <div class="sm:col-span-3">
             <label for="agent-name" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
               Agent Name
@@ -51,113 +83,22 @@
               </span>
             </div>
           </div>
-          
           <div class="sm:col-span-9">
-            <input id="agent-name" name="name" type="text" value="{{ agent.name }}" 
+            <input id="agent-name" name="name" type="text" value="{{ agent.name }}"
                    class="py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none">
-            <p class="mt-2 text-xs text-gray-500">Choose a memorable name for your agent that describes its purpose.</p>
+            <p class="mt-2 text-xs text-gray-500">Choose a memorable name that describes this agent's purpose.</p>
           </div>
 
-          {% flag "organizations" %}
-          <!-- Ownership Section (organizations feature only) -->
-          <div class="sm:col-span-3">
-            <label for="agent-ownership" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
-              Ownership
-            </label>
-            <div class="hs-tooltip inline-block">
-              <i aria-hidden="true" data-lucide="circle-help" class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400"></i>
-              <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-56 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
-                Assign this agent to one of your organizations. Requires owner/admin role.
-              </span>
-            </div>
-          </div>
-          <div class="sm:col-span-9">
-            {% if agent.organization %}
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-gray-700">Currently assigned to <strong>{{ agent.organization.name }}</strong></span>
-                <button type="button" id="move-personal-btn" class="px-3 py-1.5 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700">Move to Personal</button>
-              </div>
-            {% else %}
-              <div class="flex items-center gap-2">
-                <select id="target-org-id" class="py-2 border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500">
-                  <option value="">Select organization…</option>
-                  {% for org in reassignable_orgs %}
-                    <option value="{{ org.id }}">{{ org.name }}</option>
-                  {% endfor %}
-                </select>
-                <button type="button" id="assign-org-btn" class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Assign to Organization</button>
-              </div>
-              <p class="mt-2 text-xs text-gray-500">Name must be unique within the selected organization.</p>
-            {% endif %}
-            <div id="ownership-error" class="mt-2 text-xs text-red-600 hidden"></div>
-          </div>
-          {% endflag %}
-
-          <!-- Agent Email Section -->
-          {% if primary_email %}
-          <div class="sm:col-span-3">
-            <label for="agent-email" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
-              Primary Email
-            </label>
-          </div>
-          
-          <div class="sm:col-span-9">
-            <input id="agent-email" name="email" type="text" value="{{ primary_email.address }}"
-                   class="py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none"
-                   disabled>
-            <p class="mt-2 text-xs text-gray-500">The agent's primary email address for communication.</p>
-            <div class="mt-2">
-              <a href="{% url 'agent_email_settings' agent.id %}"
-                 class="text-sm text-blue-600 hover:text-blue-800">Manage Email Settings</a>
-            </div>
-            {% if not primary_sms %}
-            <div class="mt-2">
-              <a href="{% url 'agent_enable_sms' agent.id %}"
-                 class="text-sm text-blue-600 hover:text-blue-800">Enable SMS</a>
-            </div>
-            {% endif %}
-          </div>
-          {% endif %}
-          {% if not primary_email %}
-          <div class="sm:col-span-3">
-            <label class="inline-block text-sm font-medium text-gray-800 mt-2.5">
-              Primary Email
-            </label>
-          </div>
-          <div class="sm:col-span-9">
-            <div class="py-2 px-3 text-sm text-gray-600 bg-gray-50 border border-dashed border-gray-300 rounded">
-              Not configured. <a href="{% url 'agent_email_settings' agent.id %}" class="text-blue-600 hover:text-blue-800">Set up email</a>
-            </div>
-          </div>
-          {% endif %}
-
-          <!-- Agent Phone Section -->
-          {% if primary_sms %}
-          <div class="sm:col-span-3">
-            <label for="agent-sms" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
-              Primary SMS
-            </label>
-          </div>
-
-          <div class="sm:col-span-9">
-            <input id="agent-sms" name="sms" type="text" value="{{ primary_sms.address }}"
-                   class="phone-number-to-format py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none"
-                   disabled>
-            <p class="mt-2 text-xs text-gray-500">The agent's primary SMS address for communication. This cannot be changed.</p>
-          </div>
-          {% endif %}
-
-          <!-- Agent Status Section -->
+          <!-- Status -->
           <div class="sm:col-span-3">
             <label class="inline-block text-sm font-medium text-gray-800 mt-2.5">
               Status
             </label>
           </div>
-          
           <div class="sm:col-span-9">
-            <div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg bg-gray-50/50">
-                <div class="flex items-center gap-3">
-                  <div class="flex items-center justify-center w-10 h-10 rounded-full {% if agent.is_active %}bg-green-100{% else %}bg-gray-100{% endif %}">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6 p-4 border border-gray-200 rounded-lg bg-gray-50/60">
+              <div class="flex items-center gap-3">
+                <div class="flex items-center justify-center w-10 h-10 rounded-full {% if agent.is_active %}bg-green-100{% else %}bg-gray-100{% endif %}">
                   {% if agent.is_active %}
                     <i aria-hidden="true" data-lucide="check-circle-2" class="w-5 h-5 text-green-600"></i>
                   {% else %}
@@ -169,19 +110,16 @@
                     {% if agent.is_active %}Active{% else %}Inactive{% endif %}
                   </p>
                   <p class="text-xs text-gray-500">
-                    {% if agent.is_active %}Your agent is currently running and accepting tasks{% else %}Your agent is paused and not accepting tasks{% endif %}
+                    {% if agent.is_active %}This agent is currently running and accepting tasks.{% else %}This agent is paused and not accepting tasks.{% endif %}
                   </p>
                 </div>
               </div>
-              
-              <!-- Toggle Switch -->
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" name="is_active" {% if agent.is_active %}checked{% endif %}
-                       class="sr-only peer">
-                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              <label class="relative inline-flex shrink-0 items-center cursor-pointer">
+                <input type="checkbox" name="is_active" {% if agent.is_active %}checked{% endif %} class="sr-only peer">
+                <span class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:bg-white after:border-gray-300 after:border after:rounded-full after:transition-all"></span>
               </label>
             </div>
-            <p class="mt-2 text-xs text-gray-500">Use this switch to activate or pause the agent. Click "Save Changes" to apply.</p>
+            <p class="mt-2 text-xs text-gray-500">Toggle the switch and click "Save Changes" to activate or pause the agent.</p>
           </div>
 
           <!-- Daily Task Credits -->
@@ -192,13 +130,12 @@
             <div class="hs-tooltip inline-block">
               <i aria-hidden="true" data-lucide="circle-help" class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400"></i>
               <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-56 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
-                Track and control how many task credits this agent may use each day.
+                Track how many task credits this agent can spend each day.
               </span>
             </div>
           </div>
-
           <div class="sm:col-span-9 space-y-4">
-            <div class="p-4 border border-gray-200 rounded-lg bg-white/60 space-y-3">
+            <div class="p-4 border border-gray-200 rounded-lg bg-white/70 space-y-3">
               {% if daily_credit_low %}
                 <div class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium">
                   Your agent is almost out of daily task credits ({{ daily_credit_remaining|floatformat:2 }} left). Increase the daily limit below if you want them to keep working today.
@@ -210,8 +147,7 @@
                   <span class="font-medium">{{ daily_credit_usage|floatformat:2 }} / {{ daily_credit_limit|floatformat:0 }} credits</span>
                 </div>
                 <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div class="h-full bg-blue-600 rounded-full transition-all"
-                       style="width: {{ daily_credit_percent_used|default:0|floatformat:0 }}%;"></div>
+                  <div class="h-full bg-blue-600 rounded-full transition-all" style="width: {{ daily_credit_percent_used|default:0|floatformat:0 }}%;"></div>
                 </div>
                 {% if daily_credit_remaining is not None %}
                   <p class="text-xs text-gray-500">Remaining today: {{ daily_credit_remaining|floatformat:2 }} credits.</p>
@@ -223,7 +159,6 @@
                 <p class="text-sm text-gray-700">Daily task credits are currently unlimited for this agent.</p>
               {% endif %}
             </div>
-
             <div class="grid gap-4 sm:grid-cols-2">
               <div>
                 <label for="daily-credit-limit" class="inline-block text-sm font-medium text-gray-700">Daily limit (credits)</label>
@@ -243,192 +178,80 @@
             <div class="hs-tooltip inline-block">
               <i aria-hidden="true" data-lucide="circle-help" class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400"></i>
               <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-40 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
-                Describe what you want your agent to do
+                Describe what you want your agent to do.
               </span>
             </div>
           </div>
-          
           <div class="sm:col-span-9">
-            <textarea id="agent-charter" name="charter" rows="4" 
+            <textarea id="agent-charter" name="charter" rows="4"
                       class="py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none"
                       placeholder="Describe what you want your agent to do...">{{ agent.charter }}</textarea>
-            <p class="mt-2 text-xs text-gray-500">Describe your agent's role, responsibilities, and any specific tasks or goals it should focus on.</p>
+            <p class="mt-2 text-xs text-gray-500">Share goals, responsibilities, and key guardrails for this agent.</p>
           </div>
-          
-          <!-- Allowed Contacts Section (only shown with multiplayer_agents flag) -->
-          {% if show_allowlist %}
+
+          <!-- Dedicated IPs -->
           <div class="sm:col-span-3">
-            <label for="allowed-contacts" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
-              Allowed Contacts
-            </label>
-            <div class="hs-tooltip inline-block">
-              <i aria-hidden="true" data-lucide="circle-help" class="hs-tooltip-toggle ms-1 inline-block size-3 text-gray-400"></i>
-              <span class="hs-tooltip-content hs-tooltip-shown:opacity-100 hs-tooltip-shown:visible opacity-0 transition-opacity inline-block absolute invisible w-48 text-center z-10 py-1 px-2 bg-gray-900 text-xs font-medium text-white rounded-md shadow-sm" role="tooltip">
-                Controls who can message this agent and who the agent may contact
-              </span>
-            </div>
-          </div>
-          
-          <div class="sm:col-span-9">
-            <!-- Hidden field to maintain MANUAL policy -->
-            <input type="hidden" name="whitelist_policy" value="manual">
-            
-            <p class="text-xs text-gray-500 mb-4">
-              By default, the agent owner and organization members can communicate with this agent.
-              You can add additional contacts below. Note: Multi-recipient messaging is limited to email only.
-            </p>
-            
-            <!-- Allowed contacts entries (always visible now) -->
-            <div id="allowlist-entries" class="mt-4">
-              
-              <!-- Add Entry Form -->
-              <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg mb-3">
-                <h4 class="text-sm font-medium text-gray-700 mb-2">Add Allowed Contact</h4>
-                <div id="add-allowlist-form" class="space-y-2">
-                  {% csrf_token %}
-                  <div class="flex gap-2">
-                    <select id="allowlist-channel" name="channel" class="py-1.5 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
-                      <option value="email">Email</option>
-                      <!-- SMS option removed since multi-player agents only support email -->
-                    </select>
-                    <input type="email" 
-                           id="allowlist-address"
-                           name="address" 
-                           placeholder="email@example.com" 
-                           class="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
-                  </div>
-                  <div class="flex gap-4 items-center">
-                    <label class="flex items-center gap-1 text-sm">
-                      <input type="checkbox" id="allow-inbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                      <span>Allow Inbound</span>
-                      <span class="text-xs text-gray-500">(can send to agent)</span>
-                    </label>
-                    <label class="flex items-center gap-1 text-sm">
-                      <input type="checkbox" id="allow-outbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                      <span>Allow Outbound</span>
-                      <span class="text-xs text-gray-500">(agent can send to)</span>
-                    </label>
-                  </div>
-                  <div class="flex gap-2">
-                    <button type="button" 
-                            onclick="addAllowlistEntry()"
-                            class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                      Add
-                    </button>
-                    <button type="button" 
-                            onclick="cancelAllowlistEntry()"
-                            class="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400">
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-                <div id="allowlist-error" class="mt-2 text-xs text-red-600 hidden"></div>
-              </div>
-
-              <!-- Pending Contact Requests Alert -->
-              {% if pending_contact_requests > 0 %}
-              <div class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg mb-3">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-2">
-                    <i aria-hidden="true" data-lucide="alert-triangle" class="w-5 h-5 text-yellow-600"></i>
-                    <span class="text-sm font-medium text-yellow-800">
-                      {{ pending_contact_requests }} Contact Request{{ pending_contact_requests|pluralize }} Pending
-                    </span>
-                  </div>
-                  <a href="{% url 'agent_contact_requests' agent.id %}" class="text-sm font-medium text-yellow-700 hover:text-yellow-900 underline">
-                    Review
-                  </a>
-                </div>
-              </div>
-              {% endif %}
-
-              <!-- Current Entries List -->
-              <div class="p-3 bg-gray-50 rounded-lg">
-                <div class="flex justify-between items-center mb-2">
-                  <h4 class="text-sm font-medium text-gray-700">Allowed Contacts</h4>
-                  <span class="text-xs text-gray-500">
-                    <span id="contact-count">{{ active_allowlist_count }}</span> / {{ max_contacts_per_agent|default:account.usage.max_contacts_per_agent }} contacts
-                  </span>
-                </div>
-                <div id="allowlist-entries-container">
-                  {% include "console/partials/_allowlist_entries_inline.html" %}
-                </div>
-              </div>
-            </div>
-          </div>
-          {% endif %}
-
-
-        <!-- Dedicated IPs -->
-        <div class="sm:col-span-3">
             <label class="inline-block text-sm font-medium text-gray-800 mt-2.5">
               Dedicated IPs
             </label>
           </div>
-         <div class="sm:col-span-9">
-            <div class="text-sm text-gray-600">
-                <div class="p-6 sm:p-8 space-y-4" data-dedicated-ip-total="{{ dedicated_ip_total }}">
-                  <div>
-                    <p class="text-sm text-gray-500">Monitor and assign dedicated IP addresses reserved for this account.</p>
-                  </div>
-                  <div class="grid gap-4 sm:grid-cols-2">
-                    <div class="border border-gray-200 rounded-lg bg-gray-50 p-4">
-                      <p class="text-xs uppercase tracking-wide text-gray-500">Total Reserved</p>
-                      <p class="text-2xl font-semibold text-gray-800 mt-1">{{ dedicated_ip_total }}</p>
-                      <p class="text-xs text-gray-500 mt-3">
-                        {% if dedicated_ip_owner_type == "organization" and agent.organization %}
-                          Dedicated IPs owned by {{ agent.organization.name }}.
-                        {% else %}
-                          Dedicated IPs owned by your account.
-                        {% endif %}
-                      </p>
-                      {% if not dedicated_ip_multi_assign %}
-                        <p class="text-xs text-amber-600 mt-1">Each dedicated IP can be assigned to only one agent at a time.</p>
-                      {% endif %}
-                      {% if dedicated_ip_total == 0 %}
-                        <p class="text-xs text-gray-500 mt-1">Purchase dedicated IPs in Billing to make them available here.</p>
-                      {% endif %}
-                    </div>
-
-                    <div class="border border-gray-200 rounded-lg bg-gray-50 p-4">
-                      <p class="text-xs uppercase tracking-wide text-gray-500">Available to Assign</p>
-                      <p class="text-2xl font-semibold text-gray-800 mt-1">{{ dedicated_ip_available }}</p>
-
-                      {% if dedicated_proxy_options %}
-                        <label for="dedicated-proxy-id" class="inline-block text-sm font-medium text-gray-800 mt-4">
-                          Assigned Dedicated IP
-                        </label>
-                        <select id="dedicated-proxy-id" name="dedicated_proxy_id"
-                                class="mt-1 py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500">
-                          <option value="" {% if not selected_dedicated_proxy_id %}selected{% endif %}>
-                            Use shared proxy pool
-                          </option>
-                          {% for option in dedicated_proxy_options %}
-                            <option value="{{ option.id }}"
-                                    {% if option.selected %}selected{% endif %}
-                                    {% if option.disabled %}disabled{% endif %}>
-                              {{ option.label }}
-                              {% if option.in_use_elsewhere %}
-                                (In use)
-                              {% endif %}
-                            </option>
-                          {% endfor %}
-                        </select>
-                        <p class="mt-1 text-xs text-gray-500">
-                          Selecting a dedicated IP locks this agent to that address. Leave it on "Use shared proxy pool" to continue using shared proxies.
-                        </p>
-                        {% if not dedicated_ip_multi_assign %}
-                          <p class="mt-1 text-xs text-amber-600">IPs already assigned to other agents are disabled.</p>
-                        {% endif %}
-                      {% else %}
-                        <p class="text-xs text-gray-500 mt-4">No dedicated IPs are currently available to assign.</p>
-                      {% endif %}
-                    </div>
-                  </div>
+          <div class="sm:col-span-9">
+            <div class="text-sm text-gray-600 space-y-4" data-dedicated-ip-total="{{ dedicated_ip_total }}">
+              <p class="text-sm text-gray-500">Monitor and assign dedicated IP addresses reserved for this account.</p>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <div class="border border-gray-200 rounded-lg bg-gray-50 p-4">
+                  <p class="text-xs uppercase tracking-wide text-gray-500">Total Reserved</p>
+                  <p class="text-2xl font-semibold text-gray-800 mt-1">{{ dedicated_ip_total }}</p>
+                  <p class="text-xs text-gray-500 mt-3">
+                    {% if dedicated_ip_owner_type == "organization" and agent.organization %}
+                      Dedicated IPs owned by {{ agent.organization.name }}.
+                    {% else %}
+                      Dedicated IPs owned by your account.
+                    {% endif %}
+                  </p>
+                  {% if not dedicated_ip_multi_assign %}
+                    <p class="text-xs text-amber-600 mt-1">Each dedicated IP can be assigned to only one agent at a time.</p>
+                  {% endif %}
+                  {% if dedicated_ip_total == 0 %}
+                    <p class="text-xs text-gray-500 mt-1">Purchase dedicated IPs in Billing to make them available here.</p>
+                  {% endif %}
                 </div>
+                <div class="border border-gray-200 rounded-lg bg-gray-50 p-4">
+                  <p class="text-xs uppercase tracking-wide text-gray-500">Available to Assign</p>
+                  <p class="text-2xl font-semibold text-gray-800 mt-1">{{ dedicated_ip_available }}</p>
+                  {% if dedicated_proxy_options %}
+                    <label for="dedicated-proxy-id" class="inline-block text-sm font-medium text-gray-800 mt-4">
+                      Assigned Dedicated IP
+                    </label>
+                    <select id="dedicated-proxy-id" name="dedicated_proxy_id"
+                            class="mt-1 py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500">
+                      <option value="" {% if not selected_dedicated_proxy_id %}selected{% endif %}>
+                        Use shared proxy pool
+                      </option>
+                      {% for option in dedicated_proxy_options %}
+                        <option value="{{ option.id }}"
+                                {% if option.selected %}selected{% endif %}
+                                {% if option.disabled %}disabled{% endif %}>
+                          {{ option.label }}
+                          {% if option.in_use_elsewhere %}
+                            (In use)
+                          {% endif %}
+                        </option>
+                      {% endfor %}
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">
+                      Selecting a dedicated IP locks this agent to that address. Leave it on "Use shared proxy pool" to continue using shared proxies.
+                    </p>
+                    {% if not dedicated_ip_multi_assign %}
+                      <p class="mt-1 text-xs text-amber-600">IPs already assigned to other agents are disabled.</p>
+                    {% endif %}
+                  {% else %}
+                    <p class="text-xs text-gray-500 mt-4">No dedicated IPs are currently available to assign.</p>
+                  {% endif %}
+                </div>
+              </div>
             </div>
           </div>
-
 
           <!-- Created Date -->
           <div class="sm:col-span-3">
@@ -436,250 +259,448 @@
               Created
             </label>
           </div>
-          
           <div class="sm:col-span-9">
             <div class="py-2 px-3 text-sm text-gray-600">
-              {{ agent.created_at|date:"F j, Y \a\\t g:i A" }}
+              {{ agent.created_at|date:"F j, Y \a\t g:i A" }}
             </div>
           </div>
+      </div>
+    </details>
+  </form>
 
+  <div id="agent-save-bar" class="hidden fixed inset-x-0 bottom-0 z-40 pointer-events-none">
+    <div class="pointer-events-auto mx-auto w-full max-w-5xl px-4 pb-4">
+      <div class="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.25)] sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex items-center gap-2 text-sm text-gray-700">
+          <i aria-hidden="true" data-lucide="info" class="h-4 w-4 text-blue-600"></i>
+          <span>You have unsaved changes</span>
         </div>
-
-        <!-- Action Buttons -->
-        <div class="mt-8 pt-6 border-t border-gray-200 flex justify-end gap-x-3">
-          <a href="{% url 'agents' %}"
-             class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" id="agent-save-cancel" class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50">
             Cancel
-          </a>
-          <a href="{% url 'agent_chat_shell' pk=agent.id %}"
-             target="_blank"
-             rel="noopener noreferrer"
-             class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
-            <i aria-hidden="true" data-lucide="message-square" class="w-4 h-4"></i>
-            Open Web Chat
-          </a>
-          <a href="{% url 'agent_secrets' agent.id %}"
-             class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
-            <i aria-hidden="true" data-lucide="key-round" class="w-4 h-4"></i>
-            Manage Secrets
-          </a>
-          <a href="{% url 'agent_email_settings' agent.id %}"
-             class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors">
-            <i aria-hidden="true" data-lucide="mail" class="w-4 h-4"></i>
-            Manage Email
-          </a>
-          <button type="submit" 
-                  class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
-            <i aria-hidden="true" data-lucide="check" class="w-4 h-4"></i>
+          </button>
+          <button type="submit" form="general-settings-form" id="agent-save-submit" class="inline-flex items-center gap-2 rounded-lg border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+            <i aria-hidden="true" data-lucide="check" class="h-4 w-4"></i>
             Save Changes
           </button>
         </div>
       </div>
-  </div>
-
-  </form>
-
-  <!-- Ownership Transfer -->
-  <div class="gobii-card-base">
-    <div class="p-6 sm:p-8 space-y-4">
-      <div>
-        <h2 class="text-lg font-semibold text-gray-800">Transfer Ownership</h2>
-        <p class="text-sm text-gray-500">Send this agent to someone else. They can accept or decline from their dashboard.</p>
-      </div>
-
-      {% if pending_transfer_invite %}
-      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-indigo-50 border border-indigo-100 rounded-lg p-4">
-        <div>
-          <p class="text-sm text-indigo-800">Transfer invitation sent to <strong>{{ pending_transfer_invite.to_email }}</strong> on {{ pending_transfer_invite.created_at|date:"M j, Y g:i A" }}.</p>
-          <p class="text-xs text-indigo-700 mt-1">They'll need to sign in with that email to accept.</p>
-        </div>
-        <form method="post" class="flex">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="cancel_transfer_invite">
-          <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition">
-            Cancel Invitation
-          </button>
-        </form>
-      </div>
-      {% else %}
-      <form method="post" class="space-y-4">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="transfer_agent">
-        <div>
-          <label for="transfer-email" class="text-sm font-medium text-gray-700">Recipient email</label>
-          <input id="transfer-email" name="transfer_email" type="email" required placeholder="user@example.com" class="mt-1 block w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
-        </div>
-        <div>
-          <label for="transfer-message" class="text-sm font-medium text-gray-700">Message <span class="text-gray-400">(optional)</span></label>
-          <textarea id="transfer-message" name="transfer_message" rows="2" class="mt-1 block w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500" placeholder="Share any context you'd like them to know."></textarea>
-        </div>
-        <div class="flex justify-end">
-          <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition">
-            Send Transfer Invite
-          </button>
-        </div>
-      </form>
-      {% endif %}
     </div>
   </div>
 
-  <!-- Agent Contacts (Peer Links) -->
-  <div class="gobii-card-base">
-    <div class="p-6 sm:p-8 space-y-6">
+  <!-- Contacts & Access -->
+  <details class="gobii-card-base group" id="agent-contact-controls">
+    <summary class="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
       <div>
-        <h2 class="text-lg font-semibold text-gray-800">MCP Servers</h2>
-        <p class="text-sm text-gray-500">Platform and organization MCP servers are always enabled for this agent. Configure optional personal servers below.</p>
+        <h2 class="text-lg font-semibold text-gray-800">Contacts &amp; Access</h2>
+        <p class="text-sm text-gray-500">Contact endpoints and allowlist management.</p>
+      </div>
+      <i aria-hidden="true" data-lucide="chevron-down" class="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180"></i>
+    </summary>
+    <div class="p-6 sm:p-8 space-y-6">
+      <div class="grid sm:grid-cols-12 gap-4 sm:gap-6">
+        <!-- Primary Email -->
+        {% if primary_email %}
+        <div class="sm:col-span-3">
+          <label for="agent-email" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
+            Primary Email
+          </label>
+        </div>
+        <div class="sm:col-span-9">
+          <input id="agent-email" type="text" value="{{ primary_email.address }}"
+                 class="py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none"
+                 disabled>
+          <p class="mt-2 text-xs text-gray-500">The agent's primary email address for communication.</p>
+          <div class="mt-2">
+            <a href="{% url 'agent_email_settings' agent.id %}"
+               class="text-sm text-blue-600 hover:text-blue-800">Manage Email Settings</a>
+          </div>
+          {% if not primary_sms %}
+          <div class="mt-2">
+            <a href="{% url 'agent_enable_sms' agent.id %}"
+               class="text-sm text-blue-600 hover:text-blue-800">Enable SMS</a>
+          </div>
+          {% endif %}
+        </div>
+        {% else %}
+        <div class="sm:col-span-3">
+          <label class="inline-block text-sm font-medium text-gray-800 mt-2.5">
+            Primary Email
+          </label>
+        </div>
+        <div class="sm:col-span-9">
+          <div class="py-2 px-3 text-sm text-gray-600 bg-gray-50 border border-dashed border-gray-300 rounded">
+            Not configured. <a href="{% url 'agent_email_settings' agent.id %}" class="text-blue-600 hover:text-blue-800">Set up email</a>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Primary SMS -->
+        {% if primary_sms %}
+        <div class="sm:col-span-3">
+          <label for="agent-sms" class="inline-block text-sm font-medium text-gray-800 mt-2.5">
+            Primary SMS
+          </label>
+        </div>
+        <div class="sm:col-span-9">
+          <input id="agent-sms" type="text" value="{{ primary_sms.address }}"
+                 class="phone-number-to-format py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none"
+                 disabled>
+          <p class="mt-2 text-xs text-gray-500">The agent's primary SMS address for communication. This cannot be changed.</p>
+        </div>
+        {% endif %}
       </div>
 
-      {% if inherited_mcp_servers %}
+      {% if show_allowlist %}
+      <div class="space-y-4">
+        <p class="text-xs text-gray-500">
+          By default, the agent owner and organization members can communicate with this agent.
+          You can add additional contacts below. Note: Multi-recipient messaging is limited to email only.
+        </p>
+
+        <div id="allowlist-entries" class="space-y-4">
+          <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-700 mb-2">Add Allowed Contact</h4>
+            <div id="add-allowlist-form" class="space-y-2">
+              {% csrf_token %}
+              <div class="flex gap-2">
+                <select id="allowlist-channel" name="channel" class="py-1.5 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+                  <option value="email">Email</option>
+                  <!-- SMS option removed since multi-player agents only support email -->
+                </select>
+                <input type="email"
+                       id="allowlist-address"
+                       name="address"
+                       placeholder="email@example.com"
+                       class="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+              </div>
+              <div class="flex gap-4 items-center">
+                <label class="flex items-center gap-1 text-sm">
+                  <input type="checkbox" id="allow-inbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                  <span>Allow Inbound</span>
+                  <span class="text-xs text-gray-500">(can send to agent)</span>
+                </label>
+                <label class="flex items-center gap-1 text-sm">
+                  <input type="checkbox" id="allow-outbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                  <span>Allow Outbound</span>
+                  <span class="text-xs text-gray-500">(agent can send to)</span>
+                </label>
+              </div>
+              <div class="flex gap-2">
+                <button type="button"
+                        onclick="addAllowlistEntry()"
+                        class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                  Add
+                </button>
+                <button type="button"
+                        onclick="cancelAllowlistEntry()"
+                        class="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400">
+                  Cancel
+                </button>
+              </div>
+            </div>
+            <div id="allowlist-error" class="mt-2 text-xs text-red-600 hidden"></div>
+          </div>
+
+          {% if pending_contact_requests > 0 %}
+          <div class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <i aria-hidden="true" data-lucide="alert-triangle" class="w-5 h-5 text-yellow-600"></i>
+                <span class="text-sm font-medium text-yellow-800">
+                  {{ pending_contact_requests }} Contact Request{{ pending_contact_requests|pluralize }} Pending
+                </span>
+              </div>
+              <a href="{% url 'agent_contact_requests' agent.id %}" class="text-sm font-medium text-yellow-700 hover:text-yellow-900 underline">
+                Review
+              </a>
+            </div>
+          </div>
+          {% endif %}
+
+          <div class="p-3 bg-gray-50 rounded-lg">
+            <div class="flex justify-between items-center mb-2">
+              <h4 class="text-sm font-medium text-gray-700">Allowed Contacts</h4>
+              <span class="text-xs text-gray-500">
+                <span id="contact-count">{{ active_allowlist_count }}</span> / {{ max_contacts_per_agent|default:account.usage.max_contacts_per_agent }} contacts
+              </span>
+            </div>
+            <div id="allowlist-entries-container">
+              {% include "console/partials/_allowlist_entries_inline.html" %}
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+
+
+
+  <!-- Integrations -->
+  <details class="gobii-card-base group" id="agent-integrations">
+    <summary class="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-800">Integrations</h2>
+        <p class="text-sm text-gray-500">MCP servers, peer links, and webhooks.</p>
+      </div>
+      <i aria-hidden="true" data-lucide="chevron-down" class="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180"></i>
+    </summary>
+    <div class="divide-y divide-gray-200/70">
+      <section class="p-6 sm:p-8 space-y-6">
+        <div>
+          <h3 class="text-base font-semibold text-gray-800">MCP Servers</h3>
+          <p class="text-sm text-gray-500">Platform and organization MCP servers are always enabled for this agent. Configure optional personal servers below.</p>
+        </div>
+
+        {% if inherited_mcp_servers %}
         <div class="space-y-3">
-          <h3 class="text-sm font-semibold text-gray-700">Inherited Servers</h3>
+          <h4 class="text-sm font-semibold text-gray-700">Inherited Servers</h4>
           <ul class="space-y-2">
             {% for server in inherited_mcp_servers %}
-              <li class="flex items-start justify-between gap-3 border border-gray-200 bg-gray-50 rounded-lg px-4 py-3">
-                <div>
-                  <p class="text-sm font-medium text-gray-800">{{ server.display_name }}</p>
-                  {% if server.description %}
-                    <p class="text-sm text-gray-600">{{ server.description }}</p>
-                  {% endif %}
-                </div>
-                <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{{ server.scope|capfirst }}</span>
-              </li>
+            <li class="flex items-start justify-between gap-3 border border-gray-200 bg-gray-50 rounded-lg px-4 py-3">
+              <div>
+                <p class="text-sm font-medium text-gray-800">{{ server.display_name }}</p>
+                {% if server.description %}
+                <p class="text-sm text-gray-600">{{ server.description }}</p>
+                {% endif %}
+              </div>
+              <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{{ server.scope|capfirst }}</span>
+            </li>
             {% endfor %}
           </ul>
         </div>
-      {% endif %}
+        {% endif %}
 
-      {% if personal_mcp_servers %}
-        {% if show_personal_mcp_form %}
+        {% if personal_mcp_servers %}
+          {% if show_personal_mcp_form %}
           <div class="border border-gray-200 rounded-xl bg-white p-4">
             <form method="post" class="space-y-4">
               {% csrf_token %}
               <input type="hidden" name="mcp_server_action" value="update_personal">
               <div class="grid gap-3 md:grid-cols-2">
                 {% for server in personal_mcp_servers %}
-                  <label class="flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3">
-                    <input type="checkbox" class="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded" name="personal_servers" value="{{ server.id }}" {% if server.assigned %}checked{% endif %}>
-                    <div>
-                      <p class="text-sm font-medium text-gray-800">{{ server.display_name }}</p>
-                      {% if server.description %}
-                        <p class="text-sm text-gray-600">{{ server.description }}</p>
-                      {% endif %}
-                    </div>
-                  </label>
+                <label class="flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3">
+                  <input type="checkbox" class="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded" name="personal_servers" value="{{ server.id }}" {% if server.assigned %}checked{% endif %}>
+                  <div>
+                    <p class="text-sm font-medium text-gray-800">{{ server.display_name }}</p>
+                    {% if server.description %}
+                    <p class="text-sm text-gray-600">{{ server.description }}</p>
+                    {% endif %}
+                  </div>
+                </label>
                 {% endfor %}
               </div>
-              <div class="flex justify-end">
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                {% if current_context.type == 'personal' or can_manage_org_agents %}
+                <a href="{% url 'console-mcp-servers' %}" class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50">
+                  <i aria-hidden="true" data-lucide="server-cog" class="h-4 w-4"></i>
+                  Manage All Servers
+                </a>
+                {% endif %}
                 <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">Save Personal Servers</button>
               </div>
             </form>
           </div>
-        {% else %}
+          {% else %}
           <p class="text-sm text-gray-500">Personal MCP servers are managed on personal agents. Switch to a personal agent to configure access.</p>
+          {% endif %}
         {% endif %}
-      {% endif %}
 
-      {% if not inherited_mcp_servers and not personal_mcp_servers %}
+        {% if not inherited_mcp_servers and not personal_mcp_servers %}
         <p class="text-sm text-gray-500">No MCP servers are available for this agent yet.</p>
-      {% endif %}
-    </div>
-  </div>
+        {% endif %}
+      </section>
 
-  <!-- Agent Contacts (Peer Links) -->
-  <div class="gobii-card-base">
-    <div class="p-6 sm:p-8 space-y-6">
-      <div>
-        <h2 class="text-lg font-semibold text-gray-800">Agent Contacts (Peer Links)</h2>
-        <p class="text-sm text-gray-500">Create direct channels between this agent and other agents you control.</p>
-      </div>
+      <section class="p-6 sm:p-8 space-y-6">
+        <div>
+          <h3 class="text-base font-semibold text-gray-800">Agent Contacts (Peer Links)</h3>
+          <p class="text-sm text-gray-500">Create direct channels between this agent and other agents you control.</p>
+        </div>
 
-      <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
-        <form method="post" class="space-y-3">
-          {% csrf_token %}
-          <input type="hidden" name="peer_link_action" value="create">
-          <div class="grid md:grid-cols-4 gap-3">
-            <div class="md:col-span-2">
-              <label class="block text-xs font-medium text-gray-600 mb-1">Agent</label>
-              <select name="peer_agent_id" class="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
-                <option value="">Select an agent…</option>
-                {% for candidate in peer_link_candidates %}
+        <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+          <form method="post" class="space-y-3">
+            {% csrf_token %}
+            <input type="hidden" name="peer_link_action" value="create">
+            <div class="grid md:grid-cols-4 gap-3">
+              <div class="md:col-span-2">
+                <label class="block text-xs font-medium text-gray-600 mb-1">Agent</label>
+                <select name="peer_agent_id" class="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+                  <option value="">Select an agent…</option>
+                  {% for candidate in peer_link_candidates %}
                   <option value="{{ candidate.id }}">{{ candidate.name }}</option>
-                {% endfor %}
-              </select>
-              {% if not peer_link_candidates %}
-              <p class="mt-2 text-xs text-gray-500">No additional eligible agents available.</p>
-              {% endif %}
+                  {% endfor %}
+                </select>
+                {% if not peer_link_candidates %}
+                <p class="mt-2 text-xs text-gray-500">No additional eligible agents available.</p>
+                {% endif %}
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Messages / Window</label>
+                <input type="number" min="1" name="messages_per_window" value="{{ peer_link_defaults.messages_per_window }}" class="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Window Hours</label>
+                <input type="number" min="1" name="window_hours" value="{{ peer_link_defaults.window_hours }}" class="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+              </div>
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Messages / Window</label>
-              <input type="number" min="1" name="messages_per_window" value="{{ peer_link_defaults.messages_per_window }}" class="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+              <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors" {% if not peer_link_candidates %}disabled{% endif %}>
+                <i aria-hidden="true" data-lucide="plus" class="w-4 h-4"></i>
+                Create Link
+              </button>
             </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Window Hours</label>
-              <input type="number" min="1" name="window_hours" value="{{ peer_link_defaults.window_hours }}" class="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
-            </div>
-          </div>
-          <div>
-            <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors" {% if not peer_link_candidates %}disabled{% endif %}>
-              <i aria-hidden="true" data-lucide="plus" class="w-4 h-4"></i>
-              Create Link
-            </button>
-          </div>
-        </form>
-      </div>
+          </form>
+        </div>
 
-      <div class="space-y-3">
-        {% if peer_links %}
+        <div class="space-y-3">
+          {% if peer_links %}
+          <div class="overflow-hidden border border-gray-200 rounded-xl">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Agent</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Quota</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Remaining</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Next Reset</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Feature Flag</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                {% for entry in peer_links %}
+                <tr class="align-top">
+                  <td class="px-4 py-3 text-sm text-gray-800">
+                    {% if entry.counterpart %}
+                    <div class="font-medium">{{ entry.counterpart.name }}</div>
+                    {% else %}
+                    <div class="font-medium text-gray-500">(Agent unavailable)</div>
+                    {% endif %}
+                    <div class="text-xs text-gray-500 mt-1">Linked {{ entry.link.created_at|date:"M j, Y" }}</div>
+                    <div class="text-xs mt-1">Status: <span class="{% if entry.link.is_enabled %}text-green-600{% else %}text-gray-500{% endif %}">{% if entry.link.is_enabled %}Enabled{% else %}Disabled{% endif %}</span></div>
+                  </td>
+                  <td class="px-4 py-3 text-sm text-gray-700">{{ entry.link.messages_per_window }} / {{ entry.link.window_hours }} h</td>
+                  <td class="px-4 py-3 text-sm text-gray-700">{% if entry.state %}{{ entry.state.credits_remaining }}{% else %}—{% endif %}</td>
+                  <td class="px-4 py-3 text-sm text-gray-700">{% if entry.state and entry.state.window_reset_at %}{{ entry.state.window_reset_at|date:"M j, Y H:i" }}{% else %}—{% endif %}</td>
+                  <td class="px-4 py-3 text-sm text-gray-700">{{ entry.link.feature_flag|default:"—" }}</td>
+                  <td class="px-4 py-3 text-sm text-gray-700 space-y-2">
+                    <form method="post" class="space-y-2">
+                      {% csrf_token %}
+                      <input type="hidden" name="peer_link_action" value="update">
+                      <input type="hidden" name="link_id" value="{{ entry.link.id }}">
+                      <div class="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+                        <input type="number" min="1" name="messages_per_window" value="{{ entry.link.messages_per_window }}" class="w-full sm:w-24 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500">
+                        <input type="number" min="1" name="window_hours" value="{{ entry.link.window_hours }}" class="w-full sm:w-20 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500">
+                        <input type="text" name="feature_flag" value="{{ entry.link.feature_flag }}" placeholder="Flag (optional)" class="w-full sm:w-28 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500">
+                      </div>
+                      <label class="inline-flex items-center gap-2 text-xs text-gray-600">
+                        <input type="checkbox" name="is_enabled" value="true" {% if entry.link.is_enabled %}checked{% endif %} class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                        <span>Link enabled</span>
+                      </label>
+                      <div class="flex flex-wrap gap-2">
+                        <button type="submit" class="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                          <i aria-hidden="true" data-lucide="check" class="w-3.5 h-3.5"></i>
+                          Update
+                        </button>
+                        <button type="submit" name="peer_link_action" value="delete" class="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors" onclick="return confirm('Remove this link? This cannot be undone.');">
+                          <i aria-hidden="true" data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                          Remove
+                        </button>
+                      </div>
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
+            No peer links yet. Use the form above to connect this agent with another agent you control.
+          </div>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="p-6 sm:p-8 space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <h3 class="text-base font-semibold text-gray-800">Outbound Webhooks</h3>
+            <p class="text-sm text-gray-500">Manage webhook endpoints this agent can trigger.</p>
+          </div>
+          <button type="button"
+                  class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition"
+                  data-webhook-modal-trigger
+                  data-webhook-mode="create">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            Add Webhook
+          </button>
+        </div>
+
+        {% if agent_webhooks %}
         <div class="overflow-hidden border border-gray-200 rounded-xl">
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Agent</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Quota</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Remaining</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Next Reset</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Feature Flag</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">URL</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Last Delivery</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
-              {% for entry in peer_links %}
+              {% for webhook in agent_webhooks %}
               <tr class="align-top">
                 <td class="px-4 py-3 text-sm text-gray-800">
-                  {% if entry.counterpart %}
-                    <div class="font-medium">{{ entry.counterpart.name }}</div>
-                  {% else %}
-                    <div class="font-medium text-gray-500">(Agent unavailable)</div>
-                  {% endif %}
-                  <div class="text-xs text-gray-500 mt-1">Linked {{ entry.link.created_at|date:"M j, Y" }}</div>
-                  <div class="text-xs mt-1">Status: <span class="{% if entry.link.is_enabled %}text-green-600{% else %}text-gray-500{% endif %}">{% if entry.link.is_enabled %}Enabled{% else %}Disabled{% endif %}</span></div>
+                  <div class="font-medium">{{ webhook.name }}</div>
                 </td>
-                <td class="px-4 py-3 text-sm text-gray-700">{{ entry.link.messages_per_window }} / {{ entry.link.window_hours }} h</td>
-                <td class="px-4 py-3 text-sm text-gray-700">{% if entry.state %}{{ entry.state.credits_remaining }}{% else %}—{% endif %}</td>
-                <td class="px-4 py-3 text-sm text-gray-700">{% if entry.state and entry.state.window_reset_at %}{{ entry.state.window_reset_at|date:"M j, Y H:i" }}{% else %}—{% endif %}</td>
-                <td class="px-4 py-3 text-sm text-gray-700">{{ entry.link.feature_flag|default:"—" }}</td>
-                <td class="px-4 py-3 text-sm text-gray-700 space-y-2">
-                  <form method="post" class="space-y-2">
-                    {% csrf_token %}
-                    <input type="hidden" name="peer_link_action" value="update">
-                    <input type="hidden" name="link_id" value="{{ entry.link.id }}">
-                    <div class="flex flex-col sm:flex-row sm:items-center sm:gap-2">
-                      <input type="number" min="1" name="messages_per_window" value="{{ entry.link.messages_per_window }}" class="w-full sm:w-24 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500">
-                      <input type="number" min="1" name="window_hours" value="{{ entry.link.window_hours }}" class="w-full sm:w-20 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500">
-                      <input type="text" name="feature_flag" value="{{ entry.link.feature_flag }}" placeholder="Flag (optional)" class="w-full sm:w-28 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500">
-                    </div>
-                    <label class="inline-flex items-center gap-2 text-xs text-gray-600">
-                      <input type="checkbox" name="is_enabled" value="true" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if entry.link.is_enabled %}checked{% endif %}>
-                      <span>Enabled</span>
-                    </label>
-                    <button type="submit" class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">Save</button>
-                  </form>
-                  <form method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="peer_link_action" value="delete">
-                    <input type="hidden" name="link_id" value="{{ entry.link.id }}">
-                    <button type="submit" class="px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors">Remove</button>
-                  </form>
+                <td class="px-4 py-3 text-sm text-gray-700">
+                  <div class="break-all">{{ webhook.url }}</div>
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-700 space-y-1">
+                  {% if webhook.last_triggered_at %}
+                  <div>{{ webhook.last_triggered_at|date:"M j, Y g:i A" }}</div>
+                  {% if webhook.last_response_status %}
+                  <div class="text-xs text-gray-500">Status {{ webhook.last_response_status }}</div>
+                  {% endif %}
+                  {% if webhook.last_error_message %}
+                  <div class="text-xs text-red-600 truncate max-w-xs">{{ webhook.last_error_message }}</div>
+                  {% endif %}
+                  {% else %}
+                  <div class="text-gray-500">Never triggered</div>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-700">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button type="button"
+                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+                            data-webhook-modal-trigger
+                            data-webhook-mode="edit"
+                            data-webhook-id="{{ webhook.id }}"
+                            data-webhook-name="{{ webhook.name|escape }}"
+                            data-webhook-url="{{ webhook.url|escape }}">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 3.487a2.25 2.25 0 113.182 3.182L9.75 16.963l-4.5.75.75-4.5z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21H5"/>
+                      </svg>
+                      Edit
+                    </button>
+                    <form method="post" class="inline-flex">
+                      {% csrf_token %}
+                      <input type="hidden" name="webhook_action" value="delete">
+                      <input type="hidden" name="webhook_id" value="{{ webhook.id }}">
+                      <button type="submit"
+                              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition"
+                              onclick="return confirm('Remove this webhook? This cannot be undone.');">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        Delete
+                      </button>
+                    </form>
+                  </div>
                 </td>
               </tr>
               {% endfor %}
@@ -688,141 +709,118 @@
         </div>
         {% else %}
         <div class="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
-          No peer links yet. Use the form above to connect this agent with another agent you control.
+          No webhooks yet. Add one to let your agent notify external systems.
         </div>
         {% endif %}
-      </div>
+      </section>
     </div>
-  </div>
+  </details>
 
-  <!-- Outbound Webhooks -->
-  <div class="gobii-card-base">
-    <div class="p-6 sm:p-8 space-y-6">
-      <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+  <!-- Actions -->
+  <details class="gobii-card-base group" id="agent-ownership">
+    <summary class="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-800">Actions</h2>
+        <p class="text-sm text-gray-500">Ownership, transfer, and deletion tools.</p>
+      </div>
+      <i aria-hidden="true" data-lucide="chevron-down" class="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180"></i>
+    </summary>
+    <div class="divide-y divide-gray-200/70">
+      {% flag "organizations" %}
+      <section class="p-6 sm:p-8 space-y-4">
         <div>
-          <h2 class="text-lg font-semibold text-gray-800">Outbound Webhooks</h2>
-          <p class="text-sm text-gray-500">
-            Manage webhook endpoints this agent can trigger.
-          </p>
+          <h3 class="text-base font-semibold text-gray-800">Organization Assignment</h3>
+          <p class="text-sm text-gray-500">Switch this agent between your personal workspace and an organization you manage.</p>
         </div>
-        <button type="button"
-                class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition"
-                data-webhook-modal-trigger
-                data-webhook-mode="create">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-          </svg>
-          Add Webhook
-        </button>
-      </div>
+        <div class="space-y-3">
+          {% if agent.organization %}
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <span class="text-sm text-gray-700">Currently assigned to <strong>{{ agent.organization.name }}</strong></span>
+            <button type="button" id="move-personal-btn" class="px-3 py-1.5 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700">Move to Personal</button>
+          </div>
+          {% else %}
+          <div class="flex flex-col sm:flex-row sm:items-center sm:gap-3">
+            <select id="target-org-id" class="py-2 border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500">
+              <option value="">Select organization…</option>
+              {% for org in reassignable_orgs %}
+              <option value="{{ org.id }}">{{ org.name }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" id="assign-org-btn" class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Assign to Organization</button>
+          </div>
+          <p class="text-xs text-gray-500">Name must be unique within the selected organization.</p>
+          {% endif %}
+          <div id="ownership-error" class="text-xs text-red-600 hidden"></div>
+        </div>
+      </section>
+      {% endflag %}
 
-      {% if agent_webhooks %}
-      <div class="overflow-hidden border border-gray-200 rounded-xl">
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
-            <tr>
-              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
-              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">URL</th>
-              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Last Delivery</th>
-              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="bg-white divide-y divide-gray-200">
-            {% for webhook in agent_webhooks %}
-            <tr class="align-top">
-              <td class="px-4 py-3 text-sm text-gray-800">
-                <div class="font-medium">{{ webhook.name }}</div>
-              </td>
-              <td class="px-4 py-3 text-sm text-gray-700">
-                <div class="break-all">{{ webhook.url }}</div>
-              </td>
-              <td class="px-4 py-3 text-sm text-gray-700 space-y-1">
-                {% if webhook.last_triggered_at %}
-                  <div>{{ webhook.last_triggered_at|date:"M j, Y g:i A" }}</div>
-                  {% if webhook.last_response_status %}
-                    <div class="text-xs text-gray-500">Status {{ webhook.last_response_status }}</div>
-                  {% endif %}
-                  {% if webhook.last_error_message %}
-                    <div class="text-xs text-red-600 truncate max-w-xs">{{ webhook.last_error_message }}</div>
-                  {% endif %}
-                {% else %}
-                  <div class="text-gray-500">Never triggered</div>
-                {% endif %}
-              </td>
-              <td class="px-4 py-3 text-sm text-gray-700">
-                <div class="flex flex-wrap items-center gap-2">
-                  <button type="button"
-                          class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
-                          data-webhook-modal-trigger
-                          data-webhook-mode="edit"
-                          data-webhook-id="{{ webhook.id }}"
-                          data-webhook-name="{{ webhook.name|escape }}"
-                          data-webhook-url="{{ webhook.url|escape }}">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 3.487a2.25 2.25 0 113.182 3.182L9.75 16.963l-4.5.75.75-4.5z"/>
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21H5"/>
-                    </svg>
-                    Edit
-                  </button>
-                  <form method="post" class="inline-flex">
-                    {% csrf_token %}
-                    <input type="hidden" name="webhook_action" value="delete">
-                    <input type="hidden" name="webhook_id" value="{{ webhook.id }}">
-                    <button type="submit"
-                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition"
-                            onclick="return confirm('Remove this webhook? This cannot be undone.');">
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                      </svg>
-                      Delete
-                    </button>
-                  </form>
-                </div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <div class="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
-        No webhooks yet. Add one to let your agent notify external systems.
-      </div>
-      {% endif %}
-    </div>
-  </div>
+      <section class="p-6 sm:p-8 space-y-4">
+        <div>
+          <h3 class="text-base font-semibold text-gray-800">Transfer Ownership</h3>
+          <p class="text-sm text-gray-500">Send this agent to someone else. They can accept or decline from their dashboard.</p>
+        </div>
 
-  <!-- Danger Zone -->
-  <div class="bg-white/80 backdrop-blur-sm border border-red-200/60 shadow-xl rounded-xl overflow-hidden">
-    <div class="p-6 sm:p-8">
-      <div class="flex gap-x-4">
-        <!-- Warning Icon -->
-        <div class="flex-shrink-0">
-          <div class="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 border-4 border-red-50">
-            <i aria-hidden="true" data-lucide="shield-alert" class="w-6 h-6 text-red-600"></i>
+        {% if pending_transfer_invite %}
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-indigo-50 border border-indigo-100 rounded-lg p-4">
+          <div>
+            <p class="text-sm text-indigo-800">Transfer invitation sent to <strong>{{ pending_transfer_invite.to_email }}</strong> on {{ pending_transfer_invite.created_at|date:"M j, Y g:i A" }}.</p>
+            <p class="text-xs text-indigo-700 mt-1">They'll need to sign in with that email to accept.</p>
+          </div>
+          <form method="post" class="flex">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="cancel_transfer_invite">
+            <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition">
+              Cancel Invitation
+            </button>
+          </form>
+        </div>
+        {% else %}
+        <form method="post" class="space-y-4">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="transfer_agent">
+          <div>
+            <label for="transfer-email" class="text-sm font-medium text-gray-700">Recipient email</label>
+            <input id="transfer-email" name="transfer_email" type="email" required placeholder="user@example.com" class="mt-1 block w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+          </div>
+          <div>
+            <label for="transfer-message" class="text-sm font-medium text-gray-700">Message <span class="text-gray-400">(optional)</span></label>
+            <textarea id="transfer-message" name="transfer_message" rows="2" class="mt-1 block w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500" placeholder="Share any context you'd like them to know."></textarea>
+          </div>
+          <div class="flex justify-end">
+            <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition">
+              Send Transfer Invite
+            </button>
+          </div>
+        </form>
+        {% endif %}
+      </section>
+
+      <section class="p-6 sm:p-8">
+        <div class="flex gap-x-4">
+          <div class="flex-shrink-0">
+            <div class="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 border-4 border-red-50">
+              <i aria-hidden="true" data-lucide="shield-alert" class="w-6 h-6 text-red-600"></i>
+            </div>
+          </div>
+          <div class="flex-grow space-y-4">
+            <div>
+              <h3 class="text-lg font-bold text-red-800">Danger Zone</h3>
+              <p class="text-sm text-red-700">Permanently delete this agent and all of its data. This action cannot be undone and will immediately stop any running tasks.</p>
+            </div>
+            <button hx-delete="{% url 'agent_delete' agent.id %}"
+                    hx-confirm="Are you sure you want to delete this agent? This action cannot be undone and will permanently remove all agent data and stop any running tasks."
+                    hx-target="body"
+                    hx-swap="none"
+                    class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors">
+              <i aria-hidden="true" data-lucide="trash-2" class="w-4 h-4"></i>
+              Delete Agent
+            </button>
           </div>
         </div>
-        
-        <div class="flex-grow">
-          <h3 class="text-lg font-bold text-red-800 mb-2">Danger Zone</h3>
-          <p class="text-sm text-red-700 mb-6">
-            Permanently delete this agent and all of its data. This action cannot be undone and will immediately stop any running tasks.
-          </p>
-          
-          <!-- Delete Button -->
-          <button hx-delete="{% url 'agent_delete' agent.id %}" 
-                  hx-confirm="Are you sure you want to delete this agent? This action cannot be undone and will permanently remove all agent data and stop any running tasks."
-                  hx-target="body" 
-                  hx-swap="none"
-                  class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors">
-            <i aria-hidden="true" data-lucide="trash-2" class="w-4 h-4"></i>
-            Delete Agent
-          </button>
-        </div>
-      </div>
+      </section>
     </div>
-  </div>
-</div>
+  </details>
 
 <!-- Webhook Modal -->
 <div id="webhook-modal" class="fixed inset-0 z-50 hidden overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="webhook-modal-title">
@@ -887,6 +885,90 @@
     </div>
   </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const form = document.getElementById('general-settings-form');
+  const saveBar = document.getElementById('agent-save-bar');
+  const cancelButton = document.getElementById('agent-save-cancel');
+
+  if (!form || !saveBar || !cancelButton) {
+    return;
+  }
+
+  const trackedFields = Array.from(
+    form.querySelectorAll('input:not([type="hidden"]):not([disabled]):not([name="csrfmiddlewaretoken"]), select:not([disabled]), textarea:not([disabled])')
+  ).filter((field) => {
+    const type = field.type ? field.type.toLowerCase() : field.tagName.toLowerCase();
+    return !['button', 'submit', 'reset', 'file'].includes(type);
+  });
+
+  const storeInitialState = (field) => {
+    if (field.type === 'checkbox' || field.type === 'radio') {
+      field.dataset.initialChecked = field.checked ? 'true' : 'false';
+    } else {
+      field.dataset.initialValue = field.value ?? '';
+    }
+  };
+
+  trackedFields.forEach(storeInitialState);
+
+  const fieldIsDirty = (field) => {
+    if (field.type === 'checkbox' || field.type === 'radio') {
+      return (field.dataset.initialChecked || 'false') !== (field.checked ? 'true' : 'false');
+    }
+    return (field.dataset.initialValue ?? '') !== field.value;
+  };
+
+  const evaluateDirtyState = () => {
+    const hasChanges = trackedFields.some(fieldIsDirty);
+    saveBar.classList.toggle('hidden', !hasChanges);
+  };
+
+  trackedFields.forEach((field) => {
+    field.addEventListener('input', evaluateDirtyState);
+    field.addEventListener('change', evaluateDirtyState);
+  });
+
+  const nameField = form.querySelector('#agent-name');
+  const nameHeading = document.getElementById('agent-name-heading');
+  if (nameField && nameHeading) {
+    const updateHeading = () => {
+      const value = (nameField.value || '').trim();
+      nameHeading.textContent = `${value || 'Untitled Agent'} Settings`;
+    };
+    nameField.addEventListener('input', updateHeading);
+    updateHeading();
+  }
+
+  evaluateDirtyState();
+
+  cancelButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    trackedFields.forEach((field) => {
+      if (field.type === 'checkbox' || field.type === 'radio') {
+        const initial = field.dataset.initialChecked === 'true';
+        if (field.checked !== initial) {
+          field.checked = initial;
+          field.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } else {
+        const initialValue = field.dataset.initialValue ?? '';
+        if (field.value !== initialValue) {
+          field.value = initialValue;
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
+    });
+    evaluateDirtyState();
+  });
+
+  form.addEventListener('submit', () => {
+    saveBar.classList.add('hidden');
+    trackedFields.forEach(storeInitialState);
+  });
+});
+</script>
 
 <!-- JavaScript to handle allowlist management -->
 {% if show_allowlist %}
