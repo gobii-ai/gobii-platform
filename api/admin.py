@@ -146,7 +146,6 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "scale_product_id",
                     "scale_dedicated_ip_product_id",
                     "scale_dedicated_ip_price_id",
-                    "org_team_product_id",
                 )
             },
         ),
