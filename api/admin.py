@@ -32,6 +32,7 @@ from .models import (
     UsageThresholdSent,
     PersistentAgentWebhook,
     MCPServerConfig,
+    AgentColor,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -118,8 +119,9 @@ class StripeConfigAdmin(admin.ModelAdmin):
         "webhook_secret_status",
     )
 
+
     fieldsets = (
-        (None, {"fields": ("release_env", "live_mode")} ),
+        (None, {"fields": ("release_env", "live_mode")}),
         (
             "Secrets",
             {
@@ -137,22 +139,35 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "startup_price_id",
                     "startup_additional_task_price_id",
                     "startup_product_id",
-                    "startup_dedicated_ip_product_id",
                     "startup_dedicated_ip_price_id",
-                    "org_team_product_id",
-                    "org_team_price_id",
-                    "org_team_additional_task_price_id",
-                    "org_team_dedicated_ip_product_id",
-                    "org_team_dedicated_ip_price_id",
-                    "task_meter_id",
-                    "task_meter_event_name",
-                    "org_task_meter_id",
-                    "org_team_task_meter_id",
-                    "org_team_task_meter_event_name",
+                    "startup_dedicated_ip_product_id",
                 )
             },
         ),
-        ("Metadata", {"fields": ("created_at", "updated_at")}),
+        (
+            "Org Team",
+            {
+                "fields": (
+                    "org_team_price_id",
+                    "org_team_product_id",
+                    "org_team_dedicated_ip_price_id",
+                    "org_team_dedicated_ip_product_id",
+                    "org_team_additional_task_price_id",
+                )
+            },
+        ),
+        (
+            "Task Meters",
+            {
+                "fields": (
+                    "task_meter_id",
+                    "task_meter_event_name",
+                    "org_team_task_meter_id",
+                    "org_team_task_meter_event_name",
+                    "org_task_meter_id",
+                )
+            },
+        ),
     )
 
     def webhook_secret_status(self, obj):
@@ -161,6 +176,35 @@ class StripeConfigAdmin(admin.ModelAdmin):
     webhook_secret_status.short_description = "Webhook secret"
 
 
+@admin.register(AgentColor)
+class AgentColorAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "hex_value",
+        "preview",
+        "sort_order",
+        "is_active",
+        "created_at",
+        "updated_at",
+    )
+    list_editable = ("hex_value", "sort_order", "is_active")
+    search_fields = ("name", "hex_value")
+    list_filter = ("is_active",)
+    ordering = ("sort_order", "name")
+    readonly_fields = ("preview", "created_at", "updated_at")
+    fields = ("name", "hex_value", "sort_order", "is_active", "preview", "created_at", "updated_at")
+
+    @admin.display(description="Preview")
+    def preview(self, obj):
+        color = (obj.hex_value or "").strip() or "#000000"
+        return format_html(
+            '<span style="display:inline-flex;align-items:center;gap:0.5rem;">'
+            '<span style="width:2.75rem;height:1.25rem;border-radius:0.35rem;border:1px solid rgba(15,23,42,0.18);background:{};"></span>'
+            '<code style="font-size:0.85rem;">{}</code>'
+            '</span>',
+            color,
+            color.upper(),
+        )
 @admin.register(MCPServerConfig)
 class MCPServerConfigAdmin(admin.ModelAdmin):
     form = MCPServerConfigAdminForm
