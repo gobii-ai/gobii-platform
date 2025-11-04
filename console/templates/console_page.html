@@ -6,7 +6,25 @@
 	{% if subscribe_notification %}
   <script type="text/javascript">
     if (typeof fbq !== "undefined") {
-      fbq('track', 'Subscribe', {'value': {{sub_price}}, 'currency': 'USD'});
+      var payload = {'value': {{ sub_price }}, 'currency': 'USD'};
+      {% if subscribe_plan %}
+      payload.plan = '{{ subscribe_plan|escapejs }}';
+      {% endif %}
+      {% if subscribe_event_id %}
+      fbq('track', 'Subscribe', payload, {eventID: '{{ subscribe_event_id|escapejs }}'});
+      {% else %}
+      fbq('track', 'Subscribe', payload);
+      {% endif %}
+    }
+    if (typeof rdt !== "undefined") {
+      var redditPayload = {value: {{ sub_price }}, currency: 'USD'};
+      {% if subscribe_plan %}
+      redditPayload.plan = '{{ subscribe_plan|escapejs }}';
+      {% endif %}
+      {% if subscribe_event_id %}
+      redditPayload.conversionId = '{{ subscribe_event_id|escapejs }}';
+      {% endif %}
+      rdt('track', 'Purchase', redditPayload);
     }
   </script>
   {% endif %}

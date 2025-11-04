@@ -229,6 +229,31 @@ def _extract_plan_value_from_subscription(source: Mapping[str, Any] | None) -> s
     return None
 
 
+def _coerce_metadata_dict(candidate: Any) -> dict[str, Any]:
+    """Best effort conversion of Stripe metadata containers to plain dicts."""
+    if not candidate:
+        return {}
+    if isinstance(candidate, Mapping):
+        return dict(candidate)
+    try:
+        return dict(candidate)
+    except Exception:
+        try:
+            keys = list(candidate.keys())  # type: ignore[attr-defined]
+        except Exception:
+            return {}
+        result = {}
+        for key in keys:
+            try:
+                result[key] = candidate[key]  # type: ignore[index]
+            except Exception:
+                try:
+                    result[key] = getattr(candidate, key)
+                except Exception:
+                    continue
+        return result
+
+
 def _get_subscription_items_data(source: Any) -> list:
     if isinstance(source, Mapping):
         items_source = source.get("items")
@@ -878,6 +903,12 @@ def handle_subscription_event(event, **kwargs):
         # Prefer explicit Stripe retrieve when present; otherwise use dj-stripe's cached payload
         # from the Subscription row. This allows the normal sync_from_stripe_data path to work.
 
+        subscription_metadata: dict[str, Any] = {}
+        if isinstance(source_data, Mapping):
+            subscription_metadata = _coerce_metadata_dict(source_data.get("metadata"))
+        if not subscription_metadata:
+            subscription_metadata = _coerce_metadata_dict(getattr(sub, "metadata", None))
+
         current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
         cancel_at_dt = _coerce_datetime(_get_stripe_data_value(source_data, "cancel_at"))
         cancel_at_period_end_flag = _coerce_bool(_get_stripe_data_value(source_data, "cancel_at_period_end"))
@@ -994,6 +1025,10 @@ def handle_subscription_event(event, **kwargs):
                         "plan": plan_value,
                         "subscription_id": subscription_id,
                     }
+                    if analytics_event == AnalyticsEvent.SUBSCRIPTION_CREATED:
+                        event_id_override = subscription_metadata.get("gobii_event_id")
+                        if isinstance(event_id_override, str) and event_id_override.strip():
+                            marketing_properties["event_id"] = event_id_override.strip()
                     value, currency = _calculate_subscription_value(licensed_item)
                     if value is not None:
                         marketing_properties["value"] = value
@@ -1036,13 +1071,7 @@ def handle_subscription_event(event, **kwargs):
                         for item in items_data
                     )
 
-                    metadata: dict[str, str] = {}
-                    source_metadata = source_data.get("metadata") if isinstance(source_data, Mapping) else None
-                    if isinstance(source_metadata, Mapping):
-                        metadata = dict(source_metadata)
-                    else:
-                        metadata = dict(getattr(sub, "metadata", {}) or {})
-
+                    metadata: dict[str, str] = dict(subscription_metadata)
                     overage_state = metadata.get(ORG_OVERAGE_STATE_META_KEY, "")
                     seat_delta = seats - prev_seats
 

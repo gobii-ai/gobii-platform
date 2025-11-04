@@ -243,6 +243,8 @@ class SubscriptionSignalTests(TestCase):
         sub = self._mock_subscription(current_period_day=17, subscriber=fresh_user)
         sub.stripe_data['billing_reason'] = "subscription_create"
         sub.billing_reason = "subscription_create"
+        event_id = "sub-evt-123"
+        sub.stripe_data['metadata'] = {"gobii_event_id": event_id}
 
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
@@ -281,6 +283,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertAlmostEqual(props["value"], 29.99, places=2)
         self.assertEqual(props["currency"], "USD")
         self.assertNotIn("renewal", props)
+        self.assertEqual(props["event_id"], event_id)
         context = capi_kwargs["context"]
         self.assertIsNotNone(context)
         self.assertTrue(context.get("consent"))
@@ -322,6 +325,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertAlmostEqual(props["value"], 29.99, places=2)
         self.assertEqual(props["currency"], "USD")
         self.assertTrue(capi_kwargs["context"].get("consent"))
+        self.assertNotIn("event_id", props)
 
     @tag("batch_pages")
     def test_missing_user_billing_logs_exception(self):
@@ -398,6 +402,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(props["churn_stage"], "voluntary")
         self.assertNotIn("currency", props)
         self.assertNotIn("value", props)
+        self.assertNotIn("event_id", props)
         self.assertTrue(capi_kwargs["context"].get("consent"))
 
     @tag("batch_pages")
