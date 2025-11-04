@@ -3220,8 +3220,8 @@ class PersistentAgent(models.Model):
                     old_sched_truthy = _truthy_sched(getattr(old_instance, "schedule", None))
                     new_sched_truthy = _truthy_sched(getattr(self, "schedule", None))
                     # Trigger when schedule transitions to disabled; be lenient to ensure cleanup fires
-                    if not new_sched_truthy:
-                        # Only append once
+                    if old_sched_truthy and not new_sched_truthy:
+                        # Only append once when transitioning from scheduled -> disabled
                         shutdown_reasons.append("CRON_DISABLED")
                     # life_state: ACTIVE -> EXPIRED (soft expire)
                     if (
