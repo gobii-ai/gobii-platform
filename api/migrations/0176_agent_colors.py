@@ -20,7 +20,6 @@ RAW_AGENT_COLOR_PALETTE = [
     "#8ced85",
     "#e3f0ff",
     "#877555",
-    "#414656",
 ]
 
 
