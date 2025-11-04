@@ -1839,12 +1839,11 @@ def _build_prompt_context(
     except (OperationalError, ObjectDoesNotExist, AttributeError):
         step_recent_count = step_limit + 1  # fall back to running compaction
 
-    if step_recent_count > step_limit:
-        ensure_steps_compacted(
-            agent=agent,
-            summarise_fn=partial(llm_summarise_steps, agent=agent),
-            safety_identifier=safety_id,
-        )
+    ensure_steps_compacted(
+        agent=agent,
+        summarise_fn=partial(llm_summarise_steps, agent=agent),
+        safety_identifier=safety_id,
+    )
 
     try:
         last_comm_snapshot = (
@@ -1862,12 +1861,11 @@ def _build_prompt_context(
     except (OperationalError, ObjectDoesNotExist, AttributeError):
         comm_recent_count = comm_limit + 1
 
-    if comm_recent_count > comm_limit:
-        ensure_comms_compacted(
-            agent=agent,
-            summarise_fn=partial(llm_summarise_comms, agent=agent),
-            safety_identifier=safety_id,
-        )
+    ensure_comms_compacted(
+        agent=agent,
+        summarise_fn=partial(llm_summarise_comms, agent=agent),
+        safety_identifier=safety_id,
+    )
 
     # Get the model being used for accurate token counting
     # Note: We attempt to read DB-configured tiers with token_count=0 to pick
