@@ -16,6 +16,7 @@ from bleach.sanitizer import ALLOWED_PROTOCOLS as BLEACH_ALLOWED_PROTOCOLS_BASE
 from bleach.sanitizer import ALLOWED_TAGS as BLEACH_ALLOWED_TAGS_BASE
 from bleach.sanitizer import Cleaner
 
+from api.agent.core.processing_flags import is_processing_queued
 from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
@@ -601,11 +602,14 @@ def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
 
     lock_key = f"redlock:agent-event-processing:{agent.id}"
     lock_active = False
+    queued_flag = False
     try:
         redis_client = get_redis_client()
         lock_active = bool(redis_client.exists(lock_key))
+        queued_flag = is_processing_queued(agent.id, client=redis_client)
     except Exception:
         lock_active = False
+        queued_flag = False
 
     web_tasks: list[dict] = []
     if getattr(agent, "browser_use_agent_id", None):
@@ -618,7 +622,7 @@ def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
         now = timezone.now()
         web_tasks = [_build_web_task_payload(task, now=now) for task in active_tasks]
 
-    active = bool(lock_active or web_tasks)
+    active = bool(lock_active or queued_flag or web_tasks)
     return ProcessingSnapshot(active=active, web_tasks=web_tasks)
 
 

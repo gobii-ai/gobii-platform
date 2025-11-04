@@ -44,6 +44,7 @@ from .budget import (
     get_current_context as get_budget_context,
     set_current_context as set_budget_context,
 )
+from .processing_flags import clear_processing_queued_flag
 from .llm_utils import run_completion
 from ..short_description import (
     maybe_schedule_mini_description,
@@ -861,9 +862,11 @@ def process_agent_events(
             )
             span.add_event("Event processing skipped – lock acquisition failed (pending flag set)")
             span.set_attribute("lock.acquired", False)
+            clear_processing_queued_flag(persistent_agent_id)
             return
 
         lock_acquired = True
+        clear_processing_queued_flag(persistent_agent_id)
 
         logger.info("Acquired distributed lock for agent %s", persistent_agent_id)
         span.add_event("Distributed lock acquired")
@@ -1811,60 +1814,17 @@ def _build_prompt_context(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     safety_id = agent.user.id if agent.user else None
-    try:
-        step_limit = getattr(settings, "PA_RAW_STEP_LIMIT", RAW_STEP_LIMIT)
-    except Exception:
-        step_limit = RAW_STEP_LIMIT
-    try:
-        comm_limit = getattr(settings, "PA_RAW_MSG_LIMIT", RAW_MSG_LIMIT)
-    except Exception:
-        comm_limit = RAW_MSG_LIMIT
 
-    try:
-        last_step_snapshot = (
-            PersistentAgentStepSnapshot.objects.filter(agent=agent)
-            .only("snapshot_until")
-            .order_by("-snapshot_until")
-            .first()
-        )
-        step_lower_bound = last_step_snapshot.snapshot_until if last_step_snapshot else agent.created_at
-        step_recent_count = (
-            PersistentAgentStep.objects.filter(agent=agent, created_at__gt=step_lower_bound)
-            .order_by()
-            .count()
-        )
-    except (OperationalError, ObjectDoesNotExist, AttributeError):
-        step_recent_count = step_limit + 1  # fall back to running compaction
-
-    if step_recent_count > step_limit:
-        ensure_steps_compacted(
-            agent=agent,
-            summarise_fn=partial(llm_summarise_steps, agent=agent),
-            safety_identifier=safety_id,
-        )
-
-    try:
-        last_comm_snapshot = (
-            PersistentAgentCommsSnapshot.objects.filter(agent=agent)
-            .only("snapshot_until")
-            .order_by("-snapshot_until")
-            .first()
-        )
-        comm_lower_bound = last_comm_snapshot.snapshot_until if last_comm_snapshot else agent.created_at
-        comm_recent_count = (
-            PersistentAgentMessage.objects.filter(owner_agent=agent, timestamp__gt=comm_lower_bound)
-            .order_by()
-            .count()
-        )
-    except (OperationalError, ObjectDoesNotExist, AttributeError):
-        comm_recent_count = comm_limit + 1
-
-    if comm_recent_count > comm_limit:
-        ensure_comms_compacted(
-            agent=agent,
-            summarise_fn=partial(llm_summarise_comms, agent=agent),
-            safety_identifier=safety_id,
-        )
+    ensure_steps_compacted(
+        agent=agent,
+        summarise_fn=partial(llm_summarise_steps, agent=agent),
+        safety_identifier=safety_id,
+    )
+    ensure_comms_compacted(
+        agent=agent,
+        summarise_fn=partial(llm_summarise_comms, agent=agent),
+        safety_identifier=safety_id,
+    )
 
     # Get the model being used for accurate token counting
     # Note: We attempt to read DB-configured tiers with token_count=0 to pick
