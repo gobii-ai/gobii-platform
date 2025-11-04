@@ -14,8 +14,14 @@ class AgentColorPaletteTests(TestCase):
     def setUp(self):
         AgentColor.objects.all().delete()
 
+    def test_palette_auto_seeds_single_color(self):
+        palette = AgentColor.get_active_palette()
+
+        self.assertEqual(len(palette), 1)
+        self.assertEqual(palette[0].hex_value.upper(), AgentColor.DEFAULT_HEX.upper())
+
     @patch('api.models.AgentService.get_agents_available', return_value=100)
-    def test_agents_use_unique_colors_until_palette_exhausted(self, _mock_agents_available):
+    def test_agents_share_default_color(self, _mock_agents_available):
         owner = User.objects.create_user(username="palette_owner", email="palette@example.com", password="pw")
         browser_agent_one = BrowserUseAgent.objects.create(user=owner, name="Palette BA 1")
         browser_agent_two = BrowserUseAgent.objects.create(user=owner, name="Palette BA 2")
@@ -33,24 +39,5 @@ class AgentColorPaletteTests(TestCase):
             browser_use_agent=browser_agent_two,
         )
 
-        self.assertNotEqual(first.agent_color_id, second.agent_color_id)
-
-    @patch('api.models.AgentService.get_agents_available', return_value=100)
-    def test_agents_reuse_least_used_color_when_palette_full(self, _mock_agents_available):
-        owner = User.objects.create_user(username="palette_owner2", email="palette2@example.com", password="pw")
-
-        agents = []
-        browser_agent = BrowserUseAgent.objects.create(user=owner, name=f"Palette BA 0")
-        agent = PersistentAgent.objects.create(
-            user=owner,
-            name=f"Palette Agent 0",
-            charter="charter",
-            browser_use_agent=browser_agent,
-        )
-        agents.append(agent)
-
-        fallback_agent = agents[-1]
-        self.assertEqual(
-            fallback_agent.agent_color.hex_value,
-            AgentColor.DEFAULT_HEX,
-        )
+        self.assertEqual(first.agent_color_id, second.agent_color_id)
+        self.assertEqual(first.agent_color.hex_value.upper(), AgentColor.DEFAULT_HEX.upper())
