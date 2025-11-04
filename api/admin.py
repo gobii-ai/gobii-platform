@@ -168,6 +168,15 @@ class StripeConfigAdmin(admin.ModelAdmin):
                 )
             },
         ),
+        (
+            "Metadata",
+            {
+                "fields": (
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
     )
 
     def webhook_secret_status(self, obj):
