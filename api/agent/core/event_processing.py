@@ -1814,53 +1814,12 @@ def _build_prompt_context(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     safety_id = agent.user.id if agent.user else None
-    try:
-        step_limit = getattr(settings, "PA_RAW_STEP_LIMIT", RAW_STEP_LIMIT)
-    except Exception:
-        step_limit = RAW_STEP_LIMIT
-    try:
-        comm_limit = getattr(settings, "PA_RAW_MSG_LIMIT", RAW_MSG_LIMIT)
-    except Exception:
-        comm_limit = RAW_MSG_LIMIT
-
-    try:
-        last_step_snapshot = (
-            PersistentAgentStepSnapshot.objects.filter(agent=agent)
-            .only("snapshot_until")
-            .order_by("-snapshot_until")
-            .first()
-        )
-        step_lower_bound = last_step_snapshot.snapshot_until if last_step_snapshot else agent.created_at
-        step_recent_count = (
-            PersistentAgentStep.objects.filter(agent=agent, created_at__gt=step_lower_bound)
-            .order_by()
-            .count()
-        )
-    except (OperationalError, ObjectDoesNotExist, AttributeError):
-        step_recent_count = step_limit + 1  # fall back to running compaction
 
     ensure_steps_compacted(
         agent=agent,
         summarise_fn=partial(llm_summarise_steps, agent=agent),
         safety_identifier=safety_id,
     )
-
-    try:
-        last_comm_snapshot = (
-            PersistentAgentCommsSnapshot.objects.filter(agent=agent)
-            .only("snapshot_until")
-            .order_by("-snapshot_until")
-            .first()
-        )
-        comm_lower_bound = last_comm_snapshot.snapshot_until if last_comm_snapshot else agent.created_at
-        comm_recent_count = (
-            PersistentAgentMessage.objects.filter(owner_agent=agent, timestamp__gt=comm_lower_bound)
-            .order_by()
-            .count()
-        )
-    except (OperationalError, ObjectDoesNotExist, AttributeError):
-        comm_recent_count = comm_limit + 1
-
     ensure_comms_compacted(
         agent=agent,
         summarise_fn=partial(llm_summarise_comms, agent=agent),
