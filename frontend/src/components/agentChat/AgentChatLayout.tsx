@@ -8,6 +8,7 @@ import type { ProcessingWebTask } from '../../types/agentChat'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   agentName: string
+  agentColorHex?: string | null
   header?: ReactNode
   footer?: ReactNode
   onLoadOlder?: () => void
@@ -28,6 +29,7 @@ export function AgentChatLayout({
   agentName,
   agentFirstName,
   events,
+  agentColorHex,
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
@@ -86,6 +88,7 @@ export function AgentChatLayout({
                 <TimelineEventList
                   agentFirstName={agentFirstName}
                   events={events}
+                  agentColorHex={agentColorHex || undefined}
                   initialLoading={initialLoading}
                 />
               </div>

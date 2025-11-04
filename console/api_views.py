@@ -298,6 +298,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "has_more_newer": window.has_more_newer,
             "processing_active": window.processing_active,
             "processing_snapshot": serialize_processing_snapshot(window.processing_snapshot),
+            "agent_color_hex": agent.get_display_color(),
         }
         return JsonResponse(payload)
 

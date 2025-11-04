@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 import stripe
 from django.template.loader import render_to_string
@@ -10,7 +11,7 @@ from django.views.generic import TemplateView, ListView, View, DetailView
 from django.views.generic.edit import FormMixin
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
-from django.urls import reverse, reverse_lazy
+from django.urls import NoReverseMatch, reverse, reverse_lazy
 from django.contrib import messages
 from django.db import transaction, models, IntegrityError
 from django.db.models import Q
@@ -76,10 +77,111 @@ from util.subscription_helper import (
     calculate_extra_tasks_used_during_subscription_period,
     get_user_extra_task_limit,
     get_or_create_stripe_customer,
+    get_organization_plan,
+    has_unlimited_agents,
+    is_community_unlimited_mode,
 )
 from config import settings
 from config.stripe_config import get_stripe_settings
-from config.plans import PLAN_CONFIG
+from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
+
+
+def _clamp_color(value: int) -> int:
+    return max(0, min(255, value))
+
+
+def _hex_to_rgb_components(hex_color: str) -> tuple[int, int, int]:
+    normalized = (hex_color or "").strip().lstrip("#")
+    if len(normalized) != 6:
+        return (0, 116, 212)
+    return tuple(int(normalized[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _rgb_to_hex(r: int, g: int, b: int) -> str:
+    return f"#{_clamp_color(r):02X}{_clamp_color(g):02X}{_clamp_color(b):02X}"
+
+
+def _adjust_hex(hex_color: str, ratio: float) -> str:
+    r, g, b = _hex_to_rgb_components(hex_color)
+    if ratio >= 0:
+        r = _clamp_color(int(r + (255 - r) * ratio))
+        g = _clamp_color(int(g + (255 - g) * ratio))
+        b = _clamp_color(int(b + (255 - b) * ratio))
+    else:
+        ratio = abs(ratio)
+        r = _clamp_color(int(r * (1 - ratio)))
+        g = _clamp_color(int(g * (1 - ratio)))
+        b = _clamp_color(int(b * (1 - ratio)))
+    return _rgb_to_hex(r, g, b)
+
+
+def _build_agent_gradient(hex_color: str) -> str:
+    base = (hex_color or "#0074D4").upper()
+    lighter = _adjust_hex(base, 0.35)
+    darker = _adjust_hex(base, -0.25)
+    return f"background-image: linear-gradient(135deg, {lighter} 0%, {base} 55%, {darker} 100%); background-color: {base};"
+
+
+def _relative_luminance(hex_color: str) -> float:
+    r, g, b = _hex_to_rgb_components(hex_color)
+
+    def _normalize(channel: int) -> float:
+        c = channel / 255.0
+        if c <= 0.03928:
+            return c / 12.92
+        return ((c + 0.055) / 1.055) ** 2.4
+
+    r_lin = _normalize(r)
+    g_lin = _normalize(g)
+    b_lin = _normalize(b)
+    return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+
+
+def _text_palette_for_hex(hex_color: str) -> dict[str, str]:
+    luminance = _relative_luminance(hex_color)
+    # Threshold chosen to meet WCAG contrast guidance for normal text (~4.5:1).
+    use_light = luminance <= 0.55
+    if use_light:
+        return {
+            "primary": "text-white",
+            "secondary": "text-white/70",
+            "status": "text-white/80",
+            "badge": "bg-white/20 text-white border border-white/40",
+            "icon": "text-white",
+            "link_hover": "hover:text-white",
+        }
+    return {
+        "primary": "text-slate-900",
+        "secondary": "text-slate-700",
+        "status": "text-slate-800",
+        "badge": "bg-black/5 text-slate-800 border border-black/10",
+        "icon": "text-slate-900",
+        "link_hover": "hover:text-slate-900",
+    }
+
+
+def _safe_getattr(source, attr: str, default=None):
+    if source is None:
+        return default
+    if isinstance(source, dict):
+        return source.get(attr, default)
+    return getattr(source, attr, default)
+
+
+def _first_endpoint_address(endpoints) -> str | None:
+    if not endpoints:
+        return None
+    endpoint = endpoints[0]
+    return getattr(endpoint, "address", None) or None
+
+
+def _coerce_decimal_to_float(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, InvalidOperation, ValueError):
+        return None
 
 
 def _resolve_dedicated_ip_pricing(plan):
@@ -124,7 +226,7 @@ from .forms import (
 )
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
-from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.analytics import Analytics, AnalyticsCTAs, AnalyticsEvent, AnalyticsSource
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import ORGANIZATIONS
@@ -1628,6 +1730,109 @@ def task_result_view(request, task_id):
 class PersistentAgentsView(ConsoleViewMixin, TemplateView):
     template_name = "console/persistent_agents.html"
 
+    def _resolve_agent_capacity(self, context: dict[str, Any]) -> dict[str, Any]:
+        current_context = context.get('current_context', {})
+        membership = context.get('current_membership')
+        organization = None
+        owner = self.request.user
+        owner_type = 'user'
+
+        if current_context.get('type') == 'organization':
+            organization = getattr(membership, 'org', None)
+            if organization is None:
+                org_id = current_context.get('id')
+                if org_id:
+                    organization = Organization.objects.filter(id=org_id).first()
+            owner = organization
+            owner_type = 'organization'
+
+        if owner is None:
+            return {
+                'agents_available': 0,
+                'agents_unlimited': False,
+                'can_spawn_agents': False,
+            }
+
+        try:
+            agents_available = AgentService.get_agents_available(owner)
+        except Exception:
+            agents_available = 0
+
+        try:
+            can_spawn_agents = AgentService.has_agents_available(owner)
+        except Exception:
+            can_spawn_agents = False
+
+        community_unlimited = is_community_unlimited_mode()
+        if owner_type == 'organization':
+            plan = get_organization_plan(organization) if organization else None
+            agents_unlimited = community_unlimited or (plan and plan.get('agent_limit') == AGENTS_UNLIMITED)
+        else:
+            agents_unlimited = community_unlimited or has_unlimited_agents(owner)
+
+        return {
+            'agents_available': max(int(agents_available), 0),
+            'agents_unlimited': bool(agents_unlimited),
+            'can_spawn_agents': bool(can_spawn_agents),
+        }
+
+    def _serialize_agent_for_frontend(self, agent: PersistentAgent) -> dict[str, Any]:
+        display_tags = agent.display_tags if isinstance(agent.display_tags, list) else []
+        primary_email = _first_endpoint_address(getattr(agent, 'primary_email_endpoints', None))
+        primary_sms = _first_endpoint_address(getattr(agent, 'primary_sms_endpoints', None))
+        remaining = _coerce_decimal_to_float(getattr(agent, 'daily_credit_remaining', None))
+
+        return {
+            'id': str(agent.id),
+            'name': agent.name or '',
+            'listingDescription': agent.listing_description or '',
+            'listingDescriptionSource': getattr(agent, 'listing_description_source', None),
+            'miniDescription': agent.mini_description or '',
+            'miniDescriptionSource': getattr(agent, 'mini_description_source', None),
+            'displayTags': display_tags,
+            'isActive': bool(getattr(agent, 'is_active', False)),
+            'pendingTransfer': bool(getattr(agent, 'pending_transfer_invite', None)),
+            'primaryEmail': primary_email,
+            'primarySms': primary_sms,
+            'detailUrl': reverse('agent_detail', kwargs={'pk': agent.id}),
+            'chatUrl': reverse('agent_chat_shell', kwargs={'pk': agent.id}),
+            'cardGradientStyle': getattr(agent, 'card_gradient_style', '') or '',
+            'iconBackgroundHex': getattr(agent, 'icon_background_hex', '') or '',
+            'iconBorderHex': getattr(agent, 'icon_border_hex', '') or '',
+            'headerTextClass': getattr(agent, 'header_text_class', '') or '',
+            'headerSubtextClass': getattr(agent, 'header_subtext_class', '') or '',
+            'headerStatusClass': getattr(agent, 'header_status_class', '') or '',
+            'headerBadgeClass': getattr(agent, 'header_badge_class', '') or '',
+            'headerIconClass': getattr(agent, 'header_icon_class', '') or '',
+            'headerLinkHoverClass': getattr(agent, 'header_link_hover_class', '') or '',
+            'dailyCreditRemaining': remaining,
+            'dailyCreditLow': bool(getattr(agent, 'daily_credit_low', False)),
+        }
+
+    def _build_agent_list_props(self, context: dict[str, Any], agents: list[PersistentAgent]) -> dict[str, Any]:
+        capacity = self._resolve_agent_capacity(context)
+        can_spawn_agents = capacity['can_spawn_agents']
+        spawn_url = f"{reverse('pages:home')}?spawn=1"
+
+        upgrade_url = None
+        if settings.GOBII_PROPRIETARY_MODE:
+            try:
+                upgrade_url = reverse('proprietary:pricing')
+            except NoReverseMatch:
+                upgrade_url = None
+
+        return {
+            'agents': [self._serialize_agent_for_frontend(agent) for agent in agents],
+            'hasAgents': bool(agents),
+            'spawnAgentUrl': spawn_url,
+            'upgradeUrl': upgrade_url,
+            'canSpawnAgents': can_spawn_agents,
+            'showUpgradeCta': bool(upgrade_url) and settings.GOBII_PROPRIETARY_MODE and not can_spawn_agents,
+            'createFirstAgentEvent': AnalyticsCTAs.CTA_CREATE_FIRST_AGENT_CLICKED.value,
+            'agentsAvailable': capacity['agents_available'],
+            'agentsUnlimited': capacity['agents_unlimited'],
+        }
+
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1652,13 +1857,13 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             # Show organization's agents
             persistent_agents = PersistentAgent.objects.filter(
                 organization_id=current_context.get('id')
-            ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+            ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
             persistent_agents = PersistentAgent.objects.filter(
                 user=self.request.user,
                 organization__isnull=True  # Only personal agents
-            ).select_related('browser_use_agent').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+            ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
         persistent_agents = list(persistent_agents)
         today = timezone.localdate()
@@ -1677,6 +1882,18 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             agent.listing_description = description
             agent.listing_description_source = source
             agent.is_initializing = source == "placeholder"
+            color_hex = agent.get_display_color().upper()
+            agent.display_color_hex = color_hex
+            agent.card_gradient_style = _build_agent_gradient(color_hex)
+            agent.icon_background_hex = _adjust_hex(color_hex, 0.55)
+            agent.icon_border_hex = _adjust_hex(color_hex, -0.25)
+            palette = _text_palette_for_hex(color_hex)
+            agent.header_text_class = palette["primary"]
+            agent.header_subtext_class = palette["secondary"]
+            agent.header_status_class = palette["status"]
+            agent.header_badge_class = palette["badge"]
+            agent.header_icon_class = palette["icon"]
+            agent.header_link_hover_class = palette["link_hover"]
 
             mini_description, mini_source = build_mini_description(agent)
             agent.mini_description = mini_description
@@ -1707,8 +1924,8 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             )
 
         context['persistent_agents'] = persistent_agents
-
         context['has_agents'] = bool(persistent_agents)
+        context['agent_list_props'] = self._build_agent_list_props(context, persistent_agents)
 
         pending_transfers_qs = AgentTransferInvite.objects.filter(
             status=AgentTransferInvite.Status.PENDING,

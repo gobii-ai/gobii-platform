@@ -601,6 +601,10 @@
   word-break: break-word;
 }
 
+.chat-bubble--user .chat-content {
+  color: var(--user-content-color, var(--user-bubble-text, #fbfbff));
+}
+
 .tool-cluster {
   background: transparent;
   border: none;
@@ -1178,8 +1182,21 @@
 }
 
 .chat-bubble--user {
-  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-  color: #fbfbff;
+  --user-bubble-bg: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  --user-bubble-border: rgba(79, 70, 229, 0.18);
+  --user-bubble-text: #fbfbff;
+  --user-author-color: rgba(255, 255, 255, 0.75);
+  --user-content-color: #fbfbff;
+  --user-meta-color: rgba(226, 232, 240, 0.9);
+  --user-attachment-bg: rgba(255, 255, 255, 0.2);
+  --user-attachment-hover-bg: rgba(255, 255, 255, 0.28);
+  --user-attachment-color: #ede9fe;
+  --user-channel-badge-bg: rgba(255, 255, 255, 0.2);
+  --user-channel-badge-border: rgba(255, 255, 255, 0.35);
+  --user-channel-badge-text: rgba(255, 255, 255, 0.85);
+  background: var(--user-bubble-bg);
+  color: var(--user-bubble-text);
+  border: 1px solid var(--user-bubble-border);
 }
 
 .chat-bubble--agent {
@@ -1209,9 +1226,11 @@
   margin-bottom: 0.35rem;
 }
 
+
 .chat-author--user {
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--user-author-color, rgba(255, 255, 255, 0.75));
 }
+
 
 .chat-author--agent {
   color: rgba(79, 70, 229, 0.65);
@@ -1220,6 +1239,12 @@
 .chat-author--peer {
   color: rgba(79, 70, 229, 0.7);
   letter-spacing: 0.04em;
+}
+
+.user-channel-badge {
+  border: 1px solid var(--user-channel-badge-border, rgba(255, 255, 255, 0.35));
+  background: var(--user-channel-badge-bg, rgba(255, 255, 255, 0.2));
+  color: var(--user-channel-badge-text, rgba(255, 255, 255, 0.85));
 }
 
 .chat-meta {
@@ -1231,9 +1256,13 @@
 }
 
 .chat-meta.is-user {
-  color: rgba(148, 163, 184, 0.9);
+  color: var(--user-meta-color, rgba(226, 232, 240, 0.9));
   text-align: right;
   align-self: flex-end;
+}
+
+.chat-event.is-agent .chat-meta {
+  color: rgba(148, 163, 184, 0.9);
 }
 
 .chat-meta--peer {
@@ -1258,24 +1287,21 @@
   transition: background 0.18s ease;
 }
 
-.chat-bubble--agent .chat-attachments a {
-  background: rgba(79, 70, 229, 0.08);
-  color: #4338ca;
-}
-
 .chat-bubble--peer-out .chat-attachments a,
 .chat-bubble--peer-in .chat-attachments a {
   background: rgba(79, 70, 229, 0.08);
   color: #4338ca;
 }
 
-.chat-bubble--user .chat-attachments a {
-  background: rgba(255, 255, 255, 0.2);
-  color: #ede9fe;
+
+.chat-bubble--agent .chat-attachments a {
+  background: rgba(79, 70, 229, 0.08);
+  color: #4338ca;
 }
 
-.chat-bubble--agent .chat-attachments a:hover {
-  background: rgba(79, 70, 229, 0.12);
+.chat-bubble--user .chat-attachments a {
+  background: var(--user-attachment-bg, rgba(255, 255, 255, 0.2));
+  color: var(--user-attachment-color, #ede9fe);
 }
 
 .chat-bubble--peer-out .chat-attachments a:hover,
@@ -1283,8 +1309,12 @@
   background: rgba(79, 70, 229, 0.14);
 }
 
+.chat-bubble--agent .chat-attachments a:hover {
+  background: rgba(79, 70, 229, 0.12);
+}
+
 .chat-bubble--user .chat-attachments a:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: var(--user-attachment-hover-bg, rgba(255, 255, 255, 0.28));
 }
 
 @media (max-width: 768px) {

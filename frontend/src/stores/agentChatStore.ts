@@ -10,6 +10,7 @@ import type {
 } from '../types/agentChat'
 import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
 import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
+import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
 
 const HTML_TAG_FALLBACK_PATTERN = /<\/?[a-zA-Z][^>]*>/
 
@@ -184,7 +185,8 @@ export type AgentChatState = {
   autoScrollPinned: boolean
   autoScrollPinSuppressedUntil: number | null
   pendingEvents: TimelineEvent[]
-  initialize: (agentId: string) => Promise<void>
+  agentColorHex: string | null
+  initialize: (agentId: string, options?: { agentColorHex?: string | null }) => Promise<void>
   refreshProcessing: () => Promise<void>
   loadOlder: () => Promise<void>
   loadNewer: () => Promise<void>
@@ -213,9 +215,18 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   autoScrollPinned: true,
   autoScrollPinSuppressedUntil: null,
   pendingEvents: [],
+  agentColorHex: null,
 
-  async initialize(agentId) {
-    set({ loading: true, agentId, error: null, autoScrollPinned: true, autoScrollPinSuppressedUntil: null })
+  async initialize(agentId, options) {
+    const providedColor = options?.agentColorHex ? normalizeHexColor(options.agentColorHex) : null
+    set({
+      loading: true,
+      agentId,
+      error: null,
+      autoScrollPinned: true,
+      autoScrollPinSuppressedUntil: null,
+      agentColorHex: providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX,
+    })
 
     try {
       const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
@@ -225,6 +236,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const processingSnapshot = normalizeProcessingUpdate(
         snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
       )
+      const agentColorHex = snapshot.agent_color_hex
+        ? normalizeHexColor(snapshot.agent_color_hex)
+        : providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX
 
       set({
         events,
@@ -238,6 +252,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         autoScrollPinned: true,
         autoScrollPinSuppressedUntil: null,
         pendingEvents: [],
+        agentColorHex,
       })
     } catch (error) {
       console.error('Failed to initialize agent chat:', error)
@@ -282,14 +297,15 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const newestCursor = events.length ? events[events.length - 1].cursor : null
       const trimmedNewer = merged.length > events.length
       const hasMoreNewer = incoming.length === 0 ? state.hasMoreNewer : snapshot.has_more_newer || trimmedNewer
-      set({
+      set((current) => ({
         events,
         oldestCursor,
         newestCursor,
         hasMoreOlder: snapshot.has_more_older,
         hasMoreNewer,
         loadingOlder: false,
-      })
+        agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
+      }))
     } catch (error) {
       set({
         loadingOlder: false,
@@ -321,7 +337,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const processingSnapshot = normalizeProcessingUpdate(
         snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
       )
-      set({
+      set((current) => ({
         events,
         oldestCursor,
         newestCursor,
@@ -330,7 +346,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         processingActive: processingSnapshot.active,
         processingWebTasks: processingSnapshot.webTasks,
         loadingNewer: false,
-      })
+        agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
+      }))
     } catch (error) {
       set({
         loadingNewer: false,
@@ -353,7 +370,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const processingSnapshot = normalizeProcessingUpdate(
         snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
       )
-      set({
+      set((current) => ({
         events,
         oldestCursor,
         newestCursor,
@@ -364,7 +381,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         hasUnseenActivity: false,
         loading: false,
         pendingEvents: [],
-      })
+        agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
+      }))
     } catch (error) {
       set({
         loading: false,

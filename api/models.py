@@ -7,13 +7,14 @@ from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.validators import RegexValidator
-from django.db import models, transaction
+from django.db import IntegrityError, connection, models, transaction
 from django.db.models import UniqueConstraint, Q
-from django.db.models import UniqueConstraint, Sum
+from django.db.models import UniqueConstraint, Sum, Count
 from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.utils.text import get_valid_filename
+from django.db.utils import OperationalError, ProgrammingError
 
 from django.contrib.auth import get_user_model
 from django.db.models.signals import post_save, pre_delete, pre_save
@@ -59,9 +60,100 @@ except Exception:  # pragma: no cover - optional dependency
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
+
 def generate_ulid() -> str:
     """Return a 26-character, time-ordered ULID string."""
     return str(ulid.new())
+
+
+class AgentColor(models.Model):
+    """Palette entry for agent accent colors."""
+
+    DEFAULT_HEX = "#0074d4"
+
+    name = models.CharField(max_length=64, unique=True)
+    hex_value = models.CharField(max_length=7, unique=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.hex_value})"
+
+    @classmethod
+    def get_active_palette(cls) -> list["AgentColor"]:
+        """Return the ordered, active palette."""
+        cls._seed_palette_if_needed()
+        return list(cls.objects.filter(is_active=True).order_by("sort_order", "id"))
+
+    @classmethod
+    def get_default_hex(cls) -> str:
+        """Return the default hex value, even if the palette isn't yet seeded."""
+        palette = cls.get_active_palette()
+        if palette:
+            return palette[0].hex_value
+        return cls.DEFAULT_HEX
+
+    @classmethod
+    def pick_for_owner(cls, *, user, organization=None) -> "AgentColor | None":
+        """Prefer a unique color for the owner; otherwise reuse the least-used palette color."""
+        palette = cls.get_active_palette()
+        if not palette:
+            return None
+
+        qs = PersistentAgent.objects.filter(agent_color__isnull=False)
+        organization_id = None
+        if organization is not None:
+            organization_id = getattr(organization, "id", None)
+            if organization_id is None:
+                if isinstance(organization, uuid.UUID):
+                    organization_id = str(organization)
+                elif isinstance(organization, (int, str)):
+                    organization_id = organization
+
+        if organization_id:
+            qs = qs.filter(organization_id=organization_id)
+        else:
+            qs = qs.filter(organization__isnull=True, user=user)
+
+        usage_counts = {
+            row["agent_color_id"]: row["count"]
+            for row in qs.values("agent_color_id").annotate(count=Count("id"))
+        }
+
+        for color in palette:
+            if usage_counts.get(color.id, 0) == 0:
+                return color
+
+        least_used_color = min(
+            palette,
+            key=lambda color: (usage_counts.get(color.id, 0), color.sort_order, color.id),
+        )
+        return least_used_color
+
+    @classmethod
+    def _seed_palette_if_needed(cls) -> None:
+        """Populate the palette when migrations are disabled (e.g., unit tests)."""
+        try:
+            if cls.objects.filter(is_active=True).exists():
+                return
+        except (ProgrammingError, OperationalError):
+            # Table does not exist yet (e.g., during migrations); skip seeding.
+            return
+
+        with transaction.atomic():
+            cls.objects.update_or_create(
+                name=f"color_0",
+                defaults={
+                    "hex_value": cls.DEFAULT_HEX,
+                    "sort_order": 0,
+                    "is_active": True,
+                },
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -2498,6 +2590,14 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="SHA256 of the charter currently pending mini description generation.",
     )
+    agent_color = models.ForeignKey(
+        AgentColor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="persistent_agents",
+        help_text="UI accent color assigned to this agent.",
+    )
     tags = models.JSONField(
         default=list,
         blank=True,
@@ -2648,6 +2748,43 @@ class PersistentAgent(models.Model):
                 raise ValidationError({"tags": "Each tag must be a non-empty string."})
             if len(tag.strip()) > 64:
                 raise ValidationError({"tags": "Tags must be 64 characters or fewer."})
+
+    def assign_agent_color(self, *, force: bool = False) -> None:
+        """Assign a color, preferring unused palette entries for this owner."""
+        if self.agent_color_id and not force:
+            return
+        # Skip assignment when the colors table has not been created yet (e.g., historical migrations).
+        try:
+            table_names = connection.introspection.table_names()
+        except (ProgrammingError, OperationalError):
+            return
+        if AgentColor._meta.db_table not in table_names:
+            return
+        organization_ref = getattr(self, "organization", None)
+        if organization_ref is None:
+            organization_ref = self.organization_id
+        color = AgentColor.pick_for_owner(user=self.user, organization=organization_ref)
+        if color is None:
+            raise ValidationError({
+                "agent_color": (
+                    "No available agent colors remain for this owner. "
+                    "Add more agent colors before creating additional agents."
+                )
+            })
+        self.agent_color = color
+
+    def get_display_color(self) -> str:
+        """Return the hex color used to render the agent in the UI."""
+        if self.agent_color_id:
+            cache = getattr(self._state, "fields_cache", {})
+            cached_color = cache.get("agent_color")
+            if cached_color:
+                return cached_color.hex_value
+            try:
+                return self.agent_color.hex_value  # type: ignore[union-attr]
+            except AgentColor.DoesNotExist:
+                pass
+        return AgentColor.get_default_hex()
 
     def _validate_org_seats(self):
         billing = getattr(self.organization, "billing", None)
@@ -3045,6 +3182,12 @@ class PersistentAgent(models.Model):
         # Track whether we should reset the sent_expiration_email flag when the agent wakes up.
         reset_sent_flag = False
         update_fields = kwargs.get("update_fields")
+        if self.agent_color_id is None:
+            self.assign_agent_color()
+            if update_fields is not None and "agent_color" not in update_fields:
+                update_fields = list(update_fields)
+                update_fields.append("agent_color")
+                kwargs["update_fields"] = update_fields
 
         # For updates, we need to check if schedule-related fields have changed.
         sync_needed = False
@@ -3099,8 +3242,8 @@ class PersistentAgent(models.Model):
                 update_fields_list = list(update_fields)
                 update_fields_list.append("sent_expiration_email")
                 kwargs["update_fields"] = update_fields_list
+                update_fields = update_fields_list
 
-        # Proceed with the actual save operation. This is part of the transaction.
         super().save(*args, **kwargs)
 
         # If it's a new instance or a relevant field changed, schedule the
