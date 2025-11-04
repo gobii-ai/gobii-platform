@@ -587,8 +587,23 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
                 context['sub_price'] = float(price_str)
             except ValueError:
                 context['sub_price'] = 0.0
+
+            event_id = (self.request.GET.get('eid') or '').strip()
+            if event_id and len(event_id) <= 64:
+                context['subscribe_event_id'] = event_id
+            else:
+                context['subscribe_event_id'] = ""
+
+            plan_config = context.get('subscription_plan') or {}
+            plan_value = plan_config.get('id') if isinstance(plan_config, dict) else None
+            if isinstance(plan_value, str):
+                context['subscribe_plan'] = plan_value
+            else:
+                context['subscribe_plan'] = ''
         else:
             context['subscribe_notification'] = False
+            context['subscribe_event_id'] = ""
+            context['subscribe_plan'] = ''
 
 
         # Get the user's active subscription

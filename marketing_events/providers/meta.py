@@ -1,3 +1,5 @@
+from django.conf import settings
+
 from .base import post_json, TemporaryError, PermanentError
 
 
@@ -24,15 +26,24 @@ class MetaCAPI:
             "fbp": evt["network"]["fbp"],
             "fbc": evt["network"]["fbc"],
         }
-        body = {
-            "data": [{
-                "event_name": name,
-                "event_time": evt["event_time"],
-                "event_id": evt["event_id"],
-                "action_source": "website",
-                "event_source_url": evt["network"]["page_url"],
-                "user_data": user_data,
-                "custom_data": evt["properties"] or {},
-            }]
+        event_payload = {
+            "event_name": name,
+            "event_time": evt["event_time"],
+            "event_id": evt["event_id"],
+            "action_source": "website",
+            "event_source_url": evt["network"]["page_url"],
+            "user_data": user_data,
+            "custom_data": evt["properties"] or {},
         }
+
+        test_mode = bool(getattr(settings, "FACEBOOK_CAPI_TEST_MODE", False))
+        test_code = getattr(settings, "FACEBOOK_TEST_EVENT_CODE", "") or ""
+
+        body = {
+            "data": [event_payload]
+        }
+
+        if test_mode and isinstance(test_code, str) and test_code.strip():
+            body["test_event_code"] = test_code.strip()
+
         return post_json(self.url, json=body, params={"access_token": self.token})

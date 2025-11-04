@@ -1,5 +1,6 @@
 from datetime import timezone, datetime
 from urllib.parse import urlencode
+import uuid
 
 from django.http.response import JsonResponse
 from django.views.generic import TemplateView, RedirectView, View
@@ -636,14 +637,28 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         except Exception as e:
             logger.error(f"An unexpected error occurred while fetching price: {e}")
 
+        event_id = f"sub-{uuid.uuid4()}"
+
+        success_params = {
+            "subscribe_success": 1,
+            "p": f"{price:.2f}",
+            "eid": event_id,
+        }
+        success_url = f'{request.build_absolute_uri(reverse("console-home"))}?{urlencode(success_params)}'
+
         # 2️⃣  Kick off Checkout with the *existing* customer
         session = stripe.checkout.Session.create(
             customer=customer.id,                       # <-- key line
             api_key=stripe.api_key,
-            success_url=f'{request.build_absolute_uri(reverse("console-home"))}?subscribe_success=1&p={price}',
+            success_url=success_url,
             cancel_url=request.build_absolute_uri(reverse("pages:home")),
             mode="subscription",
             allow_promotion_codes=True,
+            subscription_data={
+                "metadata": {
+                    "gobii_event_id": event_id,
+                }
+            },
             line_items=[
                 {
                     "price": stripe_settings.startup_price_id,
