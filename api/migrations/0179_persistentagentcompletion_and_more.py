@@ -38,7 +38,6 @@ def backfill_step_completions(apps, schema_editor):
             cached_tokens=first.cached_tokens,
             llm_model=first.llm_model,
             llm_provider=first.llm_provider,
-            credits_cost=first.credits_cost,
             billed=True,
             billed_at=first.created_at,
         )
@@ -72,6 +71,18 @@ def revert_step_completions(apps, schema_editor):
     Step = apps.get_model("api", "PersistentAgentStep")
     Completion = apps.get_model("api", "PersistentAgentCompletion")
     db_alias = schema_editor.connection.alias
+    completions = Completion.objects.using(db_alias).all().iterator()
+    for completion in completions:
+        step_updates = {
+            "prompt_tokens": completion.prompt_tokens,
+            "completion_tokens": completion.completion_tokens,
+            "total_tokens": completion.total_tokens,
+            "cached_tokens": completion.cached_tokens,
+            "llm_model": completion.llm_model,
+            "llm_provider": completion.llm_provider,
+        }
+        Step.objects.using(db_alias).filter(completion_id=completion.id).update(**step_updates)
+
     Step.objects.using(db_alias).update(completion=None)
     Completion.objects.using(db_alias).all().delete()
 
