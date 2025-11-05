@@ -79,7 +79,7 @@ def revert_step_completions(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0176_agent_colors'),
+        ('api', '0178_merge_20251104_2000.py'),
     ]
 
     operations = [
