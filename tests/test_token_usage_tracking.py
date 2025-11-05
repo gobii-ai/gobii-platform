@@ -3,7 +3,13 @@ import json
 from unittest.mock import patch, MagicMock
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
-from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall, BrowserUseAgent
+from api.models import (
+    PersistentAgent,
+    PersistentAgentCompletion,
+    PersistentAgentStep,
+    PersistentAgentToolCall,
+    BrowserUseAgent,
+)
 from api.agent.core.event_processing import _completion_with_failover
 
 User = get_user_model()
@@ -70,97 +76,102 @@ class TokenUsageTrackingTest(TestCase):
             self.assertEqual(token_usage["model"], "test_model")
             self.assertEqual(token_usage["provider"], "test_provider")
     
-    def test_step_creation_with_token_usage(self):
-        """Test that steps are created with token usage fields."""
-        # Create a step with token usage
-        step = PersistentAgentStep.objects.create(
+    def test_completion_model_persists_token_usage(self):
+        """Ensure PersistentAgentCompletion stores token fields."""
+        completion = PersistentAgentCompletion.objects.create(
             agent=self.agent,
-            description="Test step with token usage",
             prompt_tokens=100,
             completion_tokens=50,
             total_tokens=150,
             cached_tokens=25,
             llm_model="gpt-4",
-            llm_provider="openai"
+            llm_provider="openai",
+            billed=True,
         )
-        
-        # Reload from database
-        step.refresh_from_db()
-        
-        # Verify fields are saved
-        self.assertEqual(step.prompt_tokens, 100)
-        self.assertEqual(step.completion_tokens, 50)
-        self.assertEqual(step.total_tokens, 150)
-        self.assertEqual(step.cached_tokens, 25)
-        self.assertEqual(step.llm_model, "gpt-4")
-        self.assertEqual(step.llm_provider, "openai")
-    
-    def test_tool_call_step_with_token_usage(self):
-        """Test that tool call steps include token usage."""
-        # Create a tool call step with token usage
+        completion.refresh_from_db()
+        self.assertEqual(completion.prompt_tokens, 100)
+        self.assertEqual(completion.completion_tokens, 50)
+        self.assertEqual(completion.total_tokens, 150)
+        self.assertEqual(completion.cached_tokens, 25)
+        self.assertEqual(completion.llm_model, "gpt-4")
+        self.assertEqual(completion.llm_provider, "openai")
+
+    def test_step_links_to_completion(self):
+        """Steps should reference a single completion record."""
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+            llm_model="gpt-4o",
+            llm_provider="openai",
+            billed=True,
+        )
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
-            description="Tool call: test_tool",
+            description="Reasoning step",
+            completion=completion,
+        )
+        step.refresh_from_db()
+        self.assertEqual(step.completion_id, completion.id)
+        self.assertEqual(completion.steps.count(), 1)
+
+    def test_tool_call_step_links_completion(self):
+        """Tool call metadata should still be accessible via the completion."""
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
             prompt_tokens=200,
             completion_tokens=100,
             total_tokens=300,
             llm_model="claude-3-opus",
-            llm_provider="anthropic"
+            llm_provider="anthropic",
+            billed=True,
         )
-        
-        # Create associated tool call
-        tool_call = PersistentAgentToolCall.objects.create(
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: test_tool",
+            completion=completion,
+        )
+        PersistentAgentToolCall.objects.create(
             step=step,
             tool_name="test_tool",
             tool_params={"param": "value"},
-            result=json.dumps({"status": "success"})
+            result=json.dumps({"status": "success"}),
         )
-        
-        # Verify token usage is associated with the step
-        self.assertEqual(step.prompt_tokens, 200)
-        self.assertEqual(step.completion_tokens, 100)
-        self.assertEqual(step.total_tokens, 300)
-        self.assertEqual(step.llm_model, "claude-3-opus")
-        self.assertEqual(step.llm_provider, "anthropic")
-    
+        self.assertEqual(step.completion.llm_model, "claude-3-opus")
+        self.assertEqual(step.completion.total_tokens, 300)
+
     def test_aggregate_token_usage_for_agent(self):
-        """Test aggregating token usage across all steps for an agent."""
-        # Create multiple steps with token usage
-        PersistentAgentStep.objects.create(
+        """Test aggregating token usage across all completions for an agent."""
+        from django.db.models import Sum
+
+        PersistentAgentCompletion.objects.create(
             agent=self.agent,
-            description="Step 1",
             prompt_tokens=100,
             completion_tokens=50,
-            total_tokens=150
+            total_tokens=150,
+            billed=True,
         )
-        
-        PersistentAgentStep.objects.create(
+        PersistentAgentCompletion.objects.create(
             agent=self.agent,
-            description="Step 2",
             prompt_tokens=200,
             completion_tokens=100,
-            total_tokens=300
+            total_tokens=300,
+            billed=True,
         )
-        
-        PersistentAgentStep.objects.create(
+        PersistentAgentCompletion.objects.create(
             agent=self.agent,
-            description="Step 3 (no tokens)",  # Step without token usage
+            billed=True,
         )
-        
-        # Aggregate token usage
-        from django.db.models import Sum
-        totals = PersistentAgentStep.objects.filter(
-            agent=self.agent
-        ).aggregate(
-            total_prompt_tokens=Sum('prompt_tokens'),
-            total_completion_tokens=Sum('completion_tokens'),
-            total_all_tokens=Sum('total_tokens')
+
+        totals = PersistentAgentCompletion.objects.filter(agent=self.agent).aggregate(
+            total_prompt_tokens=Sum("prompt_tokens"),
+            total_completion_tokens=Sum("completion_tokens"),
+            total_all_tokens=Sum("total_tokens"),
         )
-        
-        # Verify aggregation
-        self.assertEqual(totals['total_prompt_tokens'], 300)
-        self.assertEqual(totals['total_completion_tokens'], 150)
-        self.assertEqual(totals['total_all_tokens'], 450)
+        self.assertEqual(totals["total_prompt_tokens"], 300)
+        self.assertEqual(totals["total_completion_tokens"], 150)
+        self.assertEqual(totals["total_all_tokens"], 450)
 
 
 if __name__ == '__main__':

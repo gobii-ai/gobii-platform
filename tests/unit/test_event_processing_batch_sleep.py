@@ -8,7 +8,14 @@ from unittest.mock import patch, MagicMock
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
-from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentToolCall, PersistentAgentStep, UserQuota
+from api.models import (
+    PersistentAgent,
+    BrowserUseAgent,
+    PersistentAgentCompletion,
+    PersistentAgentToolCall,
+    PersistentAgentStep,
+    UserQuota,
+)
 from api.agent.tools.tool_manager import enable_tools
 
 
@@ -91,6 +98,53 @@ class TestBatchToolCallsWithSleep(TestCase):
         # Assert token usage aggregated
         self.assertIn('total_tokens', result_usage)
         self.assertGreaterEqual(result_usage['total_tokens'], 15)
+
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ignored"})
+    @patch('api.agent.core.event_processing._build_prompt_context')
+    @patch('api.agent.core.event_processing._completion_with_failover')
+    def test_sleep_only_batch_records_token_usage_once(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        _mock_execute_enabled,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "wait"}], 1000, None)
+
+        def mk_sleep_call():
+            tc = MagicMock()
+            tc.function = MagicMock()
+            tc.function.name = 'sleep_until_next_trigger'
+            tc.function.arguments = '{}'
+            return tc
+
+        tc_sleep = mk_sleep_call()
+        tc_sleep_followup = mk_sleep_call()
+
+        msg = MagicMock()
+        msg.tool_calls = [tc_sleep, tc_sleep_followup]
+        msg.content = None
+        choice = MagicMock(); choice.message = msg
+        resp = MagicMock(); resp.choices = [choice]
+        resp.model_extra = {"usage": MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15, prompt_tokens_details=MagicMock(cached_tokens=0))}
+        mock_completion.return_value = (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"})
+
+        from api.agent.core import event_processing as ep
+        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        completions = list(PersistentAgentCompletion.objects.filter(agent=self.agent))
+        self.assertEqual(len(completions), 1)
+        completion = completions[0]
+        self.assertEqual(completion.total_tokens, 15)
+        sleep_steps = list(
+            PersistentAgentStep.objects.filter(description__icontains='sleep until next trigger')
+            .order_by('created_at')
+        )
+        self.assertEqual(len(sleep_steps), 2)
+        for step in sleep_steps:
+            self.assertEqual(step.completion_id, completion.id)
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
     @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "ok", "auto_sleep_ok": True})

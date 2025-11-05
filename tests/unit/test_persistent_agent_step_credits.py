@@ -7,6 +7,7 @@ from datetime import timedelta
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentStep,
     TaskCredit,
     TaskCreditConfig,
@@ -40,10 +41,11 @@ class PersistentAgentStepCreditsTests(TestCase):
         )
 
     def test_step_creation_consumes_credits_and_sets_fields(self):
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent, llm_model="gpt-4")
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description="Test step",
-            llm_model="gpt-4",
+            completion=completion,
         )
         step.refresh_from_db()
 
@@ -68,7 +70,7 @@ class PersistentAgentStepCreditsTests(TestCase):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description="Fractional step",
-            llm_model="gpt-4",
+            completion=PersistentAgentCompletion.objects.create(agent=self.agent, llm_model="gpt-4"),
         )
         step.refresh_from_db()
         credit.refresh_from_db()
@@ -118,11 +120,8 @@ class PersistentAgentStepCreditsTests(TestCase):
             voided=False,
         )
 
-        step = PersistentAgentStep.objects.create(
-            agent=org_agent,
-            description="Org step",
-            llm_model="gpt-4",
-        )
+        completion = PersistentAgentCompletion.objects.create(agent=org_agent, llm_model="gpt-4")
+        step = PersistentAgentStep.objects.create(agent=org_agent, description="Org step", completion=completion)
         step.refresh_from_db()
         org_credit.refresh_from_db()
 

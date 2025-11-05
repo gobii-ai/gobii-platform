@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
-from api.models import PersistentAgent, BrowserUseAgent, UserQuota
+from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentCompletion, PersistentAgentStep, UserQuota
 from api.agent.tools.tool_manager import enable_tools
 
 
@@ -78,3 +78,18 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertTrue(mock_send_sms.called, "send_sms was not executed")
         self.assertEqual(mock_execute_enabled.call_count, 1)
         self.assertEqual(mock_send_sms.call_count, 1)
+
+        completions = list(PersistentAgentCompletion.objects.filter(agent=self.agent))
+        self.assertEqual(len(completions), 1, "Exactly one completion should be recorded")
+        completion = completions[0]
+        self.assertEqual(completion.total_tokens, 15)
+        self.assertEqual(completion.steps.count(), 3)
+
+        tool_steps = list(PersistentAgentStep.objects.filter(description__startswith="Tool call:").order_by('created_at'))
+        self.assertEqual(len(tool_steps), 2)
+        for step in tool_steps:
+            self.assertEqual(step.completion_id, completion.id)
+
+        # _run_agent_loop should aggregate token usage and return it
+        self.assertIn('total_tokens', result_usage)
+        self.assertEqual(result_usage['total_tokens'], 15)
