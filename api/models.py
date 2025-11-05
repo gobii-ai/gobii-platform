@@ -1804,8 +1804,8 @@ class UserAttribution(models.Model):
     landing_code_first = models.CharField(max_length=128, blank=True)
     landing_code_last = models.CharField(max_length=128, blank=True)
 
-    fbclid = models.CharField(max_length=256, blank=True)
-    fbc = models.CharField(max_length=256, blank=True)
+    fbclid = models.CharField(max_length=1024, blank=True)
+    fbc = models.CharField(max_length=1024, blank=True)
     gclid_first = models.CharField(max_length=256, blank=True)
     gclid_last = models.CharField(max_length=256, blank=True)
     gbraid_first = models.CharField(max_length=256, blank=True)

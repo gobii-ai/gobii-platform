@@ -1,6 +1,11 @@
+import logging
+
 from django.conf import settings
 
 from .base import post_json, TemporaryError, PermanentError
+
+
+logger = logging.getLogger(__name__)
 
 
 class MetaCAPI:
@@ -45,5 +50,26 @@ class MetaCAPI:
 
         if test_mode and isinstance(test_code, str) and test_code.strip():
             body["test_event_code"] = test_code.strip()
+
+        network = evt.get("network") or {}
+        fbc_value = network.get("fbc")
+        fbclid_value = network.get("fbclid")
+        if fbc_value:
+            fbc_source = "cookie"
+        elif fbclid_value:
+            fbc_source = "derived"
+        else:
+            fbc_source = "missing"
+        logger.info(
+            "Meta CAPI payload identifiers",
+            extra={
+                "event_name": name,
+                "event_id": evt.get("event_id"),
+                "fbclid": fbclid_value,
+                "fbc": fbc_value,
+                "fbp": network.get("fbp"),
+                "fbc_source": fbc_source,
+            },
+        )
 
         return post_json(self.url, json=body, params={"access_token": self.token})
