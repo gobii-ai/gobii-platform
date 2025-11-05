@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
     atomic = False
 
     dependencies = [
-        ('api', '0178_merge_20251104_2000'),
+        ('api', '0179_alter_userattribution_fbc_and_more'),
     ]
 
     operations = [
