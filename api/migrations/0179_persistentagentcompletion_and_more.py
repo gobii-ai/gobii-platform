@@ -83,7 +83,7 @@ def backfill_step_completions(apps, schema_editor):
         )
         SELECT
             step_id,
-            MIN(step_id) OVER (PARTITION BY agent_id, group_seq) AS completion_id,
+            (MIN(step_id::text) OVER (PARTITION BY agent_id, group_seq))::uuid AS completion_id,
             agent_id,
             created_at,
             prompt_tokens,
@@ -93,15 +93,6 @@ def backfill_step_completions(apps, schema_editor):
             llm_model,
             llm_provider
         FROM grouped
-        """
-    )
-
-    schema_editor.execute(
-        """
-        UPDATE api_persistentagentstep AS step
-        SET completion_id = tmp.completion_id
-        FROM tmp_pa_step_completion AS tmp
-        WHERE step.id = tmp.step_id
         """
     )
 
@@ -143,6 +134,15 @@ def backfill_step_completions(apps, schema_editor):
             llm_model,
             llm_provider
         ON CONFLICT (id) DO NOTHING
+        """
+    )
+
+    schema_editor.execute(
+        """
+        UPDATE api_persistentagentstep AS step
+        SET completion_id = tmp.completion_id
+        FROM tmp_pa_step_completion AS tmp
+        WHERE step.id = tmp.step_id
         """
     )
 
