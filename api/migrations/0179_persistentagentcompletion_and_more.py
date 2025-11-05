@@ -17,10 +17,22 @@ def backfill_step_completions(apps, schema_editor):
         | models.Q(llm_model__isnull=False)
         | models.Q(llm_provider__isnull=False)
     )
+    step_fields = [
+        "id",
+        "agent_id",
+        "created_at",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cached_tokens",
+        "llm_model",
+        "llm_provider",
+    ]
     steps = (
         Step.objects.using(db_alias)
         .filter(token_filter, completion__isnull=True)
         .order_by("agent_id", "created_at", "id")
+        .values(*step_fields)
     )
 
     current_group = []
@@ -31,27 +43,27 @@ def backfill_step_completions(apps, schema_editor):
             return
         first = group[0]
         completion = Completion.objects.using(db_alias).create(
-            agent_id=first.agent_id,
-            prompt_tokens=first.prompt_tokens,
-            completion_tokens=first.completion_tokens,
-            total_tokens=first.total_tokens,
-            cached_tokens=first.cached_tokens,
-            llm_model=first.llm_model,
-            llm_provider=first.llm_provider,
+            agent_id=first["agent_id"],
+            prompt_tokens=first["prompt_tokens"],
+            completion_tokens=first["completion_tokens"],
+            total_tokens=first["total_tokens"],
+            cached_tokens=first["cached_tokens"],
+            llm_model=first["llm_model"],
+            llm_provider=first["llm_provider"],
             billed=True,
-            billed_at=first.created_at,
+            billed_at=first["created_at"],
         )
-        Step.objects.using(db_alias).filter(pk__in=[step.pk for step in group]).update(completion=completion)
+        Step.objects.using(db_alias).filter(pk__in=[step["id"] for step in group]).update(completion=completion)
 
-    for step in steps.iterator():
+    for step in steps.iterator(chunk_size=2000):
         key = (
-            step.agent_id,
-            step.prompt_tokens,
-            step.completion_tokens,
-            step.total_tokens,
-            step.cached_tokens,
-            step.llm_model,
-            step.llm_provider,
+            step["agent_id"],
+            step["prompt_tokens"],
+            step["completion_tokens"],
+            step["total_tokens"],
+            step["cached_tokens"],
+            step["llm_model"],
+            step["llm_provider"],
         )
         if not current_group:
             current_group = [step]
@@ -71,17 +83,26 @@ def revert_step_completions(apps, schema_editor):
     Step = apps.get_model("api", "PersistentAgentStep")
     Completion = apps.get_model("api", "PersistentAgentCompletion")
     db_alias = schema_editor.connection.alias
-    completions = Completion.objects.using(db_alias).all().iterator()
+    completion_fields = [
+        "id",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cached_tokens",
+        "llm_model",
+        "llm_provider",
+    ]
+    completions = Completion.objects.using(db_alias).values(*completion_fields).iterator(chunk_size=2000)
     for completion in completions:
         step_updates = {
-            "prompt_tokens": completion.prompt_tokens,
-            "completion_tokens": completion.completion_tokens,
-            "total_tokens": completion.total_tokens,
-            "cached_tokens": completion.cached_tokens,
-            "llm_model": completion.llm_model,
-            "llm_provider": completion.llm_provider,
+            "prompt_tokens": completion["prompt_tokens"],
+            "completion_tokens": completion["completion_tokens"],
+            "total_tokens": completion["total_tokens"],
+            "cached_tokens": completion["cached_tokens"],
+            "llm_model": completion["llm_model"],
+            "llm_provider": completion["llm_provider"],
         }
-        Step.objects.using(db_alias).filter(completion_id=completion.id).update(**step_updates)
+        Step.objects.using(db_alias).filter(completion_id=completion["id"]).update(**step_updates)
 
     Step.objects.using(db_alias).update(completion=None)
     Completion.objects.using(db_alias).all().delete()
