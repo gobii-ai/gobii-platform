@@ -208,7 +208,8 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(archive.step, "Prompt archive should be linked to a step")
         linked_archive = PersistentAgentPromptArchive.objects.get(step=archive.step)
         self.assertEqual(linked_archive.id, archive.id)
-        self.assertEqual(archive.step.prompt_tokens, token_usage["prompt_tokens"])
+        self.assertIsNotNone(archive.step.completion)
+        self.assertEqual(archive.step.completion.prompt_tokens, token_usage["prompt_tokens"])
 
 @tag("batch_event_processing")
 class CronTriggerTaskTests(TestCase):

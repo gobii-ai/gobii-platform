@@ -7,6 +7,7 @@ from datetime import timedelta
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentStep,
     TaskCredit,
     TaskCreditConfig,
@@ -40,10 +41,11 @@ class PersistentAgentStepCreditsTests(TestCase):
         )
 
     def test_step_creation_consumes_credits_and_sets_fields(self):
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent, llm_model="gpt-4")
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description="Test step",
-            llm_model="gpt-4",
+            completion=completion,
         )
         step.refresh_from_db()
 
@@ -68,7 +70,7 @@ class PersistentAgentStepCreditsTests(TestCase):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description="Fractional step",
-            llm_model="gpt-4",
+            completion=PersistentAgentCompletion.objects.create(agent=self.agent, llm_model="gpt-4"),
         )
         step.refresh_from_db()
         credit.refresh_from_db()
@@ -118,11 +120,8 @@ class PersistentAgentStepCreditsTests(TestCase):
             voided=False,
         )
 
-        step = PersistentAgentStep.objects.create(
-            agent=org_agent,
-            description="Org step",
-            llm_model="gpt-4",
-        )
+        completion = PersistentAgentCompletion.objects.create(agent=org_agent, llm_model="gpt-4")
+        step = PersistentAgentStep.objects.create(agent=org_agent, description="Org step", completion=completion)
         step.refresh_from_db()
         org_credit.refresh_from_db()
 
@@ -130,3 +129,28 @@ class PersistentAgentStepCreditsTests(TestCase):
         # Ensure the linked credit is the org credit and has usage now
         self.assertEqual(step.task_credit.id, org_credit.id)
         self.assertGreater(org_credit.credits_used, 0)
+
+    def test_reusing_completion_does_not_consume_extra_credits(self):
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent, llm_model="gpt-4")
+        first_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Initial reasoning",
+            completion=completion,
+        )
+        first_step.refresh_from_db()
+        credit = first_step.task_credit
+        self.assertIsNotNone(credit)
+        credit.refresh_from_db()
+        before_used = credit.credits_used
+
+        second_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Follow-up using same completion",
+            completion=completion,
+        )
+        second_step.refresh_from_db()
+        credit.refresh_from_db()
+
+        self.assertEqual(credit.credits_used, before_used)
+        self.assertIsNone(second_step.task_credit)
+        self.assertIsNone(second_step.credits_cost)

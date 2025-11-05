@@ -99,6 +99,7 @@ from ...models import (
     PersistentAgentMessage,
     PersistentAgentSecret,
     PersistentAgentStep,
+    PersistentAgentCompletion,
     PersistentAgentStepSnapshot,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -1165,44 +1166,11 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
     cumulative_token_usage = _run_agent_loop(agent, is_first_run=is_first_run, credit_snapshot=credit_snapshot)
 
-    # Update system step with cumulative token usage
     sys_step.notes = "simplified"
-    
-    # Update the associated step with token usage (defensively handle mocks/expressions)
-    # Tests may patch `_run_agent_loop` and return a MagicMock; avoid assigning those to DB fields.
-    if isinstance(cumulative_token_usage, dict):
-        pt = cumulative_token_usage.get("prompt_tokens")
-        if isinstance(pt, int):
-            sys_step.step.prompt_tokens = pt
-        ct = cumulative_token_usage.get("completion_tokens")
-        if isinstance(ct, int):
-            sys_step.step.completion_tokens = ct
-        tt = cumulative_token_usage.get("total_tokens")
-        if isinstance(tt, int):
-            sys_step.step.total_tokens = tt
-        cached = cumulative_token_usage.get("cached_tokens")
-        if isinstance(cached, int):
-            sys_step.step.cached_tokens = cached
-        model = cumulative_token_usage.get("model")
-        if isinstance(model, str):
-            sys_step.step.llm_model = model
-        provider = cumulative_token_usage.get("provider")
-        if isinstance(provider, str):
-            sys_step.step.llm_provider = provider
-        
-    # close_old_connections()
     try:
-        sys_step.step.save(update_fields=[
-            "prompt_tokens", "completion_tokens", "total_tokens", 
-            "cached_tokens", "llm_model", "llm_provider"
-        ])
         sys_step.save(update_fields=["notes"])
     except OperationalError:
         close_old_connections()
-        sys_step.step.save(update_fields=[
-            "prompt_tokens", "completion_tokens", "total_tokens", 
-            "cached_tokens", "llm_model", "llm_provider"
-        ])
         sys_step.save(update_fields=["notes"])
 
     return agent
@@ -1303,6 +1271,19 @@ def _run_agent_loop(
                         prompt_archive_id,
                         getattr(step, "id", None),
                     )
+
+            def _token_usage_fields(token_usage: Optional[dict]) -> dict:
+                """Return sanitized token usage values for step creation."""
+                if not token_usage:
+                    return {}
+                return {
+                    "prompt_tokens": token_usage.get("prompt_tokens"),
+                    "completion_tokens": token_usage.get("completion_tokens"),
+                    "total_tokens": token_usage.get("total_tokens"),
+                    "cached_tokens": token_usage.get("cached_tokens"),
+                    "llm_model": token_usage.get("model"),
+                    "llm_provider": token_usage.get("provider"),
+                }
             
             # Use the fitted token count from promptree for LLM selection
             # This fixes the bug where we were using joined message token count
@@ -1363,31 +1344,58 @@ def _run_agent_loop(
                 break
 
             msg = response.choices[0].message
+            token_usage_fields = _token_usage_fields(token_usage)
+            completion: Optional[PersistentAgentCompletion] = None
+
+            def _ensure_completion() -> PersistentAgentCompletion:
+                nonlocal completion
+                if completion is None:
+                    completion = PersistentAgentCompletion.objects.create(
+                        agent=agent,
+                        **token_usage_fields,
+                    )
+                return completion
+
+            def _attach_completion(step_kwargs: dict) -> None:
+                completion_obj = _ensure_completion()
+                step_kwargs["completion"] = completion_obj
 
             tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:
                 if msg.content:
                     logger.info("Agent %s reasoning: %s", agent.id, msg.content)
-                    # Create a reasoning step with token usage
                     step_kwargs = {
                         "agent": agent,
                         "description": f"Internal reasoning: {msg.content[:500]}",
                     }
-                    if token_usage:
-                        step_kwargs.update({
-                            "prompt_tokens": token_usage.get("prompt_tokens"),
-                            "completion_tokens": token_usage.get("completion_tokens"),
-                            "total_tokens": token_usage.get("total_tokens"),
-                            "cached_tokens": token_usage.get("cached_tokens"),
-                            "llm_model": token_usage.get("model"),
-                            "llm_provider": token_usage.get("provider"),
-                        })
+                    _attach_completion(step_kwargs)
                     step = PersistentAgentStep.objects.create(**step_kwargs)
                     _attach_prompt_archive(step)
                 reasoning_only_streak += 1
                 continue
 
             reasoning_only_streak = 0
+
+            reasoning_text = (msg.content or "").strip()
+            if reasoning_text:
+                response_description = f"Internal reasoning: {reasoning_text[:500]}"
+            else:
+                try:
+                    tool_count = len(tool_calls)
+                except TypeError:
+                    tool_count = 0
+                response_description = (
+                    f"LLM response issued {tool_count} tool call(s)."
+                    if tool_count
+                    else "LLM response issued tool calls."
+                )
+            response_step_kwargs = {
+                "agent": agent,
+                "description": response_description,
+            }
+            _attach_completion(response_step_kwargs)
+            response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
+            _attach_prompt_archive(response_step)
 
             # Log high-level summary of tool calls
             try:
@@ -1475,15 +1483,7 @@ def _run_agent_loop(
                             "description": "Decided to sleep until next trigger.",
                             "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
                         }
-                        if token_usage:
-                            step_kwargs.update({
-                                "prompt_tokens": token_usage.get("prompt_tokens"),
-                                "completion_tokens": token_usage.get("completion_tokens"),
-                                "total_tokens": token_usage.get("total_tokens"),
-                                "cached_tokens": token_usage.get("cached_tokens"),
-                                "llm_model": token_usage.get("model"),
-                                "llm_provider": token_usage.get("provider"),
-                            })
+                        _attach_completion(step_kwargs)
                         step = PersistentAgentStep.objects.create(**step_kwargs)
                         _attach_prompt_archive(step)
                         sleep_requested = True
@@ -1520,10 +1520,12 @@ def _run_agent_loop(
                                 "Re-send the SAME tool call immediately with valid JSON only. "
                                 "For HTML content, use single quotes for all attributes to avoid JSON conflicts."
                             )
-                            step = PersistentAgentStep.objects.create(
-                                agent=agent,
-                                description=step_text,
-                            )
+                            step_kwargs = {
+                                "agent": agent,
+                                "description": step_text,
+                            }
+                            _attach_completion(step_kwargs)
+                            step = PersistentAgentStep.objects.create(**step_kwargs)
                             _attach_prompt_archive(step)
                             logger.info(
                                 "Agent %s: added correction step_id=%s to request a retried tool call",
@@ -1602,22 +1604,13 @@ def _run_agent_loop(
                     # Guard ORM writes against stale connections; retry once on OperationalError
                     close_old_connections()
                     try:
-                        # Create step with token usage if available
+                        # Create tool step with the execution result preview
                         step_kwargs = {
                             "agent": agent,
                             "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
                             "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None
                         }
-
-                        if token_usage:
-                            step_kwargs.update({
-                                "prompt_tokens": token_usage.get("prompt_tokens"),
-                                "completion_tokens": token_usage.get("completion_tokens"),
-                                "total_tokens": token_usage.get("total_tokens"),
-                                "cached_tokens": token_usage.get("cached_tokens"),
-                                "llm_model": token_usage.get("model"),
-                                "llm_provider": token_usage.get("provider"),
-                            })
+                        _attach_completion(step_kwargs)
                         step = PersistentAgentStep.objects.create(**step_kwargs)
                         _attach_prompt_archive(step)
                         PersistentAgentToolCall.objects.create(
@@ -1640,21 +1633,13 @@ def _run_agent_loop(
                         logger.info("Agent %s: persisted tool call step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
                     except OperationalError:
                         close_old_connections()
-                        # Create step with token usage if available (retry)
+                        # Create tool step (retry path)
                         step_kwargs = {
                             "agent": agent,
                             "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
                             "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
                         }
-                        if token_usage:
-                            step_kwargs.update({
-                                "prompt_tokens": token_usage.get("prompt_tokens"),
-                                "completion_tokens": token_usage.get("completion_tokens"),
-                                "total_tokens": token_usage.get("total_tokens"),
-                                "cached_tokens": token_usage.get("cached_tokens"),
-                                "llm_model": token_usage.get("model"),
-                                "llm_provider": token_usage.get("provider"),
-                            })
+                        _attach_completion(step_kwargs)
                         step = PersistentAgentStep.objects.create(**step_kwargs)
                         _attach_prompt_archive(step)
                         PersistentAgentToolCall.objects.create(

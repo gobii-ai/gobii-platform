@@ -5158,6 +5158,45 @@ class PersistentAgentWebSession(models.Model):
     def __str__(self) -> str:
         return f"WebSession<{self.agent_id}:{self.user_id}:{self.session_key}>"
 
+class PersistentAgentCompletion(models.Model):
+    """Represents a single LLM completion within a persistent agent run."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="completions",
+        help_text="Agent that triggered this LLM completion.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    prompt_tokens = models.IntegerField(null=True, blank=True)
+    completion_tokens = models.IntegerField(null=True, blank=True)
+    total_tokens = models.IntegerField(null=True, blank=True)
+    cached_tokens = models.IntegerField(null=True, blank=True)
+    llm_model = models.CharField(max_length=256, null=True, blank=True)
+    llm_provider = models.CharField(max_length=128, null=True, blank=True)
+
+    credits_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Credits consumed for this completion (if charged).",
+    )
+    billed = models.BooleanField(default=False, help_text="True once credits were consumed for this completion.")
+    billed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "-created_at"], name="pa_completion_recent_idx"),
+        ]
+
+    def __str__(self):
+        return f"Completion {self.llm_model or 'unknown'} @ {self.created_at}"
+
+
 class PersistentAgentStep(models.Model):
     """A single action taken by a PersistentAgent (tool call, internal reasoning, etc.)."""
 
@@ -5169,6 +5208,14 @@ class PersistentAgentStep(models.Model):
         on_delete=models.CASCADE,
         related_name="steps",
         help_text="The persistent agent that executed this step",
+    )
+    completion = models.ForeignKey(
+        "PersistentAgentCompletion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="steps",
+        help_text="LLM completion that produced this step (if applicable).",
     )
 
     # Credit used for this step
@@ -5188,22 +5235,6 @@ class PersistentAgentStep(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # Token usage tracking fields
-    prompt_tokens = models.IntegerField(
-        null=True, 
-        blank=True,
-        help_text="Number of tokens used in the prompt for this step's LLM call"
-    )
-    completion_tokens = models.IntegerField(
-        null=True,
-        blank=True, 
-        help_text="Number of tokens generated in the completion for this step's LLM call"
-    )
-    total_tokens = models.IntegerField(
-        null=True,
-        blank=True,
-        help_text="Total tokens used (prompt + completion) for this step's LLM call"
-    )
     # Credits charged for this step (for audit). If not provided, defaults to configured per‑task cost.
     credits_cost = models.DecimalField(
         max_digits=12,
@@ -5212,24 +5243,6 @@ class PersistentAgentStep(models.Model):
         blank=True,
         help_text="Credits charged for this step; defaults to configured per‑task cost.",
     )
-    cached_tokens = models.IntegerField(
-        null=True,
-        blank=True,
-        help_text="Number of cached tokens used (if provider supports caching)"
-    )
-    llm_model = models.CharField(
-        max_length=256,
-        null=True,
-        blank=True,
-        help_text="LLM model used for this step (e.g., 'claude-3-opus-20240229')"
-    )
-    llm_provider = models.CharField(
-        max_length=128,
-        null=True,
-        blank=True,
-        help_text="LLM provider used for this step (e.g., 'anthropic', 'openai')"
-    )
-
     # Billing rollup flag: has this step been included in a Stripe meter rollup?
     metered = models.BooleanField(default=False, db_index=True, help_text="Marked true once included in Stripe metering rollup.")
     # Temporary batch key used to reserve rows for an idempotent metering batch
@@ -5249,26 +5262,27 @@ class PersistentAgentStep(models.Model):
         return f"Step {preview}..."
 
     def save(self, *args, **kwargs):
+        completion_to_mark = None
+        completion_mark_amount = None
+
         # On creation, optionally consume credits for chargeable steps only.
         if self._state.adding:
             from django.core.exceptions import ValidationError
-            # Determine owner: organization if agent is org-owned; otherwise the agent's user
+
             owner = None
             if self.agent and getattr(self.agent, 'organization', None):
                 owner = self.agent.organization
             elif self.agent:
                 owner = self.agent.user
 
-            # Heuristic: only charge credits for LLM/tool compute steps – indicated by either
-            # an explicit credits_cost override or presence of token/model usage fields.
-            chargeable = (
-                self.credits_cost is not None
-                or self.llm_model is not None
-                or self.prompt_tokens is not None
-                or self.total_tokens is not None
-            )
+            completion_obj = getattr(self, "completion", None) if self.completion_id else None
+            completion_requires_billing = bool(completion_obj and not completion_obj.billed)
+            completion_to_mark = completion_obj if completion_requires_billing else None
+            completion_mark_amount = None
 
-            if owner is not None and chargeable:
+            should_charge = self.credits_cost is not None or completion_requires_billing
+
+            if owner is not None and should_charge:
                 default_cost = get_default_task_credit_cost()
                 amount = self.credits_cost if self.credits_cost is not None else default_cost
                 result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
@@ -5278,9 +5292,23 @@ class PersistentAgentStep(models.Model):
 
                 self.task_credit = result.get('credit')
                 if self.credits_cost is None:
-                    self.credits_cost = default_cost
+                    self.credits_cost = amount
+                if completion_to_mark is not None:
+                    completion_mark_amount = amount
+            elif completion_to_mark is not None and self.credits_cost is not None:
+                # Owner-less steps (system agents) may still want the completion marked with explicit cost.
+                completion_mark_amount = self.credits_cost
 
         result = super().save(*args, **kwargs)
+        if completion_to_mark is not None and not completion_to_mark.billed:
+            completion_to_mark.billed = True
+            completion_to_mark.billed_at = timezone.now()
+            if completion_mark_amount is not None:
+                completion_to_mark.credits_cost = completion_mark_amount
+                update_fields = ["billed", "billed_at", "credits_cost"]
+            else:
+                update_fields = ["billed", "billed_at"]
+            completion_to_mark.save(update_fields=update_fields)
         return result
 
 
