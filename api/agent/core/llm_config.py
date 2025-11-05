@@ -22,6 +22,7 @@ from django.utils import timezone
 
 from api.openrouter import get_attribution_headers
 from util.subscription_helper import get_owner_plan
+from constants.plans import PlanNames
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,8 @@ def _apply_required_temperature(model: str, params: Dict[str, Any]) -> None:
     params["temperature"] = required_temp
 
 
-_PREMIUM_PLAN_IDS = {"pro", "org", "scale", "startup", "org_team"}
-_PREMIUM_PLAN_NAMES = {"pro", "org", "scale"}
+_PREMIUM_PLAN_IDS = {"pro", "org", PlanNames.SCALE, "startup", "org_team"}
+_PREMIUM_PLAN_NAMES = {"pro", "org", PlanNames.SCALE}
 _PREMIUM_ACCOUNT_AGE_DAYS = 30
 
 

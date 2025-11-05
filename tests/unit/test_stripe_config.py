@@ -6,6 +6,7 @@ from api.models import StripeConfig
 from config import plans as plan_module
 from config.stripe_config import get_stripe_settings, invalidate_stripe_settings_cache
 from util.payments_helper import PaymentsHelper
+from constants.plans import PlanNames
 
 @tag("batch_stripe_config")
 class StripeConfigHelperTests(TestCase):
@@ -23,6 +24,11 @@ class StripeConfigHelperTests(TestCase):
         config.startup_product_id = "prod_startup_test"
         config.startup_dedicated_ip_product_id = "prod_startup_dedicated_test"
         config.startup_dedicated_ip_price_id = "price_startup_dedicated_test"
+        config.scale_price_id = "price_scale_test"
+        config.scale_additional_task_price_id = "price_scale_extra_test"
+        config.scale_product_id = "prod_scale_test"
+        config.scale_dedicated_ip_product_id = "prod_scale_dedicated_test"
+        config.scale_dedicated_ip_price_id = "price_scale_dedicated_test"
         config.org_team_product_id = "prod_org_test"
         config.org_team_price_id = "price_org_test"
         config.org_team_additional_task_price_id = "price_org_additional_test"
@@ -52,33 +58,52 @@ class StripeConfigHelperTests(TestCase):
         self.assertEqual(stripe_settings.org_team_additional_task_price_id, "price_org_additional_test")
         self.assertEqual(stripe_settings.startup_dedicated_ip_product_id, "prod_startup_dedicated_test")
         self.assertEqual(stripe_settings.startup_dedicated_ip_price_id, "price_startup_dedicated_test")
+        self.assertEqual(stripe_settings.scale_price_id, "price_scale_test")
+        self.assertEqual(stripe_settings.scale_additional_task_price_id, "price_scale_extra_test")
+        self.assertEqual(stripe_settings.scale_product_id, "prod_scale_test")
+        self.assertEqual(stripe_settings.scale_dedicated_ip_product_id, "prod_scale_dedicated_test")
+        self.assertEqual(stripe_settings.scale_dedicated_ip_price_id, "price_scale_dedicated_test")
         self.assertEqual(stripe_settings.org_team_dedicated_ip_product_id, "prod_org_dedicated_test")
         self.assertEqual(stripe_settings.org_team_dedicated_ip_price_id, "price_org_dedicated_test")
         self.assertEqual(stripe_settings.org_team_task_meter_id, "meter_org_team_test")
         self.assertEqual(stripe_settings.org_team_task_meter_event_name, "task_org_team_test")
         self.assertEqual(PaymentsHelper.get_stripe_key(), "sk_live_env")
 
-        product_id = plan_module.get_plan_product_id("startup")
+        product_id = plan_module.get_plan_product_id(PlanNames.STARTUP)
         self.assertEqual(product_id, "prod_startup_test")
+
+        scale_product_id = plan_module.get_plan_product_id(PlanNames.SCALE)
+        self.assertEqual(scale_product_id, "prod_scale_test")
 
         plan = plan_module.get_plan_by_product_id("prod_org_test")
         self.assertIsNotNone(plan)
         self.assertEqual(plan["id"], "org_team")
+        scale_plan = plan_module.get_plan_by_product_id("prod_scale_test")
+        self.assertIsNotNone(scale_plan)
+        self.assertEqual(scale_plan["id"], PlanNames.SCALE)
         self.assertEqual(
-            plan_module.PLAN_CONFIG["startup"]["dedicated_ip_product_id"],
+            plan_module.PLAN_CONFIG[PlanNames.STARTUP]["dedicated_ip_product_id"],
             "prod_startup_dedicated_test",
         )
         self.assertEqual(
-            plan_module.PLAN_CONFIG["startup"]["dedicated_ip_price_id"],
+            plan_module.PLAN_CONFIG[PlanNames.STARTUP]["dedicated_ip_price_id"],
             "price_startup_dedicated_test",
         )
         self.assertEqual(
-            plan_module.PLAN_CONFIG["org_team"]["dedicated_ip_product_id"],
+            plan_module.PLAN_CONFIG[PlanNames.ORG_TEAM]["dedicated_ip_product_id"],
             "prod_org_dedicated_test",
         )
         self.assertEqual(
-            plan_module.PLAN_CONFIG["org_team"]["dedicated_ip_price_id"],
+            plan_module.PLAN_CONFIG[PlanNames.ORG_TEAM]["dedicated_ip_price_id"],
             "price_org_dedicated_test",
+        )
+        self.assertEqual(
+            plan_module.PLAN_CONFIG[PlanNames.SCALE]["dedicated_ip_product_id"],
+            "prod_scale_dedicated_test",
+        )
+        self.assertEqual(
+            plan_module.PLAN_CONFIG[PlanNames.SCALE]["dedicated_ip_price_id"],
+            "price_scale_dedicated_test",
         )
 
     def test_webhook_secret_persists_entries(self):
@@ -111,6 +136,8 @@ class StripeConfigHelperTests(TestCase):
             "clear_webhook_secret": "",
             "startup_dedicated_ip_product_id": "prod_startup_dedicated_form",
             "startup_dedicated_ip_price_id": "price_startup_dedicated_form",
+            "scale_dedicated_ip_product_id": "prod_scale_dedicated_form",
+            "scale_dedicated_ip_price_id": "price_scale_dedicated_form",
             "org_team_dedicated_ip_product_id": "prod_org_dedicated_form",
             "org_team_dedicated_ip_price_id": "price_org_dedicated_form",
         }
@@ -122,5 +149,7 @@ class StripeConfigHelperTests(TestCase):
         config.refresh_from_db()
         self.assertEqual(config.startup_dedicated_ip_product_id, "prod_startup_dedicated_form")
         self.assertEqual(config.startup_dedicated_ip_price_id, "price_startup_dedicated_form")
+        self.assertEqual(config.scale_dedicated_ip_product_id, "prod_scale_dedicated_form")
+        self.assertEqual(config.scale_dedicated_ip_price_id, "price_scale_dedicated_form")
         self.assertEqual(config.org_team_dedicated_ip_product_id, "prod_org_dedicated_form")
         self.assertEqual(config.org_team_dedicated_ip_price_id, "price_org_dedicated_form")

@@ -27,11 +27,16 @@ class StripeSettings:
     startup_price_id: str
     startup_additional_task_price_id: str
     startup_product_id: str
+    scale_price_id: str
+    scale_additional_task_price_id: str
+    scale_product_id: str
     org_team_product_id: str
     org_team_price_id: str
     org_team_additional_task_price_id: str
     startup_dedicated_ip_product_id: str
     startup_dedicated_ip_price_id: str
+    scale_dedicated_ip_product_id: str
+    scale_dedicated_ip_price_id: str
     org_team_dedicated_ip_product_id: str
     org_team_dedicated_ip_price_id: str
     task_meter_id: str
@@ -51,8 +56,13 @@ def _env_defaults() -> StripeSettings:
         startup_price_id=env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup"),
         startup_additional_task_price_id=env("STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_startup_additional_task"),
         startup_product_id=env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup"),
+        scale_price_id=env("STRIPE_SCALE_PRICE_ID", default="price_dummy_scale"),
+        scale_additional_task_price_id=env("STRIPE_SCALE_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_scale_additional_task"),
+        scale_product_id=env("STRIPE_SCALE_PRODUCT_ID", default="prod_dummy_scale"),
         startup_dedicated_ip_product_id=env("STRIPE_STARTUP_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_startup_dedicated_ip"),
         startup_dedicated_ip_price_id=env("STRIPE_STARTUP_DEDICATED_IP_PRICE_ID", default="price_dummy_startup_dedicated_ip"),
+        scale_dedicated_ip_product_id=env("STRIPE_SCALE_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_scale_dedicated_ip"),
+        scale_dedicated_ip_price_id=env("STRIPE_SCALE_DEDICATED_IP_PRICE_ID", default="price_dummy_scale_dedicated_ip"),
         org_team_product_id=env("STRIPE_ORG_TEAM_PRODUCT_ID", default="prod_dummy_org_team"),
         org_team_price_id=env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team"),
         org_team_additional_task_price_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task"),
@@ -107,8 +117,13 @@ def _load_from_database() -> Optional[StripeSettings]:
         startup_price_id=config.startup_price_id or "",
         startup_additional_task_price_id=config.startup_additional_task_price_id or "",
         startup_product_id=config.startup_product_id or "",
+        scale_price_id=config.scale_price_id or "",
+        scale_additional_task_price_id=config.scale_additional_task_price_id or "",
+        scale_product_id=config.scale_product_id or "",
         startup_dedicated_ip_product_id=config.startup_dedicated_ip_product_id or "",
         startup_dedicated_ip_price_id=config.startup_dedicated_ip_price_id or "",
+        scale_dedicated_ip_product_id=config.scale_dedicated_ip_product_id or "",
+        scale_dedicated_ip_price_id=config.scale_dedicated_ip_price_id or "",
         org_team_product_id=config.org_team_product_id or "",
         org_team_price_id=config.org_team_price_id or "",
         org_team_additional_task_price_id=org_team_additional_price,
