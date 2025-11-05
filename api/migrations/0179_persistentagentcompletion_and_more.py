@@ -17,87 +17,7 @@ def backfill_step_completions(apps, schema_editor):
     ]) + ")"
 
     schema_editor.execute(
-        """
-        CREATE TEMP TABLE tmp_pa_step_completion (
-            step_id UUID PRIMARY KEY,
-            completion_id UUID,
-            agent_id UUID,
-            created_at TIMESTAMPTZ,
-            prompt_tokens INTEGER,
-            completion_tokens INTEGER,
-            total_tokens INTEGER,
-            cached_tokens INTEGER,
-            llm_model VARCHAR(256),
-            llm_provider VARCHAR(128)
-        )
-        """
-    )
-
-    schema_editor.execute(
         f"""
-        INSERT INTO tmp_pa_step_completion (
-            step_id,
-            completion_id,
-            agent_id,
-            created_at,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-            cached_tokens,
-            llm_model,
-            llm_provider
-        )
-        WITH ordered AS (
-            SELECT
-                id AS step_id,
-                agent_id,
-                created_at,
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                cached_tokens,
-                llm_model,
-                llm_provider,
-                CASE
-                    WHEN LAG(id) OVER w IS NULL THEN 1
-                    WHEN LAG(prompt_tokens) OVER w IS DISTINCT FROM prompt_tokens THEN 1
-                    WHEN LAG(completion_tokens) OVER w IS DISTINCT FROM completion_tokens THEN 1
-                    WHEN LAG(total_tokens) OVER w IS DISTINCT FROM total_tokens THEN 1
-                    WHEN LAG(cached_tokens) OVER w IS DISTINCT FROM cached_tokens THEN 1
-                    WHEN LAG(llm_model) OVER w IS DISTINCT FROM llm_model THEN 1
-                    WHEN LAG(llm_provider) OVER w IS DISTINCT FROM llm_provider THEN 1
-                    ELSE 0
-                END AS new_group
-            FROM api_persistentagentstep
-            WHERE completion_id IS NULL AND {token_filter_sql}
-            WINDOW w AS (PARTITION BY agent_id ORDER BY created_at, id)
-        ), grouped AS (
-            SELECT
-                ordered.*,
-                SUM(new_group) OVER (
-                    PARTITION BY agent_id
-                    ORDER BY created_at, step_id
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ) AS group_seq
-            FROM ordered
-        )
-        SELECT
-            step_id,
-            (MIN(step_id::text) OVER (PARTITION BY agent_id, group_seq))::uuid AS completion_id,
-            agent_id,
-            created_at,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-            cached_tokens,
-            llm_model,
-            llm_provider
-        FROM grouped
-        """
-    )
-
-    schema_editor.execute(
-        """
         INSERT INTO api_persistentagentcompletion (
             id,
             agent_id,
@@ -112,41 +32,37 @@ def backfill_step_completions(apps, schema_editor):
             billed_at
         )
         SELECT
-            completion_id,
-            agent_id,
-            MIN(created_at) AS created_at,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-            cached_tokens,
-            llm_model,
-            llm_provider,
+            step.id,
+            step.agent_id,
+            step.created_at,
+            step.prompt_tokens,
+            step.completion_tokens,
+            step.total_tokens,
+            step.cached_tokens,
+            step.llm_model,
+            step.llm_provider,
             TRUE,
-            MIN(created_at) AS billed_at
-        FROM tmp_pa_step_completion
-        GROUP BY
-            completion_id,
-            agent_id,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-            cached_tokens,
-            llm_model,
-            llm_provider
+            step.created_at
+        FROM api_persistentagentstep AS step
+        WHERE step.completion_id IS NULL
+          AND {token_filter_sql}
         ON CONFLICT (id) DO NOTHING
         """
     )
 
     schema_editor.execute(
-        """
+        f"""
         UPDATE api_persistentagentstep AS step
-        SET completion_id = tmp.completion_id
-        FROM tmp_pa_step_completion AS tmp
-        WHERE step.id = tmp.step_id
+        SET completion_id = step.id
+        WHERE step.completion_id IS NULL
+          AND EXISTS (
+              SELECT 1
+              FROM api_persistentagentcompletion AS completion
+              WHERE completion.id = step.id
+          )
+          AND {token_filter_sql}
         """
     )
-
-    schema_editor.execute("DROP TABLE IF EXISTS tmp_pa_step_completion")
 
 
 def revert_step_completions(apps, schema_editor):
