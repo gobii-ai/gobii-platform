@@ -3,6 +3,7 @@
 import django.db.models.deletion
 import uuid
 from django.db import migrations, models
+from django.db.models import Case, When, Value
 
 
 def backfill_step_completions(apps, schema_editor):
@@ -37,23 +38,49 @@ def backfill_step_completions(apps, schema_editor):
 
     current_group = []
     current_key = None
+    pending_completions = []
+    pending_step_pairs = []  # (step_id, completion_uuid)
+    pending_step_ids = []
+    BATCH_SIZE = 500
 
-    def flush_group(group):
+    def persist_batch():
+        nonlocal pending_completions, pending_step_pairs, pending_step_ids
+        if not pending_step_pairs:
+            return
+        Completion.objects.using(db_alias).bulk_create(pending_completions, batch_size=BATCH_SIZE)
+        case_expr = Case(
+            *[When(pk=step_id, then=Value(completion_id)) for step_id, completion_id in pending_step_pairs],
+            output_field=models.UUIDField(),
+        )
+        Step.objects.using(db_alias).filter(pk__in=pending_step_ids).update(completion=case_expr)
+        pending_completions = []
+        pending_step_pairs = []
+        pending_step_ids = []
+
+    def queue_group(group):
         if not group:
             return
+        completion_id = uuid.uuid4()
         first = group[0]
-        completion = Completion.objects.using(db_alias).create(
-            agent_id=first["agent_id"],
-            prompt_tokens=first["prompt_tokens"],
-            completion_tokens=first["completion_tokens"],
-            total_tokens=first["total_tokens"],
-            cached_tokens=first["cached_tokens"],
-            llm_model=first["llm_model"],
-            llm_provider=first["llm_provider"],
-            billed=True,
-            billed_at=first["created_at"],
+        pending_completions.append(
+            Completion(
+                id=completion_id,
+                agent_id=first["agent_id"],
+                prompt_tokens=first["prompt_tokens"],
+                completion_tokens=first["completion_tokens"],
+                total_tokens=first["total_tokens"],
+                cached_tokens=first["cached_tokens"],
+                llm_model=first["llm_model"],
+                llm_provider=first["llm_provider"],
+                billed=True,
+                billed_at=first["created_at"],
+            )
         )
-        Step.objects.using(db_alias).filter(pk__in=[step["id"] for step in group]).update(completion=completion)
+        for step in group:
+            pending_step_pairs.append((step["id"], completion_id))
+            pending_step_ids.append(step["id"])
+        if len(pending_step_ids) >= BATCH_SIZE:
+            persist_batch()
 
     for step in steps.iterator(chunk_size=2000):
         key = (
@@ -72,11 +99,12 @@ def backfill_step_completions(apps, schema_editor):
         if key == current_key:
             current_group.append(step)
             continue
-        flush_group(current_group)
+        queue_group(current_group)
         current_group = [step]
         current_key = key
 
-    flush_group(current_group)
+    queue_group(current_group)
+    persist_batch()
 
 
 def revert_step_completions(apps, schema_editor):
@@ -109,6 +137,8 @@ def revert_step_completions(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+
+    atomic = False
 
     dependencies = [
         ('api', '0178_merge_20251104_2000'),
