@@ -707,6 +707,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             raise Http404("Scale plan pricing is not ready.")
         except Exception:
             logger.exception("Unexpected error while fetching scale plan price %s", price_id)
+            raise Http404("An unexpected error occurred while preparing your checkout.")
 
         event_id = f"scale-sub-{uuid.uuid4()}"
 
