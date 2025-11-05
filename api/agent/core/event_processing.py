@@ -1167,42 +1167,10 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     cumulative_token_usage = _run_agent_loop(agent, is_first_run=is_first_run, credit_snapshot=credit_snapshot)
 
     sys_step.notes = "simplified"
-    completion_update_fields = {}
-    if isinstance(cumulative_token_usage, dict):
-        def _int_value(key):
-            value = cumulative_token_usage.get(key)
-            return value if isinstance(value, int) else None
-
-        def _str_value(key):
-            value = cumulative_token_usage.get(key)
-            return value if isinstance(value, str) else None
-
-        completion_update_fields = {
-            "prompt_tokens": _int_value("prompt_tokens"),
-            "completion_tokens": _int_value("completion_tokens"),
-            "total_tokens": _int_value("total_tokens"),
-            "cached_tokens": _int_value("cached_tokens"),
-            "llm_model": _str_value("model"),
-            "llm_provider": _str_value("provider"),
-        }
-
-    step_update_fields = []
-    if completion_update_fields:
-        completion_record = PersistentAgentCompletion.objects.create(
-            agent=agent,
-            **completion_update_fields,
-        )
-        sys_step.step.completion = completion_record
-        step_update_fields.append("completion")
-
     try:
-        if step_update_fields:
-            sys_step.step.save(update_fields=step_update_fields)
         sys_step.save(update_fields=["notes"])
     except OperationalError:
         close_old_connections()
-        if step_update_fields:
-            sys_step.step.save(update_fields=step_update_fields)
         sys_step.save(update_fields=["notes"])
 
     return agent

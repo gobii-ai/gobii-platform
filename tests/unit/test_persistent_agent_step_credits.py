@@ -129,3 +129,28 @@ class PersistentAgentStepCreditsTests(TestCase):
         # Ensure the linked credit is the org credit and has usage now
         self.assertEqual(step.task_credit.id, org_credit.id)
         self.assertGreater(org_credit.credits_used, 0)
+
+    def test_reusing_completion_does_not_consume_extra_credits(self):
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent, llm_model="gpt-4")
+        first_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Initial reasoning",
+            completion=completion,
+        )
+        first_step.refresh_from_db()
+        credit = first_step.task_credit
+        self.assertIsNotNone(credit)
+        credit.refresh_from_db()
+        before_used = credit.credits_used
+
+        second_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Follow-up using same completion",
+            completion=completion,
+        )
+        second_step.refresh_from_db()
+        credit.refresh_from_db()
+
+        self.assertEqual(credit.credits_used, before_used)
+        self.assertIsNone(second_step.task_credit)
+        self.assertIsNone(second_step.credits_cost)

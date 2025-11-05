@@ -203,6 +203,26 @@ class PersistentAgentCreditGateTests(TestCase):
             ).exists()
         )
 
+    def test_process_events_step_without_usage_has_no_completion(self):
+        self._grant_credits(credits=1, used=0)
+        zero_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cached_tokens": 0,
+            "model": None,
+            "provider": None,
+        }
+
+        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
+             patch("api.agent.core.event_processing._run_agent_loop", return_value=zero_usage):
+            from api.agent.core.event_processing import _process_agent_events_locked
+
+            _process_agent_events_locked(self.agent.id, _DummySpan())
+
+        step = PersistentAgentStep.objects.get(agent=self.agent, description="Process events")
+        self.assertIsNone(step.completion)
+
 
 @tag("batch_event_processing")
 class PersistentAgentToolCreditTests(TestCase):

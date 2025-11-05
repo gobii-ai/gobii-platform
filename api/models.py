@@ -5262,37 +5262,29 @@ class PersistentAgentStep(models.Model):
         return f"Step {preview}..."
 
     def save(self, *args, **kwargs):
+        completion_to_mark = None
+        completion_mark_amount = None
+
         # On creation, optionally consume credits for chargeable steps only.
         if self._state.adding:
             from django.core.exceptions import ValidationError
-            # Determine owner: organization if agent is org-owned; otherwise the agent's user
+
             owner = None
             if self.agent and getattr(self.agent, 'organization', None):
                 owner = self.agent.organization
             elif self.agent:
                 owner = self.agent.user
 
-            completion_charge_amount = None
-            completion_to_mark = None
+            completion_obj = getattr(self, "completion", None) if self.completion_id else None
+            completion_requires_billing = bool(completion_obj and not completion_obj.billed)
+            completion_to_mark = completion_obj if completion_requires_billing else None
             completion_mark_amount = None
-            if self.completion_id and self.credits_cost is None:
-                completion_obj = getattr(self, "completion", None)
-                if completion_obj and not completion_obj.billed:
-                    completion_charge_amount = get_default_task_credit_cost()
-                    completion_to_mark = completion_obj
 
-            # Heuristic: only charge credits for LLM/tool compute steps – indicated by either
-            # an explicit credits_cost override or presence of token/model usage fields.
-            chargeable = (
-                self.credits_cost is not None
-                or self.completion_id is not None
-            )
+            should_charge = self.credits_cost is not None or completion_requires_billing
 
-            if owner is not None and (chargeable or completion_charge_amount is not None):
+            if owner is not None and should_charge:
                 default_cost = get_default_task_credit_cost()
-                amount = self.credits_cost if self.credits_cost is not None else (
-                    completion_charge_amount if completion_charge_amount is not None else default_cost
-                )
+                amount = self.credits_cost if self.credits_cost is not None else default_cost
                 result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
 
                 if not result.get('success'):
@@ -5303,13 +5295,20 @@ class PersistentAgentStep(models.Model):
                     self.credits_cost = amount
                 if completion_to_mark is not None:
                     completion_mark_amount = amount
+            elif completion_to_mark is not None and self.credits_cost is not None:
+                # Owner-less steps (system agents) may still want the completion marked with explicit cost.
+                completion_mark_amount = self.credits_cost
 
         result = super().save(*args, **kwargs)
-        if completion_to_mark is not None and completion_mark_amount is not None and not completion_to_mark.billed:
+        if completion_to_mark is not None and not completion_to_mark.billed:
             completion_to_mark.billed = True
             completion_to_mark.billed_at = timezone.now()
-            completion_to_mark.credits_cost = completion_mark_amount
-            completion_to_mark.save(update_fields=["billed", "billed_at", "credits_cost"])
+            if completion_mark_amount is not None:
+                completion_to_mark.credits_cost = completion_mark_amount
+                update_fields = ["billed", "billed_at", "credits_cost"]
+            else:
+                update_fields = ["billed", "billed_at"]
+            completion_to_mark.save(update_fields=update_fields)
         return result
 
 
