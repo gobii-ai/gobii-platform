@@ -6,85 +6,6 @@ import uuid
 from django.db import migrations, models
 
 
-def backfill_step_completions(apps, schema_editor):
-    token_filter_sql = "(" + " OR ".join([
-        "prompt_tokens IS NOT NULL",
-        "completion_tokens IS NOT NULL",
-        "total_tokens IS NOT NULL",
-        "cached_tokens IS NOT NULL",
-        "llm_model IS NOT NULL",
-        "llm_provider IS NOT NULL",
-    ]) + ")"
-
-    schema_editor.execute(
-        f"""
-        INSERT INTO api_persistentagentcompletion (
-            id,
-            agent_id,
-            created_at,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-            cached_tokens,
-            llm_model,
-            llm_provider,
-            billed,
-            billed_at
-        )
-        SELECT
-            step.id,
-            step.agent_id,
-            step.created_at,
-            step.prompt_tokens,
-            step.completion_tokens,
-            step.total_tokens,
-            step.cached_tokens,
-            step.llm_model,
-            step.llm_provider,
-            TRUE,
-            step.created_at
-        FROM api_persistentagentstep AS step
-        WHERE step.completion_id IS NULL
-          AND {token_filter_sql}
-        ON CONFLICT (id) DO NOTHING
-        """
-    )
-
-    schema_editor.execute(
-        f"""
-        UPDATE api_persistentagentstep AS step
-        SET completion_id = step.id
-        WHERE step.completion_id IS NULL
-          AND EXISTS (
-              SELECT 1
-              FROM api_persistentagentcompletion AS completion
-              WHERE completion.id = step.id
-          )
-          AND {token_filter_sql}
-        """
-    )
-
-
-def revert_step_completions(apps, schema_editor):
-    schema_editor.execute(
-        """
-        UPDATE api_persistentagentstep AS step
-        SET
-            prompt_tokens = completion.prompt_tokens,
-            completion_tokens = completion.completion_tokens,
-            total_tokens = completion.total_tokens,
-            cached_tokens = completion.cached_tokens,
-            llm_model = completion.llm_model,
-            llm_provider = completion.llm_provider
-        FROM api_persistentagentcompletion AS completion
-        WHERE step.completion_id = completion.id
-        """
-    )
-
-    schema_editor.execute("UPDATE api_persistentagentstep SET completion_id = NULL")
-    schema_editor.execute("DELETE FROM api_persistentagentcompletion")
-
-
 class Migration(migrations.Migration):
 
     atomic = False
@@ -123,5 +44,4 @@ class Migration(migrations.Migration):
             model_name='persistentagentcompletion',
             index=models.Index(fields=['agent', '-created_at'], name='pa_completion_recent_idx'),
         ),
-        migrations.RunPython(backfill_step_completions, revert_step_completions),
     ]
