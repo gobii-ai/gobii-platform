@@ -11,8 +11,12 @@ def halve_daily_credit_limits(apps, schema_editor):
             decimal_value = raw_value if isinstance(raw_value, Decimal) else Decimal(raw_value)
         except Exception:
             continue
-        new_value = (decimal_value / Decimal("2")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        agent.daily_credit_limit = new_value
+
+        if decimal_value == Decimal("25"):
+            agent.daily_credit_limit = 5
+        else:
+            new_value = (decimal_value / Decimal("2")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            agent.daily_credit_limit = int(new_value)
         agent.save(update_fields=["daily_credit_limit"])
 
 
@@ -25,11 +29,9 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="persistentagent",
             name="daily_credit_limit",
-            field=models.DecimalField(
+            field=models.PositiveIntegerField(
                 blank=True,
-                decimal_places=2,
                 help_text="Soft daily credit target; system enforces a hard stop at 2× this value. Null means unlimited.",
-                max_digits=6,
                 null=True,
             ),
         ),

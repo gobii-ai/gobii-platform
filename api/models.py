@@ -2665,11 +2665,9 @@ class PersistentAgent(models.Model):
         related_name="persistent_agent"
     )
     is_active = models.BooleanField(default=True, help_text="Whether this agent is currently active")
-    daily_credit_limit = models.DecimalField(
+    daily_credit_limit = models.PositiveIntegerField(
         null=True,
         blank=True,
-        max_digits=6,
-        decimal_places=2,
         help_text="Soft daily credit target; system enforces a hard stop at 2× this value. Null means unlimited.",
     )
     # Soft-expiration state and interaction tracking

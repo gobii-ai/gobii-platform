@@ -4,7 +4,7 @@ from decimal import Decimal
 SOFT_TARGET_MIN = Decimal("0")
 SOFT_TARGET_MAX = Decimal("50")
 # Slider/UI precision for soft target adjustments.
-SOFT_TARGET_STEP = Decimal("0.25")
+SOFT_TARGET_STEP = Decimal("1")
 
 # Burn-rate calculations use a single global rolling window (in minutes).
 BURN_RATE_WINDOW_MINUTES = 60

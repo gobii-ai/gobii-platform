@@ -138,9 +138,8 @@ class PersistentAgentProvisioningService:
                     plan_choice = PlanNamesChoices.FREE
 
                 if plan_choice == PlanNamesChoices.FREE:
-                    default_limit = Decimal(str(settings.DEFAULT_AGENT_DAILY_CREDIT_LIMIT))
-                    soft_target_default = (default_limit / Decimal("2")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                    persistent_agent.daily_credit_limit = soft_target_default
+                    soft_target_default = Decimal(str(settings.DEFAULT_AGENT_DAILY_CREDIT_TARGET))
+                    persistent_agent.daily_credit_limit = int(soft_target_default)
                     persistent_agent.save(update_fields=["daily_credit_limit"])
 
             if template_code:

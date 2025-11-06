@@ -179,7 +179,7 @@ class PersistentAgentCreditGateTests(TestCase):
         """Processing should exit early when the agent hit its daily limit."""
         from api.agent.core.event_processing import _process_agent_events_locked
 
-        self.agent.daily_credit_limit = Decimal('0.5')
+        self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(
@@ -370,7 +370,7 @@ class PersistentAgentToolCreditTests(TestCase):
         mock_consume,
     ):
         span = MagicMock()
-        self.agent.daily_credit_limit = Decimal('0.5')
+        self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(

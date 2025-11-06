@@ -1,5 +1,5 @@
 import json
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any
 
 import stripe
@@ -3224,15 +3224,19 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             try:
                 parsed_limit = Decimal(limit_source)
             except InvalidOperation:
-                messages.error(request, "Enter a valid decimal number for the daily credit soft target.")
+                messages.error(request, "Enter a whole number for the daily credit soft target.")
                 return redirect('agent_detail', pk=agent.pk)
 
-            parsed_limit = parsed_limit.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if parsed_limit != parsed_limit.to_integral_value(rounding=ROUND_DOWN):
+                messages.error(request, "Enter a whole number for the daily credit soft target.")
+                return redirect('agent_detail', pk=agent.pk)
+
+            parsed_limit = parsed_limit.to_integral_value(rounding=ROUND_HALF_UP)
             if parsed_limit < SOFT_TARGET_MIN:
                 parsed_limit = SOFT_TARGET_MIN
             if parsed_limit > SOFT_TARGET_MAX:
                 parsed_limit = SOFT_TARGET_MAX
-            new_daily_limit = parsed_limit
+            new_daily_limit = int(parsed_limit)
 
         if not new_name:
             messages.error(request, "Agent name cannot be empty.")
