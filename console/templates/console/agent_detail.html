@@ -135,39 +135,112 @@
             </div>
           </div>
           <div class="sm:col-span-9 space-y-4">
-            <div class="p-4 border border-gray-200 rounded-lg bg-white/70 space-y-3">
+            <div class="p-4 border border-gray-200 rounded-lg bg-white/70 space-y-4">
               {% if daily_credit_low %}
                 <div class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium">
-                  Your agent is almost out of daily task credits ({{ daily_credit_remaining|floatformat:2 }} left). Increase the daily limit below if you want them to keep working today.
+                  Your agent is almost out of daily task credits before the hard stop ({{ daily_credit_remaining|floatformat:2 }} credits remain). Increase the soft target below if you want them to keep working today.
                 </div>
               {% endif %}
-              {% if not daily_credit_unlimited and daily_credit_limit %}
-                <div class="flex items-center justify-between text-sm text-gray-700">
-                  <span>Used today</span>
-                  <span class="font-medium">{{ daily_credit_usage|floatformat:2 }} / {{ daily_credit_limit|floatformat:0 }} credits</span>
+              {% if not daily_credit_unlimited and daily_credit_hard_limit %}
+                <div class="space-y-4">
+                  <div>
+                    <div class="flex items-center justify-between text-sm text-gray-700">
+                      <span>Hard limit (auto 2× soft target)</span>
+                      <span class="font-medium">{{ daily_credit_usage|floatformat:2 }} / {{ daily_credit_hard_limit|floatformat:2 }} credits</span>
+                    </div>
+                    <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div class="h-full bg-blue-600 rounded-full transition-all" style="width: {{ daily_credit_percent_used|default:0|floatformat:0 }}%;"></div>
+                    </div>
+                    {% if daily_credit_remaining is not None %}
+                      <p class="text-xs text-gray-500">Remaining before the hard stop: {{ daily_credit_remaining|floatformat:2 }} credits.</p>
+                    {% endif %}
+                    {% if daily_credit_next_reset %}
+                      <p class="text-xs text-gray-500">Resets at {{ daily_credit_next_reset|date:"Y-m-d H:i T" }}.</p>
+                    {% endif %}
+                  </div>
+                  <div>
+                    <div class="flex items-center justify-between text-sm text-gray-700">
+                      <span>Soft target progress</span>
+                      <span class="font-medium">
+                        {{ daily_credit_usage|floatformat:2 }}
+                        {% if daily_credit_limit is not None %}
+                          / {{ daily_credit_limit|floatformat:2 }} credits
+                        {% else %}
+                          / Unlimited
+                        {% endif %}
+                      </span>
+                    </div>
+                    {% if daily_credit_limit is not None %}
+                      <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div class="h-full bg-indigo-500 rounded-full transition-all" style="width: {{ daily_credit_soft_percent_used|default:0|floatformat:0 }}%;"></div>
+                      </div>
+                      {% if daily_credit_soft_remaining is not None %}
+                        <p class="text-xs text-gray-500">Remaining before soft target: {{ daily_credit_soft_remaining|floatformat:2 }} credits.</p>
+                      {% endif %}
+                    {% else %}
+                      <p class="text-xs text-gray-500">Soft target is Unlimited. Usage is only gated by your overall credits.</p>
+                    {% endif %}
+                  </div>
                 </div>
-                <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div class="h-full bg-blue-600 rounded-full transition-all" style="width: {{ daily_credit_percent_used|default:0|floatformat:0 }}%;"></div>
-                </div>
-                {% if daily_credit_remaining is not None %}
-                  <p class="text-xs text-gray-500">Remaining today: {{ daily_credit_remaining|floatformat:2 }} credits.</p>
-                {% endif %}
-                {% if daily_credit_next_reset %}
-                  <p class="text-xs text-gray-500">Resets at {{ daily_credit_next_reset|date:"Y-m-d H:i T" }}.</p>
-                {% endif %}
               {% else %}
-                <p class="text-sm text-gray-700">Daily task credits are currently unlimited for this agent.</p>
+                <p class="text-sm text-gray-700">Soft target is currently Unlimited, so this agent will keep running until your overall credits run out.</p>
+                {% if daily_credit_next_reset %}
+                  <p class="text-xs text-gray-500">Daily usage still resets at {{ daily_credit_next_reset|date:"Y-m-d H:i T" }}.</p>
+                {% endif %}
               {% endif %}
             </div>
             <div class="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label for="daily-credit-limit" class="inline-block text-sm font-medium text-gray-700">Daily limit (credits)</label>
-                <input id="daily-credit-limit" name="daily_credit_limit" type="number" step="1" min="0"
-                       value="{% if daily_credit_limit is not None %}{{ daily_credit_limit|floatformat:0 }}{% endif %}"
-                       class="mt-1 py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500">
-                <p class="mt-1 text-xs text-gray-500">Leave blank to remove the cap.</p>
+              <div class="space-y-3">
+                <label for="daily-credit-limit-slider" class="inline-block text-sm font-medium text-gray-700">Soft target (credits/day)</label>
+                <input id="daily-credit-limit-slider" type="range"
+                       min="{{ daily_credit_slider_min }}" max="{{ daily_credit_slider_max }}" step="{{ daily_credit_slider_step }}"
+                       value="{{ daily_credit_slider_value|default:daily_credit_slider_min }}"
+                       data-empty-value="{{ daily_credit_slider_min }}"
+                       class="mt-2 w-full" aria-label="Soft target slider">
+                <div class="flex items-center gap-2">
+                  <input id="daily-credit-limit-input" name="daily_credit_limit" type="number" step="0.01"
+                         min="{{ daily_credit_slider_min }}" max="{{ daily_credit_slider_max }}"
+                         value="{% if daily_credit_limit is not None %}{{ daily_credit_limit|floatformat:2 }}{% endif %}"
+                         class="py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500"
+                         placeholder="Unlimited">
+                  <span class="text-sm text-gray-500">credits/day</span>
+                </div>
+                <p class="mt-1 text-xs text-gray-500">Soft target controls pacing; we automatically enforce a hard stop at 2× this value. Leave the number blank for unlimited.</p>
               </div>
             </div>
+            <script>
+              (function() {
+                const slider = document.getElementById('daily-credit-limit-slider');
+                const input = document.getElementById('daily-credit-limit-input');
+                if (!slider || !input) {
+                  return;
+                }
+                const clamp = (value) => {
+                  const min = parseFloat(slider.min);
+                  const max = parseFloat(slider.max);
+                  if (!Number.isFinite(value)) {
+                    return min;
+                  }
+                  return Math.min(Math.max(value, min), max);
+                };
+                slider.addEventListener('input', () => {
+                  input.value = slider.value;
+                });
+                input.addEventListener('input', () => {
+                  if (input.value === '') {
+                    slider.value = slider.dataset.emptyValue || slider.min;
+                    return;
+                  }
+                  const clamped = clamp(parseFloat(input.value));
+                  slider.value = String(clamped);
+                });
+                if (input.value === '') {
+                  slider.value = slider.dataset.emptyValue || slider.min;
+                } else {
+                  input.dispatchEvent(new Event('input'));
+                }
+              })();
+            </script>
           </div>
 
           <!-- Assignment -->

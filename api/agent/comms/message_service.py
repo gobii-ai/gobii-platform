@@ -429,8 +429,8 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
 
             if not should_skip_processing and agent_obj:
                 try:
-                    limit_value = agent_obj.get_daily_credit_limit_value()
-                    if limit_value is not None:
+                    soft_target_value = agent_obj.get_daily_credit_soft_target()
+                    if soft_target_value is not None:
                         remaining = agent_obj.get_daily_credit_remaining()
                         comm_tool_cost = get_tool_credit_cost_for_channel(channel_val)
                         if remaining is None or (remaining - comm_tool_cost) <= Decimal("0"):

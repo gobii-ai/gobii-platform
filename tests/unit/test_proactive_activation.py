@@ -97,7 +97,7 @@ class ProactiveActivationServiceTests(TestCase):
     def test_skips_agents_without_daily_credit(self, mock_redis_client, _mock_flag):
         mock_redis_client.return_value = _FakeRedis()
 
-        self.agent_a.daily_credit_limit = 1
+        self.agent_a.daily_credit_limit = Decimal('0.5')
         self.agent_a.save(update_fields=["daily_credit_limit"])
 
         PersistentAgentStep.objects.create(

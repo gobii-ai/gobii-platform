@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from django.core.exceptions import ValidationError
@@ -137,7 +138,9 @@ class PersistentAgentProvisioningService:
                     plan_choice = PlanNamesChoices.FREE
 
                 if plan_choice == PlanNamesChoices.FREE:
-                    persistent_agent.daily_credit_limit = settings.DEFAULT_AGENT_DAILY_CREDIT_LIMIT
+                    default_limit = Decimal(str(settings.DEFAULT_AGENT_DAILY_CREDIT_LIMIT))
+                    soft_target_default = (default_limit / Decimal("2")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    persistent_agent.daily_credit_limit = soft_target_default
                     persistent_agent.save(update_fields=["daily_credit_limit"])
 
             if template_code:

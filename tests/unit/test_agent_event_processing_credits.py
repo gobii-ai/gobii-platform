@@ -16,7 +16,11 @@ from unittest.mock import MagicMock, patch
 
 import uuid
 from util.constants.task_constants import TASKS_UNLIMITED
-from api.agent.core.event_processing import _ensure_credit_for_tool
+from api.agent.core.event_processing import (
+    _add_budget_awareness_sections,
+    _compute_burn_rate,
+    _ensure_credit_for_tool,
+)
 
 
 class _DummySpan:
@@ -29,6 +33,32 @@ class _DummySpan:
 
 @tag("batch_event_processing")
 class PersistentAgentCreditGateTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._short_desc_patcher = patch(
+            "api.agent.tasks.short_description.generate_agent_short_description_task.delay",
+            return_value=None,
+        )
+        cls._short_desc_patcher.start()
+        cls._mini_desc_patcher = patch(
+            "api.agent.tasks.mini_description.generate_agent_mini_description_task.delay",
+            return_value=None,
+        )
+        cls._mini_desc_patcher.start()
+        cls._tags_patcher = patch(
+            "api.agent.tasks.agent_tags.generate_agent_tags_task.delay",
+            return_value=None,
+        )
+        cls._tags_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._short_desc_patcher.stop()
+        cls._mini_desc_patcher.stop()
+        cls._tags_patcher.stop()
+        super().tearDownClass()
+
     @classmethod
     def setUpTestData(cls):
         User = get_user_model()
@@ -149,7 +179,7 @@ class PersistentAgentCreditGateTests(TestCase):
         """Processing should exit early when the agent hit its daily limit."""
         from api.agent.core.event_processing import _process_agent_events_locked
 
-        self.agent.daily_credit_limit = 1
+        self.agent.daily_credit_limit = Decimal('0.5')
         self.agent.save(update_fields=["daily_credit_limit"])
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(
@@ -340,7 +370,7 @@ class PersistentAgentToolCreditTests(TestCase):
         mock_consume,
     ):
         span = MagicMock()
-        self.agent.daily_credit_limit = 1
+        self.agent.daily_credit_limit = Decimal('0.5')
         self.agent.save(update_fields=["daily_credit_limit"])
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(
@@ -363,3 +393,74 @@ class PersistentAgentToolCreditTests(TestCase):
             ).exists()
         )
         span.add_event.assert_any_call("Tool skipped - daily credit limit reached")
+
+    def test_compute_burn_rate_no_data_returns_zero(self):
+        metrics = _compute_burn_rate(self.agent, window_minutes=60, horizon_hours=Decimal("5"))
+        self.assertEqual(metrics["burn_rate_per_hour"], Decimal("0"))
+        self.assertEqual(metrics["projected_remaining"], Decimal("0"))
+
+    def test_compute_burn_rate_projects_remaining_usage(self):
+        with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Recent usage",
+                credits_cost=Decimal("3.0"),
+            )
+        PersistentAgentStep.objects.filter(pk=step.pk).update(
+            created_at=timezone.now() - timezone.timedelta(minutes=10)
+        )
+        metrics = _compute_burn_rate(self.agent, window_minutes=60, horizon_hours=Decimal("2"))
+        self.assertEqual(metrics["burn_rate_per_hour"], Decimal("3"))
+        self.assertEqual(metrics["projected_remaining"], Decimal("6"))
+
+    def test_budget_sections_include_soft_target_and_burn_warning(self):
+        critical_group = MagicMock()
+        budget_group = MagicMock()
+        critical_group.group.return_value = budget_group
+        next_reset = timezone.now() + timezone.timedelta(hours=4)
+        state = {
+            "limit": Decimal("10"),
+            "soft_target": Decimal("5"),
+            "used": Decimal("4"),
+            "remaining": Decimal("6"),
+            "soft_target_remaining": Decimal("1"),
+            "next_reset": next_reset,
+            "projected_usage": Decimal("12"),
+            "burn_rate_per_hour": Decimal("2"),
+            "burn_rate_window_minutes": 60,
+            "hours_left": Decimal("4"),
+        }
+        result = _add_budget_awareness_sections(
+            critical_group,
+            current_iteration=2,
+            max_iterations=4,
+            daily_credit_state=state,
+        )
+        self.assertTrue(result)
+        names = [call.args[0] for call in budget_group.section_text.call_args_list]
+        self.assertIn("soft_target_progress", names)
+        self.assertIn("burn_rate_warning", names)
+        soft_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "soft_target_progress")
+        self.assertIn("Soft target progress", soft_call.args[1])
+
+    def test_budget_sections_handle_unlimited_soft_target(self):
+        critical_group = MagicMock()
+        budget_group = MagicMock()
+        critical_group.group.return_value = budget_group
+        state = {
+            "limit": None,
+            "soft_target": None,
+            "used": Decimal("3"),
+            "remaining": None,
+            "soft_target_remaining": None,
+            "next_reset": timezone.now(),
+        }
+        result = _add_budget_awareness_sections(
+            critical_group,
+            current_iteration=1,
+            max_iterations=0,
+            daily_credit_state=state,
+        )
+        self.assertTrue(result)
+        soft_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "soft_target_progress")
+        self.assertIn("Soft target is Unlimited", soft_call.args[1])

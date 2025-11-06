@@ -88,6 +88,8 @@ jobs:
             tag: batch_forward_detection
           - batch: agent_limits
             tag: batch_agent_limits
+          - batch: agent_credit_soft_target
+            tag: agent_credit_soft_target_batch
           - batch: soft_expiration
             tag: batch_soft_expiration
           - batch: api_agents

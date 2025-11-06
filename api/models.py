@@ -1,5 +1,5 @@
 import hashlib, secrets, uuid, os, string, re, datetime, json
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Tuple
 
 import ulid
@@ -2665,10 +2665,12 @@ class PersistentAgent(models.Model):
         related_name="persistent_agent"
     )
     is_active = models.BooleanField(default=True, help_text="Whether this agent is currently active")
-    daily_credit_limit = models.PositiveIntegerField(
+    daily_credit_limit = models.DecimalField(
         null=True,
         blank=True,
-        help_text="Maximum task credits this agent may consume per day. Null means unlimited.",
+        max_digits=6,
+        decimal_places=2,
+        help_text="Soft daily credit target; system enforces a hard stop at 2× this value. Null means unlimited.",
     )
     # Soft-expiration state and interaction tracking
     class LifeState(models.TextChoices):
@@ -2837,12 +2839,19 @@ class PersistentAgent(models.Model):
         schedule_display = self.schedule if self.schedule else "No schedule"
         return f"PersistentAgent: {self.name} (Schedule: {schedule_display})"
 
-    def get_daily_credit_limit_value(self) -> Decimal | None:
-        """Return the configured daily task credit limit, or None if unlimited."""
+    def get_daily_credit_soft_target(self) -> Decimal | None:
+        """Return the configured soft daily credit target, or None if unlimited."""
         limit = self.daily_credit_limit
         if limit is None:
             return None
-        return Decimal(limit)
+        return limit if isinstance(limit, Decimal) else Decimal(limit)
+
+    def get_daily_credit_hard_limit(self) -> Decimal | None:
+        """Return the derived hard limit (2× soft target) or None for unlimited agents."""
+        soft_target = self.get_daily_credit_soft_target()
+        if soft_target is None:
+            return None
+        return (soft_target * Decimal("2")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def get_daily_credit_usage(self, usage_date=None) -> Decimal:
         """Return the credits consumed by this agent on the given date."""
@@ -2862,9 +2871,20 @@ class PersistentAgent(models.Model):
 
         return total if total is not None else Decimal("0")
 
+    def get_daily_credit_soft_target_remaining(self, usage_date=None) -> Decimal | None:
+        """Return remaining credits before the soft target is exceeded."""
+        soft_target = self.get_daily_credit_soft_target()
+        if soft_target is None:
+            return None
+        used = self.get_daily_credit_usage(usage_date=usage_date)
+        remaining = soft_target - used
+        if remaining <= Decimal("0"):
+            return Decimal("0")
+        return remaining
+
     def get_daily_credit_remaining(self, usage_date=None) -> Decimal | None:
-        """Return remaining daily credits; None indicates unlimited."""
-        limit = self.get_daily_credit_limit_value()
+        """Return remaining credits before the derived hard limit is enforced."""
+        limit = self.get_daily_credit_hard_limit()
         if limit is None:
             return None
         used = self.get_daily_credit_usage(usage_date=usage_date)

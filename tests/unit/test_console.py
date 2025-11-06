@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from unittest.mock import patch
 from bs4 import BeautifulSoup
+from api.constants import SOFT_TARGET_MAX, SOFT_TARGET_MIN
 
 
 @tag("batch_console_agents")
@@ -265,13 +266,14 @@ class ConsoleViewsTest(TestCase):
             'name': agent.name,
             'charter': agent.charter,
             'is_active': 'on',
-            'daily_credit_limit': '5',
+            'daily_credit_limit': '2.5',
         })
         self.assertEqual(response.status_code, 302)
 
         agent.refresh_from_db()
-        self.assertEqual(agent.daily_credit_limit, 5)
-        self.assertEqual(agent.get_daily_credit_limit_value(), Decimal('5'))
+        self.assertEqual(agent.daily_credit_limit, Decimal('2.50'))
+        self.assertEqual(agent.get_daily_credit_soft_target(), Decimal('2.50'))
+        self.assertEqual(agent.get_daily_credit_hard_limit(), Decimal('5.00'))
 
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(
@@ -281,10 +283,11 @@ class ConsoleViewsTest(TestCase):
             )
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context['daily_credit_limit'], Decimal('5'))
+        self.assertEqual(response.context['daily_credit_limit'], Decimal('2.50'))
+        self.assertEqual(response.context['daily_credit_hard_limit'], Decimal('5.00'))
         self.assertEqual(response.context['daily_credit_usage'], Decimal('4.3'))
         self.assertTrue(response.context['daily_credit_low'])
-        self.assertIn('almost out of daily task credits', response.content.decode())
+        self.assertIn('almost out of daily task credits before the hard stop', response.content.decode())
 
         response = self.client.post(url, {
             'name': agent.name,
@@ -299,6 +302,100 @@ class ConsoleViewsTest(TestCase):
         response = self.client.get(url)
         self.assertFalse(response.context['daily_credit_low'])
 
+    @tag("agent_credit_soft_target_batch")
+    @patch('util.analytics.Analytics.track_event')
+    def test_agent_detail_persists_decimal_soft_target(self, mock_track_event):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name='Decimal Browser')
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Decimal Agent',
+            charter='Precise work',
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse('agent_detail', kwargs={'pk': agent.id})
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '7.75',
+        })
+        self.assertEqual(response.status_code, 302)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.daily_credit_limit, Decimal('7.75'))
+        self.assertEqual(agent.get_daily_credit_hard_limit(), Decimal('15.50'))
+
+        self.assertTrue(mock_track_event.called)
+        props = mock_track_event.call_args[1]['properties']
+        self.assertEqual(props.get('daily_credit_limit'), 7.75)
+        self.assertEqual(props.get('daily_credit_soft_target'), 7.75)
+        self.assertEqual(props.get('daily_credit_hard_limit'), 15.5)
+
+    @tag("agent_credit_soft_target_batch")
+    def test_agent_detail_blank_soft_target_sets_unlimited(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name='Unlimited Browser')
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Unlimited Agent',
+            charter='Keep going',
+            browser_use_agent=browser_agent,
+            daily_credit_limit=Decimal('10.00')
+        )
+
+        url = reverse('agent_detail', kwargs={'pk': agent.id})
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '',
+        })
+        self.assertEqual(response.status_code, 302)
+        agent.refresh_from_db()
+        self.assertIsNone(agent.daily_credit_limit)
+
+        response = self.client.get(url)
+        self.assertTrue(response.context['daily_credit_unlimited'])
+        self.assertEqual(response.context['daily_credit_slider_value'], SOFT_TARGET_MIN)
+
+    @tag("agent_credit_soft_target_batch")
+    def test_agent_detail_soft_target_clamps_to_bounds(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name='Clamp Browser')
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Clamp Agent',
+            charter='Stay bounded',
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse('agent_detail', kwargs={'pk': agent.id})
+
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit': str(SOFT_TARGET_MAX + Decimal('25')),
+        })
+        self.assertEqual(response.status_code, 302)
+        agent.refresh_from_db()
+        self.assertEqual(agent.daily_credit_limit, SOFT_TARGET_MAX)
+
+        response = self.client.post(url, {
+            'name': agent.name,
+            'charter': agent.charter,
+            'is_active': 'on',
+            'daily_credit_limit': '-5',
+        })
+        self.assertEqual(response.status_code, 302)
+        agent.refresh_from_db()
+        self.assertEqual(agent.daily_credit_limit, SOFT_TARGET_MIN)
+
     @tag("batch_console_agents")
     def test_agent_list_shows_daily_credit_warning(self):
         from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
@@ -312,7 +409,7 @@ class ConsoleViewsTest(TestCase):
             name='List Agent',
             charter='Monitor stuff',
             browser_use_agent=browser_agent,
-            daily_credit_limit=1
+            daily_credit_limit=Decimal('0.5')
         )
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(
