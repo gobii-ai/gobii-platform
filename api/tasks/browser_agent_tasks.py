@@ -24,7 +24,7 @@ from django.db.utils import OperationalError
 
 from observability import traced, trace
 from ..agent.core.budget import AgentBudgetManager
-from ..agent.core.llm_config import _should_prioritize_premium as should_prioritize_premium
+from ..agent.core.llm_config import should_prioritize_premium as should_prioritize_premium
 from ..agent.files.filespace_service import get_or_create_default_filespace
 from ..models import (
     BrowserUseAgentTask,

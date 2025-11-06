@@ -61,7 +61,7 @@ from .llm_config import (
     get_llm_config_with_failover,
     REFERENCE_TOKENIZER_MODEL,
     LLMNotConfiguredError,
-    is_llm_bootstrap_required,
+    is_llm_bootstrap_required, should_prioritize_premium,
 )
 from .promptree import Prompt
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
@@ -113,12 +113,30 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
-MESSAGE_HISTORY_LIMIT = 20
-TOOL_CALL_HISTORY_LIMIT = 20
+MESSAGE_HISTORY_LIMIT_PREMIUM = 20
+MESSAGE_HISTORY_LIMIT_DEFAULT = 15
+TOOL_CALL_HISTORY_LIMIT_PREMIUM = 20
+TOOL_CALL_HISTORY_LIMIT_DEFAULT = 15
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 
+
+def tool_call_history_limit(agent: PersistentAgent) -> int:
+    """
+    Gets tool call history limit for the agent, based on whether premium should be used.
+    """
+    if should_prioritize_premium(agent):
+        return TOOL_CALL_HISTORY_LIMIT_PREMIUM
+    return TOOL_CALL_HISTORY_LIMIT_DEFAULT
+
+def message_history_limit(agent: PersistentAgent) -> int:
+    """
+    Gets message history limit for the agent, based on whether premium should be used.
+    """
+    if should_prioritize_premium(agent):
+        return MESSAGE_HISTORY_LIMIT_PREMIUM
+    return MESSAGE_HISTORY_LIMIT_DEFAULT
 
 def _archive_rendered_prompt(
     agent: PersistentAgent,
@@ -2067,6 +2085,7 @@ def _build_prompt_context(
 
 def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     """Add contact information sections to the provided promptree group."""
+    limit_msg_history = message_history_limit(agent)
 
     # Agent endpoints (all, highlight primary)
     agent_eps = (
@@ -2113,7 +2132,7 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     recent_messages = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint")
-        .order_by("-timestamp")[:MESSAGE_HISTORY_LIMIT]
+        .order_by("-timestamp")[:limit_msg_history]
     )
     span.set_attribute("persistent_agent.recent_messages.count", len(recent_messages))
 
@@ -2682,6 +2701,8 @@ def _get_sms_prompt_addendum(agent: PersistentAgent) -> str:
 def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    limit_tool_history = tool_call_history_limit(agent)
+    limit_msg_history = message_history_limit(agent)
 
     # ---- summaries (keep unchanged as requested) ----------------------- #
     step_snap = (
@@ -2728,14 +2749,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             agent=agent, created_at__gt=step_cutoff
         )
         .select_related("tool_call", "system_step")
-        .order_by("-created_at")[:TOOL_CALL_HISTORY_LIMIT]
+        .order_by("-created_at")[:limit_tool_history]
     )
     messages = list(
         PersistentAgentMessage.objects.filter(
             owner_agent=agent, timestamp__gt=comms_cutoff
         )
         .select_related("from_endpoint", "to_endpoint")
-        .order_by("-timestamp")[:MESSAGE_HISTORY_LIMIT]
+        .order_by("-timestamp")[:limit_msg_history]
     )
 
     # Collect structured events with their components grouped together
@@ -2762,7 +2783,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 )
             )
         )
-        completed_tasks = list(completed_tasks_qs[:TOOL_CALL_HISTORY_LIMIT])
+        completed_tasks = list(completed_tasks_qs[:limit_tool_history])
     else:
         completed_tasks = []
 
