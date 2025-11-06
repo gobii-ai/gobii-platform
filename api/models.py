@@ -2842,7 +2842,10 @@ class PersistentAgent(models.Model):
         limit = self.daily_credit_limit
         if limit is None:
             return None
-        return limit if isinstance(limit, Decimal) else Decimal(limit)
+        limit_value = limit if isinstance(limit, Decimal) else Decimal(limit)
+        if limit_value == Decimal("0"):
+            return None
+        return limit_value
 
     def get_daily_credit_hard_limit(self) -> Decimal | None:
         """Return the derived hard limit (2× soft target) or None for unlimited agents."""

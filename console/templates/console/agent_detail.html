@@ -197,6 +197,10 @@
                        value="{{ daily_credit_slider_value|default:daily_credit_slider_min }}"
                        data-empty-value="{{ daily_credit_slider_min }}"
                        class="mt-2 w-full" aria-label="Soft target slider">
+                <div class="mt-1 flex items-center justify-between text-xs text-gray-500" aria-hidden="true">
+                  <span>Unlimited</span>
+                  <span>{{ daily_credit_slider_max|floatformat:0 }} credits/day</span>
+                </div>
                 <div class="flex items-center gap-2">
                   <input id="daily-credit-limit-input" name="daily_credit_limit" type="number" step="1"
                          min="{{ daily_credit_slider_min }}" max="{{ daily_credit_slider_max }}"
@@ -215,6 +219,16 @@
                 if (!slider || !input) {
                   return;
                 }
+                const emptyValueRaw = slider.dataset.emptyValue ?? slider.min;
+                const emptyValue = Number(emptyValueRaw);
+                const isEmptyNumeric = (value) => Number.isFinite(value) && value === emptyValue;
+                const isEmptyInput = (value) => {
+                  if (value === '' || value === null || value === undefined) {
+                    return true;
+                  }
+                  const numeric = Number(value);
+                  return Number.isFinite(numeric) && isEmptyNumeric(numeric);
+                };
                 const clamp = (value) => {
                   const min = parseFloat(slider.min);
                   const max = parseFloat(slider.max);
@@ -223,19 +237,50 @@
                   }
                   return Math.min(Math.max(value, min), max);
                 };
+                const updateAriaValue = (numeric) => {
+                  if (numeric === null || isEmptyNumeric(numeric)) {
+                    slider.setAttribute('aria-valuetext', 'Unlimited');
+                  } else {
+                    slider.setAttribute('aria-valuetext', `${numeric} credits per day`);
+                  }
+                };
                 slider.addEventListener('input', () => {
-                  input.value = slider.value;
-                });
-                input.addEventListener('input', () => {
-                  if (input.value === '') {
-                    slider.value = slider.dataset.emptyValue || slider.min;
+                  const numeric = Number(slider.value);
+                  if (!Number.isFinite(numeric) || isEmptyNumeric(numeric)) {
+                    input.value = '';
+                    updateAriaValue(null);
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
                     return;
                   }
-                  const clamped = clamp(parseFloat(input.value));
-                  slider.value = String(clamped);
+                  input.value = String(numeric);
+                  updateAriaValue(numeric);
+                  input.dispatchEvent(new Event('change', { bubbles: true }));
                 });
-                if (input.value === '') {
-                  slider.value = slider.dataset.emptyValue || slider.min;
+                input.addEventListener('input', () => {
+                  const raw = input.value;
+                  if (isEmptyInput(raw)) {
+                    input.value = '';
+                    slider.value = emptyValueRaw;
+                    updateAriaValue(null);
+                    return;
+                  }
+                  const numeric = Number(raw);
+                  if (!Number.isFinite(numeric)) {
+                    slider.value = emptyValueRaw;
+                    updateAriaValue(null);
+                    return;
+                  }
+                  const clamped = clamp(numeric);
+                  slider.value = String(clamped);
+                  if (clamped !== numeric) {
+                    input.value = String(clamped);
+                  }
+                  updateAriaValue(clamped);
+                });
+                if (isEmptyInput(input.value)) {
+                  input.value = '';
+                  slider.value = emptyValueRaw;
+                  updateAriaValue(null);
                 } else {
                   input.dispatchEvent(new Event('input'));
                 }

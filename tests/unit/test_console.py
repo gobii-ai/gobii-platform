@@ -395,7 +395,7 @@ class ConsoleViewsTest(TestCase):
         })
         self.assertEqual(response.status_code, 302)
         agent.refresh_from_db()
-        self.assertEqual(agent.daily_credit_limit, SOFT_TARGET_MIN)
+        self.assertIsNone(agent.daily_credit_limit)
 
     @tag("batch_console_agents")
     def test_agent_list_shows_daily_credit_warning(self):

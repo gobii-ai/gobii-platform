@@ -3232,11 +3232,14 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 return redirect('agent_detail', pk=agent.pk)
 
             parsed_limit = parsed_limit.to_integral_value(rounding=ROUND_HALF_UP)
-            if parsed_limit < SOFT_TARGET_MIN:
-                parsed_limit = SOFT_TARGET_MIN
-            if parsed_limit > SOFT_TARGET_MAX:
-                parsed_limit = SOFT_TARGET_MAX
-            new_daily_limit = int(parsed_limit)
+            if parsed_limit <= Decimal("0"):
+                new_daily_limit = None
+            else:
+                if parsed_limit < SOFT_TARGET_MIN:
+                    parsed_limit = SOFT_TARGET_MIN
+                if parsed_limit > SOFT_TARGET_MAX:
+                    parsed_limit = SOFT_TARGET_MAX
+                new_daily_limit = int(parsed_limit)
 
         if not new_name:
             messages.error(request, "Agent name cannot be empty.")
