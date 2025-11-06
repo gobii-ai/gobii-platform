@@ -1,15 +1,18 @@
 from datetime import datetime, timezone as datetime_timezone
 
-from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
+from django.test import TestCase, tag
+from django.utils import timezone
 from unittest.mock import patch
 
-from api.models import UserBilling, Organization, OrganizationBilling
+from api.models import UserBilling, Organization, OrganizationBilling, TaskCredit
 from constants.plans import PlanNames
+from constants.grant_types import GrantTypeChoices
 from util.subscription_helper import (
     mark_user_billing_with_plan,
     mark_organization_billing_with_plan,
     downgrade_organization_to_free_plan,
+    get_users_due_for_monthly_grant,
 )
 
 
@@ -127,3 +130,71 @@ class MarkOrganizationBillingWithPlanTests(TestCase):
         self.assertEqual(billing.subscription, PlanNames.FREE)
         self.assertEqual(billing.billing_cycle_anchor, 5)
         self.assertEqual(billing.downgraded_at, datetime(2025, 6, 1, tzinfo=datetime_timezone.utc))
+
+
+@tag("batch_subscription")
+class GetUsersDueForMonthlyGrantTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="due-user@example.com",
+            email="due-user@example.com",
+            password="password123",
+        )
+        self.other = User.objects.create_user(
+            username="current-user@example.com",
+            email="current-user@example.com",
+            password="password123",
+        )
+        self.user.task_credits.all().delete()
+        self.other.task_credits.all().delete()
+        UserBilling.objects.filter(user__in=[self.user, self.other]).delete()
+
+    @tag("batch_subscription")
+    def test_returns_user_when_current_period_missing_grant(self):
+        with timezone.override("UTC"):
+            UserBilling.objects.update_or_create(
+                user=self.user,
+                defaults={"billing_cycle_anchor": 6, "subscription": PlanNames.FREE},
+            )
+            TaskCredit.objects.create(
+                user=self.user,
+                credits=10,
+                credits_used=0,
+                granted_date=timezone.make_aware(datetime(2025, 10, 6)),
+                expiration_date=timezone.make_aware(datetime(2025, 11, 6)),
+                plan=PlanNames.FREE,
+                grant_type=GrantTypeChoices.PLAN,
+                additional_task=False,
+                voided=False,
+            )
+
+            with patch("util.subscription_helper.timezone.now") as mock_now:
+                mock_now.return_value = datetime(2025, 11, 6, tzinfo=datetime_timezone.utc)
+                results = get_users_due_for_monthly_grant()
+
+        self.assertIn(self.user, results)
+
+    @tag("batch_subscription")
+    def test_skips_user_with_grant_in_current_period(self):
+        with timezone.override("UTC"):
+            UserBilling.objects.update_or_create(
+                user=self.other,
+                defaults={"billing_cycle_anchor": 6, "subscription": PlanNames.FREE},
+            )
+            TaskCredit.objects.create(
+                user=self.other,
+                credits=10,
+                credits_used=0,
+                granted_date=timezone.make_aware(datetime(2025, 11, 6)),
+                expiration_date=timezone.make_aware(datetime(2025, 12, 6)),
+                plan=PlanNames.FREE,
+                grant_type=GrantTypeChoices.PLAN,
+                additional_task=False,
+                voided=False,
+            )
+
+            with patch("util.subscription_helper.timezone.now") as mock_now:
+                mock_now.return_value = datetime(2025, 11, 6, tzinfo=datetime_timezone.utc)
+                results = get_users_due_for_monthly_grant()
+
+        self.assertNotIn(self.other, results)
