@@ -523,7 +523,7 @@ def get_users_due_for_monthly_grant(days: int = 35):
     misses its usual execution window while still avoiding scanning the entire
     history on every invocation.
     """
-    with traced("CREDITS Get Users with Credits Expiring Soon"):
+    with traced("CREDITS Get Users Due For Monthly Grant"):
         TaskCredit = apps.get_model("api", "TaskCredit")
         UserBilling = apps.get_model("api", "UserBilling")
         User = get_user_model()
@@ -557,11 +557,7 @@ def get_users_due_for_monthly_grant(days: int = 35):
 
         due_users: list = []
         for user in annotated_users.iterator():
-            billing_day = getattr(user, "billing_day", 1)
-            try:
-                billing_day_int = int(billing_day)
-            except (TypeError, ValueError):
-                billing_day_int = 1
+            billing_day_int = getattr(user, "billing_day", 1)
 
             billing_day_int = max(1, min(31, billing_day_int))
             period_start, _ = BillingService.get_current_billing_period_from_day(billing_day_int, today)
