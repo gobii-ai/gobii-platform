@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db.models.aggregates import Sum
 from django.db.models.expressions import F
 from django.db.models import Q
+from django.db.models.functions import TruncMonth
 from django.utils import timezone
 from datetime import timezone as dt_timezone
 from django.utils.dateparse import parse_datetime, parse_date
@@ -18,7 +19,7 @@ from util.analytics import Analytics
 from util.tool_costs import get_most_expensive_tool_cost
 from util.constants.task_constants import TASKS_UNLIMITED
 from util.tool_costs import get_default_task_credit_cost
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.conf import settings
 
 from util.subscription_helper import (
@@ -256,7 +257,6 @@ class TaskCreditService:
 
 
             subscription = None
-            credits_to_grant = 0
 
             if credit_override is None:
                 if plan is None:
@@ -267,8 +267,15 @@ class TaskCreditService:
             else:
                 credits_to_grant = credit_override
 
+            plan_id = None
+            if plan is not None:
+                plan_id = getattr(plan, "id", None)
+                if plan_id is None and isinstance(plan, dict):
+                    plan_id = plan.get("id")
+            plan_id = plan_id or PlanNamesChoices.FREE
+
             span.set_attribute('credits_to_grant', credits_to_grant)
-            span.set_attribute('subscription.plan', plan["id"] if plan else None)
+            span.set_attribute('subscription.plan', plan_id)
             span.set_attribute('subscription.invoice_id', invoice_id)
 
             grant_date = grant_date or timezone.now()
@@ -289,17 +296,27 @@ class TaskCreditService:
             logger.debug(f"grant_subscription_credits {user.id}: expiration date {expiration_date}")
 
             # Create the TaskCredit for the user
-            task_credit = TaskCredit.objects.create(
-                user_id=user.id,
-                credits=credits_to_grant,
-                credits_used=0,
-                expiration_date=expiration_date,
-                stripe_invoice_id=invoice_id,
-                granted_date=grant_date,
-                plan=PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE,
-                grant_type=GrantTypeChoices.PLAN,
-                additional_task=False,  # This is a regular task credit, not an additional task
-            )
+            try:
+                task_credit = TaskCredit.objects.create(
+                    user_id=user.id,
+                    credits=credits_to_grant,
+                    credits_used=0,
+                    expiration_date=expiration_date,
+                    stripe_invoice_id=invoice_id,
+                    granted_date=grant_date,
+                    plan=PlanNamesChoices(plan_id),
+                    grant_type=GrantTypeChoices.PLAN,
+                    additional_task=False,  # This is a regular task credit, not an additional task
+                )
+            except IntegrityError as exc:
+                if plan_id == PlanNames.FREE and "uniq_free_plan_block_per_month" in str(exc):
+                    logger.warning(
+                        "grant_subscription_credits %s: duplicate free plan grant detected for %s; returning 0",
+                        user.id,
+                        grant_date,
+                    )
+                    return 0
+                raise
 
             logger.debug(f"grant_subscription_credits {user.id}: created TaskCredit {task_credit.id}")
 

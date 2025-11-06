@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
+from django.db.models import IntegerField, Value
 from django.db.models.expressions import OuterRef, Subquery
+from django.db.models.functions import Coalesce
 from django.db.models.query_utils import Q
 from django.db.utils import IntegrityError
 from djstripe.models import Customer
@@ -22,6 +24,7 @@ from util.integrations import stripe_status, IntegrationDisabledError
 from djstripe.enums import SubscriptionStatus
 from django.apps import apps
 from dateutil.relativedelta import relativedelta
+from billing.services import BillingService
 
 try:
     import stripe
@@ -504,44 +507,71 @@ def get_free_plan_users():
 
         return users_without_active_sub
 
-def get_users_due_for_monthly_grant(days=1):
+def get_users_due_for_monthly_grant(days: int = 35):
     """
-    Retrieves users who are due for their free monthly task credit grant.
+    Return users who are due for their free monthly task credit grant.
 
-    This function identifies users who have not received a 'Plan' type grant
-    in the last 30 days, or who have never received one. This is used to
-    trigger the monthly grant for free-tier users.
+    A user is considered due when their current billing period has started but
+    they do not yet have a `Plan` task credit recorded for that period. The
+    billing cycle anchor stored on `UserBilling` determines when each period
+    begins (defaulting to the 1st if no record exists). Anchors beyond the
+    length of the month (e.g., 31) automatically roll to the last day of the
+    current month via `BillingService.get_current_billing_period_from_day`.
 
-    Parameters:
-    ----------
-    days : int, optional
-        The number of days within which to check for expiring task credits (default is 7).
-
-    Returns:
-    -------
-    list[User]
-        A list of user objects whose task credits are expiring soon.
+    The optional ``days`` argument defines how far back we consider period
+    starts. This keeps the helper useful for catch-up runs if a scheduled job
+    misses its usual execution window while still avoiding scanning the entire
+    history on every invocation.
     """
-    with traced("CREDITS Get Users with Credits Expiring Soon"):
-        # Subquery to get each user's latest granted date
+    with traced("CREDITS Get Users Due For Monthly Grant"):
         TaskCredit = apps.get_model("api", "TaskCredit")
-        latest_grant = (
-            TaskCredit.objects
-            .filter(user=OuterRef('pk'), grant_type=GrantTypeChoices.PLAN, voided=False)
-            .order_by('-granted_date')
-            .values('granted_date')[:1]
-        )
-
-        # Users whose last grant was 30+ days ago, or who have no grant history
+        UserBilling = apps.get_model("api", "UserBilling")
         User = get_user_model()
-        users_to_grant = User.objects.annotate(
-            last_grant_date=Subquery(latest_grant)
-        ).filter(
-            Q(last_grant_date__lte=date.today() - timedelta(days=30)) |
-            Q(last_grant_date__isnull=True)
+
+        latest_grant = Subquery(
+            TaskCredit.objects.filter(
+                user=OuterRef("pk"),
+                grant_type=GrantTypeChoices.PLAN,
+                voided=False,
+            )
+            .order_by("-granted_date")
+            .values("granted_date")[:1]
         )
 
-        return users_to_grant
+        billing_anchor = Subquery(
+            UserBilling.objects.filter(user=OuterRef("pk")).values("billing_cycle_anchor")[:1],
+            output_field=IntegerField(),
+        )
+
+        today = timezone.now().date()
+        window_start = today - timedelta(days=max(days - 1, 0))
+
+        annotated_users = (
+            User.objects.filter(is_active=True)
+            .filter(Q(billing__subscription=PlanNames.FREE) | Q(billing__isnull=True))
+            .annotate(
+                billing_day=Coalesce(billing_anchor, Value(1, output_field=IntegerField())),
+                last_grant_date=latest_grant,
+            )
+        )
+
+        due_users: list = []
+        for user in annotated_users.iterator():
+            billing_day_int = getattr(user, "billing_day", 1)
+
+            billing_day_int = max(1, min(31, billing_day_int))
+            period_start, _ = BillingService.get_current_billing_period_from_day(billing_day_int, today)
+
+            if period_start < window_start:
+                continue
+
+            last_grant = getattr(user, "last_grant_date", None)
+            last_grant_date = last_grant.date() if last_grant else None
+
+            if last_grant_date is None or last_grant_date < period_start:
+                due_users.append(user)
+
+        return due_users
 
 # Take a list of users, and return only the ones without an active subscription
 def filter_users_without_active_subscription(users):
