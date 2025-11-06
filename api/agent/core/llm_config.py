@@ -63,7 +63,7 @@ _PREMIUM_PLAN_NAMES = {"pro", "org", PlanNames.SCALE}
 _PREMIUM_ACCOUNT_AGE_DAYS = 30
 
 
-def _should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) -> bool:
+def should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) -> bool:
     """Return True when the provided agent should prefer premium LLM tiers."""
 
     if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
@@ -506,7 +506,7 @@ def get_llm_config_with_failover(
                         exc_info=True,
                     )
                     agent_instance = None
-            prefer_premium = _should_prioritize_premium(
+            prefer_premium = should_prioritize_premium(
                 agent_instance,
                 is_first_loop=is_first_loop,
             )
