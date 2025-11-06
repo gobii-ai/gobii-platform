@@ -267,7 +267,12 @@ class TaskCreditService:
             else:
                 credits_to_grant = credit_override
 
-            plan_id = getattr(plan, "id", PlanNamesChoices.FREE)
+            plan_id = None
+            if plan is not None:
+                plan_id = getattr(plan, "id", None)
+                if plan_id is None and isinstance(plan, dict):
+                    plan_id = plan.get("id")
+            plan_id = plan_id or PlanNamesChoices.FREE
 
             span.set_attribute('credits_to_grant', credits_to_grant)
             span.set_attribute('subscription.plan', plan_id)
