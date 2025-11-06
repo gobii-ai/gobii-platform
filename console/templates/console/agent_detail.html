@@ -136,51 +136,21 @@
           </div>
           <div class="sm:col-span-9 space-y-4">
             <div class="p-4 border border-gray-200 rounded-lg bg-white/70 space-y-4">
-              {% if daily_credit_low %}
-                <div class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium">
-                  Your agent is almost out of daily task credits before the hard stop ({{ daily_credit_remaining|floatformat:2 }} credits remain). Increase the soft target below if you want them to keep working today.
-                </div>
-              {% endif %}
-              {% if not daily_credit_unlimited and daily_credit_hard_limit %}
-                <div class="space-y-4">
-                  <div>
-                    <div class="flex items-center justify-between text-sm text-gray-700">
-                      <span>Hard limit (auto 2× soft target)</span>
-                      <span class="font-medium">{{ daily_credit_usage|floatformat:2 }} / {{ daily_credit_hard_limit|floatformat:2 }} credits</span>
-                    </div>
-                    <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div class="h-full bg-blue-600 rounded-full transition-all" style="width: {{ daily_credit_percent_used|default:0|floatformat:0 }}%;"></div>
-                    </div>
-                    {% if daily_credit_remaining is not None %}
-                      <p class="text-xs text-gray-500">Remaining before the hard stop: {{ daily_credit_remaining|floatformat:2 }} credits.</p>
-                    {% endif %}
-                    {% if daily_credit_next_reset %}
-                      <p class="text-xs text-gray-500">Resets at {{ daily_credit_next_reset|date:"Y-m-d H:i T" }}.</p>
-                    {% endif %}
+              {% if not daily_credit_unlimited %}
+                <div class="space-y-3">
+                  <div class="flex items-center justify-between text-sm text-gray-700">
+                    <span>Soft target progress</span>
+                    <span class="font-medium">{{ daily_credit_usage|floatformat:2 }} / {{ daily_credit_limit|floatformat:0 }} credits</span>
                   </div>
-                  <div>
-                    <div class="flex items-center justify-between text-sm text-gray-700">
-                      <span>Soft target progress</span>
-                      <span class="font-medium">
-                        {{ daily_credit_usage|floatformat:2 }}
-                        {% if daily_credit_limit is not None %}
-                          / {{ daily_credit_limit|floatformat:0 }} credits
-                        {% else %}
-                          / Unlimited
-                        {% endif %}
-                      </span>
-                    </div>
-                    {% if daily_credit_limit is not None %}
-                      <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div class="h-full bg-indigo-500 rounded-full transition-all" style="width: {{ daily_credit_soft_percent_used|default:0|floatformat:0 }}%;"></div>
-                      </div>
-                      {% if daily_credit_soft_remaining is not None %}
-                        <p class="text-xs text-gray-500">Remaining before soft target: {{ daily_credit_soft_remaining|floatformat:2 }} credits.</p>
-                      {% endif %}
-                    {% else %}
-                      <p class="text-xs text-gray-500">Soft target is Unlimited. Usage is only gated by your overall credits.</p>
-                    {% endif %}
+                  <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-indigo-500 rounded-full transition-all" style="width: {{ daily_credit_soft_percent_used|default:0|floatformat:0 }}%;"></div>
                   </div>
+                  {% if daily_credit_soft_remaining is not None %}
+                    <p class="text-xs text-gray-500">Remaining before soft target: {{ daily_credit_soft_remaining|floatformat:2 }} credits.</p>
+                  {% endif %}
+                  {% if daily_credit_next_reset %}
+                    <p class="text-xs text-gray-500">Daily usage resets at {{ daily_credit_next_reset|date:"Y-m-d H:i T" }}.</p>
+                  {% endif %}
                 </div>
               {% else %}
                 <p class="text-sm text-gray-700">Soft target is currently Unlimited, so this agent will keep running until your overall credits run out.</p>
@@ -209,7 +179,7 @@
                          placeholder="Unlimited">
                   <span class="text-sm text-gray-500">credits/day</span>
                 </div>
-                <p class="mt-1 text-xs text-gray-500">Soft target controls pacing; we automatically enforce a hard stop at 2× this value. Leave the number blank for unlimited.</p>
+                <p class="mt-1 text-xs text-gray-500">Soft target controls pacing for this agent. Leave the number blank for unlimited.</p>
               </div>
             </div>
             <script>
