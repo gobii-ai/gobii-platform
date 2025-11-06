@@ -2085,7 +2085,7 @@ def _build_prompt_context(
 
 def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     """Add contact information sections to the provided promptree group."""
-    limit_msg_history = msg_history_limit(agent)
+    limit_msg_history = message_history_limit(agent)
 
     # Agent endpoints (all, highlight primary)
     agent_eps = (
@@ -2702,7 +2702,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     limit_tool_history = tool_call_history_limit(agent)
-    limit_msg_history = msg_history_limit(agent)
+    limit_msg_history = message_history_limit(agent)
 
     # ---- summaries (keep unchanged as requested) ----------------------- #
     step_snap = (
