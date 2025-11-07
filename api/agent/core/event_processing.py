@@ -113,6 +113,7 @@ from ...models import (
 from .schedule_parser import ScheduleParser
 from config import settings
 from config.redis_client import get_redis_client
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -695,6 +696,34 @@ def _ensure_credit_for_tool(
             daily_state.get("used"),
             soft_target,
         )
+        try:
+            analytics_props: dict[str, Any] = {
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "tool_name": tool_name,
+            }
+            if soft_target is not None:
+                analytics_props["soft_target"] = str(soft_target)
+            used_value = daily_state.get("used")
+            if used_value is not None:
+                analytics_props["credits_used_today"] = str(used_value)
+            if soft_target_remaining is not None:
+                analytics_props["soft_target_remaining"] = str(soft_target_remaining)
+            props_with_org = Analytics.with_org_properties(
+                analytics_props,
+                organization=getattr(agent, "organization", None),
+            )
+            Analytics.track_event(
+                user_id=owner_user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_SOFT_LIMIT_EXCEEDED,
+                source=AnalyticsSource.AGENT,
+                properties=props_with_org,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to emit analytics for agent %s soft target exceedance",
+                agent.id,
+            )
         if span is not None:
             try:
                 span.add_event("Soft target exceeded")

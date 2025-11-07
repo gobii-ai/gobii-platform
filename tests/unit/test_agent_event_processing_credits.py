@@ -15,6 +15,7 @@ from django.contrib.auth import get_user_model
 from unittest.mock import MagicMock, patch
 
 import uuid
+from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.constants.task_constants import TASKS_UNLIMITED
 from api.agent.core.event_processing import (
     _add_budget_awareness_sections,
@@ -376,6 +377,41 @@ class PersistentAgentToolCreditTests(TestCase):
             self.agent.steps.filter(description__icontains="Skipped tool").exists(),
             "Soft target exhaustion should not emit a skip step until the hard limit is reached.",
         )
+
+    @patch("api.agent.core.event_processing.Analytics.track_event")
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit",
+        return_value={"success": True, "credit": None},
+    )
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available",
+        return_value=Decimal("10"),
+    )
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("1"))
+    def test_soft_target_exceedance_emits_analytics(
+        self,
+        _mock_cost,
+        _mock_available,
+        _mock_consume,
+        mock_track_event,
+    ):
+        self.agent.daily_credit_limit = 5
+        self.agent.save(update_fields=["daily_credit_limit"])
+        PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Soft target threshold reached",
+            credits_cost=Decimal("5"),
+        )
+
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query")
+
+        self.assertEqual(result, Decimal("1"))
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_SOFT_LIMIT_EXCEEDED)
+        self.assertEqual(kwargs["source"], AnalyticsSource.AGENT)
+        self.assertEqual(kwargs["properties"].get("agent_id"), str(self.agent.id))
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
