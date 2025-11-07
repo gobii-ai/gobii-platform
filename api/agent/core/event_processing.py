@@ -547,7 +547,6 @@ def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     )
     state = {
         "date": today,
-        "limit": soft_target,
         "soft_target": soft_target,
         "used": used,
         "remaining": soft_remaining,
@@ -2514,70 +2513,72 @@ def _add_budget_awareness_sections(
 
     if daily_credit_state:
         try:
-            limit = daily_credit_state.get("limit")
+            hard_limit = daily_credit_state.get("hard_limit")
+            hard_limit_remaining = daily_credit_state.get("hard_limit_remaining")
             soft_target = daily_credit_state.get("soft_target")
             used = daily_credit_state.get("used", Decimal("0"))
-            remaining = daily_credit_state.get("remaining")
-            soft_remaining = daily_credit_state.get("soft_target_remaining")
             next_reset = daily_credit_state.get("next_reset")
             burn_rate = daily_credit_state.get("burn_rate_per_hour")
             burn_threshold = daily_credit_state.get("burn_rate_threshold_per_hour")
             burn_window = daily_credit_state.get("burn_rate_window_minutes")
 
-            if soft_target is None:
-                soft_text = (
-                    f"Soft target progress: {used} credits consumed today. Soft target is Unlimited."
-                )
-            else:
-                remaining_soft_text = (
-                    f" Remaining before soft target: {soft_remaining}." if soft_remaining is not None else ""
-                )
+            if soft_target is not None:
                 reset_text = (
-                    f" Next reset at {next_reset.isoformat()}." if next_reset else ""
+                    f"Next reset at {next_reset.isoformat()}. " if next_reset else ""
                 )
+                if used > soft_target:
+                    soft_target_warning = (
+                        "WARNING: You have exceeded your soft target for today. "
+                        "Please moderate your usage to avoid hitting the hard limit. "
+                    )
+                else:
+                    soft_target_warning = ""
                 soft_text = (
-                    f"Soft target progress: {used}/{soft_target} credits consumed today."
-                    f"{remaining_soft_text}{reset_text}"
+                    "This is your task usage target for today. Try to stay within this limit. "
+                    "Every tool call you make consumes credits against this target. "
+                    "If you exceed this target, you will not be stopped immediately, but you risk hitting your hard limit sooner. "
+                    f"Soft target progress: {used}/{soft_target} credits consumed today. "
+                    f"{soft_target_warning}"
+                    f"{reset_text} "
                 )
-            sections.append((
-                "soft_target_progress",
-                soft_text,
-                3,
-                True,
-            ))
 
-            if (
-                limit is not None
-                and limit > Decimal("0")
-                and remaining is not None
-                and remaining <= get_default_task_credit_cost()
-            ):
-                warning_text = (
-                    "Soft target is nearly depleted; only enough credit remains for a single default-cost tool call."
-                )
                 sections.append((
-                    "daily_credits_low",
-                    warning_text,
-                    2,
+                    "soft_target_progress",
+                    soft_text,
+                    3,
                     True,
                 ))
-            elif limit is not None and limit > Decimal("0"):
+
+            if hard_limit is not None and hard_limit > Decimal("0"):
                 try:
-                    ratio = used / limit
+                    ratio = used / hard_limit
                 except Exception:
                     ratio = None
+                if hard_limit_remaining is not None and hard_limit_remaining <= get_default_task_credit_cost():
+                    hard_limit_warning = (
+                        "WARNING: Hard limit is nearly depleted; only enough credit remains for a single default-cost tool call."
+                    )
+                elif ratio is not None and ratio >= Decimal("0.9"):
+                    hard_limit_warning = (
+                        "WARNING: Hard task limit is 90% reached. Slow your pace or request a higher limit if you must continue."
+                    )
+                else:
+                    hard_limit_warning = ""
 
-                if ratio is not None:
-                    if ratio >= Decimal("0.9"):
-                        warning_text = (
-                            "Soft target is almost consumed. Slow your pace or request a higher soft target if you must continue."
-                        )
-                        sections.append((
-                            "daily_credits_warning",
-                            warning_text,
-                            2,
-                            True,
-                        ))
+                hard_text = (
+                    f"This is your task usage hard limit for today. Once you reach this limit, "
+                    "you will be blocked from making further tool calls until the limit resets. "
+                    "Every tool call you make consumes credits against this limit. "
+                    f"Hard limit progress: {used}/{hard_limit} credits consumed today. "
+                    f"{hard_limit_warning}"
+                )
+                sections.append((
+                    "hard_limit_progress",
+                    hard_text,
+                    3,
+                    True,
+                ))
+
 
             if (
                 burn_rate is not None
@@ -2590,7 +2591,7 @@ def _add_budget_awareness_sections(
                     else "the recent window"
                 )
                 burn_warning = (
-                    f"Current burn rate is {burn_rate} credits/hour over {window_text}, above the pacing target of {burn_threshold}. "
+                    f"WARNING: Current burn rate is {burn_rate} credits/hour over {window_text}, above the pacing target of {burn_threshold}. "
                     "Slow your cadence or pause non-essential tasks to stay within the soft target."
                 )
                 sections.append((
