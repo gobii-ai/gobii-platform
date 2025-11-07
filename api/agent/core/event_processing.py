@@ -24,7 +24,7 @@ from opentelemetry import baggage, trace
 from pottery import Redlock
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction, close_old_connections
-from django.db.models import Q, Prefetch
+from django.db.models import Q, Prefetch, Sum
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 from django.core.files.base import ContentFile
@@ -53,7 +53,11 @@ from ..short_description import (
 from ..tags import maybe_schedule_agent_tags
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms, RAW_MSG_LIMIT
 from tasks.services import TaskCreditService
-from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
+from util.tool_costs import (
+    get_tool_credit_cost,
+    get_default_task_credit_cost,
+    get_tool_cost_overview,
+)
 from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps, RAW_STEP_LIMIT
 from .llm_config import (
@@ -65,6 +69,7 @@ from .llm_config import (
 )
 from .promptree import Prompt
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
+from api.services.daily_credit_settings import get_daily_credit_settings
 
 from ..tools.email_sender import execute_send_email, get_send_email_tool
 from ..tools.sms_sender import execute_send_sms, get_send_sms_tool
@@ -108,6 +113,7 @@ from ...models import (
 from .schedule_parser import ScheduleParser
 from config import settings
 from config.redis_client import get_redis_client
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -486,26 +492,43 @@ def _completion_with_backoff(**kwargs):
 def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     """Return daily credit usage/limit information for the agent."""
     today = dj_timezone.localdate()
+    credit_settings = get_daily_credit_settings()
 
     try:
-        limit = agent.get_daily_credit_limit_value()
+        soft_target = agent.get_daily_credit_soft_target()
     except Exception:
-        limit = None
+        soft_target = None
+
+    try:
+        hard_limit = agent.get_daily_credit_hard_limit()
+    except Exception:
+        hard_limit = None
 
     try:
         used = agent.get_daily_credit_usage(usage_date=today)
     except Exception:
         used = Decimal("0")
 
-    if limit is None:
-        remaining: Optional[Decimal] = None
+    hard_remaining: Optional[Decimal]
+    if hard_limit is None:
+        hard_remaining = None
     else:
         try:
-            remaining = limit - used
-            if remaining < Decimal("0"):
-                remaining = Decimal("0")
+            hard_remaining = hard_limit - used
+            if hard_remaining < Decimal("0"):
+                hard_remaining = Decimal("0")
         except Exception:
-            remaining = Decimal("0")
+            hard_remaining = Decimal("0")
+
+    if soft_target is None:
+        soft_remaining: Optional[Decimal] = None
+    else:
+        try:
+            soft_remaining = soft_target - used
+            if soft_remaining < Decimal("0"):
+                soft_remaining = Decimal("0")
+        except Exception:
+            soft_remaining = Decimal("0")
 
     local_now = dj_timezone.localtime(dj_timezone.now())
     next_reset = (local_now + timedelta(days=1)).replace(
@@ -515,12 +538,59 @@ def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         microsecond=0,
     )
 
-    return {
+    burn_details = _compute_burn_rate(
+        agent,
+        window_minutes=credit_settings.burn_rate_window_minutes,
+    )
+    state = {
         "date": today,
-        "limit": limit,
+        "soft_target": soft_target,
         "used": used,
-        "remaining": remaining,
+        "remaining": soft_remaining,
+        "soft_target_remaining": soft_remaining,
+        "hard_limit": hard_limit,
+        "hard_limit_remaining": hard_remaining,
         "next_reset": next_reset,
+        "soft_target_exceeded": (
+            soft_remaining is not None and soft_remaining <= Decimal("0")
+        ),
+        "burn_rate_per_hour": burn_details.get("burn_rate_per_hour"),
+        "burn_rate_window_minutes": burn_details.get("window_minutes"),
+        "burn_rate_threshold_per_hour": credit_settings.burn_rate_threshold_per_hour,
+    }
+    return state
+
+
+def _compute_burn_rate(
+    agent: PersistentAgent,
+    window_minutes: int,
+) -> dict:
+    """Return rolling burn-rate metrics for the agent."""
+    if window_minutes <= 0:
+        return {}
+
+    now = dj_timezone.now()
+    window_start = now - timedelta(minutes=window_minutes)
+    try:
+        total = (
+            agent.steps.filter(
+                created_at__gte=window_start,
+                credits_cost__isnull=False,
+            ).aggregate(sum=Sum("credits_cost"))
+        ).get("sum") or Decimal("0")
+    except Exception as exc:
+        logger.debug("Failed to compute burn rate window for agent %s: %s", agent.id, exc)
+        total = Decimal("0")
+
+    hours = Decimal(str(window_minutes)) / Decimal("60")
+    burn_rate_per_hour = (
+        total / hours if hours > Decimal("0") else Decimal("0")
+    )
+
+    return {
+        "burn_rate_per_hour": burn_rate_per_hour,
+        "window_minutes": window_minutes,
+        "window_total": total,
     }
 
 
@@ -530,11 +600,21 @@ def _has_sufficient_daily_credit(state: dict, cost: Decimal | None) -> bool:
     if cost is None:
         return True
 
-    limit = state.get("limit")
-    if limit is None:
+    hard_limit = state.get("hard_limit")
+    if hard_limit is None:
         return True
 
-    remaining = state.get("remaining", Decimal("0"))
+    remaining = state.get("hard_limit_remaining")
+    if remaining is None:
+        try:
+            used = state.get("used", Decimal("0"))
+            if not isinstance(used, Decimal):
+                used = Decimal(str(used))
+            remaining = hard_limit - used
+        except Exception as exc:
+            logger.warning("Failed to derive hard limit remaining: %s", exc)
+            remaining = Decimal("0")
+
     try:
         return remaining >= cost
     except TypeError as e:
@@ -598,8 +678,53 @@ def _ensure_credit_for_tool(
         if credit_snapshot is not None:
             credit_snapshot["daily_state"] = daily_state
 
-    daily_limit = daily_state.get("limit")
-    daily_remaining = daily_state.get("remaining")
+    hard_limit = daily_state.get("hard_limit")
+    hard_remaining = daily_state.get("hard_limit_remaining")
+    soft_target = daily_state.get("soft_target")
+    soft_target_remaining = daily_state.get("soft_target_remaining")
+    soft_exceeded = daily_state.get("soft_target_exceeded")
+
+    if soft_exceeded and not daily_state.get("soft_target_warning_logged"):
+        daily_state["soft_target_warning_logged"] = True
+        logger.info(
+            "Agent %s exceeded daily soft target (used=%s target=%s)",
+            agent.id,
+            daily_state.get("used"),
+            soft_target,
+        )
+        try:
+            analytics_props: dict[str, Any] = {
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "tool_name": tool_name,
+            }
+            if soft_target is not None:
+                analytics_props["soft_target"] = str(soft_target)
+            used_value = daily_state.get("used")
+            if used_value is not None:
+                analytics_props["credits_used_today"] = str(used_value)
+            if soft_target_remaining is not None:
+                analytics_props["soft_target_remaining"] = str(soft_target_remaining)
+            props_with_org = Analytics.with_org_properties(
+                analytics_props,
+                organization=getattr(agent, "organization", None),
+            )
+            Analytics.track_event(
+                user_id=owner_user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_SOFT_LIMIT_EXCEEDED,
+                source=AnalyticsSource.AGENT,
+                properties=props_with_org,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to emit analytics for agent %s soft target exceedance",
+                agent.id,
+            )
+        if span is not None:
+            try:
+                span.add_event("Soft target exceeded")
+            except Exception:
+                pass
 
     if span is not None:
         try:
@@ -607,8 +732,8 @@ def _ensure_credit_for_tool(
                 "credit_check.available_in_loop",
                 int(available) if available is not None else -2,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to set soft target span attributes: %s", e)
         try:
             span.set_attribute(
                 "credit_check.tool_cost",
@@ -619,23 +744,38 @@ def _ensure_credit_for_tool(
         try:
             span.set_attribute(
                 "credit_check.daily_limit",
-                float(daily_limit) if daily_limit is not None else -1.0,
+                float(hard_limit) if hard_limit is not None else -1.0,
             )
         except Exception as e:
             logger.debug("Failed to set span attribute 'credit_check.daily_limit': %s", e)
         try:
             span.set_attribute(
                 "credit_check.daily_remaining_before",
-                float(daily_remaining) if daily_remaining is not None else -1.0,
+                float(hard_remaining) if hard_remaining is not None else -1.0,
             )
         except Exception as e:
             logger.debug("Failed to set span attribute 'credit_check.daily_remaining_before': %s", e)
+        try:
+            span.set_attribute(
+                "credit_check.daily_soft_target",
+                float(soft_target) if soft_target is not None else -1.0,
+            )
+            span.set_attribute(
+                "credit_check.daily_soft_remaining",
+                float(soft_target_remaining) if soft_target_remaining is not None else -1.0,
+            )
+            span.set_attribute(
+                "credit_check.daily_soft_exceeded",
+                bool(soft_exceeded),
+            )
+        except Exception:
+            pass
 
     if not _has_sufficient_daily_credit(daily_state, cost):
-        limit_display = daily_limit
+        limit_display = hard_limit
         used_display = daily_state.get("used")
         msg_desc = (
-            f"Skipped tool '{tool_name}' because this agent reached its daily task credit limit for today."
+            f"Skipped tool '{tool_name}' because this agent reached its enforced daily credit limit for today."
         )
         if limit_display is not None:
             msg_desc += f" {used_display} of {limit_display} credits already used."
@@ -754,7 +894,7 @@ def _ensure_credit_for_tool(
                 credit_snapshot.pop("available", None)
             if span is not None:
                 try:
-                    remaining_after = updated_state.get("remaining")
+                    remaining_after = updated_state.get("hard_limit_remaining")
                     span.set_attribute(
                         "credit_check.daily_remaining_after",
                         float(remaining_after) if remaining_after is not None else -1.0,
@@ -1103,8 +1243,8 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     span.set_attribute("credit_check.sufficient", False)
                     return agent
                 daily_state = _get_agent_daily_credit_state(agent)
-                daily_limit = daily_state.get("limit")
-                daily_remaining = daily_state.get("remaining")
+                daily_limit = daily_state.get("hard_limit")
+                daily_remaining = daily_state.get("hard_limit_remaining")
                 credit_snapshot = {
                     "available": available,
                     "daily_state": daily_state,
@@ -1123,10 +1263,10 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
                 if daily_limit is not None and (daily_remaining is None or daily_remaining <= Decimal("0")):
                     msg = (
-                        "Skipped processing because this agent has reached its daily task credit limit."
+                        "Skipped processing because this agent has reached its enforced daily task credit limit."
                     )
                     logger.warning(
-                        "Persistent agent %s not processed – daily limit reached (used=%s limit=%s).",
+                        "Persistent agent %s not processed – hard daily limit reached (used=%s limit=%s).",
                         persistent_agent_id,
                         daily_state.get("used"),
                         daily_limit,
@@ -2398,66 +2538,136 @@ def _add_budget_awareness_sections(
 
     if daily_credit_state:
         try:
-            limit = daily_credit_state.get("limit")
+            hard_limit = daily_credit_state.get("hard_limit")
+            hard_limit_remaining = daily_credit_state.get("hard_limit_remaining")
+            soft_target = daily_credit_state.get("soft_target")
             used = daily_credit_state.get("used", Decimal("0"))
-            remaining = daily_credit_state.get("remaining")
             next_reset = daily_credit_state.get("next_reset")
+            burn_rate = daily_credit_state.get("burn_rate_per_hour")
+            burn_threshold = daily_credit_state.get("burn_rate_threshold_per_hour")
+            burn_window = daily_credit_state.get("burn_rate_window_minutes")
 
-            if limit is None:
-                daily_text = (
-                    f"Daily task credit usage: {used} credits consumed today. No daily limit is configured."
-                )
-            else:
-                remaining_text = (
-                    f" Remaining: {remaining}." if remaining is not None else ""
-                )
+            if soft_target is not None:
                 reset_text = (
-                    f" Resets at {next_reset.isoformat()}" if next_reset else ""
+                    f"Next reset at {next_reset.isoformat()}. " if next_reset else ""
                 )
-                daily_text = (
-                    f"Daily task credit usage: {used}/{limit} credits consumed today.{remaining_text}{reset_text}"
+                if used > soft_target:
+                    soft_target_warning = (
+                        "WARNING: You have exceeded your soft target for today. "
+                        "Please moderate your usage to avoid hitting the hard limit. "
+                    )
+                else:
+                    soft_target_warning = ""
+                soft_text = (
+                    "This is your task usage target for today. Try to stay within this limit. "
+                    "Every tool call you make consumes credits against this target. "
+                    "If you exceed this target, you will not be stopped immediately, but you risk hitting your hard limit sooner. "
+                    f"Soft target progress: {used}/{soft_target} credits consumed today. "
+                    f"{soft_target_warning}"
+                    f"{reset_text} "
                 )
-            sections.append((
-                "daily_credits_status",
-                daily_text,
-                3,
-                True,
-            ))
 
-            if limit is not None and limit > Decimal("0"):
+                sections.append((
+                    "soft_target_progress",
+                    soft_text,
+                    3,
+                    True,
+                ))
+
+            if hard_limit is not None and hard_limit > Decimal("0"):
                 try:
-                    ratio = used / limit
+                    ratio = used / hard_limit
                 except Exception:
                     ratio = None
+                if hard_limit_remaining is not None and hard_limit_remaining <= get_default_task_credit_cost():
+                    hard_limit_warning = (
+                        "WARNING: Hard limit is nearly depleted; only enough credit remains for a single default-cost tool call."
+                    )
+                elif ratio is not None and ratio >= Decimal("0.9"):
+                    hard_limit_warning = (
+                        "WARNING: Hard task limit is 90% reached. Slow your pace or request a higher limit if you must continue."
+                    )
+                else:
+                    hard_limit_warning = ""
 
-                if ratio is not None:
-                    if ratio >= Decimal("0.9"):
-                        warning_text = (
-                            "Warning: You are almost out of daily task credits. Consider prioritizing"
-                            " critical actions or contacting the user to adjust the limit."
-                        )
-                        sections.append((
-                            "daily_credits_warning",
-                            warning_text,
-                            2,
-                            True,
-                        ))
-                    elif remaining is not None and remaining <= get_default_task_credit_cost():
-                        warning_text = (
-                            "Warning: Only enough daily task credits remain for a single default-cost tool call."
-                            " Use remaining credits carefully."
-                        )
-                        sections.append((
-                            "daily_credits_low",
-                            warning_text,
-                            2,
-                            True,
-                        ))
+                hard_text = (
+                    f"This is your task usage hard limit for today. Once you reach this limit, "
+                    "you will be blocked from making further tool calls until the limit resets. "
+                    "Every tool call you make consumes credits against this limit. "
+                    f"Hard limit progress: {used}/{hard_limit} credits consumed today. "
+                    f"{hard_limit_warning}"
+                )
+                sections.append((
+                    "hard_limit_progress",
+                    hard_text,
+                    3,
+                    True,
+                ))
+
+
+            if (
+                burn_rate is not None
+                and burn_threshold is not None
+                and Decimal("0") < burn_threshold < burn_rate
+            ):
+                window_text = (
+                    f"the last {burn_window} minutes"
+                    if burn_window
+                    else "the recent window"
+                )
+                burn_warning = (
+                    f"WARNING: Current burn rate is {burn_rate} credits/hour over {window_text}, above the pacing target of {burn_threshold}. "
+                    "Slow your cadence or pause non-essential tasks to stay within the soft target."
+                )
+                sections.append((
+                    "burn_rate_warning",
+                    burn_warning,
+                    2,
+                    True,
+                ))
         except Exception as e:
             logger.warning("Failed to generate daily credit summary for prompt: %s", e, exc_info=True)
             # Do not block prompt creation if credit summary fails
             pass
 
+    try:
+        default_cost, overrides = get_tool_cost_overview()
+
+        def _format_cost(value: Decimal | Any) -> str:
+            try:
+                normalized = Decimal(value)
+            except Exception:
+                return str(value)
+            # .normalize() removes trailing zeros and converts e.g. 1.00 to 1.
+            return str(normalized.normalize())
+
+        summary_parts = [
+            f"Default tool call cost: {_format_cost(default_cost)} credits."
+        ]
+        if overrides:
+            sorted_overrides = sorted(overrides.items())
+            max_entries = 5
+            display_pairs = sorted_overrides[:max_entries]
+            overrides_text = ", ".join(
+                f"{name}={_format_cost(cost)}"
+                for name, cost in display_pairs
+            )
+            extra_count = len(sorted_overrides) - len(display_pairs)
+            if overrides_text:
+                summary_parts.append(f"Overrides: {overrides_text}.")
+            if extra_count > 0:
+                summary_parts.append(f"+{extra_count} more override(s) not shown.")
+        else:
+            summary_parts.append("No per-tool overrides are configured right now.")
+
+        sections.append((
+            "tool_cost_awareness",
+            " ".join(summary_parts),
+            2,
+            True,
+        ))
+    except Exception:
+        logger.debug("Failed to append tool cost overview to budget awareness.", exc_info=True)
 
     if max_iterations and max_iterations > 0:
         try:

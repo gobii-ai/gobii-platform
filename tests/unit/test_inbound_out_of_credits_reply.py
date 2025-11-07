@@ -1,3 +1,4 @@
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.test import TestCase, override_settings, tag
@@ -100,7 +101,7 @@ class InboundOutOfCreditsReplyTests(TestCase):
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("tasks.services.TaskCreditService.calculate_available_tasks", return_value=10)
     def test_daily_limit_reply_sent_to_sender(self, mock_calc, mock_delay):
-        self.agent.daily_credit_limit = 0
+        self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
 
         sender = self.owner.email
@@ -116,9 +117,10 @@ class InboundOutOfCreditsReplyTests(TestCase):
 
         mail.outbox.clear()
 
-        with patch("django.contrib.sites.models.Site.objects.get_current") as mock_site:
-            mock_site.return_value = Mock(domain="example.com")
-            ingest_inbound_message(CommsChannel.EMAIL, parsed)
+        with patch.object(PersistentAgent, "get_daily_credit_remaining", return_value=Decimal("0")):
+            with patch("django.contrib.sites.models.Site.objects.get_current") as mock_site:
+                mock_site.return_value = Mock(domain="example.com")
+                ingest_inbound_message(CommsChannel.EMAIL, parsed)
 
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(set(mail.outbox[0].to), {sender})
@@ -159,7 +161,7 @@ class InboundDailyCreditsSmsTests(TestCase):
 
     @tag("batch_sms")
     def test_daily_limit_sms_notice_sent(self):
-        self.agent.daily_credit_limit = 0
+        self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
 
         parsed = ParsedMessage(
@@ -172,7 +174,8 @@ class InboundDailyCreditsSmsTests(TestCase):
             msg_channel=CommsChannel.SMS,
         )
 
-        with patch("django.contrib.sites.models.Site.objects.get_current") as mock_site, \
+        with patch.object(PersistentAgent, "get_daily_credit_remaining", return_value=Decimal("0")), \
+             patch("django.contrib.sites.models.Site.objects.get_current") as mock_site, \
              patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay, \
              patch("api.agent.comms.message_service.deliver_agent_sms") as mock_deliver_sms:
             mock_site.return_value = Mock(domain="example.com")
@@ -213,7 +216,7 @@ class InboundDailyCreditsWebChatTests(TestCase):
 
     @tag("batch_agent_chat")
     def test_daily_limit_web_notice_sent(self):
-        self.agent.daily_credit_limit = 0
+        self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
 
         sender_address = build_web_user_address(self.owner.id, self.agent.id)
@@ -228,7 +231,8 @@ class InboundDailyCreditsWebChatTests(TestCase):
             msg_channel=CommsChannel.WEB,
         )
 
-        with patch("django.contrib.sites.models.Site.objects.get_current") as mock_site, \
+        with patch.object(PersistentAgent, "get_daily_credit_remaining", return_value=Decimal("0")), \
+             patch("django.contrib.sites.models.Site.objects.get_current") as mock_site, \
              patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
             mock_site.return_value = Mock(domain="example.com")
             ingest_inbound_message(CommsChannel.WEB, parsed)

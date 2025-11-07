@@ -98,6 +98,16 @@ def _get_tool_cost_config() -> Tuple[Decimal, Dict[str, Decimal]]:
     return data
 
 
+def get_tool_cost_overview() -> Tuple[Decimal, Dict[str, Decimal]]:
+    """
+    Return the default cost and a mapping of tool-specific overrides.
+
+    The mapping keys are normalized lowercase tool names.
+    """
+    default_cost, overrides = _get_tool_cost_config()
+    return default_cost, overrides.copy()
+
+
 def get_default_task_credit_cost() -> Decimal:
     default_cost, _ = _get_tool_cost_config()
     return default_cost

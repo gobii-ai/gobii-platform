@@ -15,8 +15,13 @@ from django.contrib.auth import get_user_model
 from unittest.mock import MagicMock, patch
 
 import uuid
+from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.constants.task_constants import TASKS_UNLIMITED
-from api.agent.core.event_processing import _ensure_credit_for_tool
+from api.agent.core.event_processing import (
+    _add_budget_awareness_sections,
+    _compute_burn_rate,
+    _ensure_credit_for_tool,
+)
 
 
 class _DummySpan:
@@ -29,6 +34,32 @@ class _DummySpan:
 
 @tag("batch_event_processing")
 class PersistentAgentCreditGateTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._short_desc_patcher = patch(
+            "api.agent.tasks.short_description.generate_agent_short_description_task.delay",
+            return_value=None,
+        )
+        cls._short_desc_patcher.start()
+        cls._mini_desc_patcher = patch(
+            "api.agent.tasks.mini_description.generate_agent_mini_description_task.delay",
+            return_value=None,
+        )
+        cls._mini_desc_patcher.start()
+        cls._tags_patcher = patch(
+            "api.agent.tasks.agent_tags.generate_agent_tags_task.delay",
+            return_value=None,
+        )
+        cls._tags_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._short_desc_patcher.stop()
+        cls._mini_desc_patcher.stop()
+        cls._tags_patcher.stop()
+        super().tearDownClass()
+
     @classmethod
     def setUpTestData(cls):
         User = get_user_model()
@@ -155,14 +186,18 @@ class PersistentAgentCreditGateTests(TestCase):
             PersistentAgentStep.objects.create(
                 agent=self.agent,
                 description="Previously consumed",
-                credits_cost=Decimal("1"),
+                credits_cost=Decimal("2"),
             )
 
         fake_state = {
             "date": timezone.localdate(),
             "limit": Decimal("1"),
-            "used": Decimal("1"),
+            "soft_target": Decimal("1"),
+            "used": Decimal("2"),
             "remaining": Decimal("0"),
+            "soft_target_remaining": Decimal("0"),
+            "hard_limit": Decimal("2"),
+            "hard_limit_remaining": Decimal("0"),
             "next_reset": timezone.now(),
         }
 
@@ -311,6 +346,74 @@ class PersistentAgentToolCreditTests(TestCase):
         span.set_attribute.assert_any_call("credit_check.error", "db down")
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit",
+        return_value={"success": True, "credit": None},
+    )
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available",
+        return_value=Decimal("10"),
+    )
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("1"))
+    def test_soft_target_exceedance_allows_until_hard_limit(
+        self,
+        _mock_cost,
+        _mock_available,
+        _mock_consume,
+    ):
+        self.agent.daily_credit_limit = 5
+        self.agent.save(update_fields=["daily_credit_limit"])
+        PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Soft target exceeded",
+            credits_cost=Decimal("6"),
+        )
+
+        span = MagicMock()
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
+
+        self.assertEqual(result, Decimal("1"))
+        self.assertFalse(
+            self.agent.steps.filter(description__icontains="Skipped tool").exists(),
+            "Soft target exhaustion should not emit a skip step until the hard limit is reached.",
+        )
+
+    @patch("api.agent.core.event_processing.Analytics.track_event")
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit",
+        return_value={"success": True, "credit": None},
+    )
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available",
+        return_value=Decimal("10"),
+    )
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("1"))
+    def test_soft_target_exceedance_emits_analytics(
+        self,
+        _mock_cost,
+        _mock_available,
+        _mock_consume,
+        mock_track_event,
+    ):
+        self.agent.daily_credit_limit = 5
+        self.agent.save(update_fields=["daily_credit_limit"])
+        PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Soft target threshold reached",
+            credits_cost=Decimal("5"),
+        )
+
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query")
+
+        self.assertEqual(result, Decimal("1"))
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_SOFT_LIMIT_EXCEEDED)
+        self.assertEqual(kwargs["source"], AnalyticsSource.AGENT)
+        self.assertEqual(kwargs["properties"].get("agent_id"), str(self.agent.id))
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
     @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=TASKS_UNLIMITED)
     @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.8"))
@@ -346,7 +449,7 @@ class PersistentAgentToolCreditTests(TestCase):
             PersistentAgentStep.objects.create(
                 agent=self.agent,
                 description="Partial usage",
-                credits_cost=Decimal("0.7"),
+                credits_cost=Decimal("2.0"),
             )
 
         result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
@@ -355,7 +458,7 @@ class PersistentAgentToolCreditTests(TestCase):
         mock_consume.assert_not_called()
         step = PersistentAgentStep.objects.filter(agent=self.agent).order_by('-created_at').first()
         self.assertIsNotNone(step)
-        self.assertIn("daily task credit limit", step.description.lower())
+        self.assertIn("daily credit limit", step.description.lower())
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step=step,
@@ -363,3 +466,80 @@ class PersistentAgentToolCreditTests(TestCase):
             ).exists()
         )
         span.add_event.assert_any_call("Tool skipped - daily credit limit reached")
+
+    def test_compute_burn_rate_no_data_returns_zero(self):
+        metrics = _compute_burn_rate(self.agent, window_minutes=60)
+        self.assertEqual(metrics["burn_rate_per_hour"], Decimal("0"))
+        self.assertEqual(metrics["window_total"], Decimal("0"))
+
+    def test_compute_burn_rate_counts_recent_usage(self):
+        with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Recent usage",
+                credits_cost=Decimal("3.0"),
+            )
+        PersistentAgentStep.objects.filter(pk=step.pk).update(
+            created_at=timezone.now() - timezone.timedelta(minutes=10)
+        )
+        metrics = _compute_burn_rate(self.agent, window_minutes=60)
+        self.assertEqual(metrics["burn_rate_per_hour"], Decimal("3"))
+        self.assertEqual(metrics["window_total"], Decimal("3"))
+
+    @patch(
+        "api.agent.core.event_processing.get_tool_cost_overview",
+        return_value=(Decimal("1"), {"send_email": Decimal("1.2"), "run_sql": Decimal("2.5")}),
+    )
+    def test_budget_sections_include_soft_target_and_burn_warning(self, _mock_costs):
+        critical_group = MagicMock()
+        budget_group = MagicMock()
+        critical_group.group.return_value = budget_group
+        next_reset = timezone.now() + timezone.timedelta(hours=4)
+        state = {
+            "limit": Decimal("10"),
+            "soft_target": Decimal("5"),
+            "used": Decimal("4"),
+            "remaining": Decimal("6"),
+            "soft_target_remaining": Decimal("1"),
+            "next_reset": next_reset,
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_window_minutes": 60,
+            "burn_rate_threshold_per_hour": Decimal("3"),
+        }
+        result = _add_budget_awareness_sections(
+            critical_group,
+            current_iteration=2,
+            max_iterations=4,
+            daily_credit_state=state,
+        )
+        self.assertTrue(result)
+        names = [call.args[0] for call in budget_group.section_text.call_args_list]
+        self.assertIn("soft_target_progress", names)
+        self.assertIn("burn_rate_warning", names)
+        self.assertIn("tool_cost_awareness", names)
+        soft_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "soft_target_progress")
+        self.assertIn("Soft target progress", soft_call.args[1])
+        tool_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "tool_cost_awareness")
+        self.assertIn("send_email=1.2", tool_call.args[1])
+
+    def test_budget_sections_handle_unlimited_soft_target(self):
+        critical_group = MagicMock()
+        budget_group = MagicMock()
+        critical_group.group.return_value = budget_group
+        state = {
+            "limit": None,
+            "soft_target": None,
+            "used": Decimal("3"),
+            "remaining": None,
+            "soft_target_remaining": None,
+            "next_reset": timezone.now(),
+        }
+        result = _add_budget_awareness_sections(
+            critical_group,
+            current_iteration=1,
+            max_iterations=0,
+            daily_credit_state=state,
+        )
+        self.assertTrue(result)
+        names = [call.args[0] for call in budget_group.section_text.call_args_list]
+        self.assertNotIn("soft_target_progress", names)

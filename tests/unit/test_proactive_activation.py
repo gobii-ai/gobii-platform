@@ -103,7 +103,7 @@ class ProactiveActivationServiceTests(TestCase):
         PersistentAgentStep.objects.create(
             agent=self.agent_a,
             description="Consumed credit",
-            credits_cost=Decimal("1"),
+            credits_cost=Decimal("2"),
         )
 
         triggered = ProactiveActivationService.trigger_agents(batch_size=5)

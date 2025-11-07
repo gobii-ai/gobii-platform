@@ -1,5 +1,5 @@
 import hashlib, secrets, uuid, os, string, re, datetime, json
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from typing import Optional, Tuple
 
 import ulid
@@ -517,6 +517,91 @@ class TaskCreditConfig(models.Model):
 
     def __str__(self):
         return "Task credit configuration"
+
+
+class DailyCreditConfig(models.Model):
+    """Singleton configuration controlling soft target UI + pacing."""
+
+    singleton_id = models.PositiveSmallIntegerField(
+        primary_key=True,
+        default=1,
+        editable=False,
+    )
+    slider_min = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0"),
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Lowest selectable soft target value.",
+    )
+    slider_max = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("50"),
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Highest selectable soft target value.",
+    )
+    slider_step = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("1"),
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text="Increment applied to the soft target slider/input.",
+    )
+    burn_rate_threshold_per_hour = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        default=Decimal("3"),
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Preferred maximum credits consumed per hour before agents are asked to slow down.",
+    )
+    burn_rate_window_minutes = models.PositiveIntegerField(
+        default=60,
+        validators=[MinValueValidator(1), MaxValueValidator(1440)],
+        help_text="Window (in minutes) used to compute the rolling burn rate.",
+    )
+    hard_limit_multiplier = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("2"),
+        validators=[MinValueValidator(Decimal("1"))],
+        help_text="Multiplier applied to the soft target to derive the enforced hard limit.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Daily credit pacing configuration"
+        verbose_name_plural = "Daily credit pacing configuration"
+
+    def clean(self):
+        super().clean()
+        if self.slider_max < self.slider_min:
+            raise ValidationError({"slider_max": "Maximum must be greater than or equal to the minimum value."})
+        integer_fields = {
+            "slider_min": self.slider_min,
+            "slider_max": self.slider_max,
+            "slider_step": self.slider_step,
+        }
+        for field_name, value in integer_fields.items():
+            if value is None:
+                continue
+            if value != value.to_integral_value(rounding=ROUND_DOWN):
+                raise ValidationError({field_name: "Value must be a whole number."})
+
+    def save(self, *args, **kwargs):
+        self.singleton_id = 1
+        result = super().save(*args, **kwargs)
+        from api.services.daily_credit_settings import invalidate_daily_credit_settings_cache
+
+        invalidate_daily_credit_settings_cache()
+        return result
+
+    def delete(self, using=None, keep_parents=False):  # pragma: no cover - deletion discouraged
+        raise ValidationError("DailyCreditConfig cannot be deleted.")
+
+    def __str__(self):
+        return "Daily credit pacing configuration"
 
 
 class ToolCreditCost(models.Model):
@@ -2668,7 +2753,7 @@ class PersistentAgent(models.Model):
     daily_credit_limit = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Maximum task credits this agent may consume per day. Null means unlimited.",
+        help_text="Soft daily credit target; system enforces a hard stop at 2× this value. Null means unlimited.",
     )
     # Soft-expiration state and interaction tracking
     class LifeState(models.TextChoices):
@@ -2837,12 +2922,30 @@ class PersistentAgent(models.Model):
         schedule_display = self.schedule if self.schedule else "No schedule"
         return f"PersistentAgent: {self.name} (Schedule: {schedule_display})"
 
-    def get_daily_credit_limit_value(self) -> Decimal | None:
-        """Return the configured daily task credit limit, or None if unlimited."""
+    def get_daily_credit_soft_target(self) -> Decimal | None:
+        """Return the configured soft daily credit target, or None if unlimited."""
         limit = self.daily_credit_limit
         if limit is None:
             return None
-        return Decimal(limit)
+        limit_value = limit if isinstance(limit, Decimal) else Decimal(limit)
+        if limit_value == Decimal("0"):
+            return None
+        return limit_value
+
+    def get_daily_credit_hard_limit(self) -> Decimal | None:
+        """Return the derived hard limit (2× soft target) or None for unlimited agents."""
+        from api.services.daily_credit_settings import get_daily_credit_settings
+
+        soft_target = self.get_daily_credit_soft_target()
+        if soft_target is None:
+            return None
+        credit_settings = get_daily_credit_settings()
+        multiplier = credit_settings.hard_limit_multiplier
+        try:
+            multiplier = Decimal(multiplier)
+        except Exception:
+            multiplier = Decimal("2")
+        return (soft_target * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def get_daily_credit_usage(self, usage_date=None) -> Decimal:
         """Return the credits consumed by this agent on the given date."""
@@ -2862,9 +2965,20 @@ class PersistentAgent(models.Model):
 
         return total if total is not None else Decimal("0")
 
+    def get_daily_credit_soft_target_remaining(self, usage_date=None) -> Decimal | None:
+        """Return remaining credits before the soft target is exceeded."""
+        soft_target = self.get_daily_credit_soft_target()
+        if soft_target is None:
+            return None
+        used = self.get_daily_credit_usage(usage_date=usage_date)
+        remaining = soft_target - used
+        if remaining <= Decimal("0"):
+            return Decimal("0")
+        return remaining
+
     def get_daily_credit_remaining(self, usage_date=None) -> Decimal | None:
-        """Return remaining daily credits; None indicates unlimited."""
-        limit = self.get_daily_credit_limit_value()
+        """Return remaining credits before the derived hard limit is enforced."""
+        limit = self.get_daily_credit_hard_limit()
         if limit is None:
             return None
         used = self.get_daily_credit_usage(usage_date=usage_date)

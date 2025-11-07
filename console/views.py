@@ -1,5 +1,5 @@
 import json
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any
 
 import stripe
@@ -36,6 +36,7 @@ from api.services.dedicated_proxy_service import (
 )
 from api.agent.short_description import build_listing_description, build_mini_description
 from api.agent.tags import maybe_schedule_agent_tags
+from api.services.daily_credit_settings import get_daily_credit_settings
 
 from api.models import (
     ApiKey,
@@ -1905,23 +1906,27 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             ).first()
 
             try:
-                limit = agent.get_daily_credit_limit_value()
+                soft_target = agent.get_daily_credit_soft_target()
+                hard_limit = agent.get_daily_credit_hard_limit()
                 usage = agent.get_daily_credit_usage(usage_date=today)
                 remaining = agent.get_daily_credit_remaining(usage_date=today)
             except Exception:
-                limit = None
+                soft_target = None
+                hard_limit = None
                 usage = Decimal("0")
                 remaining = None
 
             agent.daily_credit_usage = usage
             agent.daily_credit_remaining = remaining
-            agent.daily_credit_unlimited = limit is None
+            agent.daily_credit_unlimited = soft_target is None
             agent.daily_credit_next_reset = next_reset
             agent.daily_credit_low = (
-                limit is not None
+                hard_limit is not None
                 and remaining is not None
                 and remaining < Decimal("1")
             )
+            agent.daily_credit_soft_target = soft_target
+            agent.daily_credit_hard_limit = hard_limit
 
         context['persistent_agents'] = persistent_agents
         context['has_agents'] = bool(persistent_agents)
@@ -2706,23 +2711,32 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['personal_mcp_servers'] = personal_servers
         context['show_personal_mcp_form'] = agent.organization_id is None and bool(personal_servers)
 
+        credit_settings = get_daily_credit_settings()
+        context["daily_credit_slider_min"] = credit_settings.slider_min
+        context["daily_credit_slider_max"] = credit_settings.slider_max
+        context["daily_credit_slider_step"] = credit_settings.slider_step
+
         # Daily task credit usage overview for progress UI
         try:
             today = timezone.localdate()
-            limit = agent.get_daily_credit_limit_value()
+            soft_target = agent.get_daily_credit_soft_target()
+            hard_limit = agent.get_daily_credit_hard_limit()
             usage = agent.get_daily_credit_usage(usage_date=today)
-            remaining = agent.get_daily_credit_remaining(usage_date=today)
-            unlimited = limit is None
+            hard_remaining = agent.get_daily_credit_remaining(usage_date=today)
+            soft_remaining = agent.get_daily_credit_soft_target_remaining(usage_date=today)
+            unlimited = soft_target is None
 
-            percent_used: float | None = None
-            if limit is not None and limit > Decimal("0"):
+            def _percent(value: Decimal, total: Decimal | None) -> float | None:
+                if total is None or total <= Decimal("0"):
+                    return None
                 try:
-                    percent_used = float((usage / limit) * 100)
-                    if percent_used > 100:
-                        percent_used = 100.0
+                    pct = float((value / total) * 100)
                 except Exception:
-                    percent_used = None
+                    return None
+                return min(pct, 100.0)
 
+            percent_used = _percent(usage, hard_limit)
+            soft_percent_used = _percent(usage, soft_target)
             next_reset = (
                 timezone.localtime(timezone.now()).replace(
                     hour=0,
@@ -2735,13 +2749,20 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
             context.update(
                 {
-                    "daily_credit_limit": limit,
+                    "daily_credit_limit": soft_target,
+                    "daily_credit_soft_target": soft_target,
+                    "daily_credit_hard_limit": hard_limit,
                     "daily_credit_usage": usage,
-                    "daily_credit_remaining": remaining,
+                    "daily_credit_remaining": hard_remaining,
+                    "daily_credit_soft_remaining": soft_remaining,
                     "daily_credit_unlimited": unlimited,
                     "daily_credit_percent_used": percent_used,
+                    "daily_credit_soft_percent_used": soft_percent_used,
                     "daily_credit_next_reset": next_reset,
-                    "daily_credit_low": (not unlimited and remaining is not None and remaining < Decimal("1")),
+                    "daily_credit_low": (
+                        not unlimited and hard_remaining is not None and hard_remaining < Decimal("1")
+                    ),
+                    "daily_credit_slider_value": soft_target if soft_target is not None else credit_settings.slider_min,
                 }
             )
         except Exception as e:
@@ -2750,12 +2771,17 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             context.update(
                 {
                     "daily_credit_limit": None,
+                    "daily_credit_soft_target": None,
+                    "daily_credit_hard_limit": None,
                     "daily_credit_usage": Decimal("0"),
                     "daily_credit_remaining": None,
+                    "daily_credit_soft_remaining": None,
                     "daily_credit_unlimited": True,
                     "daily_credit_percent_used": None,
+                    "daily_credit_soft_percent_used": None,
                     "daily_credit_next_reset": None,
                     "daily_credit_low": False,
+                    "daily_credit_slider_value": credit_settings.slider_min,
                 }
             )
 
@@ -2771,6 +2797,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
     def post(self, request, *args, **kwargs):
         """Handle agent configuration updates and allowlist management."""
         agent = self.get_object()
+        credit_settings = get_daily_credit_settings()
         
         peer_action = request.POST.get('peer_link_action')
         if peer_action:
@@ -3190,22 +3217,33 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
 
         raw_limit = (request.POST.get('daily_credit_limit') or '').strip()
+        slider_value = (request.POST.get('daily_credit_limit_slider') or '').strip()
+        limit_source = raw_limit or slider_value
 
-        if not raw_limit:
+        if not limit_source:
             new_daily_limit = None
         else:
             try:
-                parsed_limit = Decimal(raw_limit)
+                parsed_limit = Decimal(limit_source)
             except InvalidOperation:
-                messages.error(request, "Enter a valid number for the daily task credit limit.")
+                messages.error(request, "Enter a whole number for the daily credit soft target.")
                 return redirect('agent_detail', pk=agent.pk)
-            if parsed_limit < 0:
-                messages.error(request, "Daily task credit limit cannot be negative.")
+
+            if parsed_limit != parsed_limit.to_integral_value(rounding=ROUND_DOWN):
+                messages.error(request, "Enter a whole number for the daily credit soft target.")
                 return redirect('agent_detail', pk=agent.pk)
-            if parsed_limit != parsed_limit.to_integral_value():
-                messages.error(request, "Daily task credit limit must be a whole number.")
-                return redirect('agent_detail', pk=agent.pk)
-            new_daily_limit = int(parsed_limit)
+
+            parsed_limit = parsed_limit.to_integral_value(rounding=ROUND_HALF_UP)
+            if parsed_limit <= Decimal("0"):
+                new_daily_limit = None
+            else:
+                slider_min = credit_settings.slider_min
+                slider_max = credit_settings.slider_max
+                if parsed_limit < slider_min:
+                    parsed_limit = slider_min
+                if parsed_limit > slider_max:
+                    parsed_limit = slider_max
+                new_daily_limit = int(parsed_limit)
 
         if not new_name:
             messages.error(request, "Agent name cannot be empty.")
@@ -3354,13 +3392,17 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
                 messages.success(request, "Agent updated successfully.")
 
+                soft_value = float(new_daily_limit) if new_daily_limit is not None else None
+                hard_limit_value = agent.get_daily_credit_hard_limit()
                 update_props = Analytics.with_org_properties(
                     {
                         'agent_id': str(agent.pk),
                         'agent_name': new_name,
                         'is_active': new_is_active,
                         'charter': new_charter,
-                        'daily_credit_limit': float(new_daily_limit) if new_daily_limit is not None else None,
+                        'daily_credit_limit': soft_value,
+                        'daily_credit_soft_target': soft_value,
+                        'daily_credit_hard_limit': float(hard_limit_value) if hard_limit_value is not None else None,
                     },
                     organization=agent.organization,
                 )

@@ -26,7 +26,7 @@ from .models import (
     AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, PersistentAgentPromptArchive, CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
-    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ToolCreditCost,
+    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, ToolCreditCost,
     StripeConfig,
     MeteringBatch,
     UsageThresholdSent,
@@ -633,6 +633,40 @@ class TaskCreditConfigAdmin(admin.ModelAdmin):
         return super().has_add_permission(request)
 
     def has_delete_permission(self, request, obj=None):  # pragma: no cover - defensive guard
+        return False
+
+
+@admin.register(DailyCreditConfig)
+class DailyCreditConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "slider_min",
+        "slider_max",
+        "slider_step",
+        "burn_rate_threshold_per_hour",
+        "burn_rate_window_minutes",
+        "hard_limit_multiplier",
+        "updated_at",
+    )
+    readonly_fields = ("singleton_id", "created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("slider_min", "slider_max", "slider_step")}),
+        (
+            "Burn rate guidance",
+            {"fields": ("burn_rate_threshold_per_hour", "burn_rate_window_minutes")},
+        ),
+        (
+            "Hard limit",
+            {"fields": ("hard_limit_multiplier",)},
+        ),
+        ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
+    )
+
+    def has_add_permission(self, request):
+        if DailyCreditConfig.objects.exists():
+            return False
+        return super().has_add_permission(request)
+
+    def has_delete_permission(self, request, obj=None):  # pragma: no cover
         return False
 
 
