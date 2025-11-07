@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, tag
 from django.urls import reverse
 
-from api.models import BrowserUseAgent, PersistentAgent
+from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemMessage
 
 
 @tag("batch_api_persistent_agents")
@@ -78,3 +78,28 @@ class PersistentAgentAdminTests(TestCase):
         mock_delay.assert_called_once_with(str(self.persistent_agent.pk))
         messages = list(response.context["messages"])
         self.assertTrue(any("Forced proactive outreach queued" in message.message for message in messages))
+
+    def test_system_message_get_renders_form(self):
+        url = reverse("admin:api_persistentagent_system_message", args=[self.persistent_agent.pk])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Issue System Message")
+        self.assertContains(response, str(self.persistent_agent.id))
+
+    def test_system_message_post_creates_record_and_triggers_processing(self):
+        url = reverse("admin:api_persistentagent_system_message", args=[self.persistent_agent.pk])
+
+        with patch("api.admin.process_agent_events_task.delay") as mock_delay:
+            response = self.client.post(url, data={"message": "Focus on the quarterly report"}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            PersistentAgentSystemMessage.objects.filter(
+                agent=self.persistent_agent,
+                body="Focus on the quarterly report",
+            ).exists()
+        )
+        mock_delay.assert_called_once_with(str(self.persistent_agent.pk))
+        messages = list(response.context["messages"])
+        self.assertTrue(any("System message saved" in message.message for message in messages))

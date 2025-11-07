@@ -3607,6 +3607,46 @@ class MCPServerConfig(models.Model):
         self.headers_json_encrypted = self._encrypt_json(value)
 
 
+class PersistentAgentSystemMessage(models.Model):
+    """
+    High-priority system directives injected into an agent's system prompt.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="system_prompt_messages",
+        help_text="Agent that should receive this system directive.",
+    )
+    body = models.TextField(help_text="System directive text injected ahead of the agent's instructions.")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="issued_agent_system_messages",
+        help_text="Admin user that issued this directive.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    delivered_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when this directive was injected into the system prompt.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Disable to keep the record but skip injecting it into future prompts.",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        status = "delivered" if self.delivered_at else "pending"
+        return f"System message for {self.agent_id} ({status})"
+
+
 class PersistentAgentMCPServer(models.Model):
     """Explicit mapping for personal MCP servers enabled on an agent."""
 

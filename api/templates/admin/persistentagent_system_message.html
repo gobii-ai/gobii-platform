@@ -1,0 +1,38 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' 'api' %}">API</a>
+    &rsaquo; <a href="{% url 'admin:api_persistentagent_changelist' %}">{% trans 'Persistent Agents' %}</a>
+    &rsaquo; Issue System Message
+  </div>
+{% endblock %}
+
+{% block content %}
+  <h1>Issue System Message</h1>
+  <p>
+    Send an explicit directive from <strong>Gobii Operations</strong> to
+    <strong>{{ agent.name }}</strong> (ID: {{ agent.id }}).
+    The text below will be injected into the agent's system prompt on its next processing cycle.
+  </p>
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      {{ form.non_field_errors }}
+      <div class="form-row">
+        {{ form.message.errors }}
+        <label for="{{ form.message.id_for_label }}"><strong>{{ form.message.label }}</strong></label>
+        {{ form.message }}
+        {% if form.message.help_text %}
+          <p class="help">{{ form.message.help_text }}</p>
+        {% endif %}
+      </div>
+    </fieldset>
+    <div class="submit-row">
+      <a class="button" href="{% url 'admin:api_persistentagent_change' agent.pk %}">Cancel</a>
+      <button type="submit" class="button default">Send System Message</button>
+    </div>
+  </form>
+{% endblock %}

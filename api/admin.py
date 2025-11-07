@@ -2,6 +2,7 @@ import logging
 import uuid
 
 import djstripe
+from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.contrib.sites.models import Site
@@ -24,7 +25,8 @@ from .models import (
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
-    PersistentAgentStep, PersistentAgentPromptArchive, CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
+    PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage,
+    CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, ToolCreditCost,
     StripeConfig,
@@ -1739,6 +1741,38 @@ class AgentMessageInline(admin.TabularInline):
         return False
 
 
+class PersistentAgentSystemMessageInline(admin.TabularInline):
+    """Inline to show recent system directives issued via the admin."""
+
+    model = PersistentAgentSystemMessage
+    extra = 0
+    fields = ("body", "is_active", "delivered_at", "created_by", "created_at")
+    readonly_fields = ("body", "is_active", "delivered_at", "created_by", "created_at")
+    can_delete = False
+    ordering = ("-created_at",)
+    classes = ("collapse",)
+    verbose_name = "System directive"
+    verbose_name_plural = "System directives"
+
+
+class SystemMessageForm(forms.Form):
+    """Simple form to capture a high-priority system directive."""
+
+    message = forms.CharField(
+        label="System message",
+        widget=forms.Textarea(attrs={"rows": 5, "cols": 80}),
+        max_length=2000,
+        help_text="This text will be injected into the agent's system prompt as a Gobii system directive.",
+        strip=True,
+    )
+
+    def clean_message(self):
+        data = (self.cleaned_data.get("message") or "").strip()
+        if not data:
+            raise forms.ValidationError("System message cannot be blank.")
+        return data
+
+
 @admin.register(PersistentAgent)
 class PersistentAgentAdmin(admin.ModelAdmin):
     change_list_template = "admin/persistentagent_change_list.html"
@@ -1761,6 +1795,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         PersistentAgentWebhookInline,
         CommsAllowlistEntryInline,
         AgentMessageInline,
+        PersistentAgentSystemMessageInline,
     ]
 
     # ------------------------------------------------------------------
@@ -1811,6 +1846,11 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 '<path:object_id>/force-proactive/',
                 self.admin_site.admin_view(self.force_proactive_view),
                 name='api_persistentagent_force_proactive',
+            ),
+            path(
+                '<path:object_id>/system-message/',
+                self.admin_site.admin_view(self.system_message_view),
+                name='api_persistentagent_system_message',
             ),
             path(
                 'trigger-processing/',
@@ -1896,13 +1936,16 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             simulate_email_url = reverse("admin:api_persistentagent_simulate_email", args=[obj.pk])
             simulate_sms_url = reverse("admin:api_persistentagent_simulate_sms", args=[obj.pk])
             force_proactive_url = reverse("admin:api_persistentagent_force_proactive", args=[obj.pk])
+            system_message_url = reverse("admin:api_persistentagent_system_message", args=[obj.pk])
             return format_html(
                 '<a class="button" href="{}">Simulate Email</a>&nbsp;'
                 '<a class="button" href="{}">Simulate SMS</a>&nbsp;'
-                '<a class="button" href="{}">Force Proactive Outreach</a>',
+                '<a class="button" href="{}">Force Proactive Outreach</a>&nbsp;'
+                '<a class="button" href="{}">Send System Message</a>',
                 simulate_email_url,
                 simulate_sms_url,
                 force_proactive_url,
+                system_message_url,
             )
         return "Save agent to see actions"
 
@@ -2021,6 +2064,59 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         return TemplateResponse(
             request,
             "admin/persistentagent_force_proactive.html",
+            context,
+        )
+
+    def system_message_view(self, request, object_id):
+        """Allow staff to inject a one-off system directive into the agent prompt."""
+        try:
+            agent = PersistentAgent.objects.get(pk=object_id)
+        except PersistentAgent.DoesNotExist:
+            self.message_user(request, "Agent not found", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_persistentagent_changelist"))
+
+        if request.method == "POST":
+            form = SystemMessageForm(request.POST)
+            if form.is_valid():
+                message_body = form.cleaned_data["message"]
+                PersistentAgentSystemMessage.objects.create(
+                    agent=agent,
+                    body=message_body,
+                    created_by=request.user if request.user.is_authenticated else None,
+                )
+                queued = True
+                try:
+                    process_agent_events_task.delay(str(agent.pk))
+                except Exception:
+                    queued = False
+                    logging.exception("Failed to queue event processing for persistent agent %s", agent.pk)
+
+                if queued:
+                    self.message_user(
+                        request,
+                        "System message saved and processing queued for delivery.",
+                        level=messages.SUCCESS,
+                    )
+                else:
+                    self.message_user(
+                        request,
+                        "System message saved, but event processing could not be queued. Trigger processing manually.",
+                        level=messages.WARNING,
+                    )
+                return HttpResponseRedirect(reverse("admin:api_persistentagent_change", args=[object_id]))
+        else:
+            form = SystemMessageForm()
+
+        context = {
+            "title": "Issue System Message",
+            "agent": agent,
+            "form": form,
+            "opts": self.model._meta,
+            "original": agent,
+        }
+        return TemplateResponse(
+            request,
+            "admin/persistentagent_system_message.html",
             context,
         )
 
@@ -2463,6 +2559,16 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             self.message_user(request, f"Failed to enqueue IMAP poll: {e}", messages.ERROR)
 
         return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
+
+
+@admin.register(PersistentAgentSystemMessage)
+class PersistentAgentSystemMessageAdmin(admin.ModelAdmin):
+    list_display = ("agent", "created_by", "created_at", "delivered_at", "is_active")
+    list_filter = ("is_active", "delivered_at")
+    search_fields = ("agent__name", "agent__user__email", "body")
+    raw_id_fields = ("agent", "created_by")
+    readonly_fields = ("created_at", "delivered_at")
+    ordering = ("-created_at",)
 
 
 @admin.register(PersistentAgentMessage) 

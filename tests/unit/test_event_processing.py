@@ -26,6 +26,7 @@ from api.models import (
     PersistentAgentCronTrigger,
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
+    PersistentAgentSystemMessage,
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
@@ -121,6 +122,35 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIsNotNone(system_message)
         self.assertIn(f"You are a persistent AI agent named '{self.agent.name}'.", system_message['content'])
+
+    def test_admin_system_message_is_injected_once(self):
+        """Admin-authored system directives should appear in the system prompt and be marked delivered."""
+        directive = PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Drop everything and update the quarterly results deck today.",
+            created_by=self.user,
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        self.assertIsNotNone(system_message)
+        content = system_message['content']
+        self.assertIn("SYSTEM NOTICE FROM GOBII OPERATIONS", content)
+        self.assertIn("Drop everything and update the quarterly results deck today.", content)
+
+        directive.refresh_from_db()
+        self.assertIsNotNone(directive.delivered_at)
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            second_context, _, _ = _build_prompt_context(self.agent)
+
+        second_system = next((m for m in second_context if m['role'] == 'system'), None)
+        self.assertIsNotNone(second_system)
+        self.assertNotIn("Drop everything and update the quarterly results deck today.", second_system['content'])
 
     def test_prompt_archive_saved_to_storage(self):
         """Prompt archives should be written to object storage as compressed JSON."""
