@@ -185,14 +185,18 @@ class PersistentAgentCreditGateTests(TestCase):
             PersistentAgentStep.objects.create(
                 agent=self.agent,
                 description="Previously consumed",
-                credits_cost=Decimal("1"),
+                credits_cost=Decimal("2"),
             )
 
         fake_state = {
             "date": timezone.localdate(),
             "limit": Decimal("1"),
-            "used": Decimal("1"),
+            "soft_target": Decimal("1"),
+            "used": Decimal("2"),
             "remaining": Decimal("0"),
+            "soft_target_remaining": Decimal("0"),
+            "hard_limit": Decimal("2"),
+            "hard_limit_remaining": Decimal("0"),
             "next_reset": timezone.now(),
         }
 
@@ -339,6 +343,39 @@ class PersistentAgentToolCreditTests(TestCase):
         span.add_event.assert_any_call("Credit consumption raised exception", {"error": "db down"})
         span.add_event.assert_any_call("Tool skipped - insufficient credits during processing")
         span.set_attribute.assert_any_call("credit_check.error", "db down")
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit",
+        return_value={"success": True, "credit": None},
+    )
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available",
+        return_value=Decimal("10"),
+    )
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("1"))
+    def test_soft_target_exceedance_allows_until_hard_limit(
+        self,
+        _mock_cost,
+        _mock_available,
+        _mock_consume,
+    ):
+        self.agent.daily_credit_limit = 5
+        self.agent.save(update_fields=["daily_credit_limit"])
+        PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Soft target exceeded",
+            credits_cost=Decimal("6"),
+        )
+
+        span = MagicMock()
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
+
+        self.assertEqual(result, Decimal("1"))
+        self.assertFalse(
+            self.agent.steps.filter(description__icontains="Skipped tool").exists(),
+            "Soft target exhaustion should not emit a skip step until the hard limit is reached.",
+        )
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")

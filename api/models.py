@@ -1,5 +1,5 @@
 import hashlib, secrets, uuid, os, string, re, datetime, json
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from typing import Optional, Tuple
 
 import ulid
@@ -571,6 +571,16 @@ class DailyCreditConfig(models.Model):
         super().clean()
         if self.slider_max < self.slider_min:
             raise ValidationError({"slider_max": "Maximum must be greater than or equal to the minimum value."})
+        integer_fields = {
+            "slider_min": self.slider_min,
+            "slider_max": self.slider_max,
+            "slider_step": self.slider_step,
+        }
+        for field_name, value in integer_fields.items():
+            if value is None:
+                continue
+            if value != value.to_integral_value(rounding=ROUND_DOWN):
+                raise ValidationError({field_name: "Value must be a whole number."})
 
     def save(self, *args, **kwargs):
         self.singleton_id = 1

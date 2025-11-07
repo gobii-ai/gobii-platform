@@ -604,11 +604,21 @@ def _has_sufficient_daily_credit(state: dict, cost: Decimal | None) -> bool:
     if cost is None:
         return True
 
-    limit = state.get("limit")
-    if limit is None:
+    hard_limit = state.get("hard_limit")
+    if hard_limit is None:
         return True
 
-    remaining = state.get("remaining", Decimal("0"))
+    remaining = state.get("hard_limit_remaining")
+    if remaining is None:
+        try:
+            used = state.get("used", Decimal("0"))
+            if not isinstance(used, Decimal):
+                used = Decimal(str(used))
+            remaining = hard_limit - used
+        except Exception as exc:
+            logger.warning("Failed to derive hard limit remaining: %s", exc)
+            remaining = Decimal("0")
+
     try:
         return remaining >= cost
     except TypeError as e:
@@ -672,8 +682,8 @@ def _ensure_credit_for_tool(
         if credit_snapshot is not None:
             credit_snapshot["daily_state"] = daily_state
 
-    daily_limit = daily_state.get("limit")
-    daily_remaining = daily_state.get("remaining")
+    hard_limit = daily_state.get("hard_limit")
+    hard_remaining = daily_state.get("hard_limit_remaining")
     soft_target = daily_state.get("soft_target")
     soft_target_remaining = daily_state.get("soft_target_remaining")
     soft_exceeded = daily_state.get("soft_target_exceeded")
@@ -710,14 +720,14 @@ def _ensure_credit_for_tool(
         try:
             span.set_attribute(
                 "credit_check.daily_limit",
-                float(daily_limit) if daily_limit is not None else -1.0,
+                float(hard_limit) if hard_limit is not None else -1.0,
             )
         except Exception as e:
             logger.debug("Failed to set span attribute 'credit_check.daily_limit': %s", e)
         try:
             span.set_attribute(
                 "credit_check.daily_remaining_before",
-                float(daily_remaining) if daily_remaining is not None else -1.0,
+                float(hard_remaining) if hard_remaining is not None else -1.0,
             )
         except Exception as e:
             logger.debug("Failed to set span attribute 'credit_check.daily_remaining_before': %s", e)
@@ -738,10 +748,10 @@ def _ensure_credit_for_tool(
             pass
 
     if not _has_sufficient_daily_credit(daily_state, cost):
-        limit_display = daily_limit
+        limit_display = hard_limit
         used_display = daily_state.get("used")
         msg_desc = (
-            f"Skipped tool '{tool_name}' because this agent reached its daily task credit limit for today."
+            f"Skipped tool '{tool_name}' because this agent reached its enforced daily credit limit for today."
         )
         if limit_display is not None:
             msg_desc += f" {used_display} of {limit_display} credits already used."
@@ -860,7 +870,7 @@ def _ensure_credit_for_tool(
                 credit_snapshot.pop("available", None)
             if span is not None:
                 try:
-                    remaining_after = updated_state.get("remaining")
+                    remaining_after = updated_state.get("hard_limit_remaining")
                     span.set_attribute(
                         "credit_check.daily_remaining_after",
                         float(remaining_after) if remaining_after is not None else -1.0,
@@ -1209,8 +1219,8 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     span.set_attribute("credit_check.sufficient", False)
                     return agent
                 daily_state = _get_agent_daily_credit_state(agent)
-                daily_limit = daily_state.get("limit")
-                daily_remaining = daily_state.get("remaining")
+                daily_limit = daily_state.get("hard_limit")
+                daily_remaining = daily_state.get("hard_limit_remaining")
                 credit_snapshot = {
                     "available": available,
                     "daily_state": daily_state,
@@ -1229,10 +1239,10 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
                 if daily_limit is not None and (daily_remaining is None or daily_remaining <= Decimal("0")):
                     msg = (
-                        "Skipped processing because this agent has reached its daily task credit limit."
+                        "Skipped processing because this agent has reached its enforced daily task credit limit."
                     )
                     logger.warning(
-                        "Persistent agent %s not processed – daily limit reached (used=%s limit=%s).",
+                        "Persistent agent %s not processed – hard daily limit reached (used=%s limit=%s).",
                         persistent_agent_id,
                         daily_state.get("used"),
                         daily_limit,

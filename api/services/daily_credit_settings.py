@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
@@ -28,15 +26,20 @@ class DailyCreditSettings:
 
 
 def _serialise(config: DailyCreditConfig) -> dict:
+    def _coalesce(value, fallback):
+        return fallback if value is None else value
+
     return {
-        "slider_min": config.slider_min or DEFAULT_SLIDER_MIN,
-        "slider_max": config.slider_max or DEFAULT_SLIDER_MAX,
-        "slider_step": config.slider_step or DEFAULT_SLIDER_STEP,
-        "burn_rate_threshold_per_hour": (
-            config.burn_rate_threshold_per_hour or DEFAULT_BURN_RATE_THRESHOLD
+        "slider_min": _coalesce(config.slider_min, DEFAULT_SLIDER_MIN),
+        "slider_max": _coalesce(config.slider_max, DEFAULT_SLIDER_MAX),
+        "slider_step": _coalesce(config.slider_step, DEFAULT_SLIDER_STEP),
+        "burn_rate_threshold_per_hour": _coalesce(
+            config.burn_rate_threshold_per_hour,
+            DEFAULT_BURN_RATE_THRESHOLD,
         ),
-        "burn_rate_window_minutes": (
-            config.burn_rate_window_minutes or DEFAULT_BURN_RATE_WINDOW_MINUTES
+        "burn_rate_window_minutes": _coalesce(
+            config.burn_rate_window_minutes,
+            DEFAULT_BURN_RATE_WINDOW_MINUTES,
         ),
     }
 
