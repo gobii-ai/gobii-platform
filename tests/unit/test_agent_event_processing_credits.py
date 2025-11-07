@@ -413,7 +413,7 @@ class PersistentAgentToolCreditTests(TestCase):
             PersistentAgentStep.objects.create(
                 agent=self.agent,
                 description="Partial usage",
-                credits_cost=Decimal("0.7"),
+                credits_cost=Decimal("2.0"),
             )
 
         result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
@@ -422,7 +422,7 @@ class PersistentAgentToolCreditTests(TestCase):
         mock_consume.assert_not_called()
         step = PersistentAgentStep.objects.filter(agent=self.agent).order_by('-created_at').first()
         self.assertIsNotNone(step)
-        self.assertIn("daily task credit limit", step.description.lower())
+        self.assertIn("daily credit limit", step.description.lower())
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step=step,

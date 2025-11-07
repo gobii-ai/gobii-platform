@@ -560,6 +560,13 @@ class DailyCreditConfig(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(1440)],
         help_text="Window (in minutes) used to compute the rolling burn rate.",
     )
+    hard_limit_multiplier = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("2"),
+        validators=[MinValueValidator(Decimal("1"))],
+        help_text="Multiplier applied to the soft target to derive the enforced hard limit.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2927,10 +2934,18 @@ class PersistentAgent(models.Model):
 
     def get_daily_credit_hard_limit(self) -> Decimal | None:
         """Return the derived hard limit (2× soft target) or None for unlimited agents."""
+        from api.services.daily_credit_settings import get_daily_credit_settings
+
         soft_target = self.get_daily_credit_soft_target()
         if soft_target is None:
             return None
-        return (soft_target * Decimal("2")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        credit_settings = get_daily_credit_settings()
+        multiplier = credit_settings.hard_limit_multiplier
+        try:
+            multiplier = Decimal(multiplier)
+        except Exception:
+            multiplier = Decimal("2")
+        return (soft_target * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def get_daily_credit_usage(self, usage_date=None) -> Decimal:
         """Return the credits consumed by this agent on the given date."""

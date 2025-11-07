@@ -644,6 +644,7 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
         "slider_step",
         "burn_rate_threshold_per_hour",
         "burn_rate_window_minutes",
+        "hard_limit_multiplier",
         "updated_at",
     )
     readonly_fields = ("singleton_id", "created_at", "updated_at")
@@ -652,6 +653,10 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
         (
             "Burn rate guidance",
             {"fields": ("burn_rate_threshold_per_hour", "burn_rate_window_minutes")},
+        ),
+        (
+            "Hard limit",
+            {"fields": ("hard_limit_multiplier",)},
         ),
         ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
     )

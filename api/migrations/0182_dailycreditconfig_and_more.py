@@ -14,6 +14,7 @@ def seed_config(apps, schema_editor):
             slider_step=Decimal('1'),
             burn_rate_threshold_per_hour=Decimal('3'),
             burn_rate_window_minutes=60,
+            hard_limit_multiplier=Decimal('2'),
         )
 
 
@@ -33,6 +34,7 @@ class Migration(migrations.Migration):
                 ('slider_step', models.DecimalField(decimal_places=2, default=Decimal('1'), help_text='Increment applied to the soft target slider/input.', max_digits=6, validators=[django.core.validators.MinValueValidator(Decimal('0.01'))])),
                 ('burn_rate_threshold_per_hour', models.DecimalField(decimal_places=3, default=Decimal('3'), help_text='Preferred maximum credits consumed per hour before agents are asked to slow down.', max_digits=12, validators=[django.core.validators.MinValueValidator(Decimal('0'))])),
                 ('burn_rate_window_minutes', models.PositiveIntegerField(default=60, help_text='Window (in minutes) used to compute the rolling burn rate.', validators=[django.core.validators.MinValueValidator(1), django.core.validators.MaxValueValidator(1440)])),
+                ('hard_limit_multiplier', models.DecimalField(decimal_places=2, default=Decimal('2'), help_text='Multiplier applied to the soft target to derive the enforced hard limit.', max_digits=6, validators=[django.core.validators.MinValueValidator(Decimal('1'))])),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
             ],

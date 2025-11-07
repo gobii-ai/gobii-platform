@@ -11,6 +11,7 @@ DEFAULT_SLIDER_MAX = Decimal("50")
 DEFAULT_SLIDER_STEP = Decimal("1")
 DEFAULT_BURN_RATE_THRESHOLD = Decimal("3")
 DEFAULT_BURN_RATE_WINDOW_MINUTES = 60
+DEFAULT_HARD_LIMIT_MULTIPLIER = Decimal("2")
 
 _CACHE_KEY = "daily_credit_settings:v1"
 _CACHE_TTL_SECONDS = 300
@@ -23,6 +24,7 @@ class DailyCreditSettings:
     slider_step: Decimal
     burn_rate_threshold_per_hour: Decimal
     burn_rate_window_minutes: int
+    hard_limit_multiplier: Decimal
 
 
 def _serialise(config: DailyCreditConfig) -> dict:
@@ -41,6 +43,10 @@ def _serialise(config: DailyCreditConfig) -> dict:
             config.burn_rate_window_minutes,
             DEFAULT_BURN_RATE_WINDOW_MINUTES,
         ),
+        "hard_limit_multiplier": _coalesce(
+            config.hard_limit_multiplier,
+            DEFAULT_HARD_LIMIT_MULTIPLIER,
+        ),
     }
 
 
@@ -48,6 +54,8 @@ def get_daily_credit_settings() -> DailyCreditSettings:
     """Return the cached daily credit settings (falls back to defaults)."""
     cached: Optional[dict] = cache.get(_CACHE_KEY)
     if cached:
+        cached = cached.copy()
+        cached.setdefault("hard_limit_multiplier", DEFAULT_HARD_LIMIT_MULTIPLIER)
         return DailyCreditSettings(**cached)
 
     config = DailyCreditConfig.objects.order_by("singleton_id").first()
@@ -58,6 +66,7 @@ def get_daily_credit_settings() -> DailyCreditSettings:
             slider_step=DEFAULT_SLIDER_STEP,
             burn_rate_threshold_per_hour=DEFAULT_BURN_RATE_THRESHOLD,
             burn_rate_window_minutes=DEFAULT_BURN_RATE_WINDOW_MINUTES,
+            hard_limit_multiplier=DEFAULT_HARD_LIMIT_MULTIPLIER,
         )
     data = _serialise(config)
     cache.set(_CACHE_KEY, data, _CACHE_TTL_SECONDS)
