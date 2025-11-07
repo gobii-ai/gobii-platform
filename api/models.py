@@ -519,6 +519,74 @@ class TaskCreditConfig(models.Model):
         return "Task credit configuration"
 
 
+class DailyCreditConfig(models.Model):
+    """Singleton configuration controlling soft target UI + pacing."""
+
+    singleton_id = models.PositiveSmallIntegerField(
+        primary_key=True,
+        default=1,
+        editable=False,
+    )
+    slider_min = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0"),
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Lowest selectable soft target value.",
+    )
+    slider_max = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("50"),
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Highest selectable soft target value.",
+    )
+    slider_step = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("1"),
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text="Increment applied to the soft target slider/input.",
+    )
+    burn_rate_threshold_per_hour = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        default=Decimal("3"),
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Preferred maximum credits consumed per hour before agents are asked to slow down.",
+    )
+    burn_rate_window_minutes = models.PositiveIntegerField(
+        default=60,
+        validators=[MinValueValidator(1), MaxValueValidator(1440)],
+        help_text="Window (in minutes) used to compute the rolling burn rate.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Daily credit pacing configuration"
+        verbose_name_plural = "Daily credit pacing configuration"
+
+    def clean(self):
+        super().clean()
+        if self.slider_max < self.slider_min:
+            raise ValidationError({"slider_max": "Maximum must be greater than or equal to the minimum value."})
+
+    def save(self, *args, **kwargs):
+        self.singleton_id = 1
+        result = super().save(*args, **kwargs)
+        from api.services.daily_credit_settings import invalidate_daily_credit_settings_cache
+
+        invalidate_daily_credit_settings_cache()
+        return result
+
+    def delete(self, using=None, keep_parents=False):  # pragma: no cover - deletion discouraged
+        raise ValidationError("DailyCreditConfig cannot be deleted.")
+
+    def __str__(self):
+        return "Daily credit pacing configuration"
+
+
 class ToolCreditCost(models.Model):
     """Per-tool overrides for task credit consumption."""
 

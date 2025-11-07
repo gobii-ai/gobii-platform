@@ -395,11 +395,11 @@ class PersistentAgentToolCreditTests(TestCase):
         span.add_event.assert_any_call("Tool skipped - daily credit limit reached")
 
     def test_compute_burn_rate_no_data_returns_zero(self):
-        metrics = _compute_burn_rate(self.agent, window_minutes=60, horizon_hours=Decimal("5"))
+        metrics = _compute_burn_rate(self.agent, window_minutes=60)
         self.assertEqual(metrics["burn_rate_per_hour"], Decimal("0"))
-        self.assertEqual(metrics["projected_remaining"], Decimal("0"))
+        self.assertEqual(metrics["window_total"], Decimal("0"))
 
-    def test_compute_burn_rate_projects_remaining_usage(self):
+    def test_compute_burn_rate_counts_recent_usage(self):
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             step = PersistentAgentStep.objects.create(
                 agent=self.agent,
@@ -409,9 +409,9 @@ class PersistentAgentToolCreditTests(TestCase):
         PersistentAgentStep.objects.filter(pk=step.pk).update(
             created_at=timezone.now() - timezone.timedelta(minutes=10)
         )
-        metrics = _compute_burn_rate(self.agent, window_minutes=60, horizon_hours=Decimal("2"))
+        metrics = _compute_burn_rate(self.agent, window_minutes=60)
         self.assertEqual(metrics["burn_rate_per_hour"], Decimal("3"))
-        self.assertEqual(metrics["projected_remaining"], Decimal("6"))
+        self.assertEqual(metrics["window_total"], Decimal("3"))
 
     def test_budget_sections_include_soft_target_and_burn_warning(self):
         critical_group = MagicMock()
@@ -425,10 +425,9 @@ class PersistentAgentToolCreditTests(TestCase):
             "remaining": Decimal("6"),
             "soft_target_remaining": Decimal("1"),
             "next_reset": next_reset,
-            "projected_usage": Decimal("12"),
-            "burn_rate_per_hour": Decimal("2"),
+            "burn_rate_per_hour": Decimal("5"),
             "burn_rate_window_minutes": 60,
-            "hours_left": Decimal("4"),
+            "burn_rate_threshold_per_hour": Decimal("3"),
         }
         result = _add_budget_awareness_sections(
             critical_group,

@@ -65,7 +65,7 @@ from .llm_config import (
 )
 from .promptree import Prompt
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
-from api.constants import BURN_RATE_WINDOW_MINUTES
+from api.services.daily_credit_settings import get_daily_credit_settings
 
 from ..tools.email_sender import execute_send_email, get_send_email_tool
 from ..tools.sms_sender import execute_send_sms, get_send_sms_tool
@@ -487,6 +487,7 @@ def _completion_with_backoff(**kwargs):
 def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     """Return daily credit usage/limit information for the agent."""
     today = dj_timezone.localdate()
+    credit_settings = get_daily_credit_settings()
 
     try:
         soft_target = agent.get_daily_credit_soft_target()
@@ -538,14 +539,8 @@ def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
 
     burn_details = _compute_burn_rate(
         agent,
-        window_minutes=BURN_RATE_WINDOW_MINUTES,
-        horizon_hours=hours_left,
+        window_minutes=credit_settings.burn_rate_window_minutes,
     )
-    projected_usage = None
-    if burn_details:
-        projected_remaining = burn_details.get("projected_remaining")
-        if projected_remaining is not None:
-            projected_usage = used + projected_remaining
     state = {
         "date": today,
         "limit": hard_limit,
@@ -554,29 +549,19 @@ def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         "remaining": remaining,
         "soft_target_remaining": soft_remaining,
         "next_reset": next_reset,
-        "hours_left": hours_left,
         "soft_target_exceeded": (
             soft_target is not None and used >= soft_target
         ),
-        "projected_usage": projected_usage,
+        "burn_rate_per_hour": burn_details.get("burn_rate_per_hour"),
+        "burn_rate_window_minutes": burn_details.get("window_minutes"),
+        "burn_rate_threshold_per_hour": credit_settings.burn_rate_threshold_per_hour,
     }
-    if burn_details:
-        state.update(
-            {
-                "burn_rate_per_hour": burn_details.get("burn_rate_per_hour"),
-                "burn_rate_window_minutes": burn_details.get("window_minutes"),
-                "burn_rate_window_total": burn_details.get("window_total"),
-                "projected_remaining": burn_details.get("projected_remaining"),
-            }
-        )
     return state
 
 
 def _compute_burn_rate(
     agent: PersistentAgent,
-    window_minutes: int = BURN_RATE_WINDOW_MINUTES,
-    *,
-    horizon_hours: Decimal | None = None,
+    window_minutes: int,
 ) -> dict:
     """Return rolling burn-rate metrics for the agent."""
     if window_minutes <= 0:
@@ -600,27 +585,10 @@ def _compute_burn_rate(
         total / hours if hours > Decimal("0") else Decimal("0")
     )
 
-    if horizon_hours is None:
-        local_now = dj_timezone.localtime(now)
-        next_reset = (local_now + timedelta(days=1)).replace(
-            hour=0,
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
-        seconds_left = max((next_reset - local_now).total_seconds(), 0)
-        horizon_hours = (
-            Decimal(str(seconds_left)) / Decimal("3600") if seconds_left else Decimal("0")
-        )
-
-    projected_remaining = (
-        burn_rate_per_hour * horizon_hours if horizon_hours is not None else None
-    )
     return {
         "burn_rate_per_hour": burn_rate_per_hour,
         "window_minutes": window_minutes,
         "window_total": total,
-        "projected_remaining": projected_remaining,
     }
 
 
@@ -2536,9 +2504,9 @@ def _add_budget_awareness_sections(
             remaining = daily_credit_state.get("remaining")
             soft_remaining = daily_credit_state.get("soft_target_remaining")
             next_reset = daily_credit_state.get("next_reset")
-            projected_usage = daily_credit_state.get("projected_usage")
             burn_rate = daily_credit_state.get("burn_rate_per_hour")
-            hours_left = daily_credit_state.get("hours_left")
+            burn_threshold = daily_credit_state.get("burn_rate_threshold_per_hour")
+            burn_window = daily_credit_state.get("burn_rate_window_minutes")
 
             if soft_target is None:
                 soft_text = (
@@ -2558,28 +2526,22 @@ def _add_budget_awareness_sections(
                 True,
             ))
 
-            if limit is None:
-                daily_text = (
-                    f"Hard limit (auto 2× soft target): Unlimited. Used today: {used} credits."
+            if (
+                limit is not None
+                and limit > Decimal("0")
+                and remaining is not None
+                and remaining <= get_default_task_credit_cost()
+            ):
+                warning_text = (
+                    "System-imposed safety stop is near. Only enough credits remain for a single default-cost tool call."
                 )
-            else:
-                remaining_text = (
-                    f" Remaining: {remaining}." if remaining is not None else ""
-                )
-                reset_text = (
-                    f" Resets at {next_reset.isoformat()}" if next_reset else ""
-                )
-                daily_text = (
-                    f"Hard limit (auto 2× soft target): {used}/{limit} credits consumed today.{remaining_text}{reset_text}"
-                )
-            sections.append((
-                "daily_credits_status",
-                daily_text,
-                3,
-                True,
-            ))
-
-            if limit is not None and limit > Decimal("0"):
+                sections.append((
+                    "daily_credits_low",
+                    warning_text,
+                    2,
+                    True,
+                ))
+            elif limit is not None and limit > Decimal("0"):
                 try:
                     ratio = used / limit
                 except Exception:
@@ -2588,7 +2550,7 @@ def _add_budget_awareness_sections(
                 if ratio is not None:
                     if ratio >= Decimal("0.9"):
                         warning_text = (
-                            "Warning: You are almost out of hard-limit credits. Slow your pace or request a higher target."
+                            "Safety stop is approaching. Slow your pace or request a higher soft target to avoid being paused."
                         )
                         sections.append((
                             "daily_credits_warning",
@@ -2596,46 +2558,22 @@ def _add_budget_awareness_sections(
                             2,
                             True,
                         ))
-                    elif remaining is not None and remaining <= get_default_task_credit_cost():
-                        warning_text = (
-                            "Warning: Only enough hard-limit credits remain for a single default-cost tool call. Use them carefully."
-                        )
-                        sections.append((
-                            "daily_credits_low",
-                            warning_text,
-                            2,
-                            True,
-                        ))
 
-            burn_warning = None
-            burn_window = daily_credit_state.get("burn_rate_window_minutes")
             if (
                 burn_rate is not None
-                and limit is not None
-                and projected_usage is not None
-                and projected_usage > limit
+                and burn_threshold is not None
+                and burn_threshold > Decimal("0")
+                and burn_rate > burn_threshold
             ):
-                burn_warning = (
-                    "Projection: Based on the last "
-                    f"{burn_window or BURN_RATE_WINDOW_MINUTES} minutes you're on track to consume "
-                    f"{projected_usage} credits today, exceeding the hard stop. Slow your loop cadence and batch tool calls."
+                window_text = (
+                    f"the last {burn_window} minutes"
+                    if burn_window
+                    else "the recent window"
                 )
-            elif (
-                burn_rate is not None
-                and soft_target is not None
-                and hours_left
-                and hours_left > Decimal("0")
-            ):
-                try:
-                    burn_threshold = (soft_target * Decimal("2")) / hours_left
-                except Exception:
-                    burn_threshold = None
-                if burn_threshold is not None and burn_rate > burn_threshold:
-                    burn_warning = (
-                        "Current burn rate is too high to finish the day without tripping the auto hard stop. "
-                        "Reduce loop cadence, combine work before running tools, or pause until credits reset."
-                    )
-            if burn_warning:
+                burn_warning = (
+                    f"Current burn rate is {burn_rate} credits/hour over {window_text}, above the pacing target of {burn_threshold}. "
+                    "Slow your cadence, batch related work, or pause non-essential tasks to stay within the soft target."
+                )
                 sections.append((
                     "burn_rate_warning",
                     burn_warning,

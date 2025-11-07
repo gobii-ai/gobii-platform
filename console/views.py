@@ -36,7 +36,7 @@ from api.services.dedicated_proxy_service import (
 )
 from api.agent.short_description import build_listing_description, build_mini_description
 from api.agent.tags import maybe_schedule_agent_tags
-from api.constants import SOFT_TARGET_MAX, SOFT_TARGET_MIN, SOFT_TARGET_STEP
+from api.services.daily_credit_settings import get_daily_credit_settings
 
 from api.models import (
     ApiKey,
@@ -2711,9 +2711,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['personal_mcp_servers'] = personal_servers
         context['show_personal_mcp_form'] = agent.organization_id is None and bool(personal_servers)
 
-        context["daily_credit_slider_min"] = SOFT_TARGET_MIN
-        context["daily_credit_slider_max"] = SOFT_TARGET_MAX
-        context["daily_credit_slider_step"] = SOFT_TARGET_STEP
+        credit_settings = get_daily_credit_settings()
+        context["daily_credit_slider_min"] = credit_settings.slider_min
+        context["daily_credit_slider_max"] = credit_settings.slider_max
+        context["daily_credit_slider_step"] = credit_settings.slider_step
 
         # Daily task credit usage overview for progress UI
         try:
@@ -2761,7 +2762,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     "daily_credit_low": (
                         not unlimited and hard_remaining is not None and hard_remaining < Decimal("1")
                     ),
-                    "daily_credit_slider_value": soft_target if soft_target is not None else SOFT_TARGET_MIN,
+                    "daily_credit_slider_value": soft_target if soft_target is not None else credit_settings.slider_min,
                 }
             )
         except Exception as e:
@@ -2780,7 +2781,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     "daily_credit_soft_percent_used": None,
                     "daily_credit_next_reset": None,
                     "daily_credit_low": False,
-                    "daily_credit_slider_value": SOFT_TARGET_MIN,
+                    "daily_credit_slider_value": credit_settings.slider_min,
                 }
             )
 
@@ -2796,6 +2797,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
     def post(self, request, *args, **kwargs):
         """Handle agent configuration updates and allowlist management."""
         agent = self.get_object()
+        credit_settings = get_daily_credit_settings()
         
         peer_action = request.POST.get('peer_link_action')
         if peer_action:
@@ -3235,10 +3237,12 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             if parsed_limit <= Decimal("0"):
                 new_daily_limit = None
             else:
-                if parsed_limit < SOFT_TARGET_MIN:
-                    parsed_limit = SOFT_TARGET_MIN
-                if parsed_limit > SOFT_TARGET_MAX:
-                    parsed_limit = SOFT_TARGET_MAX
+                slider_min = credit_settings.slider_min
+                slider_max = credit_settings.slider_max
+                if parsed_limit < slider_min:
+                    parsed_limit = slider_min
+                if parsed_limit > slider_max:
+                    parsed_limit = slider_max
                 new_daily_limit = int(parsed_limit)
 
         if not new_name:

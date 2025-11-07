@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from unittest.mock import patch
 from bs4 import BeautifulSoup
-from api.constants import SOFT_TARGET_MAX, SOFT_TARGET_MIN
+from api.services.daily_credit_settings import get_daily_credit_settings
 
 
 @tag("batch_console_agents")
@@ -361,7 +361,8 @@ class ConsoleViewsTest(TestCase):
 
         response = self.client.get(url)
         self.assertTrue(response.context['daily_credit_unlimited'])
-        self.assertEqual(response.context['daily_credit_slider_value'], SOFT_TARGET_MIN)
+        credit_settings = get_daily_credit_settings()
+        self.assertEqual(response.context['daily_credit_slider_value'], credit_settings.slider_min)
 
     @tag("agent_credit_soft_target_batch")
     def test_agent_detail_soft_target_clamps_to_bounds(self):
@@ -377,15 +378,17 @@ class ConsoleViewsTest(TestCase):
 
         url = reverse('agent_detail', kwargs={'pk': agent.id})
 
+        credit_settings = get_daily_credit_settings()
+
         response = self.client.post(url, {
             'name': agent.name,
             'charter': agent.charter,
             'is_active': 'on',
-            'daily_credit_limit': str(SOFT_TARGET_MAX + Decimal('25')),
+            'daily_credit_limit': str(credit_settings.slider_max + Decimal('25')),
         })
         self.assertEqual(response.status_code, 302)
         agent.refresh_from_db()
-        self.assertEqual(agent.daily_credit_limit, SOFT_TARGET_MAX)
+        self.assertEqual(agent.daily_credit_limit, int(credit_settings.slider_max))
 
         response = self.client.post(url, {
             'name': agent.name,
