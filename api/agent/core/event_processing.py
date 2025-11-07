@@ -2503,7 +2503,7 @@ def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> N
         "These are the MCP servers you have access to. You can access them by calling search_tools with the MCP server name."
     ]
     for server in servers:
-        display_name = (server.display_name or server.name or "").strip() or server.name
+        display_name = server.display_name.strip() or server.name
         lines.append(f"- {display_name} (search name: {server.name})")
 
     mcp_group.section_text(
