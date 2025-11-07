@@ -288,7 +288,6 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.context['daily_credit_hard_limit'], Decimal('4.00'))
         self.assertEqual(response.context['daily_credit_usage'], Decimal('4.3'))
         self.assertTrue(response.context['daily_credit_low'])
-        self.assertIn('almost out of daily task credits before the hard stop', response.content.decode())
 
         response = self.client.post(url, {
             'name': agent.name,

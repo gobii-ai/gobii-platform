@@ -413,7 +413,11 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(metrics["burn_rate_per_hour"], Decimal("3"))
         self.assertEqual(metrics["window_total"], Decimal("3"))
 
-    def test_budget_sections_include_soft_target_and_burn_warning(self):
+    @patch(
+        "api.agent.core.event_processing.get_tool_cost_overview",
+        return_value=(Decimal("1"), {"send_email": Decimal("1.2"), "run_sql": Decimal("2.5")}),
+    )
+    def test_budget_sections_include_soft_target_and_burn_warning(self, _mock_costs):
         critical_group = MagicMock()
         budget_group = MagicMock()
         critical_group.group.return_value = budget_group
@@ -439,8 +443,11 @@ class PersistentAgentToolCreditTests(TestCase):
         names = [call.args[0] for call in budget_group.section_text.call_args_list]
         self.assertIn("soft_target_progress", names)
         self.assertIn("burn_rate_warning", names)
+        self.assertIn("tool_cost_awareness", names)
         soft_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "soft_target_progress")
         self.assertIn("Soft target progress", soft_call.args[1])
+        tool_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "tool_cost_awareness")
+        self.assertIn("send_email=1.2", tool_call.args[1])
 
     def test_budget_sections_handle_unlimited_soft_target(self):
         critical_group = MagicMock()

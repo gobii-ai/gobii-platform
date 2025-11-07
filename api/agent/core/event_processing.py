@@ -53,7 +53,11 @@ from ..short_description import (
 from ..tags import maybe_schedule_agent_tags
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms, RAW_MSG_LIMIT
 from tasks.services import TaskCreditService
-from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost
+from util.tool_costs import (
+    get_tool_credit_cost,
+    get_default_task_credit_cost,
+    get_tool_cost_overview,
+)
 from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps, RAW_STEP_LIMIT
 from .llm_config import (
@@ -504,16 +508,16 @@ def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     except Exception:
         used = Decimal("0")
 
-    remaining: Optional[Decimal]
+    hard_remaining: Optional[Decimal]
     if hard_limit is None:
-        remaining = None
+        hard_remaining = None
     else:
         try:
-            remaining = hard_limit - used
-            if remaining < Decimal("0"):
-                remaining = Decimal("0")
+            hard_remaining = hard_limit - used
+            if hard_remaining < Decimal("0"):
+                hard_remaining = Decimal("0")
         except Exception:
-            remaining = Decimal("0")
+            hard_remaining = Decimal("0")
 
     if soft_target is None:
         soft_remaining: Optional[Decimal] = None
@@ -543,14 +547,16 @@ def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     )
     state = {
         "date": today,
-        "limit": hard_limit,
+        "limit": soft_target,
         "soft_target": soft_target,
         "used": used,
-        "remaining": remaining,
+        "remaining": soft_remaining,
         "soft_target_remaining": soft_remaining,
+        "hard_limit": hard_limit,
+        "hard_limit_remaining": hard_remaining,
         "next_reset": next_reset,
         "soft_target_exceeded": (
-            soft_target is not None and used >= soft_target
+            soft_remaining is not None and soft_remaining <= Decimal("0")
         ),
         "burn_rate_per_hour": burn_details.get("burn_rate_per_hour"),
         "burn_rate_window_minutes": burn_details.get("window_minutes"),
@@ -2510,13 +2516,18 @@ def _add_budget_awareness_sections(
 
             if soft_target is None:
                 soft_text = (
-                    f"Soft credit limit progress: {used} credits consumed today. Soft target is Unlimited."
+                    f"Soft target progress: {used} credits consumed today. Soft target is Unlimited."
                 )
             else:
+                remaining_soft_text = (
+                    f" Remaining before soft target: {soft_remaining}." if soft_remaining is not None else ""
+                )
+                reset_text = (
+                    f" Next reset at {next_reset.isoformat()}." if next_reset else ""
+                )
                 soft_text = (
-                    f"Soft credit limit progress: {used}/{soft_target} credits consumed today. ",
-                    f" Remaining before soft credit limit: {soft_remaining}. " if soft_remaining is not None else "",
-                    f" Next reset at: {next_reset.isoformat() if next_reset else 'unknown'}.",
+                    f"Soft target progress: {used}/{soft_target} credits consumed today."
+                    f"{remaining_soft_text}{reset_text}"
                 )
             sections.append((
                 "soft_target_progress",
@@ -2532,7 +2543,7 @@ def _add_budget_awareness_sections(
                 and remaining <= get_default_task_credit_cost()
             ):
                 warning_text = (
-                    "Hard credit limit stop is near. Only enough credits remain for a single default-cost tool call."
+                    "Soft target is nearly depleted; only enough credit remains for a single default-cost tool call."
                 )
                 sections.append((
                     "daily_credits_low",
@@ -2549,7 +2560,7 @@ def _add_budget_awareness_sections(
                 if ratio is not None:
                     if ratio >= Decimal("0.9"):
                         warning_text = (
-                            "Hard credit limit stop is approaching. Be sure to your remaining tasks wisely to avoid the hard stop."
+                            "Soft target is almost consumed. Slow your pace or request a higher soft target if you must continue."
                         )
                         sections.append((
                             "daily_credits_warning",
@@ -2583,6 +2594,46 @@ def _add_budget_awareness_sections(
             # Do not block prompt creation if credit summary fails
             pass
 
+    try:
+        default_cost, overrides = get_tool_cost_overview()
+
+        def _format_cost(value: Decimal | Any) -> str:
+            try:
+                normalized = Decimal(value)
+            except Exception:
+                return str(value)
+            formatted = format(normalized, "f")
+            if "." in formatted:
+                formatted = formatted.rstrip("0").rstrip(".")
+            return formatted or "0"
+
+        summary_parts = [
+            f"Default tool call cost: {_format_cost(default_cost)} credits."
+        ]
+        if overrides:
+            sorted_overrides = sorted(overrides.items())
+            max_entries = 5
+            display_pairs = sorted_overrides[:max_entries]
+            overrides_text = ", ".join(
+                f"{name}={_format_cost(cost)}"
+                for name, cost in display_pairs
+            )
+            extra_count = len(sorted_overrides) - len(display_pairs)
+            if overrides_text:
+                summary_parts.append(f"Overrides: {overrides_text}.")
+            if extra_count > 0:
+                summary_parts.append(f"+{extra_count} more override(s) not shown.")
+        else:
+            summary_parts.append("No per-tool overrides are configured right now.")
+
+        sections.append((
+            "tool_cost_awareness",
+            " ".join(summary_parts),
+            2,
+            True,
+        ))
+    except Exception:
+        logger.debug("Failed to append tool cost overview to budget awareness.", exc_info=True)
 
     if max_iterations and max_iterations > 0:
         try:
