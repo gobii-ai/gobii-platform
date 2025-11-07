@@ -320,7 +320,7 @@ wheels = [
 [[package]]
 name = "browser-use"
 version = "0.9.5"
-source = { git = "https://github.com/gobii-ai/browser-use.git?rev=main#24f5f5cee237fb4c86e746750b6b1e05711f3016" }
+source = { git = "https://github.com/gobii-ai/browser-use.git?rev=24f5f5cee237fb4c86e746750b6b1e05711f3016#24f5f5cee237fb4c86e746750b6b1e05711f3016" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },
@@ -1190,7 +1190,7 @@ requires-dist = [
     { name = "aiohttp-retry", specifier = "==2.9.1" },
     { name = "bleach", specifier = "~=6.2.0" },
     { name = "boto3", specifier = "~=1.38.39" },
-    { name = "browser-use", git = "https://github.com/gobii-ai/browser-use.git?rev=main" },
+    { name = "browser-use", git = "https://github.com/gobii-ai/browser-use.git?rev=24f5f5cee237fb4c86e746750b6b1e05711f3016" },
     { name = "celery", specifier = "~=5.5.2" },
     { name = "celery-redbeat", specifier = "~=2.3.2" },
     { name = "channels", specifier = ">=4.3.1" },
