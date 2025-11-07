@@ -505,5 +505,5 @@ class PersistentAgentToolCreditTests(TestCase):
             daily_credit_state=state,
         )
         self.assertTrue(result)
-        soft_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "soft_target_progress")
-        self.assertIn("Soft target is Unlimited", soft_call.args[1])
+        names = [call.args[0] for call in budget_group.section_text.call_args_list]
+        self.assertNotIn("soft_target_progress", names)
