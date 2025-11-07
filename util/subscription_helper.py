@@ -643,6 +643,13 @@ def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = Tr
             try:
                 from api.models import PersistentAgent
 
+                (
+                    PersistentAgent.objects
+                    .filter(user=owner)
+                    .exclude(daily_credit_limit__isnull=True)
+                    .update(daily_credit_limit=None)
+                )
+
                 agents = (
                     PersistentAgent.objects
                     .filter(user=owner, life_state=PersistentAgent.LifeState.EXPIRED)

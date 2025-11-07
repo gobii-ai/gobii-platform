@@ -5,7 +5,14 @@ from django.test import TestCase, tag
 from django.utils import timezone
 from unittest.mock import patch
 
-from api.models import UserBilling, Organization, OrganizationBilling, TaskCredit
+from api.models import (
+    BrowserUseAgent,
+    PersistentAgent,
+    UserBilling,
+    Organization,
+    OrganizationBilling,
+    TaskCredit,
+)
 from constants.plans import PlanNames
 from constants.grant_types import GrantTypeChoices
 from util.subscription_helper import (
@@ -80,6 +87,29 @@ class MarkUserBillingWithPlanTests(TestCase):
         billing.refresh_from_db()
         self.assertEqual(billing.subscription, PlanNames.STARTUP)
         self.assertEqual(billing.billing_cycle_anchor, 5)
+
+    @tag("batch_subscription")
+    def test_upgrade_clears_agent_daily_credit_limit(self):
+        """Daily credit caps are removed from agents when the user upgrades."""
+        billing = UserBilling.objects.get(user=self.user)
+        billing.subscription = PlanNames.FREE
+        billing.save(update_fields=["subscription"])
+
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Limitless Agent")
+
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Capped Agent",
+            charter="Upgrade charter",
+            browser_use_agent=browser_agent,
+            daily_credit_limit=5,
+        )
+
+        mark_user_billing_with_plan(self.user, PlanNames.STARTUP)
+
+        agent.refresh_from_db()
+        self.assertIsNone(agent.daily_credit_limit)
 
 
 @tag("batch_subscription")
