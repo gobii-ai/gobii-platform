@@ -19,6 +19,7 @@ from api.agent.tools.http_request import execute_http_request as _execute_http_r
 from api.agent.tasks.process_events import process_agent_cron_trigger_task, _remove_orphaned_celery_beat_task
 from api.models import (
     BrowserUseAgent,
+    MCPServerConfig,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
@@ -122,6 +123,26 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIsNotNone(system_message)
         self.assertIn(f"You are a persistent AI agent named '{self.agent.name}'.", system_message['content'])
+
+    def test_mcp_servers_listed_in_prompt(self):
+        """Accessible MCP servers should be enumerated in the prompt context."""
+        MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="test-sheets",
+            display_name="Test Sheets",
+            url="https://mcp.example.com",
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message['content']
+        self.assertIn("These are the MCP servers you have access to.", content)
+        self.assertIn("Test Sheets", content)
+        self.assertIn("search_tools", content)
 
     def test_admin_system_message_is_injected_once(self):
         """Admin-authored system directives should appear in the system prompt and be marked delivered."""
