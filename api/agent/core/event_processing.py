@@ -2510,14 +2510,13 @@ def _add_budget_awareness_sections(
 
             if soft_target is None:
                 soft_text = (
-                    f"Soft target progress: {used} credits consumed today. Soft target is Unlimited."
+                    f"Soft credit limit progress: {used} credits consumed today. Soft target is Unlimited."
                 )
             else:
-                remaining_soft_text = (
-                    f" Remaining before soft target: {soft_remaining}." if soft_remaining is not None else ""
-                )
                 soft_text = (
-                    f"Soft target progress: {used}/{soft_target} credits consumed today.{remaining_soft_text}"
+                    f"Soft credit limit progress: {used}/{soft_target} credits consumed today. ",
+                    f" Remaining before soft credit limit: {soft_remaining}. " if soft_remaining is not None else "",
+                    f" Next reset at: {next_reset.isoformat() if next_reset else 'unknown'}.",
                 )
             sections.append((
                 "soft_target_progress",
@@ -2533,7 +2532,7 @@ def _add_budget_awareness_sections(
                 and remaining <= get_default_task_credit_cost()
             ):
                 warning_text = (
-                    "System-imposed safety stop is near. Only enough credits remain for a single default-cost tool call."
+                    "Hard credit limit stop is near. Only enough credits remain for a single default-cost tool call."
                 )
                 sections.append((
                     "daily_credits_low",
@@ -2550,7 +2549,7 @@ def _add_budget_awareness_sections(
                 if ratio is not None:
                     if ratio >= Decimal("0.9"):
                         warning_text = (
-                            "Safety stop is approaching. Slow your pace or request a higher soft target to avoid being paused."
+                            "Hard credit limit stop is approaching. Be sure to your remaining tasks wisely to avoid the hard stop."
                         )
                         sections.append((
                             "daily_credits_warning",
@@ -2562,8 +2561,7 @@ def _add_budget_awareness_sections(
             if (
                 burn_rate is not None
                 and burn_threshold is not None
-                and burn_threshold > Decimal("0")
-                and burn_rate > burn_threshold
+                and Decimal("0") < burn_threshold < burn_rate
             ):
                 window_text = (
                     f"the last {burn_window} minutes"
@@ -2572,7 +2570,7 @@ def _add_budget_awareness_sections(
                 )
                 burn_warning = (
                     f"Current burn rate is {burn_rate} credits/hour over {window_text}, above the pacing target of {burn_threshold}. "
-                    "Slow your cadence, batch related work, or pause non-essential tasks to stay within the soft target."
+                    "Slow your cadence or pause non-essential tasks to stay within the soft target."
                 )
                 sections.append((
                     "burn_rate_warning",
