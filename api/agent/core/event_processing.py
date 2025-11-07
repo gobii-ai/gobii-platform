@@ -70,6 +70,7 @@ from .llm_config import (
 from .promptree import Prompt
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
 from api.services.daily_credit_settings import get_daily_credit_settings
+from api.services import mcp_servers as mcp_server_service
 
 from ..tools.email_sender import execute_send_email, get_send_email_tool
 from ..tools.sms_sender import execute_send_sms, get_send_sms_tool
@@ -2076,6 +2077,7 @@ def _build_prompt_context(
     # Contacts block - use promptree natively
     _build_contacts_block(agent, important_group, span)
     _build_webhooks_block(agent, important_group, span)
+    _build_mcp_servers_block(agent, important_group, span)
     
     # Email formatting warning - important behavioral constraint
     important_group.section_text(
@@ -2476,6 +2478,39 @@ def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None
         ),
         weight=1,
         non_shrinkable=True,
+    )
+
+
+def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> None:
+    """List MCP servers available to the agent."""
+    servers = mcp_server_service.agent_accessible_server_configs(agent)
+    span.set_attribute("persistent_agent.mcp_servers.count", len(servers))
+
+    mcp_group = important_group.group("mcp_servers", weight=3)
+
+    if not servers:
+        mcp_group.section_text(
+            "mcp_servers_catalog",
+            (
+                "No MCP servers are configured for you yet."
+            ),
+            weight=1,
+            non_shrinkable=True,
+        )
+        return
+
+    lines: list[str] = [
+        "These are the MCP servers you have access to. You can access them by calling search_tools with the MCP server name."
+    ]
+    for server in servers:
+        display_name = (server.display_name or server.name or "").strip() or server.name
+        lines.append(f"- {display_name} (search name: {server.name})")
+
+    mcp_group.section_text(
+        "mcp_servers_catalog",
+        "\n".join(lines),
+        weight=2,
+        shrinker="hmt",
     )
 
 def _add_budget_awareness_sections(
