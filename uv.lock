@@ -319,8 +319,8 @@ wheels = [
 
 [[package]]
 name = "browser-use"
-version = "0.9.4"
-source = { registry = "https://pypi.org/simple" }
+version = "0.9.5"
+source = { git = "https://github.com/gobii-ai/browser-use.git?rev=24f5f5cee237fb4c86e746750b6b1e05711f3016#24f5f5cee237fb4c86e746750b6b1e05711f3016" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },
@@ -329,6 +329,7 @@ dependencies = [
     { name = "bubus" },
     { name = "cdp-use" },
     { name = "click" },
+    { name = "cloudpickle" },
     { name = "google-api-core" },
     { name = "google-api-python-client" },
     { name = "google-auth" },
@@ -349,6 +350,7 @@ dependencies = [
     { name = "pyobjc", marker = "platform_system == 'darwin'" },
     { name = "pyotp" },
     { name = "pypdf" },
+    { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "reportlab" },
     { name = "requests" },
@@ -356,10 +358,6 @@ dependencies = [
     { name = "screeninfo", marker = "platform_system != 'darwin'" },
     { name = "typing-extensions" },
     { name = "uuid7" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/87/24/fa2acd8bc91dd6305788afc21d0d03c8ce89666ed713aff7f1ae446c4bed/browser_use-0.9.4.tar.gz", hash = "sha256:e052a73f1a5c378f031530a12cca8004a4b84f823fa836643b0d7aca09d216d6", size = 416451, upload-time = "2025-10-29T04:39:19.303Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/36/24/adb50a7c0030c0c18ab87becee7d34c7c8e5008f6612e2eee8c61761d9c9/browser_use-0.9.4-py3-none-any.whl", hash = "sha256:bc334bbfc3eb0ac7401517ff8a2c152ddb7df57bcc7b3140dc2c06129ab542f1", size = 503065, upload-time = "2025-10-29T04:39:17.643Z" },
 ]
 
 [[package]]
@@ -594,6 +592,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cb/a2/57f4ac79838cfae6912f997b4d1a64a858fb0c86d7fcaae6f7b58d267fca/click-repl-0.3.0.tar.gz", hash = "sha256:17849c23dba3d667247dc4defe1757fff98694e90fe37474f3feebb69ced26a9", size = 10449, upload-time = "2023-06-15T12:43:51.141Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/52/40/9d857001228658f0d59e97ebd4c346fe73e138c6de1bce61dc568a57c7f8/click_repl-0.3.0-py3-none-any.whl", hash = "sha256:fb7e06deb8da8de86180a33a9da97ac316751c094c6899382da7feeeeb51b812", size = 10289, upload-time = "2023-06-15T12:43:48.626Z" },
+]
+
+[[package]]
+name = "cloudpickle"
+version = "3.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/27/fb/576f067976d320f5f0114a8d9fa1215425441bb35627b1993e5afd8111e5/cloudpickle-3.1.2.tar.gz", hash = "sha256:7fda9eb655c9c230dab534f1983763de5835249750e85fbcef43aaa30a9a2414", size = 22330, upload-time = "2025-11-03T09:25:26.604Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl", hash = "sha256:9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a", size = 22228, upload-time = "2025-11-03T09:25:25.534Z" },
 ]
 
 [[package]]
@@ -1183,7 +1190,7 @@ requires-dist = [
     { name = "aiohttp-retry", specifier = "==2.9.1" },
     { name = "bleach", specifier = "~=6.2.0" },
     { name = "boto3", specifier = "~=1.38.39" },
-    { name = "browser-use", specifier = "==0.9.4" },
+    { name = "browser-use", git = "https://github.com/gobii-ai/browser-use.git?rev=24f5f5cee237fb4c86e746750b6b1e05711f3016" },
     { name = "celery", specifier = "~=5.5.2" },
     { name = "celery-redbeat", specifier = "~=2.3.2" },
     { name = "channels", specifier = ">=4.3.1" },
@@ -6486,6 +6493,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
+]
+
+[[package]]
+name = "python-docx"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lxml" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/f7/eddfe33871520adab45aaa1a71f0402a2252050c14c7e3009446c8f4701c/python_docx-1.2.0.tar.gz", hash = "sha256:7bc9d7b7d8a69c9c02ca09216118c86552704edc23bac179283f2e38f86220ce", size = 5723256, upload-time = "2025-06-16T20:46:27.921Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/00/1e03a4989fa5795da308cd774f05b704ace555a70f9bf9d3be057b680bcf/python_docx-1.2.0-py3-none-any.whl", hash = "sha256:3fd478f3250fbbbfd3b94fe1e985955737c145627498896a8a6bf81f4baf66c7", size = 252987, upload-time = "2025-06-16T20:46:22.506Z" },
 ]
 
 [[package]]

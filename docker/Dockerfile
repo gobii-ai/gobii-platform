@@ -14,6 +14,7 @@ WORKDIR /app
 RUN --mount=type=cache,target=/var/cache/apt \
     apt-get update && \
     apt-get install --no-install-recommends -y \
+        git \
         procps \
         xvfb x11-utils xauth libx11-6 libxext6 libxrender1 \
         libxtst6 libxi6 libxrandr2 libxfont2 curl \
