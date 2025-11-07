@@ -537,10 +537,6 @@ def _get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         second=0,
         microsecond=0,
     )
-    seconds_left = max((next_reset - local_now).total_seconds(), 0)
-    hours_left = (
-        Decimal(str(seconds_left)) / Decimal("3600") if seconds_left else Decimal("0")
-    )
 
     burn_details = _compute_burn_rate(
         agent,
@@ -736,8 +732,8 @@ def _ensure_credit_for_tool(
                 "credit_check.available_in_loop",
                 int(available) if available is not None else -2,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to set soft target span attributes: %s", e)
         try:
             span.set_attribute(
                 "credit_check.tool_cost",
@@ -2642,10 +2638,8 @@ def _add_budget_awareness_sections(
                 normalized = Decimal(value)
             except Exception:
                 return str(value)
-            formatted = format(normalized, "f")
-            if "." in formatted:
-                formatted = formatted.rstrip("0").rstrip(".")
-            return formatted or "0"
+            # .normalize() removes trailing zeros and converts e.g. 1.00 to 1.
+            return str(normalized.normalize())
 
         summary_parts = [
             f"Default tool call cost: {_format_cost(default_cost)} credits."
