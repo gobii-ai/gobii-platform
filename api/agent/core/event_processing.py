@@ -2755,7 +2755,8 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
     try:
         PersistentAgentSystemMessage.objects.filter(id__in=message_ids).update(delivered_at=now)
     except Exception:
-        logger.exception("Failed to mark system prompt messages delivered for agent %s", agent.id)
+        logger.exception("Failed to mark system prompt messages delivered for agent %s. These messages will not be injected in this cycle.", agent.id)
+        return ""
 
     header = (
         "SYSTEM NOTICE FROM GOBII OPERATIONS:\n"
