@@ -21,7 +21,7 @@ def get_attribution_headers() -> Dict[str, str]:
     if title:
         headers["X-Title"] = str(title)
 
-    logger.info("OpenRouter attribution headers: %s", headers)
+    logger.debug("OpenRouter attribution headers: %s", headers)
 
     return headers
 
