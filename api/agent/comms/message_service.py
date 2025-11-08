@@ -72,6 +72,8 @@ def _get_or_create_conversation(channel: str, address: str, owner_agent=None) ->
             defaults={"owner_agent": owner_agent},
         )
     except MultipleObjectsReturned:
+        span.set_attribute("get_or_create.fallback", True)
+        span.set_attribute("get_or_create.error", "MultipleObjectsReturned")
         # Multiple rows exist for the same (channel, address). Pick a deterministic
         # record so ingestion can continue and emit a warning for cleanup.
         conv = (
