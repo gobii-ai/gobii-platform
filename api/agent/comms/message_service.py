@@ -14,6 +14,7 @@ from typing import Iterable, Any
 import logging
 import requests
 from django.contrib.sites.models import Site
+from django.core.exceptions import MultipleObjectsReturned
 from django.core.files.base import ContentFile, File
 from django.core.mail import send_mail
 from django.db import transaction
@@ -40,6 +41,9 @@ from observability import traced
 from opentelemetry import baggage
 from config import settings
 from util.constants.task_constants import TASKS_UNLIMITED
+from opentelemetry import trace
+
+tracer = trace.get_tracer("gobii.utils")
 
 @dataclass
 class InboundMessageInfo:
@@ -47,7 +51,7 @@ class InboundMessageInfo:
 
     message: PersistentAgentMessage
 
-
+@tracer.start_as_current_span("_get_or_create_endpoint")
 def _get_or_create_endpoint(channel: str, address: str) -> PersistentAgentCommsEndpoint:
     ep, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
         channel=channel,
@@ -55,19 +59,42 @@ def _get_or_create_endpoint(channel: str, address: str) -> PersistentAgentCommsE
     )
     return ep
 
-
+@tracer.start_as_current_span("_get_or_create_conversation")
 def _get_or_create_conversation(channel: str, address: str, owner_agent=None) -> PersistentAgentConversation:
-    conv, created = PersistentAgentConversation.objects.get_or_create(
-        channel=channel,
-        address=address,
-        defaults={"owner_agent": owner_agent},
-    )
+    span = trace.get_current_span()
+    span.set_attribute("channel", channel)
+    span.set_attribute("address", address)
+
+    try:
+        conv, created = PersistentAgentConversation.objects.get_or_create(
+            channel=channel,
+            address=address,
+            defaults={"owner_agent": owner_agent},
+        )
+    except MultipleObjectsReturned:
+        # Multiple rows exist for the same (channel, address). Pick a deterministic
+        # record so ingestion can continue and emit a warning for cleanup.
+        conv = (
+            PersistentAgentConversation.objects
+            .filter(channel=channel, address=address)
+            .order_by("id")
+            .first()
+        )
+        created = False
+        logging.warning(
+            "Multiple conversations found for channel=%s address=%s; using %s",
+            channel,
+            address,
+            getattr(conv, "id", None),
+        )
+        if conv is None:
+            raise
     if owner_agent and conv.owner_agent_id is None:
         conv.owner_agent = owner_agent
         conv.save(update_fields=["owner_agent"])
     return conv
 
-
+@tracer.start_as_current_span("_ensure_participant")
 def _ensure_participant(conv: PersistentAgentConversation, ep: PersistentAgentCommsEndpoint, role: str) -> None:
     PersistentAgentConversationParticipant.objects.get_or_create(
         conversation=conv,
@@ -75,7 +102,7 @@ def _ensure_participant(conv: PersistentAgentConversation, ep: PersistentAgentCo
         defaults={"role": role},
     )
 
-
+@tracer.start_as_current_span("_save_attachments")
 def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any]) -> None:
     for att in attachments:
         file_obj: File | None = None
@@ -139,7 +166,7 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                 filename=filename,
             )
 
-
+@tracer.start_as_current_span("_build_agent_detail_url")
 def _build_agent_detail_url(agent) -> str:
     """Return an absolute URL to the agent's detail page."""
 
@@ -149,7 +176,7 @@ def _build_agent_detail_url(agent) -> str:
     path = reverse("agent_detail", kwargs={"pk": agent.id})
     return f"{base}{path}"
 
-
+@tracer.start_as_current_span("_find_agent_endpoint")
 def _find_agent_endpoint(agent, channel: str) -> PersistentAgentCommsEndpoint | None:
     """Find the agent-owned endpoint to send from for the given channel."""
 
@@ -158,7 +185,7 @@ def _find_agent_endpoint(agent, channel: str) -> PersistentAgentCommsEndpoint | 
         or agent.comms_endpoints.filter(channel=channel).first()
     )
 
-
+@tracer.start_as_current_span("_ensure_agent_web_endpoint")
 def _ensure_agent_web_endpoint(agent) -> PersistentAgentCommsEndpoint:
     """Ensure the agent has a web chat endpoint for outbound messages."""
 
@@ -173,7 +200,7 @@ def _ensure_agent_web_endpoint(agent) -> PersistentAgentCommsEndpoint:
         endpoint.save(update_fields=["owner_agent"])
     return endpoint
 
-
+@tracer.start_as_current_span("_send_daily_credit_notice")
 def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                               sender_endpoint: PersistentAgentCommsEndpoint | None,
                               conversation: PersistentAgentConversation | None,
@@ -278,6 +305,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
 
 
 @transaction.atomic
+@tracer.start_as_current_span("ingest_inbound_message")
 def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -> InboundMessageInfo:
     """Persist an inbound message and trigger event processing."""
 
@@ -469,6 +497,7 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
 
         return InboundMessageInfo(message=message)
 
+@tracer.start_as_current_span("get_agent_id_from_address")
 def get_agent_id_from_address(channel: CommsChannel | str, address: str) -> UUID | None:
     """
     Get the agent ID associated with a given address.
