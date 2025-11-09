@@ -262,6 +262,45 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(archive.step.completion)
         self.assertEqual(archive.step.completion.prompt_tokens, token_usage["prompt_tokens"])
 
+    def test_agent_loop_passes_preferred_provider(self):
+        """Agent loop should forward the preferred provider returned by the helper."""
+        response_message = MagicMock()
+        response_message.tool_calls = None
+        response_message.content = "Reasoning output"
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock()
+        response.choices = [response_choice]
+        response.model_extra = {
+            "usage": MagicMock(
+                prompt_tokens=12,
+                completion_tokens=6,
+                total_tokens=18,
+                prompt_tokens_details=MagicMock(cached_tokens=0),
+            )
+        }
+        token_usage = {
+            "prompt_tokens": 12,
+            "completion_tokens": 6,
+            "total_tokens": 18,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+        preferred_provider = "preferred-provider"
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'), \
+             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+             patch('api.agent.core.event_processing._get_recent_preferred_provider', return_value=preferred_provider) as mock_helper, \
+             patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+                _run_agent_loop(self.agent, is_first_run=False)
+
+        mock_helper.assert_called_once_with(agent=self.agent, failover_configs=[("mock", "mock-model", {})])
+        call_kwargs = mock_completion.call_args.kwargs
+        self.assertEqual(call_kwargs["preferred_provider"], preferred_provider)
+
 @tag("batch_event_processing")
 class CronTriggerTaskTests(TestCase):
     """Unit tests for the cron trigger task."""
