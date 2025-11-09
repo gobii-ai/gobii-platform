@@ -27,6 +27,7 @@ from api.models import (
     PersistentAgentCronTrigger,
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
+    PersistentAgentCompletion,
     PersistentAgentSystemMessage,
 )
 from constants.grant_types import GrantTypeChoices
@@ -300,6 +301,33 @@ class PromptContextBuilderTests(TestCase):
         mock_helper.assert_called_once_with(agent=self.agent, failover_configs=[("mock", "mock-model", {})])
         call_kwargs = mock_completion.call_args.kwargs
         self.assertEqual(call_kwargs["preferred_provider"], preferred_provider)
+
+    def test_completion_record_keeps_model_when_usage_missing(self):
+        """PersistentAgentCompletion should store provider/model even if usage isn't provided."""
+        response_message = MagicMock()
+        response_message.tool_calls = None
+        response_message.content = "Reasoning output"
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock()
+        response.choices = [response_choice]
+        response.model_extra = {}
+
+        token_usage = {
+            "model": "mock-model",
+            "provider": "mock-provider",
+        }
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'), \
+             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+             patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)):
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+                _run_agent_loop(self.agent, is_first_run=False)
+
+        completion = PersistentAgentCompletion.objects.get(agent=self.agent)
+        self.assertEqual(completion.llm_model, "mock-model")
+        self.assertEqual(completion.llm_provider, "mock-provider")
 
 @tag("batch_event_processing")
 class CronTriggerTaskTests(TestCase):

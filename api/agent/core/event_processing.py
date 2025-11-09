@@ -437,7 +437,10 @@ def _completion_with_failover(
                 )
 
                 # Record usage if available and prepare token usage dict
-                token_usage = None
+                token_usage: Optional[dict] = {
+                    "model": model,
+                    "provider": provider,
+                }
                 usage = response.model_extra.get("usage", None)
                 if usage:
                     llm_span.set_attribute("llm.usage.prompt_tokens", usage.prompt_tokens)
@@ -445,13 +448,13 @@ def _completion_with_failover(
                     llm_span.set_attribute("llm.usage.total_tokens", usage.total_tokens)
                     
                     # Build token usage dict to return
-                    token_usage = {
-                        "prompt_tokens": usage.prompt_tokens,
-                        "completion_tokens": usage.completion_tokens,
-                        "total_tokens": usage.total_tokens,
-                        "model": model,
-                        "provider": provider
-                    }
+                    token_usage.update(
+                        {
+                            "prompt_tokens": usage.prompt_tokens,
+                            "completion_tokens": usage.completion_tokens,
+                            "total_tokens": usage.total_tokens,
+                        }
+                    )
                     
                     details = usage.prompt_tokens_details
                     if details:
@@ -476,7 +479,7 @@ def _completion_with_failover(
                 )
             except Exception:
                 pass
-                logger.exception(
+            logger.exception(
                 "Provider %s failed for agent %s; trying next provider",
                 provider,
                 agent_id or "unknown",

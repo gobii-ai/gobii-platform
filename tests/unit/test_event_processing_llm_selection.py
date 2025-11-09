@@ -115,7 +115,7 @@ class TestEventProcessingLLMSelection(TestCase):
         mock_response.model_extra = {"usage": None}
         mock_run_completion.side_effect = [Exception("fail"), mock_response]
 
-        _completion_with_failover(
+        response, token_usage = _completion_with_failover(
             messages,
             tools,
             failover_configs=failover_configs,
@@ -126,6 +126,9 @@ class TestEventProcessingLLMSelection(TestCase):
         self.assertEqual(mock_run_completion.call_count, 2)
         first_call = mock_run_completion.call_args_list[0]
         self.assertEqual(first_call.kwargs["model"], "model-preferred")
+        self.assertIs(response, mock_response)
+        self.assertEqual(token_usage["provider"], "default")
+        self.assertEqual(token_usage["model"], "model-default")
 
     @patch('api.agent.core.event_processing.run_completion')
     def test_completion_with_failover_prefers_matching_model_identifier(self, mock_run_completion):
@@ -141,7 +144,7 @@ class TestEventProcessingLLMSelection(TestCase):
         mock_response.model_extra = {"usage": None}
         mock_run_completion.return_value = mock_response
 
-        _completion_with_failover(
+        _, token_usage = _completion_with_failover(
             messages,
             tools,
             failover_configs=failover_configs,
@@ -151,6 +154,8 @@ class TestEventProcessingLLMSelection(TestCase):
 
         first_call = mock_run_completion.call_args_list[0]
         self.assertEqual(first_call.kwargs["model"], "model-preferred")
+        self.assertEqual(token_usage["provider"], "preferred")
+        self.assertEqual(token_usage["model"], "model-preferred")
 
     def test_get_recent_preferred_provider_uses_recent_completion(self):
         """Helper should return provider for a completion recorded within the allowed window."""
