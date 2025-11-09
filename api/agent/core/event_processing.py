@@ -2094,7 +2094,73 @@ def _build_prompt_context(
     
     # Build the user content sections using promptree
     # Group sections by priority for better weight distribution
-    
+
+    # Medium priority sections (weight=6) - important but can be shrunk if needed
+    important_group = prompt.group("important", weight=6)
+
+    # Schedule block
+    schedule_str = agent.schedule if agent.schedule else "No schedule configured"
+    # Provide the schedule details and a helpful note as separate sections so Prompt can
+    # automatically wrap them with <schedule> and <schedule_note> tags respectively.
+    important_group.section_text(
+        "schedule",
+        schedule_str,
+        weight=2
+    )
+    important_group.section_text(
+        "schedule_note",
+        "Remember, you can and should update your schedule to best suit your charter. And remember, you do NOT have to contact the user on every schedule trigger. You only want to contact them when it makes sense.",
+        weight=1,
+        non_shrinkable=True
+    )
+
+    # Contacts block - use promptree natively
+    _build_contacts_block(agent, important_group, span)
+    _build_webhooks_block(agent, important_group, span)
+    _build_mcp_servers_block(agent, important_group, span)
+
+    # Email formatting warning - important behavioral constraint
+    important_group.section_text(
+        "email_formatting_warning",
+        "YOU MUST NOT USE MARKDOWN FORMATTING IN EMAILS! ",
+        weight=2,
+        non_shrinkable=True
+    )
+
+    # Secrets block
+    secrets_block = _get_secrets_block(agent)
+    important_group.section_text(
+        "secrets",
+        secrets_block,
+        weight=2
+    )
+    important_group.section_text(
+        "secrets_note",
+        (
+            "ONLY request secure credentials when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
+            "or `spawn_web_task` (classic username/password website login). DO NOT request credentials for MCP tools "
+            "(e.g., Google Sheets, Slack). For MCP tools: call the tool first; if it returns 'action_required' with a "
+            "connect/auth link, surface that link to the user and wait. NEVER ask for user passwords or 2FA codes for "
+            "OAuth‑based services."
+        ),
+        weight=1,
+        non_shrinkable=True
+    )
+
+    if agent.charter:
+        important_group.section_text(
+            "charter",
+            agent.charter,
+            weight=5,
+            non_shrinkable=True
+        )
+        important_group.section_text(
+            "charter_note",
+            "Remember, you can and should evolve this over time, especially if the user gives you feedback or new instructions.",
+            weight=2,
+            non_shrinkable=True
+        )
+
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
     
@@ -2142,58 +2208,6 @@ def _build_prompt_context(
         non_shrinkable=True
     )
     
-    # Medium priority sections (weight=6) - important but can be shrunk if needed
-    important_group = prompt.group("important", weight=6)
-    
-    # Schedule block
-    schedule_str = agent.schedule if agent.schedule else "No schedule configured"
-    # Provide the schedule details and a helpful note as separate sections so Prompt can
-    # automatically wrap them with <schedule> and <schedule_note> tags respectively.
-    important_group.section_text(
-        "schedule",
-        schedule_str,
-        weight=2
-    )
-    important_group.section_text(
-        "schedule_note",
-        "Remember, you can and should update your schedule to best suit your charter. And remember, you do NOT have to contact the user on every schedule trigger. You only want to contact them when it makes sense.",
-        weight=1,
-        non_shrinkable=True
-    )
-    
-    # Contacts block - use promptree natively
-    _build_contacts_block(agent, important_group, span)
-    _build_webhooks_block(agent, important_group, span)
-    _build_mcp_servers_block(agent, important_group, span)
-    
-    # Email formatting warning - important behavioral constraint
-    important_group.section_text(
-        "email_formatting_warning",
-        "YOU MUST NOT USE MARKDOWN FORMATTING IN EMAILS! ",
-        weight=2,
-        non_shrinkable=True
-    )
-    
-    # Secrets block
-    secrets_block = _get_secrets_block(agent)
-    important_group.section_text(
-        "secrets",
-        secrets_block,
-        weight=2
-    )
-    important_group.section_text(
-        "secrets_note",
-        (
-            "ONLY request secure credentials when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
-            "or `spawn_web_task` (classic username/password website login). DO NOT request credentials for MCP tools "
-            "(e.g., Google Sheets, Slack). For MCP tools: call the tool first; if it returns 'action_required' with a "
-            "connect/auth link, surface that link to the user and wait. NEVER ask for user passwords or 2FA codes for "
-            "OAuth‑based services."
-        ),
-        weight=1,
-        non_shrinkable=True
-    )
-    
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
 
@@ -2229,20 +2243,6 @@ def _build_prompt_context(
         weight=2,
         non_shrinkable=True
     )
-
-    if agent.charter:
-        critical_group.section_text(
-            "charter",
-            agent.charter,
-            weight=5,
-            non_shrinkable=True
-        )
-        critical_group.section_text(
-            "charter_note",
-            "Remember, you can and should evolve this over time, especially if the user gives you feedback or new instructions.",
-            weight=2,
-            non_shrinkable=True
-        )
 
     if agent.preferred_contact_endpoint:
         span.set_attribute("persistent_agent.preferred_contact_endpoint.channel",
