@@ -1952,15 +1952,25 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     def trigger_processing_view(self, request):
         """Queue event processing for the provided persistent agent IDs."""
         changelist_url = reverse('admin:api_persistentagent_changelist')
+        default_context = {
+            "title": "Trigger Event Processing",
+            "agent_ids": "",
+            "only_active": True,
+            "only_with_user": True,
+            "skip_expired": False,
+        }
 
         if request.method != 'POST':
             return TemplateResponse(
                 request,
                 "admin/persistentagent_trigger_processing.html",
-                {"title": "Trigger Event Processing", "agent_ids": ""},
+                default_context,
             )
 
         raw_ids = request.POST.get('agent_ids', '')
+        only_active = request.POST.get('only_active') is not None
+        only_with_user = request.POST.get('only_with_user') is not None
+        skip_expired = request.POST.get('skip_expired') is not None
         parsed_ids: list[str] = []
         invalid_entries: list[str] = []
 
@@ -1975,13 +1985,43 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
         # Deduplicate, preserve order, and check for existence
         unique_ids = list(dict.fromkeys(parsed_ids))
-        existing_ids = set(map(str, PersistentAgent.objects.filter(id__in=unique_ids).values_list('id', flat=True)))
-        non_existent_ids = [agent_id for agent_id in unique_ids if agent_id not in existing_ids]
+        agents = list(
+            PersistentAgent.objects.filter(id__in=unique_ids).only(
+                "id",
+                "is_active",
+                "life_state",
+                "user_id",
+            )
+        )
+        agents_by_id = {str(agent.id): agent for agent in agents}
+        existing_ids = [agent_id for agent_id in unique_ids if agent_id in agents_by_id]
+        non_existent_ids = [agent_id for agent_id in unique_ids if agent_id not in agents_by_id]
+
+        user_ids = {agent.user_id for agent in agents if agent.user_id}
+        user_model = get_user_model()
+        existing_user_ids = (
+            set(user_model.objects.filter(id__in=user_ids).values_list('id', flat=True))
+            if user_ids
+            else set()
+        )
 
         queued = 0
         failures: list[str] = []
+        skipped_inactive: list[str] = []
+        skipped_missing_user: list[str] = []
+        skipped_expired: list[str] = []
 
         for agent_id in existing_ids:
+            agent = agents_by_id[agent_id]
+            if only_active and not agent.is_active:
+                skipped_inactive.append(agent_id)
+                continue
+            if skip_expired and agent.life_state == PersistentAgent.LifeState.EXPIRED:
+                skipped_expired.append(agent_id)
+                continue
+            if only_with_user and agent.user_id not in existing_user_ids:
+                skipped_missing_user.append(agent_id)
+                continue
             try:
                 process_agent_events_task.delay(agent_id)
                 queued += 1
@@ -2007,6 +2047,34 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             self.message_user(
                 request,
                 "Skipped invalid ID(s): " + ", ".join(invalid_entries),
+                level=messages.WARNING,
+            )
+
+        if non_existent_ids:
+            self.message_user(
+                request,
+                "Skipped non-existent ID(s): " + ", ".join(non_existent_ids),
+                level=messages.WARNING,
+            )
+
+        if skipped_inactive:
+            self.message_user(
+                request,
+                "Skipped inactive agent ID(s): " + ", ".join(skipped_inactive),
+                level=messages.WARNING,
+            )
+
+        if skipped_missing_user:
+            self.message_user(
+                request,
+                "Skipped agent ID(s) missing a user: " + ", ".join(skipped_missing_user),
+                level=messages.WARNING,
+            )
+
+        if skipped_expired:
+            self.message_user(
+                request,
+                "Skipped expired agent ID(s): " + ", ".join(skipped_expired),
                 level=messages.WARNING,
             )
 
