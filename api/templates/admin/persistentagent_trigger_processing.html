@@ -21,6 +21,26 @@
         <textarea name="agent_ids" id="id_agent_ids" rows="8" cols="60" placeholder="One persistent agent ID per line">{{ agent_ids|default_if_none:'' }}</textarea>
       </div>
     </fieldset>
+    <fieldset class="module aligned">
+      <div class="form-row">
+        <label for="id_only_active">
+          <input type="checkbox" name="only_active" id="id_only_active" value="1" {% if only_active %}checked{% endif %}>
+          Only queue if <code>is_active = True</code>
+        </label>
+      </div>
+      <div class="form-row">
+        <label for="id_only_with_user">
+          <input type="checkbox" name="only_with_user" id="id_only_with_user" value="1" {% if only_with_user %}checked{% endif %}>
+          Only queue if the owning user still exists
+        </label>
+      </div>
+      <div class="form-row">
+        <label for="id_skip_expired">
+          <input type="checkbox" name="skip_expired" id="id_skip_expired" value="1" {% if skip_expired %}checked{% endif %}>
+          Skip agents where <code>life_state = expired</code>
+        </label>
+      </div>
+    </fieldset>
     <div class="submit-row">
       <a class="button" href="{% url 'admin:api_persistentagent_changelist' %}">Cancel</a>
       <button type="submit" class="button default">Queue Processing</button>
