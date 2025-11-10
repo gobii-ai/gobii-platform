@@ -128,6 +128,7 @@ TOOL_CALL_HISTORY_LIMIT_DEFAULT = 15
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
+PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
 
 
 def tool_call_history_limit(agent: PersistentAgent) -> int:
@@ -335,6 +336,7 @@ def _completion_with_failover(
     failover_configs: List[Tuple[str, str, dict]],
     agent_id: str = None,
     safety_identifier: str = None,
+    preferred_config: Optional[Tuple[str, str]] = None,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
@@ -345,6 +347,7 @@ def _completion_with_failover(
         failover_configs: Pre-selected list of provider configurations
         agent_id: Optional agent ID for logging
         safety_identifier: Optional user ID for safety filtering
+        preferred_config: Optional tuple of (provider, model) to try first
         
     Returns:
         Tuple of (LiteLLM completion response, token usage dict)
@@ -356,7 +359,36 @@ def _completion_with_failover(
     """
     last_exc: Exception | None = None
     
-    for provider, model, params in failover_configs:
+    ordered_configs: List[Tuple[str, str, dict]] = list(failover_configs)
+    if preferred_config:
+        pref_provider, pref_model = preferred_config
+        full_match: List[Tuple[str, str, dict]] = []
+        fallback: List[Tuple[str, str, dict]] = []
+        for cfg in ordered_configs:
+            cfg_provider, cfg_model, _ = cfg
+            match_provider = cfg_provider == pref_provider
+            match_model = cfg_model == pref_model
+            if match_provider and match_model:
+                full_match.append(cfg)
+            else:
+                fallback.append(cfg)
+        if full_match:
+            ordered_configs = full_match + fallback
+            logger.info(
+                "Applying preferred provider/model %s/%s for agent %s",
+                pref_provider,
+                pref_model,
+                agent_id or "unknown",
+            )
+        else:
+            logger.debug(
+                "Preferred provider/model %s/%s not present for agent %s",
+                pref_provider,
+                pref_model,
+                agent_id or "unknown",
+            )
+
+    for provider, model, params in ordered_configs:
         logger.info(
             "Attempting provider %s for agent %s",
             provider,
@@ -410,7 +442,10 @@ def _completion_with_failover(
                 )
 
                 # Record usage if available and prepare token usage dict
-                token_usage = None
+                token_usage: Optional[dict] = {
+                    "model": model,
+                    "provider": provider,
+                }
                 usage = response.model_extra.get("usage", None)
                 if usage:
                     llm_span.set_attribute("llm.usage.prompt_tokens", usage.prompt_tokens)
@@ -418,13 +453,13 @@ def _completion_with_failover(
                     llm_span.set_attribute("llm.usage.total_tokens", usage.total_tokens)
                     
                     # Build token usage dict to return
-                    token_usage = {
-                        "prompt_tokens": usage.prompt_tokens,
-                        "completion_tokens": usage.completion_tokens,
-                        "total_tokens": usage.total_tokens,
-                        "model": model,
-                        "provider": provider
-                    }
+                    token_usage.update(
+                        {
+                            "prompt_tokens": usage.prompt_tokens,
+                            "completion_tokens": usage.completion_tokens,
+                            "total_tokens": usage.total_tokens,
+                        }
+                    )
                     
                     details = usage.prompt_tokens_details
                     if details:
@@ -459,6 +494,53 @@ def _completion_with_failover(
     if last_exc:
         raise last_exc
     raise RuntimeError("No LLM provider available")
+
+
+def _get_recent_preferred_config(
+    agent: PersistentAgent
+) -> Optional[Tuple[str, str]]:
+    """
+    Return the (provider, model) from the most recent completion if fresh enough.
+    """
+    if agent is None:
+        return None
+    try:
+        window_start = dj_timezone.now() - PREFERRED_PROVIDER_MAX_AGE
+        last_completion = (
+            PersistentAgentCompletion.objects.filter(agent=agent, created_at__gte=window_start)
+            .only("created_at", "llm_model", "llm_provider")
+            .order_by("-created_at")
+            .first()
+        )
+    except Exception:
+        logger.debug(
+            "Unable to determine last completion for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return None
+
+    if not last_completion:
+        return None
+
+    last_model = getattr(last_completion, "llm_model", None)
+    last_provider = getattr(last_completion, "llm_provider", None)
+    agent_id = getattr(agent, "id", None)
+
+    if last_model and last_provider:
+        logger.info(
+            "Agent %s reusing provider %s with model %s",
+            agent_id,
+            last_provider,
+            last_model,
+        )
+        return last_provider, last_model
+
+    logger.info(
+        "Agent %s missing provider/model data for preferred config",
+        agent_id,
+    )
+    return None
 
 
 @retry(
@@ -1470,13 +1552,18 @@ def _run_agent_loop(
                 span.add_event("Agent loop aborted - llm bootstrap required")
                 break
 
+            preferred_config = _get_recent_preferred_config(
+                agent=agent
+            )
+
             try:
                 response, token_usage = _completion_with_failover(
                     messages=history,
                     tools=tools,
                     failover_configs=failover_configs,
                     agent_id=str(agent.id),
-                    safety_identifier=agent.user.id if agent.user else None
+                    safety_identifier=agent.user.id if agent.user else None,
+                    preferred_config=preferred_config,
                 )
                 
                 # Accumulate token usage
