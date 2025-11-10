@@ -102,12 +102,17 @@ def execute_search_web(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             )
         except Exception as e:
             exa_span.add_event('Exa Search failure')
-            logger.error(f"Search failure: {e}", query)
+            logger.error(
+                "Search failure: %s (query=%s)",
+                e,
+                query,
+                exc_info=True,
+            )
             return {"status": "error", "message": format_search_error(f"Search failure with Exa: {e}", query)}
 
         if not search_result:
             exa_span.add_event('Exa Search failure')
-            logger.error("Search failure", query)
+            logger.error("Search failure for query: %s", query)
             return {"status": "error", "message": format_search_error("Search failure with Exa", query)}
         else:
             result_count = len(search_result.results)
