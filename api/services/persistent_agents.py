@@ -127,7 +127,7 @@ class PersistentAgentProvisioningService:
 
             persistent_agent.save()
 
-            # Default daily credit limit for free plans
+            # Apply plan-specific default daily credit limits
             if settings.GOBII_PROPRIETARY_MODE:
                 owner = organization or user
                 plan_value = getattr(getattr(owner, "billing", None), "subscription", PlanNamesChoices.FREE)
@@ -137,8 +137,16 @@ class PersistentAgentProvisioningService:
                 except ValueError:
                     plan_choice = PlanNamesChoices.FREE
 
-                if plan_choice == PlanNamesChoices.FREE:
-                    soft_target_default = Decimal(str(settings.DEFAULT_AGENT_DAILY_CREDIT_TARGET))
+                plan_default_targets = {
+                    PlanNamesChoices.FREE: settings.DEFAULT_AGENT_DAILY_CREDIT_TARGET,
+                    PlanNamesChoices.STARTUP: settings.PAID_AGENT_DAILY_CREDIT_TARGET,
+                    PlanNamesChoices.SCALE: settings.PAID_AGENT_DAILY_CREDIT_TARGET,
+                    PlanNamesChoices.ORG_TEAM: settings.PAID_AGENT_DAILY_CREDIT_TARGET,
+                }
+
+                soft_target_value = plan_default_targets.get(plan_choice)
+                if soft_target_value is not None:
+                    soft_target_default = Decimal(str(soft_target_value))
                     persistent_agent.daily_credit_limit = int(soft_target_default)
                     persistent_agent.save(update_fields=["daily_credit_limit"])
 
