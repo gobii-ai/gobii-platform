@@ -336,7 +336,7 @@ def _completion_with_failover(
     failover_configs: List[Tuple[str, str, dict]],
     agent_id: str = None,
     safety_identifier: str = None,
-    preferred_provider: str | None = None,
+    preferred_config: Optional[Tuple[str, str]] = None,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
@@ -347,7 +347,7 @@ def _completion_with_failover(
         failover_configs: Pre-selected list of provider configurations
         agent_id: Optional agent ID for logging
         safety_identifier: Optional user ID for safety filtering
-        preferred_provider: Optional provider/model identifier to try first
+        preferred_config: Optional tuple of (provider, model) to try first
         
     Returns:
         Tuple of (LiteLLM completion response, token usage dict)
@@ -360,26 +360,31 @@ def _completion_with_failover(
     last_exc: Exception | None = None
     
     ordered_configs: List[Tuple[str, str, dict]] = list(failover_configs)
-    if preferred_provider:
-        prioritized: List[Tuple[str, str, dict]] = []
+    if preferred_config:
+        pref_provider, pref_model = preferred_config
+        full_match: List[Tuple[str, str, dict]] = []
         fallback: List[Tuple[str, str, dict]] = []
         for cfg in ordered_configs:
             cfg_provider, cfg_model, _ = cfg
-            if cfg_provider == preferred_provider or cfg_model == preferred_provider:
-                prioritized.append(cfg)
+            match_provider = cfg_provider == pref_provider
+            match_model = cfg_model == pref_model
+            if match_provider and match_model:
+                full_match.append(cfg)
             else:
                 fallback.append(cfg)
-        if prioritized:
-            ordered_configs = prioritized + fallback
+        if full_match:
+            ordered_configs = full_match + fallback
             logger.info(
-                "Applying preferred provider %s for agent %s",
-                preferred_provider,
+                "Applying preferred provider/model %s/%s for agent %s",
+                pref_provider,
+                pref_model,
                 agent_id or "unknown",
             )
         else:
             logger.debug(
-                "Preferred provider %s not present for agent %s",
-                preferred_provider,
+                "Preferred provider/model %s/%s not present for agent %s",
+                pref_provider,
+                pref_model,
                 agent_id or "unknown",
             )
 
@@ -491,12 +496,11 @@ def _completion_with_failover(
     raise RuntimeError("No LLM provider available")
 
 
-def _get_recent_preferred_provider(
-    agent: PersistentAgent,
-    failover_configs: List[Tuple[str, str, dict]],
-) -> str | None:
+def _get_recent_preferred_config(
+    agent: PersistentAgent
+) -> Optional[Tuple[str, str]]:
     """
-    Return the provider/model identifier from the most recent completion if it is fresh enough.
+    Return the (provider, model) from the most recent completion if fresh enough.
     """
     if agent is None:
         return None
@@ -523,33 +527,19 @@ def _get_recent_preferred_provider(
     last_provider = getattr(last_completion, "llm_provider", None)
     agent_id = getattr(agent, "id", None)
 
-    if last_model:
-        for provider, model, _ in failover_configs:
-            if model == last_model:
-                logger.debug(
-                    "Agent %s reusing provider %s based on recent model %s",
-                    agent_id,
-                    provider,
-                    last_model,
-                )
-                return provider
-
-    if last_provider:
-        logger.debug(
-            "Agent %s reusing provider %s based on recent completion",
+    if last_model and last_provider:
+        logger.info(
+            "Agent %s reusing provider %s with model %s",
             agent_id,
             last_provider,
-        )
-        return last_provider
-
-    if last_model:
-        logger.debug(
-            "Agent %s falling back to model %s for provider preference",
-            agent_id,
             last_model,
         )
-        return last_model
+        return last_provider, last_model
 
+    logger.info(
+        "Agent %s missing provider/model data for preferred config",
+        agent_id,
+    )
     return None
 
 
@@ -1562,9 +1552,8 @@ def _run_agent_loop(
                 span.add_event("Agent loop aborted - llm bootstrap required")
                 break
 
-            preferred_provider = _get_recent_preferred_provider(
-                agent=agent,
-                failover_configs=failover_configs,
+            preferred_config = _get_recent_preferred_config(
+                agent=agent
             )
 
             try:
@@ -1574,7 +1563,7 @@ def _run_agent_loop(
                     failover_configs=failover_configs,
                     agent_id=str(agent.id),
                     safety_identifier=agent.user.id if agent.user else None,
-                    preferred_provider=preferred_provider,
+                    preferred_config=preferred_config,
                 )
                 
                 # Accumulate token usage

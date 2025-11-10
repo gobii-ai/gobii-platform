@@ -1,19 +1,15 @@
 """
 Unit tests for event processing LLM selection and token estimation.
 """
-import os
 from datetime import timedelta
-from unittest import mock
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
 from api.agent.core.event_processing import (
-    _estimate_message_tokens,
-    _estimate_agent_context_tokens,
     _completion_with_failover,
-    _get_recent_preferred_provider,
+    _get_recent_preferred_config,
 )
 from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentCompletion
 
@@ -120,7 +116,7 @@ class TestEventProcessingLLMSelection(TestCase):
             tools,
             failover_configs=failover_configs,
             agent_id=str(self.agent.id),
-            preferred_provider="preferred",
+            preferred_config=("preferred", "model-preferred"),
         )
 
         self.assertEqual(mock_run_completion.call_count, 2)
@@ -149,7 +145,7 @@ class TestEventProcessingLLMSelection(TestCase):
             tools,
             failover_configs=failover_configs,
             agent_id=str(self.agent.id),
-            preferred_provider="model-preferred",
+            preferred_config=("preferred", "model-preferred"),
         )
 
         first_call = mock_run_completion.call_args_list[0]
@@ -157,22 +153,28 @@ class TestEventProcessingLLMSelection(TestCase):
         self.assertEqual(token_usage["provider"], "preferred")
         self.assertEqual(token_usage["model"], "model-preferred")
 
-    def test_get_recent_preferred_provider_uses_recent_completion(self):
-        """Helper should return provider for a completion recorded within the allowed window."""
+    def test_get_recent_preferred_config_uses_recent_completion(self):
+        """Helper should return (provider, model) for a fresh completion."""
         PersistentAgentCompletion.objects.create(
             agent=self.agent,
             llm_model="model-preferred",
             llm_provider="preferred",
         )
-        failover_configs = [
-            ("default", "model-default", {}),
-            ("preferred", "model-preferred", {}),
-        ]
 
-        provider = _get_recent_preferred_provider(self.agent, failover_configs)
-        self.assertEqual(provider, "preferred")
+        preferred = _get_recent_preferred_config(self.agent)
+        self.assertEqual(preferred, ("preferred", "model-preferred"))
 
-    def test_get_recent_preferred_provider_ignores_stale_completion(self):
+    def test_get_recent_preferred_config_requires_both_fields(self):
+        """Helper should return None when it cannot determine both provider and model."""
+        PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            llm_provider="preferred",
+        )
+
+        preferred = _get_recent_preferred_config(self.agent)
+        self.assertIsNone(preferred)
+
+    def test_get_recent_preferred_config_ignores_stale_completion(self):
         """Helper should ignore cached providers older than the freshness window."""
         completion = PersistentAgentCompletion.objects.create(
             agent=self.agent,
@@ -182,10 +184,6 @@ class TestEventProcessingLLMSelection(TestCase):
         PersistentAgentCompletion.objects.filter(id=completion.id).update(
             created_at=timezone.now() - timedelta(hours=2),
         )
-        failover_configs = [
-            ("default", "model-default", {}),
-            ("preferred", "model-preferred", {}),
-        ]
 
-        provider = _get_recent_preferred_provider(self.agent, failover_configs)
-        self.assertIsNone(provider)
+        preferred = _get_recent_preferred_config(self.agent)
+        self.assertIsNone(preferred)

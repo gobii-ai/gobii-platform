@@ -287,12 +287,10 @@ class PromptContextBuilderTests(TestCase):
             "provider": "mock-provider",
             "cached_tokens": 0,
         }
-        preferred_provider = "preferred-provider"
-
         with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
              patch('api.agent.core.event_processing.ensure_comms_compacted'), \
              patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
-             patch('api.agent.core.event_processing._get_recent_preferred_provider', return_value=preferred_provider) as mock_helper, \
+             patch('api.agent.core.event_processing._get_recent_preferred_config', return_value=("mock", "mock-model")) as mock_helper, \
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
             from api.agent.core import event_processing as ep
             with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
@@ -300,7 +298,7 @@ class PromptContextBuilderTests(TestCase):
 
         mock_helper.assert_called_once_with(agent=self.agent, failover_configs=[("mock", "mock-model", {})])
         call_kwargs = mock_completion.call_args.kwargs
-        self.assertEqual(call_kwargs["preferred_provider"], preferred_provider)
+        self.assertEqual(call_kwargs["preferred_config"], ("mock", "mock-model"))
 
     def test_completion_record_keeps_model_when_usage_missing(self):
         """PersistentAgentCompletion should store provider/model even if usage isn't provided."""
