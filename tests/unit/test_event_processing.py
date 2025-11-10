@@ -296,7 +296,7 @@ class PromptContextBuilderTests(TestCase):
             with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
                 _run_agent_loop(self.agent, is_first_run=False)
 
-        mock_helper.assert_called_once_with(agent=self.agent, failover_configs=[("mock", "mock-model", {})])
+        mock_helper.assert_called_once_with(agent=self.agent)
         call_kwargs = mock_completion.call_args.kwargs
         self.assertEqual(call_kwargs["preferred_config"], ("mock", "mock-model"))
 
