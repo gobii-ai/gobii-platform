@@ -147,6 +147,27 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(important.get("charter"), "Test prompt context")
         self.assertEqual(important.get("schedule"), "No schedule configured")
 
+        agent_endpoints = important.get("agent_endpoints")
+        self.assertIsInstance(agent_endpoints, list)
+        self.assertTrue(
+            any(entry.get("address") == self.endpoint.address for entry in agent_endpoints)
+        )
+
+        recent_contacts = important.get("recent_contacts")
+        self.assertIsInstance(recent_contacts, list)
+        self.assertTrue(
+            any(entry.get("address") == self.external_endpoint.address for entry in recent_contacts)
+        )
+
+        secrets_section = important.get("secrets")
+        self.assertIsInstance(secrets_section, list)
+
+        webhooks_block = important.get("webhooks", {})
+        self.assertIsInstance(webhooks_block.get("webhook_catalog"), list)
+
+        mcp_block = important.get("mcp_servers", {})
+        self.assertIsInstance(mcp_block.get("mcp_servers_catalog"), list)
+
         critical = prompt_payload.get("critical", {})
         self.assertIn("current_datetime", critical)
 

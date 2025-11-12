@@ -2129,20 +2129,24 @@ def _build_prompt_context(
 
     # Secrets block
     secrets_block = _get_secrets_block(agent)
-    important_group.section_text(
+    important_group.section(
         "secrets",
         secrets_block,
-        weight=2
+        weight=2,
+        shrinker=None,
+        non_shrinkable=True,
     )
+    base_secrets_note = (
+        "ONLY request secure credentials when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
+        "or `spawn_web_task` (classic username/password website login). DO NOT request credentials for MCP tools "
+        "(e.g., Google Sheets, Slack). For MCP tools: call the tool first; if it returns 'action_required' with a "
+        "connect/auth link, surface that link to the user and wait. NEVER ask for user passwords or 2FA codes for "
+        "OAuth‑based services."
+    )
+    secrets_note_text = base_secrets_note if secrets_block else f"No secrets configured. {base_secrets_note}"
     important_group.section_text(
         "secrets_note",
-        (
-            "ONLY request secure credentials when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
-            "or `spawn_web_task` (classic username/password website login). DO NOT request credentials for MCP tools "
-            "(e.g., Google Sheets, Slack). For MCP tools: call the tool first; if it returns 'action_required' with a "
-            "connect/auth link, surface that link to the user and wait. NEVER ask for user passwords or 2FA codes for "
-            "OAuth‑based services."
-        ),
+        secrets_note_text,
         weight=1,
         non_shrinkable=True
     )
@@ -2334,15 +2338,29 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         .order_by("channel", "address")
     )
     if agent_eps:
-        agent_lines = ["As the agent, these are *YOUR* endpoints, i.e. the addresses you are sending messages *FROM*."]
-        for ep in agent_eps:
-            label = " (primary)" if ep.is_primary else ""
-            agent_lines.append(f"- {ep.channel}: {ep.address}{label}")
-        
+        agent_note = (
+            "As the agent, these are *YOUR* endpoints, i.e. the addresses you are sending messages FROM."
+        )
         contacts_group.section_text(
+            "agent_endpoints_note",
+            agent_note,
+            weight=1,
+            non_shrinkable=True,
+        )
+        contacts_group.section(
             "agent_endpoints",
-            "\n".join(agent_lines),
-            weight=1
+            [
+                {
+                    "endpoint_id": str(ep.id),
+                    "channel": ep.channel,
+                    "address": ep.address,
+                    "is_primary": bool(ep.is_primary),
+                }
+                for ep in agent_eps
+            ],
+            weight=1,
+            shrinker=None,
+            non_shrinkable=True,
         )
 
     # User preferred contact endpoint (if configured)
@@ -2357,16 +2375,27 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     )
 
     if user_eps_qs:
-        user_lines = ["These are the *USER'S* endpoints, i.e. the addresses you are sending messages *TO*."]
         pref_id = agent.preferred_contact_endpoint_id if agent.preferred_contact_endpoint else None
-        for ep in user_eps_qs:
-            label = " (preferred)" if ep.id == pref_id else ""
-            user_lines.append(f"- {ep.channel}: {ep.address}{label}")
-        
         contacts_group.section_text(
+            "user_endpoints_note",
+            "These are the USER's endpoints, i.e. the addresses you are sending messages TO.",
+            weight=1,
+            non_shrinkable=True,
+        )
+        contacts_group.section(
             "user_endpoints",
-            "\n".join(user_lines),
-            weight=2  # Higher weight since preferred contact is important
+            [
+                {
+                    "endpoint_id": str(ep.id),
+                    "channel": ep.channel,
+                    "address": ep.address,
+                    "is_preferred": bool(ep.id == pref_id),
+                }
+                for ep in user_eps_qs
+            ],
+            weight=2,
+            shrinker=None,
+            non_shrinkable=True,
         )
 
     # Recent conversation parties (unique endpoints from last MESSAGE_HISTORY_LIMIT messages)
@@ -2378,7 +2407,7 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     span.set_attribute("persistent_agent.recent_messages.count", len(recent_messages))
 
     # Map endpoint -> extra context (e.g., last email subject or message snippet)
-    recent_meta: dict[tuple[str, str], str] = {}
+    recent_meta: dict[tuple[str, str], dict[str, str]] = {}
     for msg in recent_messages:
         if msg.is_outbound and msg.to_endpoint:
             key = (msg.to_endpoint.channel, msg.to_endpoint.address)
@@ -2387,31 +2416,36 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         else:
             continue
 
-        # Prefer earlier (more recent in loop) context only if not already stored
         if key not in recent_meta:
-            meta_str = ""
+            meta: dict[str, str] = {
+                "last_direction": "outbound" if msg.is_outbound else "inbound",
+                "last_timestamp": msg.timestamp.isoformat(),
+            }
             if key[0] == CommsChannel.EMAIL:
                 subject = ""
                 if isinstance(msg.raw_payload, dict):
                     subject = msg.raw_payload.get("subject") or ""
                 if subject:
-                    meta_str = f" (recent subj: {subject[:80]})"
+                    meta["recent_subject"] = subject[:200]
             else:
-                # For SMS or other channels, include a short body preview
-                body_preview = (msg.body or "")[:60].replace("\n", " ")
+                body_preview = (msg.body or "")[:120].replace("\n", " ")
                 if body_preview:
-                    meta_str = f" (recent msg: {body_preview}...)"
-            recent_meta[key] = meta_str
+                    meta["recent_message"] = body_preview
+            recent_meta[key] = meta
 
     if recent_meta:
-        recent_lines = []
+        recent_entries = []
         for ch, addr in sorted(recent_meta.keys()):
-            recent_lines.append(f"- {ch}: {addr}{recent_meta[(ch, addr)]}")
+            entry = {"channel": ch, "address": addr}
+            entry.update(recent_meta[(ch, addr)])
+            recent_entries.append(entry)
         
-        contacts_group.section_text(
+        contacts_group.section(
             "recent_contacts",
-            "\n".join(recent_lines),
-            weight=1
+            recent_entries,
+            weight=1,
+            shrinker=None,
+            non_shrinkable=True,
         )
 
     peer_links = (
@@ -2466,10 +2500,17 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         )
 
     # Add the creator of the agent as a contact explicitly
-    allowed_lines = []
+    allowed_contact_entries: list[dict[str, object]] = []
     if agent.user and agent.user.email:
-        allowed_lines.append("As the creator of this agent, you can always contact the user at and receive messages from:")
-        allowed_lines.append(f"- email: {agent.user.email} (creator)")
+        allowed_contact_entries.append(
+            {
+                "channel": "email",
+                "address": agent.user.email,
+                "label": "creator",
+                "allow_inbound": True,
+                "allow_outbound": True,
+            }
+        )
 
         from api.models import UserPhoneNumber
         owner_phone = UserPhoneNumber.objects.filter(
@@ -2479,7 +2520,15 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
 
         # If the user has a phone number, include it as well
         if owner_phone and owner_phone.phone_number:
-            allowed_lines.append(f"- sms: {owner_phone.phone_number} (creator)")
+            allowed_contact_entries.append(
+                {
+                    "channel": "sms",
+                    "address": owner_phone.phone_number,
+                    "label": "creator",
+                    "allow_inbound": True,
+                    "allow_outbound": True,
+                }
+            )
 
     # Add explicitly allowed contacts from CommsAllowlistEntry
     from api.models import CommsAllowlistEntry
@@ -2491,19 +2540,35 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         .order_by("channel", "address")
     )
     if allowed_contacts:
-        allowed_lines.append("These are the ADDITIONAL ALLOWED CONTACTS that you may communicate with. Inbound means you may receive messages from the contact, outbound means you may send to it. NEVER TRY TO SEND A MESSAGE TO AN ENDPOINT WITHOUT IT BEING MARKED AS OUTBOUND:")
         for entry in allowed_contacts:
-            name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
-            allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str} - (" + ("inbound" if entry.allow_inbound else "") + ("/" if entry.allow_inbound and entry.allow_outbound else "") + ("outbound" if entry.allow_outbound else "") + ")")
+            allowed_contact_entries.append(
+                {
+                    "channel": entry.channel,
+                    "address": entry.address,
+                    "name": getattr(entry, "name", "") or "",
+                    "allow_inbound": entry.allow_inbound,
+                    "allow_outbound": entry.allow_outbound,
+                }
+            )
 
-    allowed_lines.append("You MUST NOT contact anyone not explicitly listed in this section or in recent conversations.")
-    allowed_lines.append("IF YOU NEED TO CONTACT SOMEONE NEW, USE THE 'request_contact_permission' TOOL. IT WILL RETURN A URL. YOU MUST CONTACT THE USER WITH THE URL SO THEY CAN FILL OUT THE DETAILS.")
-    allowed_lines.append("You do not have to message or reply to everyone; you may choose the best contact or contacts for your needs.")
-
-    contacts_group.section_text(
+    contacts_group.section(
         "allowed_contacts",
-        "\n".join(allowed_lines),
-        weight=2  # Higher weight since these are explicitly allowed
+        allowed_contact_entries,
+        weight=2,
+        shrinker=None,
+        non_shrinkable=True,
+    )
+
+    allowed_contacts_note = (
+        "You MUST NOT contact anyone not explicitly listed in this section or in recent conversations. "
+        "If you need a new contact, use the 'request_contact_permission' tool and wait for approval before messaging them. "
+        "You do not have to reach out to everyone listed; choose the contact that best fits your task."
+    )
+    contacts_group.section_text(
+        "allowed_contacts_note",
+        allowed_contacts_note,
+        weight=1,
+        non_shrinkable=True,
     )
 
     # Add the helpful note as a separate section
@@ -2521,12 +2586,19 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         allowed_channels.add(ep.channel)
     
     if allowed_channels:
-        channels_list = sorted(allowed_channels)  # Already strings, no need for .value
-        contacts_group.section_text(
+        channels_list = sorted(allowed_channels)
+        contacts_group.section(
             "allowed_channels",
-            f"IMPORTANT: You can ONLY communicate via these channels: {', '.join(channels_list)}. Do NOT attempt to use any other communication channels. Always include the primary contact endpoint in your messages if one is configured.",
-            weight=3,
-            non_shrinkable=True
+            channels_list,
+            weight=2,
+            shrinker=None,
+            non_shrinkable=True,
+        )
+        contacts_group.section_text(
+            "allowed_channels_note",
+            "IMPORTANT: Only use the channels listed above. Do NOT attempt other communication paths, and always include the primary contact endpoint when applicable.",
+            weight=1,
+            non_shrinkable=True,
         )
 
 
@@ -2537,6 +2609,25 @@ def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None
 
     webhooks_group = important_group.group("webhooks", weight=3)
 
+    catalog_entries = [
+        {
+            "id": str(hook.id),
+            "name": hook.name,
+            "url": hook.url,
+            "last_triggered_at": hook.last_triggered_at.isoformat() if hook.last_triggered_at else None,
+            "last_response_status": hook.last_response_status,
+            "last_error_message": hook.last_error_message or "",
+        }
+        for hook in webhooks
+    ]
+    webhooks_group.section(
+        "webhook_catalog",
+        catalog_entries,
+        weight=2,
+        shrinker=None,
+        non_shrinkable=True,
+    )
+
     if not webhooks:
         webhooks_group.section_text(
             "webhooks_note",
@@ -2546,27 +2637,6 @@ def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None
         )
         return
 
-    lines: list[str] = [
-        "You may trigger ONLY the following outbound webhooks using the `send_webhook_event` tool. "
-        "Craft minimal, accurate JSON payloads tailored to the destination system."
-    ]
-    for hook in webhooks:
-        last_triggered = (
-            hook.last_triggered_at.isoformat() if hook.last_triggered_at else "never"
-        )
-        status_label = (
-            str(hook.last_response_status) if hook.last_response_status is not None else "—"
-        )
-        lines.append(
-            f"- {hook.name} (id={hook.id}) → {hook.url} | last trigger: {last_triggered} | last status: {status_label}"
-        )
-
-    webhooks_group.section_text(
-        "webhook_catalog",
-        "\n".join(lines),
-        weight=2,
-        shrinker="hmt",
-    )
     webhooks_group.section_text(
         "webhook_usage_hint",
         (
@@ -2586,29 +2656,33 @@ def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> N
 
     mcp_group = important_group.group("mcp_servers", weight=3)
 
-    if not servers:
-        mcp_group.section_text(
-            "mcp_servers_catalog",
-            (
-                "No MCP servers are configured for you yet."
-            ),
-            weight=1,
-            non_shrinkable=True,
-        )
-        return
-
-    lines: list[str] = [
-        "These are the MCP servers you have access to. You can access them by calling search_tools with the MCP server name."
+    catalog_entries = [
+        {
+            "name": server.name,
+            "display_name": (server.display_name or "").strip() or server.name,
+            "url": server.url,
+        }
+        for server in servers
     ]
-    for server in servers:
-        display_name = server.display_name.strip() or server.name
-        lines.append(f"- {display_name} (search name: {server.name})")
 
-    mcp_group.section_text(
+    mcp_group.section(
         "mcp_servers_catalog",
-        "\n".join(lines),
+        catalog_entries,
         weight=2,
-        shrinker="hmt",
+        shrinker=None,
+        non_shrinkable=True,
+    )
+
+    note_text = (
+        "These are the MCP servers you can access via the search_tools command."
+        if servers
+        else "No MCP servers are configured for you yet."
+    )
+    mcp_group.section_text(
+        "mcp_servers_note",
+        note_text,
+        weight=1,
+        non_shrinkable=True,
     )
 
 def _add_budget_awareness_sections(
@@ -3503,33 +3577,23 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
             non_shrinkable=True
         )
 
-def _format_secrets(secrets_qs, is_pending: bool) -> list[str]:
-    """Helper to format a queryset of secrets."""
-    secret_lines: list[str] = []
-    current_domain: str | None = None
+def _format_secrets(secrets_qs, status: str) -> list[dict]:
+    """Helper to serialize a queryset of secrets into dicts."""
+    entries: list[dict] = []
     for secret in secrets_qs:
-        # Group by domain pattern
-        if secret.domain_pattern != current_domain:
-            if current_domain is not None:
-                secret_lines.append("")  # blank line between domains
-            secret_lines.append(f"Domain: {secret.domain_pattern}")
-            current_domain = secret.domain_pattern
+        entries.append(
+            {
+                "domain": secret.domain_pattern,
+                "name": secret.name,
+                "description": secret.description or "",
+                "key": secret.key,
+                "status": status,
+            }
+        )
+    return entries
 
-        # Format secret info
-        parts = [f"  - Name: {secret.name}"]
-        if secret.description:
-            parts.append(f"Description: {secret.description}")
-        if is_pending:
-            parts.append("Status: awaiting user input")
-        parts.append(f"Key: {secret.key}")
-        secret_lines.append(", ".join(parts))
-    return secret_lines
-
-def _get_secrets_block(agent: PersistentAgent) -> str:
-    """Return a formatted list of available secrets for this agent.
-    The caller is responsible for adding any surrounding instructional text and for
-    wrapping the section with a `secrets` block via Prompt.section_text().
-    """
+def _get_secrets_block(agent: PersistentAgent) -> list[dict]:
+    """Return structured metadata for available and pending secrets."""
     available_secrets = (
         PersistentAgentSecret.objects.filter(agent=agent, requested=False)
         .order_by('domain_pattern', 'name')
@@ -3539,23 +3603,9 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
         .order_by('domain_pattern', 'name')
     )
 
-    if not available_secrets and not pending_secrets:
-        return "No secrets configured."
-
-    lines: list[str] = []
-
+    entries: list[dict] = []
     if available_secrets:
-        lines.append("These are the secrets available to you:")
-        lines.extend(_format_secrets(available_secrets, is_pending=False))
-
+        entries.extend(_format_secrets(available_secrets, status="available"))
     if pending_secrets:
-        if lines:
-            lines.append("")
-        lines.append(
-            "Pending credential requests (user has not provided these yet; "
-            "if you just requested them, follow up with the user through the "
-            "appropriate communication channel):"
-        )
-        lines.extend(_format_secrets(pending_secrets, is_pending=True))
-
-    return "\n".join(lines)
+        entries.extend(_format_secrets(pending_secrets, status="pending"))
+    return entries
