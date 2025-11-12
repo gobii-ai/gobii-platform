@@ -280,6 +280,50 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("Test Sheets", content)
         self.assertIn("search_tools", content)
 
+    def test_browser_tasks_rendered_as_array(self):
+        """Active browser tasks should render as an ordered array in the prompt."""
+        BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            status=BrowserUseAgentTask.StatusChoices.PENDING,
+            prompt="Check the latest earnings releases.",
+        )
+        BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+            prompt="Capture screenshots for the competitor pricing page.",
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        browser_tasks = payload["variable"]["browser_tasks"]
+
+        self.assertIsInstance(browser_tasks, list)
+        self.assertEqual(len(browser_tasks), 2)
+        self.assertEqual(browser_tasks[0]["prompt"], "Check the latest earnings releases.")
+        self.assertEqual(
+            browser_tasks[1]["status"],
+            BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+        )
+
+    def test_browser_tasks_empty_array_when_no_tasks(self):
+        """Browser tasks array should still be present (empty) when no tasks exist."""
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        browser_tasks = payload["variable"]["browser_tasks"]
+
+        self.assertEqual(browser_tasks, [])
+        self.assertEqual(payload["variable"]["browser_tasks_empty"], "No active browser tasks.")
+
     def test_admin_system_message_is_injected_once(self):
         """Admin-authored system directives should appear in the system prompt and be marked delivered."""
         directive = PersistentAgentSystemMessage.objects.create(

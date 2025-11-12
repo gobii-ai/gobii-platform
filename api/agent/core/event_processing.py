@@ -2674,7 +2674,7 @@ def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> N
     )
 
     note_text = (
-        "These are the MCP servers you can access via the search_tools command."
+        "These are the MCP servers you have access to. Use the search_tools command to connect."
         if servers
         else "No MCP servers are configured for you yet."
     )
@@ -3530,36 +3530,27 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
         )
     else:
         active_tasks = []
-    
 
-    
-    # Add active tasks as individual groups
-    for i, task in enumerate(active_tasks):
-        task_group = tasks_group.group(f"active_browser_task_{i}", weight=3)
-        
-        # Task ID - high priority
-        task_group.section_text(
-            "id",
-            str(task.id),
-            weight=3,
-            non_shrinkable=True
-        )
-        
-        # Task Status - high priority
-        task_group.section_text(
-            "status",
-            task.status,
-            weight=3,
-            non_shrinkable=True
-        )
-        
-        # Task Prompt - medium priority
-        task_group.section_text(
-            "prompt",
-            task.prompt,
-            weight=2,
-            shrinker="hmt"
-        )
+    task_entries: list[dict[str, object]] = []
+    for task in active_tasks:
+        entry: dict[str, object] = {
+            "id": str(task.id),
+            "status": task.status,
+            "prompt": task.prompt or "",
+        }
+        if task.created_at:
+            entry["created_at"] = task.created_at.isoformat()
+        if task.updated_at:
+            entry["updated_at"] = task.updated_at.isoformat()
+        task_entries.append(entry)
+
+    tasks_group.section(
+        "browser_tasks",
+        task_entries,
+        weight=3,
+        shrinker=None,
+        non_shrinkable=True,
+    )
     
     # Add explanatory note
     if active_tasks:
