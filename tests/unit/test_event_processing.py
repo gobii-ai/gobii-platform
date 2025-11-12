@@ -19,11 +19,14 @@ from api.agent.tools.http_request import execute_http_request as _execute_http_r
 from api.agent.tasks.process_events import process_agent_cron_trigger_task, _remove_orphaned_celery_beat_task
 from api.models import (
     BrowserUseAgent,
+    BrowserUseAgentTask,
+    BrowserUseAgentTaskStep,
     MCPServerConfig,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentToolCall,
     PersistentAgentCronTrigger,
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
@@ -76,6 +79,20 @@ class PromptContextBuilderTests(TestCase):
         self.addCleanup(self._print_patch.stop)
         self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
 
+    def _get_history_events(self, history_block):
+        events = history_block.get("events")
+        if isinstance(events, list):
+            return events
+        if isinstance(events, dict):
+            # Backwards compatibility if callers still emit dict-of-events
+            nested = events.get("event")
+            if isinstance(nested, list):
+                return nested
+            if nested:
+                return [nested]
+            return list(events.values())
+        return []
+
     def test_message_metadata_in_prompt(self):
         """Test that message metadata (from, channel) is included in the prompt."""
         # Create a mock event window with one message
@@ -99,20 +116,138 @@ class PromptContextBuilderTests(TestCase):
         
         # Check that the content includes the structured format with message metadata
         content = user_message['content']
+        prompt_payload = json.loads(content)
         
-        # Verify the event block exists and contains message metadata
-        self.assertIn('<event_', content)  # Event sections start with <event_
-        self.assertIn('_message_inbound_email>', content)  # Contains message event type
-        self.assertIn(f'On {self.external_endpoint.channel}, you received a message from {self.external_endpoint.address}:', content)
-        self.assertIn('<body>', content)  # Updated to match current format
-        self.assertIn('Hello agent!', content)
-        self.assertIn('</body>', content)  # Updated to match current format
+        # Verify the unified history event contains the inbound message metadata
+        history_block = prompt_payload.get("variable", {}).get("unified_history", {})
+        self.assertTrue(history_block)
+        events = self._get_history_events(history_block)
+        self.assertIsInstance(events, list)
+
+        expected_timestamp = msg.timestamp.isoformat()
+        found_message = False
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            body = event.get("body") or event.get("content", "")
+            if "Hello agent!" in body:
+                found_message = True
+                self.assertEqual(event.get("channel"), self.external_endpoint.channel)
+                self.assertEqual(event.get("from"), self.external_endpoint.address)
+                self.assertEqual(event.get("direction"), "inbound")
+                self.assertEqual(event.get("timestamp"), expected_timestamp)
+                self.assertEqual(
+                    event.get("type"),
+                    f"message_inbound_{self.external_endpoint.channel.lower()}",
+                )
+                break
+        self.assertTrue(found_message, "Expected inbound message event in unified history")
         
-        # Verify other expected blocks are present
-        self.assertIn('<charter>Test prompt context</charter>', content)
-        self.assertIn('<schedule>No schedule configured</schedule>', content)
-        self.assertIn('<current_datetime>', content)
-        self.assertIn('</current_datetime>', content)
+        important = prompt_payload.get("important", {})
+        self.assertEqual(important.get("charter"), "Test prompt context")
+        self.assertEqual(important.get("schedule"), "No schedule configured")
+
+        agent_endpoints = important.get("agent_endpoints")
+        self.assertIsInstance(agent_endpoints, list)
+        self.assertTrue(
+            any(entry.get("address") == self.endpoint.address for entry in agent_endpoints)
+        )
+
+        recent_contacts = important.get("recent_contacts")
+        self.assertIsInstance(recent_contacts, list)
+        self.assertTrue(
+            any(entry.get("address") == self.external_endpoint.address for entry in recent_contacts)
+        )
+
+        secrets_section = important.get("secrets")
+        self.assertIsInstance(secrets_section, list)
+
+        webhooks_block = important.get("webhooks", {})
+        self.assertIsInstance(webhooks_block.get("webhook_catalog"), list)
+
+        mcp_block = important.get("mcp_servers", {})
+        self.assertIsInstance(mcp_block.get("mcp_servers_catalog"), list)
+
+        critical = prompt_payload.get("critical", {})
+        self.assertIn("current_datetime", critical)
+
+    def test_tool_call_result_remains_structured_json(self):
+        """Tool call result strings containing JSON should stay structured in the prompt."""
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="invoke tool",
+        )
+        tool_result = {"status": "ok", "payload": {"items": [1, 2]}}
+        tool_call = PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="http_request",
+            tool_params={"query": "status"},
+            result=json.dumps(tool_result),
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        history_block = payload.get("variable", {}).get("unified_history", {})
+        self.assertTrue(history_block)
+        events = self._get_history_events(history_block)
+        self.assertIsInstance(events, list)
+
+        expected_timestamp = step.created_at.isoformat()
+        found_tool_event = False
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            result = event.get("result")
+            params = event.get("params")
+            if isinstance(result, dict) and result.get("status") == "ok":
+                found_tool_event = True
+                self.assertEqual(result.get("payload", {}).get("items"), [1, 2])
+                self.assertIsInstance(params, dict)
+                self.assertEqual(params.get("query"), "status")
+                self.assertEqual(event.get("tool"), tool_call.tool_name)
+                self.assertEqual(event.get("timestamp"), expected_timestamp)
+                self.assertEqual(event.get("type"), "tool_call")
+                self.assertNotIn("meta", event)
+                break
+
+        self.assertTrue(found_tool_event, "Expected structured tool call event in unified history")
+
+    def test_browser_task_event_includes_type_and_result(self):
+        """Browser task events should retain type metadata and structured results."""
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="Visit homepage and summarize",
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+        )
+        BrowserUseAgentTaskStep.objects.create(
+            task=task,
+            step_number=1,
+            description="Result",
+            is_result=True,
+            result_value={"summary": "All good"},
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        history_block = payload.get("variable", {}).get("unified_history", {})
+        events = self._get_history_events(history_block)
+
+        matching = next((e for e in events if e.get("task_id") == str(task.id)), None)
+        self.assertIsNotNone(matching, "Expected browser task event")
+        self.assertEqual(matching.get("type"), "browser_task")
+        self.assertEqual(matching.get("status"), BrowserUseAgentTask.StatusChoices.COMPLETED)
+        self.assertEqual(matching.get("result", {}).get("summary"), "All good")
 
     def test_agent_name_in_system_prompt(self):
         """Test that the agent's name is included in the system prompt."""
@@ -144,6 +279,50 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("These are the MCP servers you have access to.", content)
         self.assertIn("Test Sheets", content)
         self.assertIn("search_tools", content)
+
+    def test_browser_tasks_rendered_as_array(self):
+        """Active browser tasks should render as an ordered array in the prompt."""
+        BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            status=BrowserUseAgentTask.StatusChoices.PENDING,
+            prompt="Check the latest earnings releases.",
+        )
+        BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+            prompt="Capture screenshots for the competitor pricing page.",
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        browser_tasks = payload["variable"]["browser_tasks"]
+
+        self.assertIsInstance(browser_tasks, list)
+        self.assertEqual(len(browser_tasks), 2)
+        self.assertEqual(browser_tasks[0]["prompt"], "Check the latest earnings releases.")
+        self.assertEqual(
+            browser_tasks[1]["status"],
+            BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+        )
+
+    def test_browser_tasks_empty_array_when_no_tasks(self):
+        """Browser tasks array should still be present (empty) when no tasks exist."""
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        browser_tasks = payload["variable"]["browser_tasks"]
+
+        self.assertEqual(browser_tasks, [])
+        self.assertEqual(payload["variable"]["browser_tasks_empty"], "No active browser tasks.")
 
     def test_admin_system_message_is_injected_once(self):
         """Admin-authored system directives should appear in the system prompt and be marked delivered."""

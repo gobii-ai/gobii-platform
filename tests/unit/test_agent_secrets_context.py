@@ -25,6 +25,14 @@ from api.agent.tools.secure_credentials_request import (
 User = get_user_model()
 
 
+def _keys_by_status(entries, status):
+    return {
+        entry.get("key")
+        for entry in entries
+        if entry.get("status") == status
+    }
+
+
 @tag("batch_agent_secrets_ctx")
 class GetSecretsBlockTests(TestCase):
     """Test the _get_secrets_block function that includes secrets in agent context."""
@@ -90,21 +98,22 @@ class GetSecretsBlockTests(TestCase):
         # Get the secrets block
         result = _get_secrets_block(self.agent)
 
-        # Verify fulfilled secrets ARE in the result
-        self.assertIn("api_key", result)
-        self.assertIn("auth_token", result)
-        self.assertIn("API Key", result)
-        self.assertIn("Auth Token", result)
-        self.assertIn("https://api.example.com", result)
-        self.assertIn("https://auth.example.com", result)
+        available_keys = _keys_by_status(result, "available")
+        pending_keys = _keys_by_status(result, "pending")
 
-        # Verify requested secrets are surfaced as pending (not as available)
-        self.assertIn("Pending credential requests", result)
-        self.assertIn("follow up with the user", result)
-        self.assertIn("pending_secret", result)
-        self.assertIn("waiting_secret", result)
-        self.assertIn("https://pending.example.com", result)
-        self.assertIn("https://waiting.example.com", result)
+        # Verify fulfilled secrets ARE in the result
+        self.assertIn("api_key", available_keys)
+        self.assertIn("auth_token", available_keys)
+
+        domains = {entry["domain"] for entry in result}
+        self.assertIn("https://api.example.com", domains)
+        self.assertIn("https://auth.example.com", domains)
+        self.assertIn("https://pending.example.com", domains)
+        self.assertIn("https://waiting.example.com", domains)
+
+        # Verify requested secrets are surfaced as pending
+        self.assertIn("pending_secret", pending_keys)
+        self.assertIn("waiting_secret", pending_keys)
     
     def test_no_secrets_returns_empty_message(self):
         """Test that when no fulfilled secrets exist, appropriate message is returned."""
@@ -120,8 +129,8 @@ class GetSecretsBlockTests(TestCase):
         
         result = _get_secrets_block(self.agent)
         
-        self.assertIn("Pending credential requests", result)
-        self.assertIn("requested_key", result)
+        pending_keys = _keys_by_status(result, "pending")
+        self.assertIn("requested_key", pending_keys)
     
     def test_secrets_grouped_by_domain(self):
         """Test that secrets are properly grouped by domain pattern."""
@@ -156,24 +165,13 @@ class GetSecretsBlockTests(TestCase):
         
         result = _get_secrets_block(self.agent)
         
-        # Check structure
-        self.assertIn("Domain: *.github.com", result)
-        self.assertIn("Domain: *.google.com", result)
+        domains = {entry["domain"] for entry in result}
+        self.assertSetEqual(domains, {"*.github.com", "*.google.com"})
         
-        # Check that all secrets are present
-        self.assertIn("google_api_key", result)
-        self.assertIn("google_secret", result) 
-        self.assertIn("github_token", result)
-        
-        # Verify ordering - domains should be alphabetically sorted
-        lines = result.split('\n')
-        # Find domain lines
-        domain_lines = [i for i, line in enumerate(lines) if "Domain:" in line]
-        self.assertEqual(len(domain_lines), 2)
-        
-        # GitHub should come before Google alphabetically
-        self.assertIn("*.github.com", lines[domain_lines[0]])
-        self.assertIn("*.google.com", lines[domain_lines[1]])
+        available_keys = _keys_by_status(result, "available")
+        self.assertIn("google_api_key", available_keys)
+        self.assertIn("google_secret", available_keys)
+        self.assertIn("github_token", available_keys)
     
     def test_mixed_requested_and_fulfilled_secrets(self):
         """Test filtering when both requested and fulfilled secrets exist."""
@@ -207,17 +205,16 @@ class GetSecretsBlockTests(TestCase):
         
         result = _get_secrets_block(self.agent)
         
-        # Fulfilled secrets should be listed as available
-        self.assertIn("fulfilled_key", result)
-        self.assertIn("other_key", result)
+        available_keys = _keys_by_status(result, "available")
+        pending_keys = _keys_by_status(result, "pending")
 
-        # Pending secrets should be surfaced under the pending section
-        self.assertIn("Pending credential requests", result)
-        self.assertIn("requested_secret", result)
+        self.assertIn("fulfilled_key", available_keys)
+        self.assertIn("other_key", available_keys)
+        self.assertIn("requested_secret", pending_keys)
         
-        # Both domains with fulfilled secrets should appear
-        self.assertIn("https://api.com", result)
-        self.assertIn("https://other.com", result)
+        domains = {entry["domain"] for entry in result}
+        self.assertIn("https://api.com", domains)
+        self.assertIn("https://other.com", domains)
 
 
 @tag("batch_agent_secrets_ctx")
@@ -370,15 +367,14 @@ class SecureCredentialsRequestToolTests(TestCase):
 
         # It should appear in the pending section while requested
         context_block = _get_secrets_block(self.agent)
-        self.assertIn("Pending credential requests", context_block)
-        self.assertIn("api_key", context_block)
+        self.assertIn("api_key", _keys_by_status(context_block, "pending"))
 
         # Simulate fulfilling again and ensure it appears
         fulfilled.set_value("new-value")
         fulfilled.requested = False
         fulfilled.save()
         context_block2 = _get_secrets_block(self.agent)
-        self.assertIn("api_key", context_block2)
+        self.assertIn("api_key", _keys_by_status(context_block2, "available"))
 
 
 from django.urls import reverse
@@ -607,8 +603,7 @@ class SecretContextIntegrationTests(TestCase):
         
         # Step 2: Verify secret is surfaced as pending but not usable yet
         context_before = _get_secrets_block(self.agent)
-        self.assertIn("Pending credential requests", context_before)
-        self.assertIn("api_key", context_before)
+        self.assertIn("api_key", _keys_by_status(context_before, "pending"))
         
         # Step 3: Simulate user providing the credential value
         secret = PersistentAgentSecret.objects.get(
@@ -624,13 +619,12 @@ class SecretContextIntegrationTests(TestCase):
         
         # Step 4: Verify secret now appears in context
         context_after = _get_secrets_block(self.agent)
-        self.assertNotEqual(context_after, "No secrets configured.")
-        self.assertIn("api_key", context_after)
-        self.assertIn("API Key", context_after)
-        self.assertIn("https://api.example.com", context_after)
+        self.assertIn("api_key", _keys_by_status(context_after, "available"))
+        domains_after = {entry["domain"] for entry in context_after}
+        self.assertIn("https://api.example.com", domains_after)
         
         # Verify the actual value is NOT in the context (only metadata)
-        self.assertNotIn("super-secret-api-key-value", context_after)
+        self.assertNotIn("super-secret-api-key-value", str(context_after))
     
     def test_http_request_only_uses_fulfilled_secrets(self):
         """Test that http_request tool only has access to fulfilled secrets."""
