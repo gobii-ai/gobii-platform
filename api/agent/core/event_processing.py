@@ -2101,7 +2101,7 @@ def _build_prompt_context(
     # Schedule block
     schedule_str = agent.schedule if agent.schedule else "No schedule configured"
     # Provide the schedule details and a helpful note as separate sections so Prompt can
-    # automatically wrap them with <schedule> and <schedule_note> tags respectively.
+    # emit distinct JSON keys (`schedule`, `schedule_note`) for clarity.
     important_group.section_text(
         "schedule",
         schedule_str,
@@ -2211,6 +2211,17 @@ def _build_prompt_context(
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
 
+    critical_group.section_text(
+        "prompt_format_note",
+        (
+            "All context in this message is structured as minified JSON. "
+            "Keys represent section names and nested objects mirror the prompt layout. "
+            "Treat the string values as normal text and do not emit XML or JSON when responding unless explicitly asked."
+        ),
+        weight=5,
+        non_shrinkable=True,
+    )
+
     if daily_credit_state is None:
         daily_credit_state = _get_agent_daily_credit_state(agent)
     _add_budget_awareness_sections(
@@ -2286,7 +2297,7 @@ def _build_prompt_context(
     # Using print() bypasses the 64KB container log truncation limit that affects logger.info()
     # Container runtimes (Docker/Kubernetes) truncate log messages at 64KB, which cuts off
     # our prompts mid-stream, losing critical debugging information especially the high-weight
-    # sections at the end (</critical>, </important>). Using separate print() calls ensures
+    # sections near the end (critical, important). Using separate print() calls ensures
     # we can see the complete prompt in production logs for debugging agent issues.
     # The BEGIN/END markers make it easy to extract full prompts with grep/awk.
     # See: test_log_message_truncation.py and proof_64kb_truncation.py for evidence
@@ -3474,7 +3485,7 @@ def _format_secrets(secrets_qs, is_pending: bool) -> list[str]:
 def _get_secrets_block(agent: PersistentAgent) -> str:
     """Return a formatted list of available secrets for this agent.
     The caller is responsible for adding any surrounding instructional text and for
-    wrapping the section with <secrets> tags via Prompt.section_text().
+    wrapping the section with a `secrets` block via Prompt.section_text().
     """
     available_secrets = (
         PersistentAgentSecret.objects.filter(agent=agent, requested=False)

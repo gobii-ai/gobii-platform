@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import heapq
+import json
 import math
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -59,6 +61,7 @@ class _Node:
     use_jinja2: bool = False
     children: List["_Node"] = field(default_factory=list)
     text: str = ""
+    rendered_content: str = ""
     tokens: int = 0
     shrunk: bool = False
     non_shrinkable: bool = False
@@ -105,7 +108,7 @@ class _Node:
 class Prompt:
     """
     Tree‑structured prompt builder that globally allocates the token budget.
-    Client usage remains unchanged.
+    Client usage remains unchanged, but `render()` now returns minified JSON.
     """
 
     # ------------------------------------------------------------------ #
@@ -192,6 +195,7 @@ class Prompt:
 
             if n.tokens + overhead <= budget:
                 # Fits unshrunk: just wrap
+                n.rendered_content = n.text
                 n.text = f"<{n.name}>{n.text}</{n.name}>"
                 n.tokens = self._tok(n.text)
                 n.shrunk = False
@@ -209,15 +213,31 @@ class Prompt:
         self._last = leaves
 
         # Assemble nested output with group tags
-        def _assemble(node: _Node) -> str:
-            if node.children:
-                inner = "\n".join(_assemble(c) for c in node.children)
-                if node.name == "root":
-                    return inner  # Skip wrapping the synthetic root
-                return f"<{node.name}>" + inner + f"</{node.name}>"
-            return node.text
+        def _merge(container: OrderedDict, key: str, value: Any) -> None:
+            if key in container:
+                existing = container[key]
+                if isinstance(existing, list):
+                    existing.append(value)
+                else:
+                    container[key] = [existing, value]
+            else:
+                container[key] = value
 
-        output = _assemble(self.root)
+        def _assemble(node: _Node):
+            if node.children:
+                obj = OrderedDict()
+                for child in node.children:
+                    child_payload = _assemble(child)
+                    _merge(obj, child.name, child_payload)
+                return obj
+            return node.rendered_content
+
+        assembled = _assemble(self.root)
+        if isinstance(assembled, OrderedDict):
+            output = json.dumps(assembled, separators=(",", ":"), ensure_ascii=False)
+        else:
+            output = json.dumps({"root": assembled}, separators=(",", ":"), ensure_ascii=False)
+
         self._tokens_after_fitting = self._tok(output)
         return output
 
@@ -257,6 +277,7 @@ class Prompt:
                 pass
 
         n.text = raw
+        n.rendered_content = raw
         n.tokens = self._tok(raw)
 
     def _flat(self, n: _Node) -> List[_Node]:
@@ -350,11 +371,13 @@ class Prompt:
                 current = self._tok(wrapped)
                 if current <= budget:
                     n.text = wrapped
+                    n.rendered_content = shrunk_text
                     n.tokens = current
                     break
                 r *= 0.80
             else:
                 n.text = wrapped
+                n.rendered_content = shrunk_text
                 n.tokens = self._tok(wrapped)
         else:
             self._hard_truncate(n, budget)
@@ -383,12 +406,17 @@ class Prompt:
         dropped = max(0, len(raw_bytes) - len(kept_bytes))
         marker = marker_tpl.format(d=dropped)
 
-        final = f"{tag_open}{marker} {kept_text}{tag_close}"
+        content = f"{marker} {kept_text}".strip()
+        final = f"{tag_open}{content}{tag_close}"
         n.text = final
+        n.rendered_content = content
         n.tokens = self._tok(final)
 
         # Last‑ditch clamp if estimator is off
         if n.tokens > budget:
-            words = final.split()
-            n.text = " ".join(words[:budget])
-            n.tokens = self._tok(n.text)
+            words = content.split()
+            trimmed_content = " ".join(words[:budget])
+            final = f"{tag_open}{trimmed_content}{tag_close}"
+            n.text = final
+            n.rendered_content = trimmed_content
+            n.tokens = self._tok(final)

@@ -99,20 +99,31 @@ class PromptContextBuilderTests(TestCase):
         
         # Check that the content includes the structured format with message metadata
         content = user_message['content']
+        prompt_payload = json.loads(content)
         
-        # Verify the event block exists and contains message metadata
-        self.assertIn('<event_', content)  # Event sections start with <event_
-        self.assertIn('_message_inbound_email>', content)  # Contains message event type
-        self.assertIn(f'On {self.external_endpoint.channel}, you received a message from {self.external_endpoint.address}:', content)
-        self.assertIn('<body>', content)  # Updated to match current format
-        self.assertIn('Hello agent!', content)
-        self.assertIn('</body>', content)  # Updated to match current format
+        # Verify the unified history event contains the inbound message metadata
+        history_block = prompt_payload.get("variable", {}).get("unified_history", {})
+        self.assertTrue(history_block)
+
+        found_message = False
+        for event in history_block.values():
+            header = event.get("header", "")
+            body = event.get("body") or event.get("content", "")
+            if "Hello agent!" in body:
+                found_message = True
+                self.assertIn(
+                    f"On {self.external_endpoint.channel}, you received a message from {self.external_endpoint.address}:",
+                    header,
+                )
+                break
+        self.assertTrue(found_message, "Expected inbound message event in unified history")
         
-        # Verify other expected blocks are present
-        self.assertIn('<charter>Test prompt context</charter>', content)
-        self.assertIn('<schedule>No schedule configured</schedule>', content)
-        self.assertIn('<current_datetime>', content)
-        self.assertIn('</current_datetime>', content)
+        important = prompt_payload.get("important", {})
+        self.assertEqual(important.get("charter"), "Test prompt context")
+        self.assertEqual(important.get("schedule"), "No schedule configured")
+
+        critical = prompt_payload.get("critical", {})
+        self.assertIn("current_datetime", critical)
 
     def test_agent_name_in_system_prompt(self):
         """Test that the agent's name is included in the system prompt."""

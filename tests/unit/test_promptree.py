@@ -1,3 +1,4 @@
+import json
 import random
 import string
 from django.test import TestCase, tag
@@ -84,8 +85,7 @@ class PromptShrinkingTests(TestCase):
         p3.section_text("huge", huge, shrinker="hmt")
         result = p3.render(5)
         
-        # With XML wrapping overhead, minimum is around 8 tokens
-        # (e.g., "<huge>BYTES TRUNCATED</huge>" ≈ 4 tokens + content)
+        # Even with JSON wrapper + marker overhead, result stays tiny
         self.assertLessEqual(p3._tok(result), 10)
 
     def test_nested_groups_builder_api(self):
@@ -206,11 +206,11 @@ class PromptTokenCountingTests(TestCase):
         tokens_before = prompt.get_tokens_before_fitting()
         tokens_after = prompt.get_tokens_after_fitting()
         
-        # Before fitting should be the full count (around 80 tokens for content + tags)
+        # Before fitting should be the full count (around 80 tokens for content + wrappers)
         self.assertGreater(tokens_before, budget)
         
         # After fitting should be within the budget (or close to it)
-        self.assertLessEqual(tokens_after, budget + 5)  # Allow some margin for XML tags
+        self.assertLessEqual(tokens_after, budget + 5)  # Allow some margin for wrapper overhead
         
         # Before should be greater than after
         self.assertGreater(tokens_before, tokens_after)
@@ -234,8 +234,8 @@ class PromptTokenCountingTests(TestCase):
         tokens_before = prompt.get_tokens_before_fitting()
         tokens_after = prompt.get_tokens_after_fitting()
         
-        # Token count may differ slightly due to XML wrapping overhead calculation
-        # In this case: 5 tokens before (including XML overhead) vs 4 tokens after (actual content)
+        # Token count may differ slightly due to wrapper overhead calculation
+        # In this case: 5 tokens before (including wrapper overhead) vs 4 tokens after (actual content)
         self.assertLessEqual(abs(tokens_before - tokens_after), 1)
         self.assertLess(tokens_after, budget)
 
@@ -251,8 +251,9 @@ class PromptRenderingTests(TestCase):
         p.section_text("question", "How are you?")
         
         result = p.render(100)
-        self.assertIn("Hello", result)
-        self.assertIn("How are you?", result)
+        payload = json.loads(result)
+        self.assertEqual(payload["greeting"], "Hello")
+        self.assertEqual(payload["question"], "How are you?")
 
     def test_context_variable_substitution(self):
         """Test that context variables are properly substituted."""
@@ -261,8 +262,9 @@ class PromptRenderingTests(TestCase):
         p.section("info", lambda ctx: f"You have {ctx['count']} messages")
         
         result = p.render(100, name="Alice", count=5)
-        self.assertIn("Hello Alice", result)
-        self.assertIn("You have 5 messages", result)
+        payload = json.loads(result)
+        self.assertEqual(payload["greeting"], "Hello Alice")
+        self.assertEqual(payload["info"], "You have 5 messages")
 
     def test_weight_based_proportional_distribution(self):
         """Test that weights affect token distribution proportionally."""
@@ -290,6 +292,12 @@ class PromptRenderingTests(TestCase):
         p.section_text("template", template_text)
         
         result = p.render(100, name="Bob", count=3)
+        payload = json.loads(result)
+        template_value = payload["template"]
+        if template_value != "Hello Bob, you have 3 items":
+            self.assertEqual(template_value, template_text)
+        else:
+            self.assertEqual(template_value, "Hello Bob, you have 3 items")
         
         # Should work with or without Jinja2 installed
         # If Jinja2 is available, templates should be rendered
@@ -350,7 +358,7 @@ class PromptUnshrinkableTests(TestCase):
         
         # Total should be close to budget
         tokens_after = prompt.get_tokens_after_fitting()
-        self.assertLessEqual(tokens_after, budget + 5)  # Allow margin for XML tags
+        self.assertLessEqual(tokens_after, budget + 5)  # Allow margin for wrapper overhead
 
     def test_unshrinkable_sections_exhaust_budget(self):
         """Test behavior when unshrinkable sections exceed the available budget."""
@@ -392,13 +400,16 @@ class PromptUnshrinkableTests(TestCase):
         
         budget = 20  # Budget that allows critical + some of the others
         result = prompt.render(budget)
+        payload = json.loads(result)
         
         # Critical should be preserved
-        self.assertIn("critical data", result)
+        self.assertIn("critical data", payload["critical"])
         
-        # Both shrinkable sections should be present (check for section tags)
-        self.assertIn("<high_weight>", result)
-        self.assertIn("<low_weight>", result)
+        # Both shrinkable sections should be present
+        self.assertIn("high_weight", payload)
+        self.assertIn("low_weight", payload)
+        self.assertIsInstance(payload["high_weight"], str)
+        self.assertIsInstance(payload["low_weight"], str)
         
         # Should contain truncation markers due to shrinking
         self.assertIn("BYTES TRUNCATED", result)
