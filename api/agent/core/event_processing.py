@@ -856,6 +856,36 @@ def _ensure_credit_for_tool(
             pass
 
     if not _has_sufficient_daily_credit(daily_state, cost):
+        if not daily_state.get("hard_limit_warning_logged"):
+            daily_state["hard_limit_warning_logged"] = True
+            try:
+                analytics_props: dict[str, Any] = {
+                    "agent_id": str(agent.id),
+                    "agent_name": agent.name,
+                    "tool_name": tool_name,
+                }
+                if hard_limit is not None:
+                    analytics_props["hard_limit"] = str(hard_limit)
+                used_value = daily_state.get("used")
+                if used_value is not None:
+                    analytics_props["credits_used_today"] = str(used_value)
+                if hard_remaining is not None:
+                    analytics_props["hard_limit_remaining"] = str(hard_remaining)
+                props_with_org = Analytics.with_org_properties(
+                    analytics_props,
+                    organization=getattr(agent, "organization", None),
+                )
+                Analytics.track_event(
+                    user_id=owner_user.id,
+                    event=AnalyticsEvent.PERSISTENT_AGENT_HARD_LIMIT_EXCEEDED,
+                    source=AnalyticsSource.AGENT,
+                    properties=props_with_org,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to emit analytics for agent %s hard limit exceedance",
+                    agent.id,
+                )
         limit_display = hard_limit
         used_display = daily_state.get("used")
         msg_desc = (

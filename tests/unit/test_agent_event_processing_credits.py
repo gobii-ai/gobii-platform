@@ -467,6 +467,44 @@ class PersistentAgentToolCreditTests(TestCase):
         )
         span.add_event.assert_any_call("Tool skipped - daily credit limit reached")
 
+    @patch("api.agent.core.event_processing.Analytics.track_event")
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
+    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=Decimal("5"))
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.5"))
+    def test_mid_loop_daily_limit_blocks_tool_emits_analytics(
+        self,
+        mock_cost,
+        _mock_available,
+        mock_consume,
+        mock_track_event,
+    ):
+        span = MagicMock()
+        self.agent.daily_credit_limit = 1
+        self.agent.save(update_fields=["daily_credit_limit"])
+        with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
+            PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Usage to hit limit",
+                credits_cost=Decimal("2.0"),
+            )
+
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
+
+        self.assertFalse(result)
+        mock_consume.assert_not_called()
+        events = [
+            call.kwargs
+            for call in mock_track_event.call_args_list
+        ]
+        hard_limit_call = next(
+            (kwargs for kwargs in events if kwargs.get("event") == AnalyticsEvent.PERSISTENT_AGENT_HARD_LIMIT_EXCEEDED),
+            None,
+        )
+        self.assertIsNotNone(hard_limit_call, "Expected hard limit analytics event to be emitted")
+        self.assertEqual(hard_limit_call["source"], AnalyticsSource.AGENT)
+        self.assertEqual(hard_limit_call["properties"].get("agent_id"), str(self.agent.id))
+
     def test_compute_burn_rate_no_data_returns_zero(self):
         metrics = _compute_burn_rate(self.agent, window_minutes=60)
         self.assertEqual(metrics["burn_rate_per_hour"], Decimal("0"))
