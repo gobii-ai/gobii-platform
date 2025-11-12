@@ -504,6 +504,9 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertIsNotNone(hard_limit_call, "Expected hard limit analytics event to be emitted")
         self.assertEqual(hard_limit_call["source"], AnalyticsSource.AGENT)
         self.assertEqual(hard_limit_call["properties"].get("agent_id"), str(self.agent.id))
+        self.assertEqual(hard_limit_call["properties"].get("hard_limit"), '2.00')
+        self.assertEqual(hard_limit_call["properties"].get("credits_used_today"), '2.0')
+        self.assertEqual(hard_limit_call["properties"].get("hard_limit_remaining"), '0.00')
 
     def test_compute_burn_rate_no_data_returns_zero(self):
         metrics = _compute_burn_rate(self.agent, window_minutes=60)
