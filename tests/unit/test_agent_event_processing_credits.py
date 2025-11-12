@@ -505,7 +505,9 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(hard_limit_call["source"], AnalyticsSource.AGENT)
         self.assertEqual(hard_limit_call["properties"].get("agent_id"), str(self.agent.id))
         self.assertEqual(hard_limit_call["properties"].get("hard_limit"), '2.00')
-        self.assertEqual(hard_limit_call["properties"].get("credits_used_today"), '2.0')
+        credits_used_today = hard_limit_call["properties"].get("credits_used_today")
+        self.assertIsNotNone(credits_used_today, "credits_used_today should be included in analytics payload")
+        self.assertEqual(Decimal(credits_used_today), Decimal("2.0"))
         self.assertEqual(hard_limit_call["properties"].get("hard_limit_remaining"), '0.00')
 
     def test_compute_burn_rate_no_data_returns_zero(self):
