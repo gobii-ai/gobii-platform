@@ -3220,14 +3220,18 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             }
             if tc.result:
                 components["result"] = _maybe_parse_json_value(tc.result)
-            
-            structured_events.append((s.created_at, "tool_call", components))
+            event_type = "tool_call"
+            components["type"] = event_type
+
+            structured_events.append((s.created_at, event_type, components))
         except ObjectDoesNotExist:
             components = {
                 "timestamp": s.created_at.isoformat(),
                 "description": s.description or "No description",
             }
-            structured_events.append((s.created_at, "step_description", components))
+            event_type = "step_description"
+            components["type"] = event_type
+            structured_events.append((s.created_at, event_type, components))
 
     # format messages
     for m in messages:
@@ -3291,13 +3295,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             else:
                 components["content"] = body if body else "(no content)"
 
+        components["type"] = event_type
         structured_events.append((m.timestamp, event_type, components))
 
     # Include most recent completed browser tasks as structured events
     for t in completed_tasks:
         components = {
             "timestamp": t.updated_at.isoformat(),
-            "task_id": t.id,
+            "task_id": str(t.id),
             "status": t.status,
             "prompt": t.prompt,
         }
@@ -3306,11 +3311,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         if result_step and result_step.result_value:
             components["result"] = result_step.result_value
         
-        structured_events.append((t.updated_at, "browser_task", components))
+        event_type = "browser_task"
+        components["type"] = event_type
+        structured_events.append((t.updated_at, event_type, components))
 
     # Create structured promptree groups for each event
     if structured_events:
         structured_events.sort(key=lambda e: e[0])  # chronological order
+        events_group = history_group.group("events", weight=3, as_list=True)
 
         # Pre‑compute constants for exponential decay
         now = structured_events[-1][0]
@@ -3332,6 +3340,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         # Component weights within each event
         COMPONENT_WEIGHTS = {
             "timestamp": 3,   # High priority - ordering context
+            "type": 3,        # High priority - event type for downstream routing
             "tool": 3,        # High priority - which tool executed
             "params": 1,      # Low priority - can be shrunk aggressively
             "result": 1,      # Low priority - can be shrunk aggressively
@@ -3358,7 +3367,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             event_weight = max(1, math.ceil(base_weight * recency_multiplier(timestamp)))
 
             # Create event group
-            event_group = history_group.group(event_name, weight=event_weight)
+            event_group = events_group.group(event_name, weight=event_weight)
 
             # Add components as subsections within the event group
             for component_name, component_content in components.items():

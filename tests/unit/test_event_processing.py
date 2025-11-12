@@ -19,6 +19,8 @@ from api.agent.tools.http_request import execute_http_request as _execute_http_r
 from api.agent.tasks.process_events import process_agent_cron_trigger_task, _remove_orphaned_celery_beat_task
 from api.models import (
     BrowserUseAgent,
+    BrowserUseAgentTask,
+    BrowserUseAgentTaskStep,
     MCPServerConfig,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -77,17 +79,19 @@ class PromptContextBuilderTests(TestCase):
         self.addCleanup(self._print_patch.stop)
         self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
 
-    def _iter_history_nodes(self, node):
-        if isinstance(node, dict):
-            for value in node.values():
-                if isinstance(value, list):
-                    for item in value:
-                        yield item
-                else:
-                    yield value
-        elif isinstance(node, list):
-            for item in node:
-                yield item
+    def _get_history_events(self, history_block):
+        events = history_block.get("events")
+        if isinstance(events, list):
+            return events
+        if isinstance(events, dict):
+            # Backwards compatibility if callers still emit dict-of-events
+            nested = events.get("event")
+            if isinstance(nested, list):
+                return nested
+            if nested:
+                return [nested]
+            return list(events.values())
+        return []
 
     def test_message_metadata_in_prompt(self):
         """Test that message metadata (from, channel) is included in the prompt."""
@@ -117,10 +121,12 @@ class PromptContextBuilderTests(TestCase):
         # Verify the unified history event contains the inbound message metadata
         history_block = prompt_payload.get("variable", {}).get("unified_history", {})
         self.assertTrue(history_block)
+        events = self._get_history_events(history_block)
+        self.assertIsInstance(events, list)
 
         expected_timestamp = msg.timestamp.isoformat()
         found_message = False
-        for event in self._iter_history_nodes(history_block):
+        for event in events:
             if not isinstance(event, dict):
                 continue
             body = event.get("body") or event.get("content", "")
@@ -130,6 +136,10 @@ class PromptContextBuilderTests(TestCase):
                 self.assertEqual(event.get("from"), self.external_endpoint.address)
                 self.assertEqual(event.get("direction"), "inbound")
                 self.assertEqual(event.get("timestamp"), expected_timestamp)
+                self.assertEqual(
+                    event.get("type"),
+                    f"message_inbound_{self.external_endpoint.channel.lower()}",
+                )
                 break
         self.assertTrue(found_message, "Expected inbound message event in unified history")
         
@@ -163,10 +173,12 @@ class PromptContextBuilderTests(TestCase):
         payload = json.loads(user_message['content'])
         history_block = payload.get("variable", {}).get("unified_history", {})
         self.assertTrue(history_block)
+        events = self._get_history_events(history_block)
+        self.assertIsInstance(events, list)
 
         expected_timestamp = step.created_at.isoformat()
         found_tool_event = False
-        for event in self._iter_history_nodes(history_block):
+        for event in events:
             if not isinstance(event, dict):
                 continue
             result = event.get("result")
@@ -178,10 +190,43 @@ class PromptContextBuilderTests(TestCase):
                 self.assertEqual(params.get("query"), "status")
                 self.assertEqual(event.get("tool"), tool_call.tool_name)
                 self.assertEqual(event.get("timestamp"), expected_timestamp)
+                self.assertEqual(event.get("type"), "tool_call")
                 self.assertNotIn("meta", event)
                 break
 
         self.assertTrue(found_tool_event, "Expected structured tool call event in unified history")
+
+    def test_browser_task_event_includes_type_and_result(self):
+        """Browser task events should retain type metadata and structured results."""
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="Visit homepage and summarize",
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+        )
+        BrowserUseAgentTaskStep.objects.create(
+            task=task,
+            step_number=1,
+            description="Result",
+            is_result=True,
+            result_value={"summary": "All good"},
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        history_block = payload.get("variable", {}).get("unified_history", {})
+        events = self._get_history_events(history_block)
+
+        matching = next((e for e in events if e.get("task_id") == str(task.id)), None)
+        self.assertIsNotNone(matching, "Expected browser task event")
+        self.assertEqual(matching.get("type"), "browser_task")
+        self.assertEqual(matching.get("status"), BrowserUseAgentTask.StatusChoices.COMPLETED)
+        self.assertEqual(matching.get("result", {}).get("summary"), "All good")
 
     def test_agent_name_in_system_prompt(self):
         """Test that the agent's name is included in the system prompt."""

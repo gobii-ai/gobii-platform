@@ -66,11 +66,12 @@ class _Node:
     shrunk: bool = False
     non_shrinkable: bool = False
     value_is_json: bool = False
+    render_as_list: bool = False
     _prompt: Optional["Prompt"] = None  # Reference to parent prompt for accessing shrinkers
     
-    def group(self, name: str, *, weight: int = 1) -> "_Node":
+    def group(self, name: str, *, weight: int = 1, as_list: bool = False) -> "_Node":
         """Create a sub-group within this node."""
-        child = _Node(name, weight, _prompt=self._prompt)
+        child = _Node(name, weight, _prompt=self._prompt, render_as_list=as_list)
         self.children.append(child)
         return child
     
@@ -133,8 +134,8 @@ class Prompt:
         self._tokens_after_fitting: int = 0
 
     # builder shortcuts ---------------------------------------------------
-    def group(self, name: str, *, weight: int = 1) -> _Node:
-        child = _Node(name, weight, _prompt=self)
+    def group(self, name: str, *, weight: int = 1, as_list: bool = False) -> _Node:
+        child = _Node(name, weight, _prompt=self, render_as_list=as_list)
         self.root.children.append(child)
         return child
 
@@ -225,6 +226,8 @@ class Prompt:
 
         def _assemble(node: _Node):
             if node.children:
+                if node.render_as_list:
+                    return [_assemble(child) for child in node.children]
                 obj = OrderedDict()
                 for child in node.children:
                     child_payload = _assemble(child)
