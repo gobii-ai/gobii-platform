@@ -123,7 +123,7 @@ class PromptContextBuilderTests(TestCase):
         system_message = next((m for m in context if m['role'] == 'system'), None)
 
         self.assertIsNotNone(system_message)
-        self.assertIn(f"You are a persistent AI agent named '{self.agent.name}'.", system_message['content'])
+        self.assertIn(f"Your name is '{self.agent.name}'.", system_message['content'])
 
     def test_mcp_servers_listed_in_prompt(self):
         """Accessible MCP servers should be enumerated in the prompt context."""
