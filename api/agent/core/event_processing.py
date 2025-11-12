@@ -3214,7 +3214,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             tc = s.tool_call
 
             components = {
-                "meta": f"[{s.created_at.isoformat()}] Tool {tc.tool_name} called.",
+                "timestamp": s.created_at.isoformat(),
+                "tool": tc.tool_name,
                 "params": _maybe_parse_json_value(tc.tool_params),
             }
             if tc.result:
@@ -3223,7 +3224,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
             components = {
-                "description": f"[{s.created_at.isoformat()}] {s.description or 'No description'}"
+                "timestamp": s.created_at.isoformat(),
+                "description": s.description or "No description",
             }
             structured_events.append((s.created_at, "step_description", components))
 
@@ -3236,32 +3238,32 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         channel = m.from_endpoint.channel
         body = m.body or ""
         event_prefix = f"message_{'outbound' if m.is_outbound else 'inbound'}"
+        base_components = {
+            "timestamp": m.timestamp.isoformat(),
+            "channel": channel,
+            "direction": "outbound" if m.is_outbound else "inbound",
+        }
+        from_addr = m.from_endpoint.address
+        to_addr = m.to_endpoint.address if m.to_endpoint else None
 
         if m.conversation and getattr(m.conversation, "is_peer_dm", False):
             peer_name = getattr(m.peer_agent, "name", "linked agent")
-            if m.is_outbound:
-                header = (
-                    f"[{m.timestamp.isoformat()}] Peer DM sent to {peer_name}:"
-                )
-            else:
-                header = (
-                    f"[{m.timestamp.isoformat()}] Peer DM received from {peer_name}:"
-                )
             event_type = f"{event_prefix}_peer_dm"
-            components = {
-                "header": header,
-                "content": body if body else "(no content)",
-            }
+            components = dict(base_components)
+            components["channel"] = "peer_dm"
+            components["peer_name"] = peer_name
+            if from_addr and not components.get("from"):
+                components["from"] = from_addr
+            if to_addr and not components.get("to"):
+                components["to"] = to_addr
+            components["content"] = body if body else "(no content)"
         else:
-            from_addr = m.from_endpoint.address
-            if m.is_outbound:
-                to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
-                header = f"[{m.timestamp.isoformat()}] On {channel}, you sent a message to {to_addr}:"
-            else:
-                header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {from_addr}:"
-
             event_type = f"{event_prefix}_{channel.lower()}"
-            components = {"header": header}
+            components = dict(base_components)
+            if from_addr:
+                components["from"] = from_addr
+            if to_addr:
+                components["to"] = to_addr
 
             # Handle email messages with structured components
             if channel == CommsChannel.EMAIL:
@@ -3294,7 +3296,10 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     # Include most recent completed browser tasks as structured events
     for t in completed_tasks:
         components = {
-            "meta": f"[{t.updated_at.isoformat()}] Browser task (id={t.id}) completed with status '{t.status}': {t.prompt}"
+            "timestamp": t.updated_at.isoformat(),
+            "task_id": t.id,
+            "status": t.status,
+            "prompt": t.prompt,
         }
         result_steps = getattr(t, "result_steps_prefetched", None)
         result_step = result_steps[0] if result_steps else None
@@ -3326,14 +3331,22 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
         # Component weights within each event
         COMPONENT_WEIGHTS = {
-            "meta": 3,        # High priority - always want to see what happened
+            "timestamp": 3,   # High priority - ordering context
+            "tool": 3,        # High priority - which tool executed
             "params": 1,      # Low priority - can be shrunk aggressively
             "result": 1,      # Low priority - can be shrunk aggressively
+            "direction": 2,   # Medium priority - inbound vs outbound
+            "channel": 2,     # Medium priority - routing info
+            "from": 3,        # High priority - counterparty information
+            "to": 3,          # High priority - routing information
+            "peer_name": 2,   # Medium priority - DM counterpart
             "content": 2,     # Medium priority for message content (SMS, etc.)
             "description": 2, # Medium priority for step descriptions
-            "header": 3,      # High priority - message routing info
             "subject": 2,     # Medium priority - email subject
             "body": 1,        # Low priority - email body (can be long and shrunk)
+            "task_id": 3,     # High priority - reference to browser task
+            "status": 3,      # High priority - task outcome
+            "prompt": 1,      # Low priority - browser task prompt (can be long)
         }
 
         for idx, (timestamp, event_type, components) in enumerate(structured_events):
@@ -3353,11 +3366,11 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 
                 # Apply HMT shrinking to bulky content
                 shrinker = None
-                if (
-                    component_name in ("params", "result", "body") or
-                    (component_name == "content" and len(component_content) > 250)
-                ):
+                if component_name in ("params", "result", "body", "prompt"):
                     shrinker = "hmt"
+                elif component_name in ("content", "description"):
+                    if isinstance(component_content, str) and len(component_content) > 250:
+                        shrinker = "hmt"
 
                 event_group.section_text(
                     component_name,

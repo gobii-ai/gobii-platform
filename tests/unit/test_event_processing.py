@@ -118,18 +118,18 @@ class PromptContextBuilderTests(TestCase):
         history_block = prompt_payload.get("variable", {}).get("unified_history", {})
         self.assertTrue(history_block)
 
+        expected_timestamp = msg.timestamp.isoformat()
         found_message = False
         for event in self._iter_history_nodes(history_block):
             if not isinstance(event, dict):
                 continue
-            header = event.get("header", "")
             body = event.get("body") or event.get("content", "")
             if "Hello agent!" in body:
                 found_message = True
-                self.assertIn(
-                    f"On {self.external_endpoint.channel}, you received a message from {self.external_endpoint.address}:",
-                    header,
-                )
+                self.assertEqual(event.get("channel"), self.external_endpoint.channel)
+                self.assertEqual(event.get("from"), self.external_endpoint.address)
+                self.assertEqual(event.get("direction"), "inbound")
+                self.assertEqual(event.get("timestamp"), expected_timestamp)
                 break
         self.assertTrue(found_message, "Expected inbound message event in unified history")
         
@@ -147,7 +147,7 @@ class PromptContextBuilderTests(TestCase):
             description="invoke tool",
         )
         tool_result = {"status": "ok", "payload": {"items": [1, 2]}}
-        PersistentAgentToolCall.objects.create(
+        tool_call = PersistentAgentToolCall.objects.create(
             step=step,
             tool_name="http_request",
             tool_params={"query": "status"},
@@ -164,6 +164,7 @@ class PromptContextBuilderTests(TestCase):
         history_block = payload.get("variable", {}).get("unified_history", {})
         self.assertTrue(history_block)
 
+        expected_timestamp = step.created_at.isoformat()
         found_tool_event = False
         for event in self._iter_history_nodes(history_block):
             if not isinstance(event, dict):
@@ -175,6 +176,9 @@ class PromptContextBuilderTests(TestCase):
                 self.assertEqual(result.get("payload", {}).get("items"), [1, 2])
                 self.assertIsInstance(params, dict)
                 self.assertEqual(params.get("query"), "status")
+                self.assertEqual(event.get("tool"), tool_call.tool_name)
+                self.assertEqual(event.get("timestamp"), expected_timestamp)
+                self.assertNotIn("meta", event)
                 break
 
         self.assertTrue(found_tool_event, "Expected structured tool call event in unified history")
