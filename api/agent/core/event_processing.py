@@ -3194,7 +3194,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
             components = {
                 "meta": f"[{s.created_at.isoformat()}] Tool {tc.tool_name} called.",
-                "params": json.dumps(tc.tool_params)
+                "params": tc.tool_params,
             }
             if tc.result:
                 components["result"] = str(tc.result)
@@ -3278,7 +3278,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         result_steps = getattr(t, "result_steps_prefetched", None)
         result_step = result_steps[0] if result_steps else None
         if result_step and result_step.result_value:
-            components["result"] = json.dumps(result_step.result_value)
+            components["result"] = result_step.result_value
         
         structured_events.append((t.updated_at, "browser_task", components))
 

@@ -105,8 +105,22 @@ class PromptContextBuilderTests(TestCase):
         history_block = prompt_payload.get("variable", {}).get("unified_history", {})
         self.assertTrue(history_block)
 
+        def iter_values(node):
+            if isinstance(node, dict):
+                for value in node.values():
+                    if isinstance(value, list):
+                        for item in value:
+                            yield item
+                    else:
+                        yield value
+            elif isinstance(node, list):
+                for item in node:
+                    yield item
+
         found_message = False
-        for event in history_block.values():
+        for event in iter_values(history_block):
+            if not isinstance(event, dict):
+                continue
             header = event.get("header", "")
             body = event.get("body") or event.get("content", "")
             if "Hello agent!" in body:
