@@ -24,6 +24,7 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentToolCall,
     PersistentAgentCronTrigger,
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
@@ -76,6 +77,18 @@ class PromptContextBuilderTests(TestCase):
         self.addCleanup(self._print_patch.stop)
         self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
 
+    def _iter_history_nodes(self, node):
+        if isinstance(node, dict):
+            for value in node.values():
+                if isinstance(value, list):
+                    for item in value:
+                        yield item
+                else:
+                    yield value
+        elif isinstance(node, list):
+            for item in node:
+                yield item
+
     def test_message_metadata_in_prompt(self):
         """Test that message metadata (from, channel) is included in the prompt."""
         # Create a mock event window with one message
@@ -105,20 +118,8 @@ class PromptContextBuilderTests(TestCase):
         history_block = prompt_payload.get("variable", {}).get("unified_history", {})
         self.assertTrue(history_block)
 
-        def iter_values(node):
-            if isinstance(node, dict):
-                for value in node.values():
-                    if isinstance(value, list):
-                        for item in value:
-                            yield item
-                    else:
-                        yield value
-            elif isinstance(node, list):
-                for item in node:
-                    yield item
-
         found_message = False
-        for event in iter_values(history_block):
+        for event in self._iter_history_nodes(history_block):
             if not isinstance(event, dict):
                 continue
             header = event.get("header", "")
@@ -138,6 +139,45 @@ class PromptContextBuilderTests(TestCase):
 
         critical = prompt_payload.get("critical", {})
         self.assertIn("current_datetime", critical)
+
+    def test_tool_call_result_remains_structured_json(self):
+        """Tool call result strings containing JSON should stay structured in the prompt."""
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="invoke tool",
+        )
+        tool_result = {"status": "ok", "payload": {"items": [1, 2]}}
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="http_request",
+            tool_params={"query": "status"},
+            result=json.dumps(tool_result),
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        history_block = payload.get("variable", {}).get("unified_history", {})
+        self.assertTrue(history_block)
+
+        found_tool_event = False
+        for event in self._iter_history_nodes(history_block):
+            if not isinstance(event, dict):
+                continue
+            result = event.get("result")
+            params = event.get("params")
+            if isinstance(result, dict) and result.get("status") == "ok":
+                found_tool_event = True
+                self.assertEqual(result.get("payload", {}).get("items"), [1, 2])
+                self.assertIsInstance(params, dict)
+                self.assertEqual(params.get("query"), "status")
+                break
+
+        self.assertTrue(found_tool_event, "Expected structured tool call event in unified history")
 
     def test_agent_name_in_system_prompt(self):
         """Test that the agent's name is included in the system prompt."""

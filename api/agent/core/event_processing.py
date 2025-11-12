@@ -3095,6 +3095,27 @@ def _get_sms_prompt_addendum(agent: PersistentAgent) -> str:
            """)
     return ""
 
+
+def _maybe_parse_json_value(value: Any) -> Any:
+    """
+    Convert JSON-looking strings into structured data while leaving other values untouched.
+    Keeps promptree output types stable when tools already emit JSON.
+    """
+    if value is None or isinstance(value, (dict, list, int, float, bool)):
+        return value
+    if not isinstance(value, str):
+        return value
+
+    trimmed = value.strip()
+    if not trimmed or trimmed[0] not in ('{', '[', '"'):
+        return value
+
+    try:
+        return json.loads(trimmed)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return value
+
+
 def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -3194,10 +3215,10 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
             components = {
                 "meta": f"[{s.created_at.isoformat()}] Tool {tc.tool_name} called.",
-                "params": tc.tool_params,
+                "params": _maybe_parse_json_value(tc.tool_params),
             }
             if tc.result:
-                components["result"] = str(tc.result)
+                components["result"] = _maybe_parse_json_value(tc.result)
             
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
