@@ -89,7 +89,7 @@ def init_tracing(service_name: GobiiService) -> None:
     """
     global _tracer_provider
     
-    logger.info(f"OpenTelemetry: Initializing OTEL tracer for {service_name.value}")
+    logger.debug(f"OpenTelemetry: Initializing OTEL tracer for {service_name.value}")
 
     # ────────── Decide whether to enable tracing ──────────
     release_env = os.getenv("GOBII_RELEASE_ENV", "local").lower()
@@ -101,13 +101,13 @@ def init_tracing(service_name: GobiiService) -> None:
 
     # 1.  If the developer explicitly set a falsy flag, always disable.
     if user_flag in falsy:
-        logger.info("OpenTelemetry: Tracing explicitly disabled via GOBII_ENABLE_TRACING env var – skipping initialization")
+        logger.debug("OpenTelemetry: Tracing explicitly disabled via GOBII_ENABLE_TRACING env var – skipping initialization")
         return
 
     # 2.  If we are in a *local* environment (default during dev/tests) and the
     #     user did *not* explicitly opt-in with a truthy flag, disable tracing.
     if release_env == "local" and user_flag not in truthy:
-        logger.info("OpenTelemetry: Local environment detected with no explicit opt-in – tracing disabled")
+        logger.debug("OpenTelemetry: Local environment detected with no explicit opt-in – tracing disabled")
         return
 
     # Otherwise: proceed with normal initialization (current behaviour for
@@ -256,7 +256,7 @@ def shutdown_tracing() -> None:
 def traced(name: str, **attrs):
     # For local/dev runs where tracing is inactive, keep silent (DEBUG at most).
     if _TRACING_ACTIVE:
-        logger.info(f"OpenTelemetry: Tracing {name} with attributes: {attrs}")
+        logger.debug(f"OpenTelemetry: Tracing {name} with attributes: {attrs}")
     else:
         logger.debug(f"Tracing suppressed (inactive): {name} {attrs}")
 
