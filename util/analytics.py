@@ -1,6 +1,6 @@
 import ipaddress
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 import segment.analytics as analytics
 from enum import StrEnum
@@ -16,9 +16,54 @@ import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
-GOOGLE_CIDR_RANGE = ipaddress.ip_network("35.184.0.0/13")
-TRUSTED_PROXIES = [GOOGLE_CIDR_RANGE]
+GOOGLE_TRUSTED = [
+    ipaddress.ip_network("35.184.0.0/13"),  # your existing (keep if you know you use it)
+    ipaddress.ip_network("35.191.0.0/16"),  # common Google Front End / LB
+    ipaddress.ip_network("130.211.0.0/22"), # common Google Front End / LB
+]
 
+CLOUDFLARE_V4 = [
+    ipaddress.ip_network("173.245.48.0/20"),
+    ipaddress.ip_network("103.21.244.0/22"),
+    ipaddress.ip_network("103.22.200.0/22"),
+    ipaddress.ip_network("103.31.4.0/22"),
+    ipaddress.ip_network("141.101.64.0/18"),
+    ipaddress.ip_network("108.162.192.0/18"),
+    ipaddress.ip_network("190.93.240.0/20"),
+    ipaddress.ip_network("188.114.96.0/20"),
+    ipaddress.ip_network("197.234.240.0/22"),
+    ipaddress.ip_network("198.41.128.0/17"),
+    ipaddress.ip_network("162.158.0.0/15"),
+    ipaddress.ip_network("104.16.0.0/12"),  # covers 104.16.0.0 – 104.31.255.255
+    ipaddress.ip_network("172.64.0.0/13"),
+    ipaddress.ip_network("131.0.72.0/22"),
+]
+
+CLOUDFLARE_V6 = [
+    ipaddress.ip_network("2400:cb00::/32"),
+    ipaddress.ip_network("2606:4700::/32"),
+    ipaddress.ip_network("2803:f800::/32"),
+    ipaddress.ip_network("2405:b500::/32"),
+    ipaddress.ip_network("2405:8100::/32"),
+    ipaddress.ip_network("2a06:98c0::/29"),
+    ipaddress.ip_network("2c0f:f248::/32"),
+]
+
+TRUSTED_PROXIES = GOOGLE_TRUSTED + CLOUDFLARE_V4 + CLOUDFLARE_V6
+
+def _parse_ip(raw: Optional[str]) -> Optional[ipaddress._BaseAddress]:
+    if not raw:
+        return None
+    try:
+        return ipaddress.ip_address(raw.strip())
+    except Exception:
+        return None
+
+
+def _is_trusted(ip: Optional[ipaddress._BaseAddress]) -> bool:
+    if ip is None:
+        return False
+    return any(ip in net for net in TRUSTED_PROXIES)
 
 class AnalyticsEvent(StrEnum):
 
@@ -301,38 +346,42 @@ class Analytics:
     @tracer.start_as_current_span("ANALYTICS Get Client IP")
     def get_client_ip(request) -> str:
         """
-        Get the client IP address from the request, considering trusted proxies and Google Cloud IP ranges.
-        This function checks the `HTTP_X_FORWARDED_FOR` header for the original client IP address, and falls back to
-        `REMOTE_ADDR` if not present.
+        Returns the most reliable client IP given Cloudflare -> GCLB -> GKE.
 
-        It also checks if the IP address is in the Google Cloud range and returns '0' if it is, to prevent skewing our
-        analytics data.
-
-        Args:
-            request (HttpRequest): The Django request object containing metadata about the request.
-        Returns:
-            str: The client IP address, or '0' if the IP is in the Google Cloud range or if no valid IP is found.
+        Trust model:
+          - Only honor forwarded headers if the *peer* (REMOTE_ADDR) is a trusted proxy.
+          - Priority within trusted requests:
+              1) True-Client-IP (Enterprise)
+              2) CF-Connecting-IP
+              3) Right-to-left scan of X-Forwarded-For removing trusted proxies
+              4) Fallback to REMOTE_ADDR (diagnostic only; will be Google)
         """
-        xff = request.META.get("HTTP_X_FORWARDED_FOR") or request.META.get("REMOTE_ADDR")
+        # 1) Who connected to us?
+        peer_ip = _parse_ip(request.META.get("REMOTE_ADDR"))
 
-        # split & strip spaces
-        candidates = [ip.strip() for ip in xff.split(",")] if xff else []
+        # If the peer isn't a trusted proxy, ignore headers and return the peer
+        if not _is_trusted(peer_ip):
+            return str(peer_ip) if peer_ip else None
 
-        remote_addr = request.META.get("REMOTE_ADDR")
+        # 2) Prefer Cloudflare headers when peer is trusted
+        for header in ("HTTP_TRUE_CLIENT_IP", "HTTP_CF_CONNECTING_IP"):
+            hval = request.META.get(header)
+            ip = _parse_ip(hval)
+            if ip:
+                return str(ip)
 
-        if remote_addr is not None:
-            candidates.append(remote_addr.strip())
+        # 3) Walk X-Forwarded-For right-to-left, dropping trusted proxies
+        xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        if xff:
+            hops = [h.strip() for h in xff.split(",") if h.strip()]
+            # Work from right-most (closest to us) to left-most (original client)
+            for raw in reversed(hops):
+                hop_ip = _parse_ip(raw)
+                if hop_ip and not _is_trusted(hop_ip):
+                    return str(hop_ip)
 
-        # Walk **right-to-left**, discarding any address that belongs to a proxy we trust
-        for ip in reversed(candidates):
-            if not is_in_trusted_proxies(ip):
-                # If the IP is not in the Google Cloud range, we return it
-                logger.debug(f"Client IP: {ip}")
-                return ip
-
-
-        # Fallback: we only saw proxies
-        logger.debug("Client IP is in Google Cloud range or no valid IP found. Returning '0'.")
+        # 4) Nothing found
+        logger.debug("Client IP is in Google Cloud range, Cloudflare range, or no valid IP found. Returning '0'.")
         return '0'
 
     @staticmethod
