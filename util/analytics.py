@@ -20,6 +20,7 @@ GOOGLE_TRUSTED = [
     ipaddress.ip_network("35.184.0.0/13"),  # your existing (keep if you know you use it)
     ipaddress.ip_network("35.191.0.0/16"),  # common Google Front End / LB
     ipaddress.ip_network("130.211.0.0/22"), # common Google Front End / LB
+    ipaddress.ip_network("34.128.0.0/10"),
 ]
 
 CLOUDFLARE_V4 = [
@@ -371,14 +372,15 @@ class Analytics:
                 return str(ip)
 
         # 3) Walk X-Forwarded-For right-to-left, dropping trusted proxies
-        xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
-        if xff:
-            hops = [h.strip() for h in xff.split(",") if h.strip()]
-            # Work from right-most (closest to us) to left-most (original client)
-            for raw in reversed(hops):
-                hop_ip = _parse_ip(raw)
-                if hop_ip and not _is_trusted(hop_ip):
-                    return str(hop_ip)
+        # Disabling temporarily; the filter list is so long and we should tone it down
+        # xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        # if xff:
+        #     hops = [h.strip() for h in xff.split(",") if h.strip()]
+        #     # Work from right-most (closest to us) to left-most (original client)
+        #     for raw in reversed(hops):
+        #         hop_ip = _parse_ip(raw)
+        #         if hop_ip and not _is_trusted(hop_ip):
+        #             return str(hop_ip)
 
         # 4) Nothing found
         logger.debug("Client IP is in Google Cloud range, Cloudflare range, or no valid IP found. Returning '0'.")
