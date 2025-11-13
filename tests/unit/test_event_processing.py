@@ -130,9 +130,9 @@ class PromptContextBuilderTests(TestCase):
         self.assertTrue(history_block)
         events_block = history_block.get("events", {})
         self.assertIsInstance(events_block, dict)
-        self.assertIn("events_note", events_block)
-        self.assertIn("chronological", events_block["events_note"].lower())
-        event_keys = [key for key in events_block.keys() if key != "events_note"]
+        self.assertIn("note", events_block)
+        self.assertIn("chronological", events_block["note"].lower())
+        event_keys = [key for key in events_block.keys() if key != "note"]
         self.assertTrue(event_keys, "Expected at least one event entry in unified history")
         self.assertTrue(all(key.startswith("event_") for key in event_keys))
         events = self._get_history_events(history_block)
