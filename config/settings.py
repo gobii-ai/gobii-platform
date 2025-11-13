@@ -253,7 +253,6 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    "middleware.utm_capture.UTMTrackingMiddleware",
     "django.middleware.common.CommonMiddleware",
     "setup.middleware.FirstRunSetupMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -263,6 +262,8 @@ MIDDLEWARE = [
     "waffle.middleware.WaffleMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
     "middleware.user_id_baggage.UserIdBaggageMiddleware",
+    "middleware.fbp_middleware.FbpMiddleware",
+    "middleware.utm_capture.UTMTrackingMiddleware"
 ]
 
 TEMPLATES = [
