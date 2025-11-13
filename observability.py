@@ -59,10 +59,10 @@ class DaemonBatchSpanProcessor(BatchSpanProcessor):
         # The worker thread is stored in the _worker_thread attribute
         if hasattr(self, '_worker_thread') and self._worker_thread:
             self._worker_thread.daemon = True
-            logger.info("BatchSpanProcessor worker thread set as daemon")
+            logger.debug("BatchSpanProcessor worker thread set as daemon")
         elif hasattr(self, 'worker_thread') and self.worker_thread:
             self.worker_thread.daemon = True
-            logger.info("BatchSpanProcessor worker thread set as daemon")
+            logger.debug("BatchSpanProcessor worker thread set as daemon")
         else:
             logger.warning("Could not find BatchSpanProcessor worker thread to set as daemon")
 
@@ -125,12 +125,12 @@ def init_tracing(service_name: GobiiService) -> None:
         }
     )
 
-    logger.info(f"OpenTelemetry: OTEL resource: {res}")
+    logger.debug(f"OpenTelemetry: OTEL resource: {res}")
 
     # Create a TracerProvider with the resource and add processors
     try:
         provider = TracerProvider(resource=res)
-        logger.info(f"OpenTelemetry: TracerProvider created with resource: {res}")
+        logger.debug(f"OpenTelemetry: TracerProvider created with resource: {res}")
         
         # Choose span processor type based on environment variable
         # SimpleSpanProcessor = synchronous, no threads -- can be useful for debugging
@@ -144,7 +144,7 @@ def init_tracing(service_name: GobiiService) -> None:
                 endpoint=settings.OTEL_EXPORTER_OTLP_ENDPOINT,
                 insecure=settings.OTEL_EXPORTER_OTLP_INSECURE,
             ))
-            logger.info("OpenTelemetry: Using SimpleSpanProcessor (synchronous, no background threads)")
+            logger.debug("OpenTelemetry: Using SimpleSpanProcessor (synchronous, no background threads)")
             
         else:
             # Use BatchSpanProcessor with aggressive timeouts and daemon threads
@@ -163,16 +163,16 @@ def init_tracing(service_name: GobiiService) -> None:
                 max_export_batch_size=max_batch_size,
                 max_queue_size=max_queue_size,
             )
-            logger.info(f"OpenTelemetry: Using DaemonBatchSpanProcessor with schedule_delay={schedule_delay_ms}ms, "
+            logger.debug(f"OpenTelemetry: Using DaemonBatchSpanProcessor with schedule_delay={schedule_delay_ms}ms, "
                        f"export_timeout={export_timeout_ms}ms, max_queue_size={max_queue_size}, "
                        f"max_batch_size={max_batch_size}")
         
         provider.add_span_processor(span_processor)
-        logger.info(f"OpenTelemetry: Span processor ({processor_type}) and DaemonOTLPSpanExporter added to TracerProvider")
+        logger.debug(f"OpenTelemetry: Span processor ({processor_type}) and DaemonOTLPSpanExporter added to TracerProvider")
 
         logger_provider = LoggerProvider(resource=res)
         set_logger_provider(logger_provider)
-        logger.info("OpenTelemetry: LoggerProvider set with resource")
+        logger.debug("OpenTelemetry: LoggerProvider set with resource")
 
         exporter = OTLPLogExporter(
             endpoint=settings.OTEL_EXPORTER_OTLP_LOG_ENDPOINT,  # Adjust endpoint as needed
@@ -185,11 +185,11 @@ def init_tracing(service_name: GobiiService) -> None:
         logging.getLogger().addHandler(handler)
 
         provider.add_span_processor(TaskIdAttributeProcessor())
-        logger.info("OpenTelemetry: TaskIdAttributeProcessor added to TracerProvider")
+        logger.debug("OpenTelemetry: TaskIdAttributeProcessor added to TracerProvider")
         provider.add_span_processor(UserIdAttributeProcessor())
-        logger.info("OpenTelemetry: UserIdAttributeProcessor added to TracerProvider")
+        logger.debug("OpenTelemetry: UserIdAttributeProcessor added to TracerProvider")
         trace.set_tracer_provider(provider)
-        logger.info("OpenTelemetry: provider set as the global tracer provider")
+        logger.debug("OpenTelemetry: provider set as the global tracer provider")
         
         # Store reference for cleanup
         _tracer_provider = provider
@@ -213,10 +213,10 @@ def shutdown_tracing() -> None:
     global _tracer_provider
     
     if _tracer_provider is None:
-        logger.info("OpenTelemetry: No tracer provider to shutdown")
+        logger.debug("OpenTelemetry: No tracer provider to shutdown")
         return
         
-    logger.info("OpenTelemetry: Starting tracer provider shutdown...")
+    logger.debug("OpenTelemetry: Starting tracer provider shutdown...")
     
     # Create a thread to handle the shutdown with timeout
     shutdown_complete = threading.Event()
@@ -226,13 +226,13 @@ def shutdown_tracing() -> None:
         nonlocal shutdown_exception
         try:
             # Force flush first to try to export any pending spans quickly
-            logger.info("OpenTelemetry: Force flushing pending spans...")
+            logger.debug("OpenTelemetry: Force flushing pending spans...")
             _tracer_provider.force_flush(timeout_millis=3000)  # 3 second flush timeout
             
             # Then shutdown
-            logger.info("OpenTelemetry: Shutting down tracer provider...")
+            logger.debug("OpenTelemetry: Shutting down tracer provider...")
             _tracer_provider.shutdown()
-            logger.info("OpenTelemetry: Tracer provider shutdown completed successfully")
+            logger.debug("OpenTelemetry: Tracer provider shutdown completed successfully")
         except Exception as e:
             shutdown_exception = e
             logger.error(f"OpenTelemetry: Error during tracer provider shutdown: {e}")
@@ -249,7 +249,7 @@ def shutdown_tracing() -> None:
         if shutdown_exception:
             logger.error(f"OpenTelemetry: Shutdown completed with error: {shutdown_exception}")
         else:
-            logger.info("OpenTelemetry: Shutdown completed successfully")
+            logger.debug("OpenTelemetry: Shutdown completed successfully")
     else:
         logger.warning(f"OpenTelemetry: Shutdown timed out after {timeout_seconds} seconds")
     
@@ -339,7 +339,7 @@ class TaskIdAttributeProcessor(SpanProcessor):
         if task_id:
             # Set the task ID as an attribute on the span - we know that's a string
             span.set_attribute("task.id", str(task_id))
-            logger.info(f"OpenTelemetry: Task ID set on span: {task_id}")
+            logger.debug(f"OpenTelemetry: Task ID set on span: {task_id}")
         else:
             logger.debug("OpenTelemetry: No task ID found in baggage, not setting on span")
 
