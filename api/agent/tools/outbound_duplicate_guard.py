@@ -41,11 +41,13 @@ class DuplicateDetectionResult:
         """Return a serializable payload explaining the duplicate rejection."""
         if self.reason == "exact":
             detail = "matches"
+            instruction = "Do not attempt to send this message again."
         else:
             detail = "is highly similar to"
+            instruction = "Consider if this message should have been sent at all. If so, please revise before sending again."
         message = (
             f"Message blocked: content {detail} the previous message and may be a duplicate. "
-            "Consider if this message should have been sent at all. If so, please revise before sending again."
+            f"{instruction}"
         )
         payload: Dict[str, Any] = {
             "status": "error",
