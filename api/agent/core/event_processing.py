@@ -164,17 +164,39 @@ def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any
     cached_tokens = min(cached_tokens, prompt_tokens)
     uncached_tokens = max(prompt_tokens - cached_tokens, 0)
 
+    model_variants = [model]
+    provider_from_model: Optional[str] = None
+    if "/" in model:
+        provider_from_model, stripped_model = model.split("/", 1)
+        model_variants.append(stripped_model)
+    provider_candidates: List[Optional[str]] = []
+    if provider_from_model:
+        provider_candidates.append(provider_from_model)
+    if provider and provider not in provider_candidates:
+        provider_candidates.append(provider)
+    provider_candidates.append(None)
+
     model_info = None
-    try:
-        model_info = litellm.get_model_info(model=model, custom_llm_provider=provider)
-        if not model_info and "/" in model:
-            stripped_model = model.split("/", 1)[1]
-            model_info = litellm.get_model_info(model=stripped_model, custom_llm_provider=provider)
-    except Exception:
-        logger.debug("Unable to fetch model info for cost calculation", exc_info=True)
-        return {}
+    for candidate_model in model_variants:
+        for candidate_provider in provider_candidates:
+            try:
+                model_info = litellm.get_model_info(
+                    model=candidate_model,
+                    custom_llm_provider=candidate_provider,
+                )
+            except Exception:
+                model_info = None
+            if model_info:
+                break
+        if model_info:
+            break
 
     if not model_info:
+        logger.debug(
+            "Unable to resolve LiteLLM pricing for model=%s provider_hint=%s",
+            model,
+            provider,
+        )
         return {}
 
     def _info_value(key: str) -> Optional[float]:
