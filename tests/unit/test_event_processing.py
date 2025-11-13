@@ -12,6 +12,7 @@ from unittest.mock import patch, MagicMock
 import zstandard as zstd
 
 from api.agent.core.event_processing import _build_prompt_context, _run_agent_loop, PROMPT_TOKEN_BUDGET
+from api.agent.core.promptree import Prompt
 from api.admin import PersistentAgentPromptArchiveAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
 from api.agent.tools.search_web import execute_search_web as _execute_search_web
@@ -354,6 +355,21 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(browser_tasks_block.get("items"), [])
         self.assertEqual(browser_tasks_block.get("note"), "No active browser tasks.")
         self.assertNotIn("browser_tasks_empty", payload["variable"])
+
+    def test_sqlite_note_not_shrunk_in_promptree(self):
+        """Promptree should truncate schema content while keeping the paired note intact."""
+        long_schema = "CREATE TABLE data (\n" + ("x" * 6000) + "\n)"
+        prompt = Prompt(token_estimator=lambda text: len(text))
+        variable_group = prompt.group("variable", weight=4)
+        sqlite_group = variable_group.group("sqlite", weight=1)
+        sqlite_group.section_text("schema", long_schema, weight=1, shrinker="hmt")
+        sqlite_group.section_text("note", "critical sqlite note", weight=1, non_shrinkable=True)
+
+        rendered = json.loads(prompt.render(500))
+        sqlite_block = rendered["variable"]["sqlite"]
+
+        self.assertEqual(sqlite_block["note"], "critical sqlite note")
+        self.assertIn("BYTES TRUNCATED", sqlite_block["schema"])
 
     def test_admin_system_message_is_injected_once(self):
         """Admin-authored system directives should appear in the system prompt and be marked delivered."""

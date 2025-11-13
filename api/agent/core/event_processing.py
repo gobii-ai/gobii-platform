@@ -2130,18 +2130,22 @@ def _build_prompt_context(
 
     # Schedule block
     schedule_str = agent.schedule if agent.schedule else "No schedule configured"
-    important_group.section(
-        "schedule",
-        {
-            "details": schedule_str,
-            "note": (
-                "Remember, you can and should update your schedule to best suit your charter. "
-                "And remember, you do NOT have to contact the user on every schedule trigger. "
-                "You only want to contact them when it makes sense."
-            ),
-        },
+    schedule_group = important_group.group("schedule", weight=2)
+    schedule_group.section_text(
+        "details",
+        schedule_str,
         weight=2,
         shrinker=None,
+        non_shrinkable=True,
+    )
+    schedule_group.section_text(
+        "note",
+        (
+            "Remember, you can and should update your schedule to best suit your charter. "
+            "And remember, you do NOT have to contact the user on every schedule trigger. "
+            "You only want to contact them when it makes sense."
+        ),
+        weight=1,
         non_shrinkable=True,
     )
 
@@ -2168,29 +2172,37 @@ def _build_prompt_context(
         "OAuth‑based services."
     )
     secrets_note_text = base_secrets_note if secrets_block else f"No secrets configured. {base_secrets_note}"
-    important_group.section(
-        "secrets",
-        {
-            "note": secrets_note_text,
-            "items": secrets_block,
-        },
+    secrets_group = important_group.group("secrets", weight=2)
+    secrets_group.section(
+        "items",
+        secrets_block or [],
         weight=2,
         shrinker=None,
+        non_shrinkable=False,
+    )
+    secrets_group.section_text(
+        "note",
+        secrets_note_text,
+        weight=1,
         non_shrinkable=True,
     )
 
     if agent.charter:
-        important_group.section(
-            "charter",
-            {
-                "content": agent.charter,
-                "note": (
-                    "Remember, you can and should evolve this over time, especially if the user gives you feedback "
-                    "or new instructions."
-                ),
-            },
+        charter_group = important_group.group("charter", weight=5)
+        charter_group.section_text(
+            "content",
+            agent.charter,
             weight=5,
             shrinker=None,
+            non_shrinkable=True,
+        )
+        charter_group.section_text(
+            "note",
+            (
+                "Remember, you can and should evolve this over time, especially if the user gives you feedback "
+                "or new instructions."
+            ),
+            weight=2,
             non_shrinkable=True,
         )
 
@@ -2219,14 +2231,18 @@ def _build_prompt_context(
             "Call enable_database to enable the sqlite_batch tool whenever you need durable structured memory, complex analysis, or set-based queries. "
             "You can execute DDL or other SQL statements at any time to create and evolve a SQLite database that will help with your current task or charter."
         )
-    variable_group.section(
-        "sqlite",
-        {
-            "schema": sqlite_schema_block,
-            "note": sqlite_note,
-        },
+    sqlite_group = variable_group.group("sqlite", weight=1)
+    sqlite_group.section_text(
+        "schema",
+        sqlite_schema_block,
         weight=1,
-        shrinker="hmt"
+        shrinker="hmt",
+    )
+    sqlite_group.section_text(
+        "note",
+        sqlite_note,
+        weight=1,
+        non_shrinkable=True,
     )
 
     # Agent filesystem listing - simple list of accessible files
@@ -2367,22 +2383,26 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         agent_note = (
             "As the agent, these are *YOUR* endpoints, i.e. the addresses you are sending messages FROM."
         )
-        contacts_group.section(
-            "agent_endpoints",
-            {
-                "note": agent_note,
-                "items": [
-                    {
-                        "endpoint_id": str(ep.id),
-                        "channel": ep.channel,
-                        "address": ep.address,
-                        "is_primary": bool(ep.is_primary),
-                    }
-                    for ep in agent_eps
-                ],
-            },
+        agent_eps_group = contacts_group.group("agent_endpoints", weight=1)
+        agent_eps_group.section(
+            "items",
+            [
+                {
+                    "endpoint_id": str(ep.id),
+                    "channel": ep.channel,
+                    "address": ep.address,
+                    "is_primary": bool(ep.is_primary),
+                }
+                for ep in agent_eps
+            ],
             weight=1,
             shrinker=None,
+            non_shrinkable=False,
+        )
+        agent_eps_group.section_text(
+            "note",
+            agent_note,
+            weight=1,
             non_shrinkable=True,
         )
 
@@ -2399,22 +2419,26 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
 
     if user_eps_qs:
         pref_id = agent.preferred_contact_endpoint_id if agent.preferred_contact_endpoint else None
-        contacts_group.section(
-            "user_endpoints",
-            {
-                "note": "These are the USER's endpoints, i.e. the addresses you are sending messages TO.",
-                "items": [
-                    {
-                        "endpoint_id": str(ep.id),
-                        "channel": ep.channel,
-                        "address": ep.address,
-                        "is_preferred": bool(ep.id == pref_id),
-                    }
-                    for ep in user_eps_qs
-                ],
-            },
+        user_eps_group = contacts_group.group("user_endpoints", weight=2)
+        user_eps_group.section(
+            "items",
+            [
+                {
+                    "endpoint_id": str(ep.id),
+                    "channel": ep.channel,
+                    "address": ep.address,
+                    "is_preferred": bool(ep.id == pref_id),
+                }
+                for ep in user_eps_qs
+            ],
             weight=2,
             shrinker=None,
+            non_shrinkable=False,
+        )
+        user_eps_group.section_text(
+            "note",
+            "These are the USER's endpoints, i.e. the addresses you are sending messages TO.",
+            weight=1,
             non_shrinkable=True,
         )
 
@@ -2460,16 +2484,18 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
             entry.update(recent_meta[(ch, addr)])
             recent_entries.append(entry)
         
-        contacts_group.section(
-            "recent_contacts",
-            {
-                "note": (
-                    "Conversation partners from your most recent messages. Use these endpoints when you need to continue an existing thread."
-                ),
-                "items": recent_entries,
-            },
+        recent_group = contacts_group.group("recent_contacts", weight=1)
+        recent_group.section(
+            "items",
+            recent_entries,
             weight=1,
             shrinker=None,
+            non_shrinkable=False,
+        )
+        recent_group.section_text(
+            "note",
+            "Conversation partners from your most recent messages. Use these endpoints when you need to continue an existing thread.",
+            weight=1,
             non_shrinkable=True,
         )
 
@@ -2582,14 +2608,18 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         "You do not have to reach out to everyone listed; choose the contact that best fits your task."
     )
 
-    contacts_group.section(
-        "allowed_contacts",
-        {
-            "note": allowed_contacts_note,
-            "items": allowed_contact_entries,
-        },
+    allowed_contacts_group = contacts_group.group("allowed_contacts", weight=2)
+    allowed_contacts_group.section(
+        "items",
+        allowed_contact_entries,
         weight=2,
         shrinker=None,
+        non_shrinkable=False,
+    )
+    allowed_contacts_group.section_text(
+        "note",
+        allowed_contacts_note,
+        weight=1,
         non_shrinkable=True,
     )
 
@@ -2609,14 +2639,18 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     
     if allowed_channels:
         channels_list = sorted(allowed_channels)
-        contacts_group.section(
-            "allowed_channels",
-            {
-                "note": "IMPORTANT: Only use the channels listed above. Do NOT attempt other communication paths, and always include the primary contact endpoint when applicable.",
-                "items": channels_list,
-            },
+        allowed_channels_group = contacts_group.group("allowed_channels", weight=2)
+        allowed_channels_group.section(
+            "items",
+            channels_list,
             weight=2,
             shrinker=None,
+            non_shrinkable=False,
+        )
+        allowed_channels_group.section_text(
+            "note",
+            "IMPORTANT: Only use the channels listed above. Do NOT attempt other communication paths, and always include the primary contact endpoint when applicable.",
+            weight=1,
             non_shrinkable=True,
         )
 
@@ -2650,14 +2684,18 @@ def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None
             "You do not have any outbound webhooks configured. If you need one, ask the user to add it on the agent settings page."
         )
 
-    webhooks_group.section(
-        "webhook_catalog",
-        {
-            "note": note_text,
-            "items": catalog_entries,
-        },
+    catalog_group = webhooks_group.group("webhook_catalog", weight=2)
+    catalog_group.section(
+        "items",
+        catalog_entries,
         weight=2,
         shrinker=None,
+        non_shrinkable=False,
+    )
+    catalog_group.section_text(
+        "note",
+        note_text,
+        weight=1,
         non_shrinkable=True,
     )
 
@@ -2686,14 +2724,18 @@ def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> N
         if servers
         else "No MCP servers are configured for you yet."
     )
-    mcp_group.section(
-        "mcp_servers_catalog",
-        {
-            "note": note_text,
-            "items": catalog_entries,
-        },
+    mcp_catalog_group = mcp_group.group("mcp_servers_catalog", weight=2)
+    mcp_catalog_group.section(
+        "items",
+        catalog_entries,
         weight=2,
         shrinker=None,
+        non_shrinkable=False,
+    )
+    mcp_catalog_group.section_text(
+        "note",
+        note_text,
+        weight=1,
         non_shrinkable=True,
     )
 
@@ -3232,31 +3274,37 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
     # Add summaries as fixed sections (no shrinking)
     if step_snap and step_snap.summary:
-        history_group.section(
-            "step_summary",
-            {
-                "content": step_snap.summary,
-                "note": (
-                    "Condensed summary of all prior tool calls and steps before the detailed history below. "
-                    "Use for context only; no need to restate it to the user."
-                ),
-            },
+        step_summary_group = history_group.group("step_summary", weight=1)
+        step_summary_group.section_text(
+            "content",
+            step_snap.summary,
             weight=1,
-            shrinker=None,
+            shrinker="hmt",
+        )
+        step_summary_group.section_text(
+            "note",
+            (
+                "Condensed summary of all prior tool calls and steps before the detailed history below. "
+                "Use for context only; no need to restate it to the user."
+            ),
+            weight=1,
             non_shrinkable=True,
         )
     if comm_snap and comm_snap.summary:
-        history_group.section(
-            "comms_summary",
-            {
-                "content": comm_snap.summary,
-                "note": (
-                    "Concise summary of the earlier user/agent conversation before the detailed history below. "
-                    "Treat as context—only reference it when it helps move the task forward."
-                ),
-            },
+        comms_summary_group = history_group.group("comms_summary", weight=1)
+        comms_summary_group.section_text(
+            "content",
+            comm_snap.summary,
             weight=1,
-            shrinker=None,
+            shrinker="hmt",
+        )
+        comms_summary_group.section_text(
+            "note",
+            (
+                "Concise summary of the earlier user/agent conversation before the detailed history below. "
+                "Treat as context—only reference it when it helps move the task forward."
+            ),
+            weight=1,
             non_shrinkable=True,
         )
 
@@ -3580,18 +3628,22 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
             entry["updated_at"] = task.updated_at.isoformat()
         task_entries.append(entry)
 
-    tasks_group.section(
-        "browser_tasks",
-        {
-            "note": (
-                "These are your current web automation tasks. Completed tasks appear in your unified history."
-                if active_tasks
-                else "No active browser tasks."
-            ),
-            "items": task_entries,
-        },
+    browser_tasks_group = tasks_group.group("browser_tasks", weight=3)
+    browser_tasks_group.section(
+        "items",
+        task_entries,
         weight=3,
         shrinker=None,
+        non_shrinkable=False,
+    )
+    browser_tasks_group.section_text(
+        "note",
+        (
+            "These are your current web automation tasks. Completed tasks appear in your unified history."
+            if active_tasks
+            else "No active browser tasks."
+        ),
+        weight=1,
         non_shrinkable=True,
     )
 
