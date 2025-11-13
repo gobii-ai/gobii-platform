@@ -16,10 +16,24 @@ def get_or_make_fbp(request):
     Returns:
         str: The Facebook Browser Pixel (fbp) identifier.
     """
-    fbp = request.COOKIES.get(settings.FBP_COOKIE_NAME) or request.session.get(settings.FBP_COOKIE_NAME)
+    fbp = (
+        request.COOKIES.get(settings.FBP_COOKIE_NAME)
+        or request.session.get(settings.FBP_COOKIE_NAME)
+        or getattr(request, "fbp", None)
+    )
     if not fbp:
         fbp = f"fb.1.{int(time.time() * 1000)}.{random.randint(10**9, 10**10 - 1)}"
         request.session[settings.FBP_COOKIE_NAME] = fbp
+        # also surface on the request so downstream sees it this request
+        setattr(request, "fbp", fbp)
+        try:
+            # request.COOKIES is a dict-like and is safe to mutate during request handling
+            request.COOKIES[settings.FBP_COOKIE_NAME] = fbp
+        except Exception:
+            pass
+    else:
+        # normalize onto request for convenience
+        setattr(request, "fbp", fbp)
     return fbp
 
 class FbpMiddleware:
@@ -46,18 +60,18 @@ class FbpMiddleware:
                 cookie settings, if applicable.
         """
         # Check consent before generating/setting
-        fbp = request.COOKIES.get(settings.FBP_COOKIE_NAME)
-        if not fbp:
-            fbp = get_or_make_fbp(request)
+        had_cookie = settings.FBP_COOKIE_NAME in request.COOKIES
+
+        # Ensure an fbp exists and is visible to downstream code right now
+        fbp = get_or_make_fbp(request)
 
         response = self.get_response(request)
 
-        # If we generated one and don’t already have the cookie, set it
-        sess_fbp = request.session.get(settings.FBP_COOKIE_NAME)
-        if sess_fbp and settings.FBP_COOKIE_NAME not in request.COOKIES:
+        # If the browser didn't send one, set it on the response
+        if not had_cookie and fbp:
             response.set_cookie(
                 settings.FBP_COOKIE_NAME,
-                sess_fbp,
+                fbp,
                 max_age=settings.FBP_MAX_AGE,
                 secure=True,
                 samesite="Lax",
