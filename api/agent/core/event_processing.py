@@ -118,6 +118,91 @@ from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
+
+_COST_PRECISION = Decimal("0.000001")
+
+
+def _quantize_cost(value: Decimal) -> Decimal:
+    return value.quantize(_COST_PRECISION)
+
+
+def _safe_decimal(value: Optional[float]) -> Optional[Decimal]:
+    if value is None:
+        return None
+    return Decimal(str(value))
+
+
+def _usage_attribute(usage: Any, attr: str, default: Optional[Any] = None) -> Any:
+    if usage is None:
+        return default
+    if isinstance(usage, dict):
+        return usage.get(attr, default)
+    return getattr(usage, attr, default)
+
+
+def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any]) -> dict:
+    if not token_usage:
+        return {}
+
+    model = token_usage.get("model")
+    provider = token_usage.get("provider")
+    if not model:
+        return {}
+
+    prompt_tokens = int(token_usage.get("prompt_tokens") or 0)
+    completion_tokens = int(token_usage.get("completion_tokens") or 0)
+    cached_tokens = int(token_usage.get("cached_tokens") or 0)
+
+    if raw_usage is not None and not cached_tokens:
+        details = _usage_attribute(raw_usage, "prompt_tokens_details")
+        if details:
+            if isinstance(details, dict):
+                cached_tokens = int(details.get("cached_tokens") or 0)
+            else:
+                cached_tokens = int(getattr(details, "cached_tokens", 0) or 0)
+
+    cached_tokens = min(cached_tokens, prompt_tokens)
+    uncached_tokens = max(prompt_tokens - cached_tokens, 0)
+
+    model_info = None
+    try:
+        model_info = litellm.get_model_info(model=model, custom_llm_provider=provider)
+        if not model_info and "/" in model:
+            stripped_model = model.split("/", 1)[1]
+            model_info = litellm.get_model_info(model=stripped_model, custom_llm_provider=provider)
+    except Exception:
+        logger.debug("Unable to fetch model info for cost calculation", exc_info=True)
+        return {}
+
+    if not model_info:
+        return {}
+
+    def _info_value(key: str) -> Optional[float]:
+        if isinstance(model_info, dict):
+            return model_info.get(key)
+        return getattr(model_info, key, None)
+
+    input_price = _safe_decimal(_info_value("input_cost_per_token"))
+    cache_read_price = _safe_decimal(_info_value("cache_read_input_token_cost")) or input_price
+    output_price = _safe_decimal(_info_value("output_cost_per_token"))
+
+    if input_price is None and output_price is None:
+        return {}
+
+    zero = Decimal("0")
+    uncached_cost = (input_price or zero) * Decimal(uncached_tokens)
+    cached_cost = (cache_read_price or input_price or zero) * Decimal(cached_tokens)
+    input_total = uncached_cost + cached_cost
+    output_cost = (output_price or zero) * Decimal(completion_tokens)
+    total_cost = input_total + output_cost
+
+    return {
+        "input_cost_total": _quantize_cost(input_total),
+        "input_cost_uncached": _quantize_cost(uncached_cost),
+        "input_cost_cached": _quantize_cost(cached_cost),
+        "output_cost": _quantize_cost(output_cost),
+        "total_cost": _quantize_cost(total_cost),
+    }
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
@@ -467,6 +552,10 @@ def _completion_with_failover(
                         llm_span.set_attribute("llm.usage.cached_tokens", cached_tokens)
                         if cached_tokens:
                             token_usage["cached_tokens"] = cached_tokens
+
+                    cost_fields = _compute_cost_breakdown(token_usage, usage)
+                    if cost_fields:
+                        token_usage.update(cost_fields)
 
                 return response, token_usage
                 
@@ -1555,6 +1644,11 @@ def _run_agent_loop(
                     "cached_tokens": token_usage.get("cached_tokens"),
                     "llm_model": token_usage.get("model"),
                     "llm_provider": token_usage.get("provider"),
+                    "input_cost_total": token_usage.get("input_cost_total"),
+                    "input_cost_uncached": token_usage.get("input_cost_uncached"),
+                    "input_cost_cached": token_usage.get("input_cost_cached"),
+                    "output_cost": token_usage.get("output_cost"),
+                    "total_cost": token_usage.get("total_cost"),
                 }
             
             # Use the fitted token count from promptree for LLM selection

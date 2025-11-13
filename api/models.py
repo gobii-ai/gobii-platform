@@ -5331,6 +5331,41 @@ class PersistentAgentCompletion(models.Model):
     cached_tokens = models.IntegerField(null=True, blank=True)
     llm_model = models.CharField(max_length=256, null=True, blank=True)
     llm_provider = models.CharField(max_length=128, null=True, blank=True)
+    input_cost_total = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Total USD cost for prompt tokens (cached + uncached).",
+    )
+    input_cost_uncached = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="USD cost for uncached prompt tokens.",
+    )
+    input_cost_cached = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="USD cost for cached prompt tokens.",
+    )
+    output_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="USD cost for completion tokens.",
+    )
+    total_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Total USD cost (input + output).",
+    )
 
     credits_cost = models.DecimalField(
         max_digits=12,
