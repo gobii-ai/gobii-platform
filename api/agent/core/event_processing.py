@@ -3471,7 +3471,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         components["type"] = event_type
         structured_events.append((t.updated_at, event_type, components))
 
-    history_group.section_text(
+    events_group = history_group.group("events", weight=3)
+    events_group.section_text(
         "note",
         (
             "Chronological list of recent tool calls, browser tasks, and messages. "
@@ -3481,87 +3482,80 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         non_shrinkable=True,
     )
 
+    if not structured_events:
+        return
+
     # Create structured promptree groups for each event
-    if structured_events:
-        structured_events.sort(key=lambda e: e[0])  # chronological order
-        events_group = history_group.group("events", weight=3, as_list=True)
+    structured_events.sort(key=lambda e: e[0])  # chronological order
 
-        # Pre‑compute constants for exponential decay
-        now = structured_events[-1][0]
-        HALF_LIFE = timedelta(hours=12).total_seconds()
+    # Pre‑compute constants for exponential decay
+    now = structured_events[-1][0]
+    HALF_LIFE = timedelta(hours=12).total_seconds()
 
-        def recency_multiplier(ts: datetime) -> float:
-            age = (now - ts).total_seconds()
-            return 2 ** (-age / HALF_LIFE)  # newest ≈1, halves every 12 h
+    def recency_multiplier(ts: datetime) -> float:
+        age = (now - ts).total_seconds()
+        return 2 ** (-age / HALF_LIFE)  # newest ≈1, halves every 12 h
 
-        # Base weights for different event types
-        BASE_EVENT_WEIGHTS = {
-            "tool_call": 4,
-            "browser_task": 3,
-            "message_inbound": 4,
-            "message_outbound": 2,
-            "step_description": 2,
-        }
+    # Base weights for different event types
+    BASE_EVENT_WEIGHTS = {
+        "tool_call": 4,
+        "browser_task": 3,
+        "message_inbound": 4,
+        "message_outbound": 2,
+        "step_description": 2,
+    }
 
-        # Component weights within each event
-        COMPONENT_WEIGHTS = {
-            "timestamp": 3,   # High priority - ordering context
-            "type": 3,        # High priority - event type for downstream routing
-            "tool": 3,        # High priority - which tool executed
-            "params": 1,      # Low priority - can be shrunk aggressively
-            "result": 1,      # Low priority - can be shrunk aggressively
-            "direction": 2,   # Medium priority - inbound vs outbound
-            "channel": 2,     # Medium priority - routing info
-            "from": 3,        # High priority - counterparty information
-            "to": 3,          # High priority - routing information
-            "peer_name": 2,   # Medium priority - DM counterpart
-            "content": 2,     # Medium priority for message content (SMS, etc.)
-            "description": 2, # Medium priority for step descriptions
-            "subject": 2,     # Medium priority - email subject
-            "body": 1,        # Low priority - email body (can be long and shrunk)
-            "task_id": 3,     # High priority - reference to browser task
-            "status": 3,      # High priority - task outcome
-            "prompt": 1,      # Low priority - browser task prompt (can be long)
-        }
+    # Component weights within each event
+    COMPONENT_WEIGHTS = {
+        "timestamp": 3,   # High priority - ordering context
+        "type": 3,        # High priority - event type for downstream routing
+        "tool": 3,        # High priority - which tool executed
+        "params": 1,      # Low priority - can be shrunk aggressively
+        "result": 1,      # Low priority - can be shrunk aggressively
+        "direction": 2,   # Medium priority - inbound vs outbound
+        "channel": 2,     # Medium priority - routing info
+        "from": 3,        # High priority - counterparty information
+        "to": 3,          # High priority - routing information
+        "peer_name": 2,   # Medium priority - DM counterpart
+        "content": 2,     # Medium priority for message content (SMS, etc.)
+        "description": 2, # Medium priority for step descriptions
+        "subject": 2,     # Medium priority - email subject
+        "body": 1,        # Low priority - email body (can be long and shrunk)
+        "task_id": 3,     # High priority - reference to browser task
+        "status": 3,      # High priority - task outcome
+        "prompt": 1,      # Low priority - browser task prompt (can be long)
+    }
 
-        for idx, (timestamp, event_type, components) in enumerate(structured_events):
-            time_str = timestamp.strftime("%m%d_%H%M%S")
-            event_name = f"event_{idx:03d}_{time_str}_{event_type}"
+    for idx, (timestamp, event_type, components) in enumerate(structured_events):
+        time_str = timestamp.strftime("%m%d_%H%M%S")
+        event_name = f"event_{idx:03d}_{time_str}_{event_type}"
 
-            # Calculate event weight based on type and recency
-            base_weight = BASE_EVENT_WEIGHTS.get(event_type, 2)
-            event_weight = max(1, math.ceil(base_weight * recency_multiplier(timestamp)))
+        # Calculate event weight based on type and recency
+        base_weight = BASE_EVENT_WEIGHTS.get(event_type, 2)
+        event_weight = max(1, math.ceil(base_weight * recency_multiplier(timestamp)))
 
-            # Create event group
-            event_group = events_group.group(event_name, weight=event_weight)
+        # Create event group
+        event_group = events_group.group(event_name, weight=event_weight)
 
-            # Add components as subsections within the event group
-            tool_name = components.get("tool") if event_type == "tool_call" else None
-            for component_name, component_content in components.items():
-                component_weight = COMPONENT_WEIGHTS.get(component_name, 1)
-                should_shrink, force_non_shrink = _get_component_shrink_policy(
-                    event_type,
-                    tool_name,
-                    component_name,
-                    component_content,
-                )
-                shrinker = "hmt" if should_shrink else None
+        # Add components as subsections within the event group
+        tool_name = components.get("tool") if event_type == "tool_call" else None
+        for component_name, component_content in components.items():
+            component_weight = COMPONENT_WEIGHTS.get(component_name, 1)
+            should_shrink, force_non_shrink = _get_component_shrink_policy(
+                event_type,
+                tool_name,
+                component_name,
+                component_content,
+            )
+            shrinker = "hmt" if should_shrink else None
 
-                event_group.section_text(
-                    component_name,
-                    component_content,
-                    weight=component_weight,
-                    shrinker=shrinker,
-                    non_shrinkable=force_non_shrink,
-                )
-    else:
-        history_group.section(
-            "events",
-            [],
-            weight=1,
-            shrinker=None,
-            non_shrinkable=True,
-        )
+            event_group.section_text(
+                component_name,
+                component_content,
+                weight=component_weight,
+                shrinker=shrinker,
+                non_shrinkable=force_non_shrink,
+            )
 
 
 def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
