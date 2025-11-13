@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -414,8 +414,9 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
         form = MCPServerConfigForm(payload, allow_commands=False)
         if form.is_valid():
             try:
-                server = form.save(user=owner_user, organization=owner_org)
-            except IntegrityError as e:
+                with transaction.atomic():
+                    server = form.save(user=owner_user, organization=owner_org)
+            except IntegrityError:
                 form.add_error("name", "A server with that identifier already exists.")
             else:
                 manager = get_mcp_manager()
@@ -454,8 +455,9 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
         form = MCPServerConfigForm(payload, instance=server, allow_commands=False)
         if form.is_valid():
             try:
-                updated = form.save()
-            except IntegrityError as e:
+                with transaction.atomic():
+                    updated = form.save()
+            except IntegrityError:
                 form.add_error("name", "A server with that identifier already exists.")
             else:
                 get_mcp_manager().refresh_server(str(updated.id))

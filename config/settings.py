@@ -253,7 +253,6 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    "middleware.utm_capture.UTMTrackingMiddleware",
     "django.middleware.common.CommonMiddleware",
     "setup.middleware.FirstRunSetupMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -263,6 +262,8 @@ MIDDLEWARE = [
     "waffle.middleware.WaffleMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
     "middleware.user_id_baggage.UserIdBaggageMiddleware",
+    "middleware.fbp_middleware.FbpMiddleware",
+    "middleware.utm_capture.UTMTrackingMiddleware"
 ]
 
 TEMPLATES = [
@@ -992,3 +993,8 @@ ENABLE_DEFAULT_AGENT_EMAIL = env.bool(
 )
 # DB-backed LLM config is always enabled; system falls back to legacy
 # behavior only when DB has no usable tiers/endpoints.
+
+
+# FBP Cookie
+FBP_COOKIE_NAME = "_fbp"
+FBP_MAX_AGE = 90 * 24 * 60 * 60  # 90 days

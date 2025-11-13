@@ -86,6 +86,8 @@ jobs:
             tag: batch_browser_profile
           - batch: forward_detection
             tag: batch_forward_detection
+          - batch: fbp_middleware
+            tag: batch_fbp_middleware
           - batch: agent_limits
             tag: batch_agent_limits
           - batch: agent_credit_soft_target

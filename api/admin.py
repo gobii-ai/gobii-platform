@@ -1781,7 +1781,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         'is_active', 'execution_environment', 'schedule', 'life_state', 'last_interaction_at',
         'message_count', 'created_at'
     )
-    list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'execution_environment', 'schedule', 'created_at')
+    list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'execution_environment', 'created_at')
     search_fields = ('name', 'user__email', 'organization__name', 'charter', 'short_description')
     raw_id_fields = ('user', 'browser_use_agent')
     readonly_fields = (
