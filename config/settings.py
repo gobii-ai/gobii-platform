@@ -993,3 +993,8 @@ ENABLE_DEFAULT_AGENT_EMAIL = env.bool(
 )
 # DB-backed LLM config is always enabled; system falls back to legacy
 # behavior only when DB has no usable tiers/endpoints.
+
+
+# FBP Cookie
+FBP_COOKIE_NAME = "_fbp"
+FBP_MAX_AGE = 90 * 24 * 60 * 60  # 90 days
