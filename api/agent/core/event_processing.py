@@ -3251,8 +3251,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     history_group.section_text(
         "note",
         (
-            "Chronological list of recent tool calls, browser tasks, and user/agent messages. "
-            "Items are ordered from oldest to newest so you can replay the conversation flow."
+            "Chronological list of recent tool calls, browser tasks, and messages. "
+            "EVENTS ARE ORDERED FROM OLDEST TO NEWEST SO YOU CAN UNDERSTAND THE CONVERSATION FLOW. "
         ),
         weight=1,
         non_shrinkable=True,
@@ -3481,7 +3481,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     # Create structured promptree groups for each event
     if structured_events:
         structured_events.sort(key=lambda e: e[0])  # chronological order
-        events_group = history_group.group("items", weight=3, as_list=True)
+        events_group = history_group.group("events", weight=3, as_list=True)
 
         # Pre‑compute constants for exponential decay
         now = structured_events[-1][0]
@@ -3553,7 +3553,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 )
     else:
         history_group.section(
-            "items",
+            "events",
             [],
             weight=1,
             shrinker=None,
