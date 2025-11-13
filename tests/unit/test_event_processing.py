@@ -80,7 +80,7 @@ class PromptContextBuilderTests(TestCase):
         self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
 
     def _get_history_events(self, history_block):
-        events = history_block.get("events")
+        events = history_block.get("items") or history_block.get("events")
         if isinstance(events, list):
             return events
         if isinstance(events, dict):
@@ -121,6 +121,8 @@ class PromptContextBuilderTests(TestCase):
         # Verify the unified history event contains the inbound message metadata
         history_block = prompt_payload.get("variable", {}).get("unified_history", {})
         self.assertTrue(history_block)
+        self.assertIn("note", history_block)
+        self.assertIn("chronological", history_block["note"].lower())
         events = self._get_history_events(history_block)
         self.assertIsInstance(events, list)
 
@@ -144,29 +146,54 @@ class PromptContextBuilderTests(TestCase):
         self.assertTrue(found_message, "Expected inbound message event in unified history")
         
         important = prompt_payload.get("important", {})
-        self.assertEqual(important.get("charter"), "Test prompt context")
-        self.assertEqual(important.get("schedule"), "No schedule configured")
+        charter_block = important.get("charter")
+        self.assertIsInstance(charter_block, dict)
+        self.assertEqual(charter_block.get("content"), "Test prompt context")
+        self.assertIn("note", charter_block)
+
+        schedule_block = important.get("schedule")
+        self.assertIsInstance(schedule_block, dict)
+        self.assertEqual(schedule_block.get("details"), "No schedule configured")
+        self.assertIn("note", schedule_block)
 
         agent_endpoints = important.get("agent_endpoints")
-        self.assertIsInstance(agent_endpoints, list)
+        self.assertIsInstance(agent_endpoints, dict)
+        self.assertIsInstance(agent_endpoints.get("items"), list)
+        self.assertIn("note", agent_endpoints)
         self.assertTrue(
-            any(entry.get("address") == self.endpoint.address for entry in agent_endpoints)
+            any(entry.get("address") == self.endpoint.address for entry in agent_endpoints.get("items"))
         )
 
-        recent_contacts = important.get("recent_contacts")
+        recent_contacts_block = important.get("recent_contacts")
+        self.assertIsInstance(recent_contacts_block, dict)
+        self.assertIn("note", recent_contacts_block)
+        recent_contacts = recent_contacts_block.get("items")
         self.assertIsInstance(recent_contacts, list)
         self.assertTrue(
             any(entry.get("address") == self.external_endpoint.address for entry in recent_contacts)
         )
 
         secrets_section = important.get("secrets")
-        self.assertIsInstance(secrets_section, list)
+        self.assertIsInstance(secrets_section, dict)
+        self.assertIsInstance(secrets_section.get("items"), list)
+        self.assertIn("note", secrets_section)
 
         webhooks_block = important.get("webhooks", {})
-        self.assertIsInstance(webhooks_block.get("webhook_catalog"), list)
+        webhook_catalog = webhooks_block.get("webhook_catalog")
+        self.assertIsInstance(webhook_catalog, dict)
+        self.assertIn("note", webhook_catalog)
+        self.assertIsInstance(webhook_catalog.get("items"), list)
 
         mcp_block = important.get("mcp_servers", {})
-        self.assertIsInstance(mcp_block.get("mcp_servers_catalog"), list)
+        mcp_catalog = mcp_block.get("mcp_servers_catalog")
+        self.assertIsInstance(mcp_catalog, dict)
+        self.assertIn("note", mcp_catalog)
+        self.assertIsInstance(mcp_catalog.get("items"), list)
+
+        sqlite_block = prompt_payload.get("variable", {}).get("sqlite")
+        self.assertIsInstance(sqlite_block, dict)
+        self.assertIn("schema", sqlite_block)
+        self.assertIn("note", sqlite_block)
 
         critical = prompt_payload.get("critical", {})
         self.assertIn("current_datetime", critical)
@@ -300,15 +327,18 @@ class PromptContextBuilderTests(TestCase):
         user_message = next((m for m in context if m['role'] == 'user'), None)
         self.assertIsNotNone(user_message)
         payload = json.loads(user_message['content'])
-        browser_tasks = payload["variable"]["browser_tasks"]
+        browser_tasks_block = payload["variable"]["browser_tasks"]
 
-        self.assertIsInstance(browser_tasks, list)
-        self.assertEqual(len(browser_tasks), 2)
-        self.assertEqual(browser_tasks[0]["prompt"], "Check the latest earnings releases.")
+        self.assertIsInstance(browser_tasks_block, dict)
+        tasks = browser_tasks_block.get("items")
+        self.assertIsInstance(tasks, list)
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(tasks[0]["prompt"], "Check the latest earnings releases.")
         self.assertEqual(
-            browser_tasks[1]["status"],
+            tasks[1]["status"],
             BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
         )
+        self.assertIn("note", browser_tasks_block)
 
     def test_browser_tasks_empty_array_when_no_tasks(self):
         """Browser tasks array should still be present (empty) when no tasks exist."""
@@ -319,10 +349,11 @@ class PromptContextBuilderTests(TestCase):
         user_message = next((m for m in context if m['role'] == 'user'), None)
         self.assertIsNotNone(user_message)
         payload = json.loads(user_message['content'])
-        browser_tasks = payload["variable"]["browser_tasks"]
+        browser_tasks_block = payload["variable"]["browser_tasks"]
 
-        self.assertEqual(browser_tasks, [])
-        self.assertEqual(payload["variable"]["browser_tasks_empty"], "No active browser tasks.")
+        self.assertEqual(browser_tasks_block.get("items"), [])
+        self.assertEqual(browser_tasks_block.get("note"), "No active browser tasks.")
+        self.assertNotIn("browser_tasks_empty", payload["variable"])
 
     def test_admin_system_message_is_injected_once(self):
         """Admin-authored system directives should appear in the system prompt and be marked delivered."""

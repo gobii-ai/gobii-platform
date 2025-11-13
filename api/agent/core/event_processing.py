@@ -2130,18 +2130,19 @@ def _build_prompt_context(
 
     # Schedule block
     schedule_str = agent.schedule if agent.schedule else "No schedule configured"
-    # Provide the schedule details and a helpful note as separate sections so Prompt can
-    # emit distinct JSON keys (`schedule`, `schedule_note`) for clarity.
-    important_group.section_text(
+    important_group.section(
         "schedule",
-        schedule_str,
-        weight=2
-    )
-    important_group.section_text(
-        "schedule_note",
-        "Remember, you can and should update your schedule to best suit your charter. And remember, you do NOT have to contact the user on every schedule trigger. You only want to contact them when it makes sense.",
-        weight=1,
-        non_shrinkable=True
+        {
+            "details": schedule_str,
+            "note": (
+                "Remember, you can and should update your schedule to best suit your charter. "
+                "And remember, you do NOT have to contact the user on every schedule trigger. "
+                "You only want to contact them when it makes sense."
+            ),
+        },
+        weight=2,
+        shrinker=None,
+        non_shrinkable=True,
     )
 
     # Contacts block - use promptree natively
@@ -2159,13 +2160,6 @@ def _build_prompt_context(
 
     # Secrets block
     secrets_block = _get_secrets_block(agent)
-    important_group.section(
-        "secrets",
-        secrets_block,
-        weight=2,
-        shrinker=None,
-        non_shrinkable=True,
-    )
     base_secrets_note = (
         "ONLY request secure credentials when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
         "or `spawn_web_task` (classic username/password website login). DO NOT request credentials for MCP tools "
@@ -2174,25 +2168,30 @@ def _build_prompt_context(
         "OAuth‑based services."
     )
     secrets_note_text = base_secrets_note if secrets_block else f"No secrets configured. {base_secrets_note}"
-    important_group.section_text(
-        "secrets_note",
-        secrets_note_text,
-        weight=1,
-        non_shrinkable=True
+    important_group.section(
+        "secrets",
+        {
+            "note": secrets_note_text,
+            "items": secrets_block,
+        },
+        weight=2,
+        shrinker=None,
+        non_shrinkable=True,
     )
 
     if agent.charter:
-        important_group.section_text(
+        important_group.section(
             "charter",
-            agent.charter,
+            {
+                "content": agent.charter,
+                "note": (
+                    "Remember, you can and should evolve this over time, especially if the user gives you feedback "
+                    "or new instructions."
+                ),
+            },
             weight=5,
-            non_shrinkable=True
-        )
-        important_group.section_text(
-            "charter_note",
-            "Remember, you can and should evolve this over time, especially if the user gives you feedback or new instructions.",
-            weight=2,
-            non_shrinkable=True
+            shrinker=None,
+            non_shrinkable=True,
         )
 
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
@@ -2208,21 +2207,6 @@ def _build_prompt_context(
     
     # SQLite schema - can be truncated aggressively if needed
     sqlite_schema_block = get_sqlite_schema_prompt()
-    variable_group.section_text(
-        "sqlite_schema",
-        sqlite_schema_block,
-        weight=1,
-        shrinker="hmt"
-    )
-
-    # Agent filesystem listing - simple list of accessible files
-    files_listing_block = get_agent_filesystem_prompt(agent)
-    variable_group.section_text(
-        "agent_filesystem",
-        files_listing_block,
-        weight=1,
-        shrinker="hmt"
-    )
 
     # Contextual note based on whether a schema already exists
     if any(line.startswith("Table ") for line in sqlite_schema_block.splitlines()):
@@ -2235,11 +2219,23 @@ def _build_prompt_context(
             "Call enable_database to enable the sqlite_batch tool whenever you need durable structured memory, complex analysis, or set-based queries. "
             "You can execute DDL or other SQL statements at any time to create and evolve a SQLite database that will help with your current task or charter."
         )
-    variable_group.section_text(
-        "sqlite_note",
-        sqlite_note,
+    variable_group.section(
+        "sqlite",
+        {
+            "schema": sqlite_schema_block,
+            "note": sqlite_note,
+        },
         weight=1,
-        non_shrinkable=True
+        shrinker="hmt"
+    )
+
+    # Agent filesystem listing - simple list of accessible files
+    files_listing_block = get_agent_filesystem_prompt(agent)
+    variable_group.section_text(
+        "agent_filesystem",
+        files_listing_block,
+        weight=1,
+        shrinker="hmt"
     )
     
     # High priority sections (weight=10) - critical information that shouldn't shrink much
@@ -2371,23 +2367,20 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         agent_note = (
             "As the agent, these are *YOUR* endpoints, i.e. the addresses you are sending messages FROM."
         )
-        contacts_group.section_text(
-            "agent_endpoints_note",
-            agent_note,
-            weight=1,
-            non_shrinkable=True,
-        )
         contacts_group.section(
             "agent_endpoints",
-            [
-                {
-                    "endpoint_id": str(ep.id),
-                    "channel": ep.channel,
-                    "address": ep.address,
-                    "is_primary": bool(ep.is_primary),
-                }
-                for ep in agent_eps
-            ],
+            {
+                "note": agent_note,
+                "items": [
+                    {
+                        "endpoint_id": str(ep.id),
+                        "channel": ep.channel,
+                        "address": ep.address,
+                        "is_primary": bool(ep.is_primary),
+                    }
+                    for ep in agent_eps
+                ],
+            },
             weight=1,
             shrinker=None,
             non_shrinkable=True,
@@ -2406,23 +2399,20 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
 
     if user_eps_qs:
         pref_id = agent.preferred_contact_endpoint_id if agent.preferred_contact_endpoint else None
-        contacts_group.section_text(
-            "user_endpoints_note",
-            "These are the USER's endpoints, i.e. the addresses you are sending messages TO.",
-            weight=1,
-            non_shrinkable=True,
-        )
         contacts_group.section(
             "user_endpoints",
-            [
-                {
-                    "endpoint_id": str(ep.id),
-                    "channel": ep.channel,
-                    "address": ep.address,
-                    "is_preferred": bool(ep.id == pref_id),
-                }
-                for ep in user_eps_qs
-            ],
+            {
+                "note": "These are the USER's endpoints, i.e. the addresses you are sending messages TO.",
+                "items": [
+                    {
+                        "endpoint_id": str(ep.id),
+                        "channel": ep.channel,
+                        "address": ep.address,
+                        "is_preferred": bool(ep.id == pref_id),
+                    }
+                    for ep in user_eps_qs
+                ],
+            },
             weight=2,
             shrinker=None,
             non_shrinkable=True,
@@ -2472,7 +2462,12 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         
         contacts_group.section(
             "recent_contacts",
-            recent_entries,
+            {
+                "note": (
+                    "Conversation partners from your most recent messages. Use these endpoints when you need to continue an existing thread."
+                ),
+                "items": recent_entries,
+            },
             weight=1,
             shrinker=None,
             non_shrinkable=True,
@@ -2581,23 +2576,20 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
                 }
             )
 
-    contacts_group.section(
-        "allowed_contacts",
-        allowed_contact_entries,
-        weight=2,
-        shrinker=None,
-        non_shrinkable=True,
-    )
-
     allowed_contacts_note = (
         "You MUST NOT contact anyone not explicitly listed in this section or in recent conversations. "
         "If you need a new contact, use the 'request_contact_permission' tool and wait for approval before messaging them. "
         "You do not have to reach out to everyone listed; choose the contact that best fits your task."
     )
-    contacts_group.section_text(
-        "allowed_contacts_note",
-        allowed_contacts_note,
-        weight=1,
+
+    contacts_group.section(
+        "allowed_contacts",
+        {
+            "note": allowed_contacts_note,
+            "items": allowed_contact_entries,
+        },
+        weight=2,
+        shrinker=None,
         non_shrinkable=True,
     )
 
@@ -2619,15 +2611,12 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
         channels_list = sorted(allowed_channels)
         contacts_group.section(
             "allowed_channels",
-            channels_list,
+            {
+                "note": "IMPORTANT: Only use the channels listed above. Do NOT attempt other communication paths, and always include the primary contact endpoint when applicable.",
+                "items": channels_list,
+            },
             weight=2,
             shrinker=None,
-            non_shrinkable=True,
-        )
-        contacts_group.section_text(
-            "allowed_channels_note",
-            "IMPORTANT: Only use the channels listed above. Do NOT attempt other communication paths, and always include the primary contact endpoint when applicable.",
-            weight=1,
             non_shrinkable=True,
         )
 
@@ -2650,33 +2639,30 @@ def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None
         }
         for hook in webhooks
     ]
+    if webhooks:
+        note_text = (
+            "When you call `send_webhook_event`, you MUST provide the matching `webhook_id` from this list "
+            "and a well-structured JSON `payload`. Do NOT send secrets, credentials, or personal data unless "
+            "the user explicitly instructs you to do so."
+        )
+    else:
+        note_text = (
+            "You do not have any outbound webhooks configured. If you need one, ask the user to add it on the agent settings page."
+        )
+
     webhooks_group.section(
         "webhook_catalog",
-        catalog_entries,
+        {
+            "note": note_text,
+            "items": catalog_entries,
+        },
         weight=2,
         shrinker=None,
         non_shrinkable=True,
     )
 
     if not webhooks:
-        webhooks_group.section_text(
-            "webhooks_note",
-            "You do not have any outbound webhooks configured. If you need one, ask the user to add it on the agent settings page.",
-            weight=1,
-            non_shrinkable=True,
-        )
         return
-
-    webhooks_group.section_text(
-        "webhook_usage_hint",
-        (
-            "When you call `send_webhook_event`, you MUST provide the matching `webhook_id` from this list "
-            "and a well-structured JSON `payload`. Do NOT send secrets, credentials, or personal data unless "
-            "the user explicitly instructs you to do so."
-        ),
-        weight=1,
-        non_shrinkable=True,
-    )
 
 
 def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> None:
@@ -2695,23 +2681,19 @@ def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> N
         for server in servers
     ]
 
-    mcp_group.section(
-        "mcp_servers_catalog",
-        catalog_entries,
-        weight=2,
-        shrinker=None,
-        non_shrinkable=True,
-    )
-
     note_text = (
         "These are the MCP servers you have access to. Use the search_tools command to connect."
         if servers
         else "No MCP servers are configured for you yet."
     )
-    mcp_group.section_text(
-        "mcp_servers_note",
-        note_text,
-        weight=1,
+    mcp_group.section(
+        "mcp_servers_catalog",
+        {
+            "note": note_text,
+            "items": catalog_entries,
+        },
+        weight=2,
+        shrinker=None,
         non_shrinkable=True,
     )
 
@@ -3226,6 +3208,16 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     limit_tool_history = tool_call_history_limit(agent)
     limit_msg_history = message_history_limit(agent)
 
+    history_group.section_text(
+        "note",
+        (
+            "Chronological list of recent tool calls, browser tasks, and user/agent messages. "
+            "Items are ordered from oldest to newest so you can replay the conversation flow."
+        ),
+        weight=1,
+        non_shrinkable=True,
+    )
+
     # ---- summaries (keep unchanged as requested) ----------------------- #
     step_snap = (
         PersistentAgentStepSnapshot.objects.filter(agent=agent)
@@ -3240,26 +3232,32 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
     # Add summaries as fixed sections (no shrinking)
     if step_snap and step_snap.summary:
-        history_group.section_text(
+        history_group.section(
             "step_summary",
-            step_snap.summary,
-            weight=1
-        )
-        history_group.section_text(
-            "step_summary_note",
-            "The previous section is a condensed summary of all past agent tool calls and internal steps that occurred before the fully detailed history below. Use it as historical context only; you do not need to repeat any of this information back to the user.",
-            weight=1
+            {
+                "content": step_snap.summary,
+                "note": (
+                    "Condensed summary of all prior tool calls and steps before the detailed history below. "
+                    "Use for context only; no need to restate it to the user."
+                ),
+            },
+            weight=1,
+            shrinker=None,
+            non_shrinkable=True,
         )
     if comm_snap and comm_snap.summary:
-        history_group.section_text(
-            "comms_summary", 
-            comm_snap.summary,
-            weight=1
-        )
-        history_group.section_text(
-            "comms_summary_note",
-            "The previous section is a concise summary of the user-agent conversation before the fully detailed history below. Treat it purely as historical context—avoid reiterating these messages unless it helps progress the task.",
-            weight=1
+        history_group.section(
+            "comms_summary",
+            {
+                "content": comm_snap.summary,
+                "note": (
+                    "Concise summary of the earlier user/agent conversation before the detailed history below. "
+                    "Treat as context—only reference it when it helps move the task forward."
+                ),
+            },
+            weight=1,
+            shrinker=None,
+            non_shrinkable=True,
         )
 
     step_cutoff = step_snap.snapshot_until if step_snap else epoch
@@ -3422,7 +3420,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     # Create structured promptree groups for each event
     if structured_events:
         structured_events.sort(key=lambda e: e[0])  # chronological order
-        events_group = history_group.group("events", weight=3, as_list=True)
+        events_group = history_group.group("items", weight=3, as_list=True)
 
         # Pre‑compute constants for exponential decay
         now = structured_events[-1][0]
@@ -3491,6 +3489,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                     weight=component_weight,
                     shrinker=shrinker
                 )
+    else:
+        history_group.section(
+            "items",
+            [],
+            weight=1,
+            shrinker=None,
+            non_shrinkable=True,
+        )
 
 
 def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
@@ -3576,27 +3582,18 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
 
     tasks_group.section(
         "browser_tasks",
-        task_entries,
+        {
+            "note": (
+                "These are your current web automation tasks. Completed tasks appear in your unified history."
+                if active_tasks
+                else "No active browser tasks."
+            ),
+            "items": task_entries,
+        },
         weight=3,
         shrinker=None,
         non_shrinkable=True,
     )
-    
-    # Add explanatory note
-    if active_tasks:
-        tasks_group.section_text(
-            "browser_tasks_note",
-            "These are your current web automation tasks. Completed tasks appear in your unified history.",
-            weight=1,
-            non_shrinkable=True
-        )
-    else:
-        tasks_group.section_text(
-            "browser_tasks_empty",
-            "No active browser tasks.",
-            weight=1,
-            non_shrinkable=True
-        )
 
 def _format_secrets(secrets_qs, status: str) -> list[dict]:
     """Helper to serialize a queryset of secrets into dicts."""
