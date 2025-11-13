@@ -2684,15 +2684,14 @@ def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None
             "You do not have any outbound webhooks configured. If you need one, ask the user to add it on the agent settings page."
         )
 
-    catalog_group = webhooks_group.group("webhook_catalog", weight=2)
-    catalog_group.section(
-        "items",
+    webhooks_group.section(
+        "urls",
         catalog_entries,
         weight=2,
         shrinker=None,
         non_shrinkable=False,
     )
-    catalog_group.section_text(
+    webhooks_group.section_text(
         "note",
         note_text,
         weight=1,
@@ -2724,15 +2723,14 @@ def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> N
         if servers
         else "No MCP servers are configured for you yet."
     )
-    mcp_catalog_group = mcp_group.group("mcp_servers_catalog", weight=2)
-    mcp_catalog_group.section(
-        "items",
+    mcp_group.section(
+        "servers",
         catalog_entries,
         weight=2,
         shrinker=None,
         non_shrinkable=False,
     )
-    mcp_catalog_group.section_text(
+    mcp_group.section_text(
         "note",
         note_text,
         weight=1,

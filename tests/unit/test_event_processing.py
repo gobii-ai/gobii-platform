@@ -180,16 +180,14 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("note", secrets_section)
 
         webhooks_block = important.get("webhooks", {})
-        webhook_catalog = webhooks_block.get("webhook_catalog")
-        self.assertIsInstance(webhook_catalog, dict)
-        self.assertIn("note", webhook_catalog)
-        self.assertIsInstance(webhook_catalog.get("items"), list)
+        self.assertIsInstance(webhooks_block, dict)
+        self.assertIn("note", webhooks_block)
+        self.assertIsInstance(webhooks_block.get("urls"), list)
 
         mcp_block = important.get("mcp_servers", {})
-        mcp_catalog = mcp_block.get("mcp_servers_catalog")
-        self.assertIsInstance(mcp_catalog, dict)
-        self.assertIn("note", mcp_catalog)
-        self.assertIsInstance(mcp_catalog.get("items"), list)
+        self.assertIsInstance(mcp_block, dict)
+        self.assertIn("note", mcp_block)
+        self.assertIsInstance(mcp_block.get("servers"), list)
 
         sqlite_block = prompt_payload.get("variable", {}).get("sqlite")
         self.assertIsInstance(sqlite_block, dict)
