@@ -3356,6 +3356,15 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         completed_tasks = []
 
     # format steps (group meta/params/result components together)
+    SPECIAL_TOOL_COMPONENTS = {
+        "update_charter": (("new_charter", "new_charter"),),
+        "send_email": (("mobile_first_html", "mobile_first_html"),),
+        "send_sms": (("body", "body"),),
+        "send_chat_message": (("body", "body"),),
+        "send_agent_message": (("message", "message"),),
+        "send_webhook_event": (("payload", "payload"),),
+    }
+
     for s in steps:
         try:
             system_step = getattr(s, "system_step", None)
@@ -3368,6 +3377,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 "tool": tc.tool_name,
                 "params": _maybe_parse_json_value(tc.tool_params),
             }
+            for param_key, component_name in SPECIAL_TOOL_COMPONENTS.get(tc.tool_name, ()):
+                _move_param_to_component(
+                    components,
+                    param_key=param_key,
+                    component_name=component_name,
+                )
             if tc.result:
                 components["result"] = _maybe_parse_json_value(tc.result)
             event_type = "tool_call"
@@ -3520,22 +3535,23 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             event_group = events_group.group(event_name, weight=event_weight)
 
             # Add components as subsections within the event group
+            tool_name = components.get("tool") if event_type == "tool_call" else None
             for component_name, component_content in components.items():
                 component_weight = COMPONENT_WEIGHTS.get(component_name, 1)
-                
-                # Apply HMT shrinking to bulky content
-                shrinker = None
-                if component_name in ("params", "result", "body", "prompt"):
-                    shrinker = "hmt"
-                elif component_name in ("content", "description"):
-                    if isinstance(component_content, str) and len(component_content) > 250:
-                        shrinker = "hmt"
+                should_shrink, force_non_shrink = _get_component_shrink_policy(
+                    event_type,
+                    tool_name,
+                    component_name,
+                    component_content,
+                )
+                shrinker = "hmt" if should_shrink else None
 
                 event_group.section_text(
                     component_name,
                     component_content,
                     weight=component_weight,
-                    shrinker=shrinker
+                    shrinker=shrinker,
+                    non_shrinkable=force_non_shrink,
                 )
     else:
         history_group.section(
@@ -3679,3 +3695,58 @@ def _get_secrets_block(agent: PersistentAgent) -> list[dict]:
     if pending_secrets:
         entries.extend(_format_secrets(pending_secrets, status="pending"))
     return entries
+def _move_param_to_component(components: dict, *, param_key: str, component_name: str) -> None:
+    """Lift a specific param out of the params dict into its own top-level component."""
+    params = components.get("params")
+    if not isinstance(params, dict):
+        return
+    if param_key not in params:
+        return
+    components[component_name] = params.pop(param_key)
+    if not params:
+        components.pop("params", None)
+
+
+def _get_component_shrink_policy(
+    event_type: str,
+    tool_name: str | None,
+    component_name: str,
+    component_value,
+) -> tuple[bool, bool]:
+    """
+    Return (should_shrink, force_non_shrink) for a unified-history component.
+    should_shrink -> apply HMT shrinker.
+    force_non_shrink -> mark the node as non_shrinkable so promptree never truncates it.
+    """
+    if event_type.startswith("message_"):
+        if component_name in {"body", "content"}:
+            return True, False
+        return False, True
+
+    TOOL_SHRINK_COMPONENTS = {
+        "update_charter": {"new_charter"},
+        "send_email": {"mobile_first_html"},
+        "send_sms": {"body"},
+        "send_chat_message": {"body"},
+        "send_agent_message": {"message"},
+        "send_webhook_event": {"payload"},
+    }
+
+    if event_type == "tool_call":
+        allowed = TOOL_SHRINK_COMPONENTS.get(tool_name or "")
+        if allowed is not None:
+            if component_name in allowed:
+                return True, False
+            return False, True
+
+    if component_name in {"params", "result", "body", "prompt"}:
+        return True, False
+
+    if (
+        component_name in {"content", "description"}
+        and isinstance(component_value, str)
+        and len(component_value) > 250
+    ):
+        return True, False
+
+    return False, False

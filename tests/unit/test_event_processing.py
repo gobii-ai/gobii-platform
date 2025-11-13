@@ -371,6 +371,100 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(sqlite_block["note"], "critical sqlite note")
         self.assertIn("BYTES TRUNCATED", sqlite_block["schema"])
 
+    def test_update_charter_exposes_new_charter_component(self):
+        """Update charter tool calls should lift new_charter into its own component."""
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="update charter")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="update_charter",
+            tool_params={
+                "new_charter": "A" * 1024,
+                "reason": "user request",
+            },
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        history_block = payload["variable"]["unified_history"]
+        events = self._get_history_events(history_block)
+        charter_event = next((e for e in events if e.get("tool") == "update_charter"), None)
+
+        self.assertIsNotNone(charter_event, "Expected update_charter tool call in history")
+        self.assertIn("new_charter", charter_event)
+        self.assertEqual(charter_event["params"]["reason"], "user request")
+        self.assertNotIn("new_charter", charter_event.get("params", {}))
+        self.assertEqual(len(charter_event["new_charter"]), 1024)
+
+    def test_send_email_exposes_mobile_first_html_component(self):
+        """Send email tool calls should lift mobile_first_html into its own component."""
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="send email")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="send_email",
+            tool_params={
+                "to": "user@example.com",
+                "subject": "Status",
+                "mobile_first_html": "<p>" + ("x" * 1000) + "</p>",
+            },
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        history_block = payload["variable"]["unified_history"]
+        events = self._get_history_events(history_block)
+        email_event = next((e for e in events if e.get("tool") == "send_email"), None)
+
+        self.assertIsNotNone(email_event, "Expected send_email tool call in history")
+        self.assertEqual(email_event["params"]["to"], "user@example.com")
+        self.assertNotIn("mobile_first_html", email_event.get("params", {}))
+        self.assertTrue(email_event["mobile_first_html"].startswith("<p>"))
+
+    def test_messaging_tools_expose_body_components(self):
+        """Deliverability tools should lift the message body/payload into its own component."""
+        scenarios = [
+            ("send_sms", {"to_number": "+11234567890", "body": "sms body"}, "body"),
+            ("send_chat_message", {"to_address": "web://user/1/agent/2", "body": "chat body"}, "body"),
+            ("send_agent_message", {"peer_agent_id": str(self.agent.id), "message": "peer note"}, "message"),
+            ("send_webhook_event", {"webhook_id": "123", "payload": {"key": "value"}}, "payload"),
+        ]
+
+        for tool_name, params, expected_component in scenarios:
+            with self.subTest(tool=tool_name):
+                PersistentAgentStep.objects.all().delete()
+                PersistentAgentToolCall.objects.all().delete()
+
+                step = PersistentAgentStep.objects.create(agent=self.agent, description=f"{tool_name} step")
+                PersistentAgentToolCall.objects.create(
+                    step=step,
+                    tool_name=tool_name,
+                    tool_params=params,
+                )
+
+                with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+                     patch('api.agent.core.event_processing.ensure_comms_compacted'):
+                    context, _, _ = _build_prompt_context(self.agent)
+
+                user_message = next((m for m in context if m['role'] == 'user'), None)
+                self.assertIsNotNone(user_message)
+                payload = json.loads(user_message['content'])
+                history_block = payload["variable"]["unified_history"]
+                events = self._get_history_events(history_block)
+                event = next((e for e in events if e.get("tool") == tool_name), None)
+
+                self.assertIsNotNone(event, f"Expected {tool_name} tool call in history")
+                self.assertIn(expected_component, event)
+                self.assertNotIn(expected_component, event.get("params", {}))
+
     def test_admin_system_message_is_injected_once(self):
         """Admin-authored system directives should appear in the system prompt and be marked delivered."""
         directive = PersistentAgentSystemMessage.objects.create(
