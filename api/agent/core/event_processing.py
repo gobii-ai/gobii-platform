@@ -522,11 +522,7 @@ def _get_recent_preferred_config(
         # Skip preferred provider on second run to avoid immediate repetition
         return None
 
-    raw_max_streak = getattr(settings, "MAX_PREFERRED_PROVIDER_STREAK", 20)
-    try:
-        max_streak_limit = int(raw_max_streak)
-    except (TypeError, ValueError):
-        max_streak_limit = 20
+    max_streak_limit = getattr(settings, "MAX_PREFERRED_PROVIDER_STREAK", 20)
 
     streak_sample_size = max(1, max_streak_limit)
 
@@ -563,26 +559,25 @@ def _get_recent_preferred_config(
         return None
 
     if last_model and last_provider:
-        if max_streak_limit > 0:
-            streak = 0
-            for completion in recent_completions:
-                if (
-                    getattr(completion, "llm_model", None) == last_model
-                    and getattr(completion, "llm_provider", None) == last_provider
-                ):
-                    streak += 1
-                else:
-                    break
-            if streak >= max_streak_limit:
-                logger.info(
-                    "Agent %s skipping preferred provider/model %s/%s due to streak=%d (limit=%d)",
-                    agent_id,
-                    last_provider,
-                    last_model,
-                    streak,
-                    max_streak_limit,
-                )
-                return None
+        streak = 0
+        for completion in recent_completions:
+            if (
+                getattr(completion, "llm_model", None) == last_model
+                and getattr(completion, "llm_provider", None) == last_provider
+            ):
+                streak += 1
+            else:
+                break
+        if max_streak_limit is not None and streak >= max_streak_limit:
+            logger.info(
+                "Agent %s skipping preferred provider/model %s/%s due to streak=%d (limit=%d)",
+                agent_id,
+                last_provider,
+                last_model,
+                streak,
+                max_streak_limit,
+            )
+            return None
 
         logger.info(
             "Agent %s reusing provider %s with model %s",

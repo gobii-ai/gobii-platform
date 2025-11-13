@@ -212,6 +212,18 @@ class TestEventProcessingLLMSelection(TestCase):
         preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
         self.assertIsNone(preferred)
 
+    @patch('api.agent.core.event_processing.settings.MAX_PREFERRED_PROVIDER_STREAK', 0)
+    def test_get_recent_preferred_config_enforces_zero_streak_limit(self):
+        """Helper should never reuse a provider when the streak limit is zero."""
+        PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            llm_model="model-preferred",
+            llm_provider="preferred",
+        )
+
+        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
+        self.assertIsNone(preferred)
+
     @patch('api.agent.core.event_processing.settings.MAX_PREFERRED_PROVIDER_STREAK', 3)
     def test_get_recent_preferred_config_allows_under_limit(self):
         """Helper should still return the preference when streak is below the limit."""
