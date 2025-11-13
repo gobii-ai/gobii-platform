@@ -3248,16 +3248,6 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     limit_tool_history = tool_call_history_limit(agent)
     limit_msg_history = message_history_limit(agent)
 
-    history_group.section_text(
-        "note",
-        (
-            "Chronological list of recent tool calls, browser tasks, and messages. "
-            "EVENTS ARE ORDERED FROM OLDEST TO NEWEST SO YOU CAN UNDERSTAND THE CONVERSATION FLOW. "
-        ),
-        weight=1,
-        non_shrinkable=True,
-    )
-
     # ---- summaries (keep unchanged as requested) ----------------------- #
     step_snap = (
         PersistentAgentStepSnapshot.objects.filter(agent=agent)
@@ -3477,6 +3467,16 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         event_type = "browser_task"
         components["type"] = event_type
         structured_events.append((t.updated_at, event_type, components))
+
+    history_group.section_text(
+        "note",
+        (
+            "Chronological list of recent tool calls, browser tasks, and messages. "
+            "EVENTS ARE ORDERED FROM OLDEST TO NEWEST SO YOU CAN UNDERSTAND THE CONVERSATION FLOW. "
+        ),
+        weight=1,
+        non_shrinkable=True,
+    )
 
     # Create structured promptree groups for each event
     if structured_events:
