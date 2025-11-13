@@ -12,6 +12,7 @@ from unittest.mock import patch, MagicMock
 import zstandard as zstd
 
 from api.agent.core.event_processing import _build_prompt_context, _run_agent_loop, PROMPT_TOKEN_BUDGET
+from api.agent.core.promptree import Prompt
 from api.admin import PersistentAgentPromptArchiveAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
 from api.agent.tools.search_web import execute_search_web as _execute_search_web
@@ -80,7 +81,7 @@ class PromptContextBuilderTests(TestCase):
         self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
 
     def _get_history_events(self, history_block):
-        events = history_block.get("events")
+        events = history_block.get("items") or history_block.get("events")
         if isinstance(events, list):
             return events
         if isinstance(events, dict):
@@ -121,6 +122,8 @@ class PromptContextBuilderTests(TestCase):
         # Verify the unified history event contains the inbound message metadata
         history_block = prompt_payload.get("variable", {}).get("unified_history", {})
         self.assertTrue(history_block)
+        self.assertIn("note", history_block)
+        self.assertIn("chronological", history_block["note"].lower())
         events = self._get_history_events(history_block)
         self.assertIsInstance(events, list)
 
@@ -144,29 +147,52 @@ class PromptContextBuilderTests(TestCase):
         self.assertTrue(found_message, "Expected inbound message event in unified history")
         
         important = prompt_payload.get("important", {})
-        self.assertEqual(important.get("charter"), "Test prompt context")
-        self.assertEqual(important.get("schedule"), "No schedule configured")
+        charter_block = important.get("charter")
+        self.assertIsInstance(charter_block, dict)
+        self.assertEqual(charter_block.get("content"), "Test prompt context")
+        self.assertIn("note", charter_block)
+
+        schedule_block = important.get("schedule")
+        self.assertIsInstance(schedule_block, dict)
+        self.assertEqual(schedule_block.get("details"), "No schedule configured")
+        self.assertIn("note", schedule_block)
 
         agent_endpoints = important.get("agent_endpoints")
-        self.assertIsInstance(agent_endpoints, list)
+        self.assertIsInstance(agent_endpoints, dict)
+        self.assertIsInstance(agent_endpoints.get("items"), list)
+        self.assertIn("note", agent_endpoints)
         self.assertTrue(
-            any(entry.get("address") == self.endpoint.address for entry in agent_endpoints)
+            any(entry.get("address") == self.endpoint.address for entry in agent_endpoints.get("items"))
         )
 
-        recent_contacts = important.get("recent_contacts")
+        recent_contacts_block = important.get("recent_contacts")
+        self.assertIsInstance(recent_contacts_block, dict)
+        self.assertIn("note", recent_contacts_block)
+        recent_contacts = recent_contacts_block.get("items")
         self.assertIsInstance(recent_contacts, list)
         self.assertTrue(
             any(entry.get("address") == self.external_endpoint.address for entry in recent_contacts)
         )
 
         secrets_section = important.get("secrets")
-        self.assertIsInstance(secrets_section, list)
+        self.assertIsInstance(secrets_section, dict)
+        self.assertIsInstance(secrets_section.get("items"), list)
+        self.assertIn("note", secrets_section)
 
         webhooks_block = important.get("webhooks", {})
-        self.assertIsInstance(webhooks_block.get("webhook_catalog"), list)
+        self.assertIsInstance(webhooks_block, dict)
+        self.assertIn("note", webhooks_block)
+        self.assertIsInstance(webhooks_block.get("urls"), list)
 
         mcp_block = important.get("mcp_servers", {})
-        self.assertIsInstance(mcp_block.get("mcp_servers_catalog"), list)
+        self.assertIsInstance(mcp_block, dict)
+        self.assertIn("note", mcp_block)
+        self.assertIsInstance(mcp_block.get("servers"), list)
+
+        sqlite_block = prompt_payload.get("variable", {}).get("sqlite")
+        self.assertIsInstance(sqlite_block, dict)
+        self.assertIn("schema", sqlite_block)
+        self.assertIn("note", sqlite_block)
 
         critical = prompt_payload.get("critical", {})
         self.assertIn("current_datetime", critical)
@@ -300,15 +326,18 @@ class PromptContextBuilderTests(TestCase):
         user_message = next((m for m in context if m['role'] == 'user'), None)
         self.assertIsNotNone(user_message)
         payload = json.loads(user_message['content'])
-        browser_tasks = payload["variable"]["browser_tasks"]
+        browser_tasks_block = payload["variable"]["browser_tasks"]
 
-        self.assertIsInstance(browser_tasks, list)
-        self.assertEqual(len(browser_tasks), 2)
-        self.assertEqual(browser_tasks[0]["prompt"], "Check the latest earnings releases.")
+        self.assertIsInstance(browser_tasks_block, dict)
+        tasks = browser_tasks_block.get("items")
+        self.assertIsInstance(tasks, list)
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(tasks[0]["prompt"], "Check the latest earnings releases.")
         self.assertEqual(
-            browser_tasks[1]["status"],
+            tasks[1]["status"],
             BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
         )
+        self.assertIn("note", browser_tasks_block)
 
     def test_browser_tasks_empty_array_when_no_tasks(self):
         """Browser tasks array should still be present (empty) when no tasks exist."""
@@ -319,10 +348,120 @@ class PromptContextBuilderTests(TestCase):
         user_message = next((m for m in context if m['role'] == 'user'), None)
         self.assertIsNotNone(user_message)
         payload = json.loads(user_message['content'])
-        browser_tasks = payload["variable"]["browser_tasks"]
+        browser_tasks_block = payload["variable"]["browser_tasks"]
 
-        self.assertEqual(browser_tasks, [])
-        self.assertEqual(payload["variable"]["browser_tasks_empty"], "No active browser tasks.")
+        self.assertEqual(browser_tasks_block.get("items"), [])
+        self.assertEqual(browser_tasks_block.get("note"), "No active browser tasks.")
+        self.assertNotIn("browser_tasks_empty", payload["variable"])
+
+    def test_sqlite_note_not_shrunk_in_promptree(self):
+        """Promptree should truncate schema content while keeping the paired note intact."""
+        long_schema = "CREATE TABLE data (\n" + ("x" * 6000) + "\n)"
+        prompt = Prompt(token_estimator=lambda text: len(text))
+        variable_group = prompt.group("variable", weight=4)
+        sqlite_group = variable_group.group("sqlite", weight=1)
+        sqlite_group.section_text("schema", long_schema, weight=1, shrinker="hmt")
+        sqlite_group.section_text("note", "critical sqlite note", weight=1, non_shrinkable=True)
+
+        rendered = json.loads(prompt.render(500))
+        sqlite_block = rendered["variable"]["sqlite"]
+
+        self.assertEqual(sqlite_block["note"], "critical sqlite note")
+        self.assertIn("BYTES TRUNCATED", sqlite_block["schema"])
+
+    def test_update_charter_exposes_new_charter_component(self):
+        """Update charter tool calls should lift new_charter into its own component."""
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="update charter")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="update_charter",
+            tool_params={
+                "new_charter": "A" * 1024,
+                "reason": "user request",
+            },
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        history_block = payload["variable"]["unified_history"]
+        events = self._get_history_events(history_block)
+        charter_event = next((e for e in events if e.get("tool") == "update_charter"), None)
+
+        self.assertIsNotNone(charter_event, "Expected update_charter tool call in history")
+        self.assertIn("new_charter", charter_event)
+        self.assertEqual(charter_event["params"]["reason"], "user request")
+        self.assertNotIn("new_charter", charter_event.get("params", {}))
+        self.assertEqual(len(charter_event["new_charter"]), 1024)
+
+    def test_send_email_exposes_mobile_first_html_component(self):
+        """Send email tool calls should lift mobile_first_html into its own component."""
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="send email")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="send_email",
+            tool_params={
+                "to": "user@example.com",
+                "subject": "Status",
+                "mobile_first_html": "<p>" + ("x" * 1000) + "</p>",
+            },
+        )
+
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+            context, _, _ = _build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        payload = json.loads(user_message['content'])
+        history_block = payload["variable"]["unified_history"]
+        events = self._get_history_events(history_block)
+        email_event = next((e for e in events if e.get("tool") == "send_email"), None)
+
+        self.assertIsNotNone(email_event, "Expected send_email tool call in history")
+        self.assertEqual(email_event["params"]["to"], "user@example.com")
+        self.assertNotIn("mobile_first_html", email_event.get("params", {}))
+        self.assertTrue(email_event["mobile_first_html"].startswith("<p>"))
+
+    def test_messaging_tools_expose_body_components(self):
+        """Deliverability tools should lift the message body/payload into its own component."""
+        scenarios = [
+            ("send_sms", {"to_number": "+11234567890", "body": "sms body"}, "body"),
+            ("send_chat_message", {"to_address": "web://user/1/agent/2", "body": "chat body"}, "body"),
+            ("send_agent_message", {"peer_agent_id": str(self.agent.id), "message": "peer note"}, "message"),
+            ("send_webhook_event", {"webhook_id": "123", "payload": {"key": "value"}}, "payload"),
+        ]
+
+        for tool_name, params, expected_component in scenarios:
+            with self.subTest(tool=tool_name):
+                PersistentAgentStep.objects.all().delete()
+                PersistentAgentToolCall.objects.all().delete()
+
+                step = PersistentAgentStep.objects.create(agent=self.agent, description=f"{tool_name} step")
+                PersistentAgentToolCall.objects.create(
+                    step=step,
+                    tool_name=tool_name,
+                    tool_params=params,
+                )
+
+                with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+                     patch('api.agent.core.event_processing.ensure_comms_compacted'):
+                    context, _, _ = _build_prompt_context(self.agent)
+
+                user_message = next((m for m in context if m['role'] == 'user'), None)
+                self.assertIsNotNone(user_message)
+                payload = json.loads(user_message['content'])
+                history_block = payload["variable"]["unified_history"]
+                events = self._get_history_events(history_block)
+                event = next((e for e in events if e.get("tool") == tool_name), None)
+
+                self.assertIsNotNone(event, f"Expected {tool_name} tool call in history")
+                self.assertIn(expected_component, event)
+                self.assertNotIn(expected_component, event.get("params", {}))
 
     def test_admin_system_message_is_injected_once(self):
         """Admin-authored system directives should appear in the system prompt and be marked delivered."""
