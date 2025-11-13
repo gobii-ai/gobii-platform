@@ -13,6 +13,7 @@ import math
 from datetime import datetime, timezone, timedelta
 from functools import partial
 from decimal import Decimal
+from numbers import Number
 from typing import List, Tuple, Union, Optional, Dict, Any, Sequence
 from uuid import UUID, uuid4
 
@@ -140,6 +141,25 @@ def _usage_attribute(usage: Any, attr: str, default: Optional[Any] = None) -> An
     return getattr(usage, attr, default)
 
 
+def _coerce_int(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, Number):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+    try:
+        return int(str(value))
+    except Exception:
+        return 0
+
+
 def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any]) -> dict:
     if not token_usage:
         return {}
@@ -149,17 +169,17 @@ def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any
     if not model:
         return {}
 
-    prompt_tokens = int(token_usage.get("prompt_tokens") or 0)
-    completion_tokens = int(token_usage.get("completion_tokens") or 0)
-    cached_tokens = int(token_usage.get("cached_tokens") or 0)
+    prompt_tokens = _coerce_int(token_usage.get("prompt_tokens"))
+    completion_tokens = _coerce_int(token_usage.get("completion_tokens"))
+    cached_tokens = _coerce_int(token_usage.get("cached_tokens"))
 
     if raw_usage is not None and not cached_tokens:
         details = _usage_attribute(raw_usage, "prompt_tokens_details")
         if details:
             if isinstance(details, dict):
-                cached_tokens = int(details.get("cached_tokens") or 0)
+                cached_tokens = _coerce_int(details.get("cached_tokens"))
             else:
-                cached_tokens = int(_usage_attribute(details, "cached_tokens", 0) or 0)
+                cached_tokens = _coerce_int(_usage_attribute(details, "cached_tokens", 0))
 
     cached_tokens = min(cached_tokens, prompt_tokens)
     uncached_tokens = max(prompt_tokens - cached_tokens, 0)

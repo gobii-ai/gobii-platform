@@ -191,6 +191,34 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(token_usage["total_cost"], Decimal("0.000375"))
         mock_get_model_info.assert_called()
 
+    @patch("api.agent.core.event_processing.litellm.get_model_info")
+    def test_cost_fields_handle_non_numeric_usage(self, mock_get_model_info):
+        """Token usage values that aren't numeric (e.g. MagicMocks) should not crash cost calc."""
+        mock_get_model_info.return_value = {
+            "input_cost_per_token": 0.000002,
+            "cache_read_input_token_cost": 0.000001,
+            "output_cost_per_token": 0.000004,
+        }
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock(content="Mocky")
+        usage = MagicMock()
+        # Leave prompt/completion tokens as MagicMocks (default) to mimic upstream tests
+        mock_response.model_extra = {"usage": usage}
+
+        with patch("api.agent.core.event_processing.litellm.completion") as mock_completion:
+            mock_completion.return_value = mock_response
+            response, token_usage = _completion_with_failover(
+                messages=[{"role": "user", "content": "Hi"}],
+                tools=[],
+                failover_configs=[("openai-provider", "openai/gpt-4o-mini", {})],
+                agent_id=str(self.agent.id),
+            )
+
+        self.assertIsNotNone(response)
+        self.assertEqual(token_usage.get("total_cost"), Decimal("0.000000"))
+
     def test_aggregate_token_usage_for_agent(self):
         """Test aggregating token usage across all completions for an agent."""
         from django.db.models import Sum
