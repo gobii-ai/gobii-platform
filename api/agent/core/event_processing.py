@@ -496,6 +496,18 @@ def _completion_with_failover(
     raise RuntimeError("No LLM provider available")
 
 
+def _get_completed_process_run_count(agent: Optional[PersistentAgent]) -> int:
+    """Return how many PROCESS_EVENTS loops completed for the agent."""
+    if agent is None:
+        return 0
+
+    return PersistentAgentSystemStep.objects.filter(
+        step__agent=agent,
+        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        step__description="Process events",
+    ).count()
+
+
 def _get_recent_preferred_config(
     agent: PersistentAgent,
     run_sequence_number: int,
@@ -1456,11 +1468,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         span.set_attribute('credit_check.error', str(e))
         return agent
 
-    prior_runs_qs = PersistentAgentSystemStep.objects.filter(
-        step__agent=agent,
-        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-    )
-    prior_run_count = prior_runs_qs.count()
+    prior_run_count = _get_completed_process_run_count(agent)
 
     # Determine whether this is the first processing run before recording the system step
     is_first_run = prior_run_count == 0

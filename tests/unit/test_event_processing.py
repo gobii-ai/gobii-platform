@@ -11,7 +11,12 @@ from unittest.mock import patch, MagicMock
 
 import zstandard as zstd
 
-from api.agent.core.event_processing import _build_prompt_context, _run_agent_loop, PROMPT_TOKEN_BUDGET
+from api.agent.core.event_processing import (
+    _build_prompt_context,
+    _get_completed_process_run_count,
+    _run_agent_loop,
+    PROMPT_TOKEN_BUDGET,
+)
 from api.agent.core.promptree import Prompt
 from api.admin import PersistentAgentPromptArchiveAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
@@ -32,6 +37,7 @@ from api.models import (
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
     PersistentAgentCompletion,
+    PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
 )
 from constants.grant_types import GrantTypeChoices
@@ -670,6 +676,49 @@ class PromptContextBuilderTests(TestCase):
         completion = PersistentAgentCompletion.objects.get(agent=self.agent)
         self.assertEqual(completion.llm_model, "mock-model")
         self.assertEqual(completion.llm_provider, "mock-provider")
+
+
+@tag("batch_event_processing")
+class AgentRunSequenceHelperTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="sequence_tester@example.com",
+            email="sequence_tester@example.com",
+            password="secret",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="SeqBA")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="SeqAgent",
+            charter="Test run sequence helper",
+            browser_use_agent=self.browser_agent,
+        )
+
+    def test_completed_run_count_ignores_non_processing_steps(self):
+        """Helper should ignore credit gate PROCESS_EVENTS system steps."""
+        skipped_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Skipped due to credits",
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=skipped_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes="credit_insufficient",
+        )
+
+        self.assertEqual(_get_completed_process_run_count(self.agent), 0)
+
+        run_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Process events",
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=run_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes="simplified",
+        )
+
+        self.assertEqual(_get_completed_process_run_count(self.agent), 1)
 
 @tag("batch_event_processing")
 class CronTriggerTaskTests(TestCase):
