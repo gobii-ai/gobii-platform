@@ -72,6 +72,8 @@ GOBII_ENABLE_COMMUNITY_UNLIMITED = env.bool("GOBII_ENABLE_COMMUNITY_UNLIMITED", 
 FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
 # Permit skipping LLM bootstrap enforcement (useful for non-interactive tests)
 LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
+# Maximum times we will allow the same provider/model to be preferred consecutively
+MAX_PREFERRED_PROVIDER_STREAK = env.int("MAX_PREFERRED_PROVIDER_STREAK", default=20)
 
 try:
     from proprietary import defaults as _proprietary_defaults_module

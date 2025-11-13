@@ -161,7 +161,7 @@ class TestEventProcessingLLMSelection(TestCase):
             llm_provider="preferred",
         )
 
-        preferred = _get_recent_preferred_config(self.agent)
+        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
         self.assertEqual(preferred, ("preferred", "model-preferred"))
 
     def test_get_recent_preferred_config_requires_both_fields(self):
@@ -171,7 +171,7 @@ class TestEventProcessingLLMSelection(TestCase):
             llm_provider="preferred",
         )
 
-        preferred = _get_recent_preferred_config(self.agent)
+        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
         self.assertIsNone(preferred)
 
     def test_get_recent_preferred_config_ignores_stale_completion(self):
@@ -185,5 +185,42 @@ class TestEventProcessingLLMSelection(TestCase):
             created_at=timezone.now() - timedelta(hours=2),
         )
 
-        preferred = _get_recent_preferred_config(self.agent)
+        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
         self.assertIsNone(preferred)
+
+    def test_get_recent_preferred_config_skips_on_second_run(self):
+        """Second run should never use preferred provider, even if fresh."""
+        PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            llm_model="model-preferred",
+            llm_provider="preferred",
+        )
+
+        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=2)
+        self.assertIsNone(preferred)
+
+    @patch('api.agent.core.event_processing.settings.MAX_PREFERRED_PROVIDER_STREAK', 3)
+    def test_get_recent_preferred_config_skips_when_streak_limit_hit(self):
+        """Helper should stop preferring a provider once the streak limit is reached."""
+        for _ in range(3):
+            PersistentAgentCompletion.objects.create(
+                agent=self.agent,
+                llm_model="model-preferred",
+                llm_provider="preferred",
+            )
+
+        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
+        self.assertIsNone(preferred)
+
+    @patch('api.agent.core.event_processing.settings.MAX_PREFERRED_PROVIDER_STREAK', 3)
+    def test_get_recent_preferred_config_allows_under_limit(self):
+        """Helper should still return the preference when streak is below the limit."""
+        for _ in range(2):
+            PersistentAgentCompletion.objects.create(
+                agent=self.agent,
+                llm_model="model-preferred",
+                llm_provider="preferred",
+            )
+
+        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
+        self.assertEqual(preferred, ("preferred", "model-preferred"))

@@ -612,11 +612,37 @@ class PromptContextBuilderTests(TestCase):
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
             from api.agent.core import event_processing as ep
             with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
-                _run_agent_loop(self.agent, is_first_run=False)
+                _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=3)
 
-        mock_helper.assert_called_once_with(agent=self.agent)
+        mock_helper.assert_called_once_with(agent=self.agent, run_sequence_number=3)
         call_kwargs = mock_completion.call_args.kwargs
         self.assertEqual(call_kwargs["preferred_config"], ("mock", "mock-model"))
+
+    def test_agent_loop_skips_preference_on_second_run(self):
+        """Agent loop should not request preferred configs on the agent's second run."""
+        response_message = MagicMock()
+        response_message.tool_calls = None
+        response_message.content = "Reasoning output"
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock()
+        response.choices = [response_choice]
+        response.model_extra = {}
+        token_usage = {
+            "model": "mock-model",
+            "provider": "mock-provider",
+        }
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'), \
+             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+             patch('api.agent.core.event_processing._get_recent_preferred_config', return_value=None) as mock_helper, \
+             patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+                _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=2)
+
+        mock_helper.assert_called_once_with(agent=self.agent, run_sequence_number=2)
+        call_kwargs = mock_completion.call_args.kwargs
+        self.assertIsNone(call_kwargs["preferred_config"])
 
     def test_completion_record_keeps_model_when_usage_missing(self):
         """PersistentAgentCompletion should store provider/model even if usage isn't provided."""

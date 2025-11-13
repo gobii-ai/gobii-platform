@@ -497,20 +497,32 @@ def _completion_with_failover(
 
 
 def _get_recent_preferred_config(
-    agent: PersistentAgent
+    agent: PersistentAgent,
+    run_sequence_number: int,
 ) -> Optional[Tuple[str, str]]:
     """
     Return the (provider, model) from the most recent completion if fresh enough.
     """
     if agent is None:
         return None
+
+    if run_sequence_number == 2:
+        # Skip preferred provider on second run to avoid immediate repetition
+        return None
+
+    raw_max_streak = getattr(settings, "MAX_PREFERRED_PROVIDER_STREAK", 20)
     try:
-        window_start = dj_timezone.now() - PREFERRED_PROVIDER_MAX_AGE
-        last_completion = (
-            PersistentAgentCompletion.objects.filter(agent=agent, created_at__gte=window_start)
+        max_streak_limit = int(raw_max_streak)
+    except (TypeError, ValueError):
+        max_streak_limit = 20
+
+    streak_sample_size = max(1, max_streak_limit)
+
+    try:
+        recent_completions = list(
+            PersistentAgentCompletion.objects.filter(agent=agent)
             .only("created_at", "llm_model", "llm_provider")
-            .order_by("-created_at")
-            .first()
+            .order_by("-created_at")[:streak_sample_size]
         )
     except Exception:
         logger.debug(
@@ -520,14 +532,46 @@ def _get_recent_preferred_config(
         )
         return None
 
-    if not last_completion:
+    if not recent_completions:
         return None
 
+    window_start = dj_timezone.now() - PREFERRED_PROVIDER_MAX_AGE
+    last_completion = recent_completions[0]
     last_model = getattr(last_completion, "llm_model", None)
     last_provider = getattr(last_completion, "llm_provider", None)
     agent_id = getattr(agent, "id", None)
+    created_at = getattr(last_completion, "created_at", None)
+
+    if not created_at or created_at < window_start:
+        logger.info(
+            "Agent %s preferred provider stale due to age (created_at=%s)",
+            agent_id,
+            created_at,
+        )
+        return None
 
     if last_model and last_provider:
+        if max_streak_limit > 0:
+            streak = 0
+            for completion in recent_completions:
+                if (
+                    getattr(completion, "llm_model", None) == last_model
+                    and getattr(completion, "llm_provider", None) == last_provider
+                ):
+                    streak += 1
+                else:
+                    break
+            if streak >= max_streak_limit:
+                logger.info(
+                    "Agent %s skipping preferred provider/model %s/%s due to streak=%d (limit=%d)",
+                    agent_id,
+                    last_provider,
+                    last_model,
+                    streak,
+                    max_streak_limit,
+                )
+                return None
+
         logger.info(
             "Agent %s reusing provider %s with model %s",
             agent_id,
@@ -1412,11 +1456,15 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         span.set_attribute('credit_check.error', str(e))
         return agent
 
-    # Determine whether this is the first processing run before recording the system step
-    is_first_run = not PersistentAgentSystemStep.objects.filter(
+    prior_runs_qs = PersistentAgentSystemStep.objects.filter(
         step__agent=agent,
         code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-    ).exists()
+    )
+    prior_run_count = prior_runs_qs.count()
+
+    # Determine whether this is the first processing run before recording the system step
+    is_first_run = prior_run_count == 0
+    run_sequence_number = prior_run_count + 1
 
     with transaction.atomic():
         processing_step = PersistentAgentStep.objects.create(
@@ -1429,14 +1477,21 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
         )
 
     logger.info(
-        "Processing agent %s (is_first_run=%s)",
+        "Processing agent %s (is_first_run=%s, run_sequence_number=%s)",
         agent.id,
         is_first_run,
+        run_sequence_number,
     )
     span.set_attribute('processing_step.id', str(processing_step.id))
     span.set_attribute('processing.is_first_run', is_first_run)
+    span.set_attribute('processing.run_sequence_number', run_sequence_number)
 
-    cumulative_token_usage = _run_agent_loop(agent, is_first_run=is_first_run, credit_snapshot=credit_snapshot)
+    cumulative_token_usage = _run_agent_loop(
+        agent,
+        is_first_run=is_first_run,
+        credit_snapshot=credit_snapshot,
+        run_sequence_number=run_sequence_number,
+    )
 
     sys_step.notes = "simplified"
     try:
@@ -1453,8 +1508,15 @@ def _run_agent_loop(
     *,
     is_first_run: bool,
     credit_snapshot: Optional[Dict[str, Any]] = None,
+    run_sequence_number: Optional[int] = None,
 ) -> dict:
     """The core tool‑calling loop for a persistent agent.
+    
+    Args:
+        agent: Agent being processed.
+        is_first_run: Whether this is the first ever processing run.
+        credit_snapshot: Cached credit info for prompt context.
+        run_sequence_number: 1-based count of PROCESS_EVENTS runs for the agent.
     
     Returns:
         dict: Cumulative token usage across all iterations
@@ -1582,9 +1644,7 @@ def _run_agent_loop(
                 span.add_event("Agent loop aborted - llm bootstrap required")
                 break
 
-            preferred_config = _get_recent_preferred_config(
-                agent=agent
-            )
+            preferred_config = _get_recent_preferred_config(agent=agent, run_sequence_number=run_sequence_number)
 
             try:
                 response, token_usage = _completion_with_failover(
