@@ -1,11 +1,24 @@
 import time
 
+from util.analytics import Analytics
 
-def _first_ip(meta):
-    xff = meta.get("HTTP_X_FORWARDED_FOR")
-    if xff:
-        return xff.split(",")[0].strip()
-    return meta.get("REMOTE_ADDR")
+
+def _client_ip(request):
+    """
+    Return a trustworthy client IP string or None.
+
+    We rely on Analytics.get_client_ip which already understands Cloudflare /
+    Google proxy headers. A value of '0' is treated as "unknown".
+    """
+    if not request:
+        return None
+    try:
+        ip = Analytics.get_client_ip(request)
+    except Exception:
+        return None
+    if not ip or ip == '0':
+        return None
+    return ip
 
 
 def extract_click_context(request):
@@ -14,7 +27,7 @@ def extract_click_context(request):
     q = request.GET
     c = request.COOKIES
     ua = request.META.get("HTTP_USER_AGENT")
-    ip = _first_ip(request.META)
+    ip = _client_ip(request)
 
     fbp = c.get("_fbp")
     fbc = c.get("_fbc")

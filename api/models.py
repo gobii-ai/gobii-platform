@@ -1912,6 +1912,7 @@ class UserAttribution(models.Model):
 
     first_touch_at = models.DateTimeField(null=True, blank=True)
     last_touch_at = models.DateTimeField(null=True, blank=True)
+    last_client_ip = models.GenericIPAddressField(null=True, blank=True, help_text="Most recent client IP observed for this user.")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
