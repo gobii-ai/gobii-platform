@@ -121,6 +121,19 @@ def _coerce_bool(value: Any) -> bool | None:
         return None
 
 
+def _safe_client_ip(request) -> str | None:
+    """Return a normalized client IP or None if unavailable."""
+    if not request:
+        return None
+    try:
+        ip = Analytics.get_client_ip(request)
+    except Exception:
+        return None
+    if not ip or ip == '0':
+        return None
+    return ip
+
+
 def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     """Construct marketing context payload from persisted attribution data."""
     context: dict[str, Any] = {"consent": True}
@@ -154,6 +167,10 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     utm = {key: value for key, value in utm_candidates.items() if value}
     if utm:
         context["utm"] = utm
+
+    last_client_ip = getattr(attribution, "last_client_ip", None)
+    if last_client_ip:
+        context["client_ip"] = last_client_ip
 
     return context
 
@@ -343,6 +360,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
     logger.info(f"New user signed up: {user.email}")
 
     request.session['show_signup_tracking'] = True
+    client_ip = _safe_client_ip(request)
 
     # Example: fire off an analytics event
     try:
@@ -534,12 +552,13 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     'last_referrer': last_referrer,
                     'first_landing_path': first_path,
                     'last_landing_path': last_path,
-                    'segment_anonymous_id': segment_anonymous_id,
-                    'ga_client_id': ga_client_id,
-                    'first_touch_at': first_touch_at,
-                    'last_touch_at': last_touch_at,
-                },
-            )
+            'segment_anonymous_id': segment_anonymous_id,
+            'ga_client_id': ga_client_id,
+            'first_touch_at': first_touch_at,
+            'last_touch_at': last_touch_at,
+            'last_client_ip': client_ip,
+        },
+    )
         except Exception:
             logger.exception("Failed to persist user attribution for user %s", user.id)
 
@@ -685,6 +704,12 @@ def handle_user_logged_in(sender, request, user, **kwargs):
     logger.info(f"User logged in: {user.id} ({user.email})")
 
     try:
+        client_ip = _safe_client_ip(request)
+        if client_ip:
+            UserAttribution.objects.update_or_create(
+                user=user,
+                defaults={'last_client_ip': client_ip},
+            )
         Analytics.identify(user.id, {
             'first_name': user.first_name or '',
             'last_name': user.last_name or '',

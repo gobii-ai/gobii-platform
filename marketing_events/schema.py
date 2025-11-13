@@ -38,6 +38,14 @@ def normalize_event(payload: dict) -> dict:
     click = ctx.get("click_ids") or {}
     page = ctx.get("page") or {}
 
+    client_ip = ctx.get("client_ip")
+    if isinstance(client_ip, str):
+        client_ip = client_ip.strip()
+        if not client_ip or client_ip == '0':
+            client_ip = None
+    else:
+        client_ip = None
+
     # Clean phone number to default to empty string and filter characters
     cleaned_phone = _clean_phone(user.get("phone"))
 
@@ -52,7 +60,7 @@ def normalize_event(payload: dict) -> dict:
             "ph": _sha256_norm(cleaned_phone),
         },
         "network": {
-            "client_ip": ctx.get("client_ip"),
+            "client_ip": client_ip,
             "user_agent": ctx.get("user_agent"),
             "page_url": page.get("url"),
             "fbp": click.get("fbp"),

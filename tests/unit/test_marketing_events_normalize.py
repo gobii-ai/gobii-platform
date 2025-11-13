@@ -25,3 +25,13 @@ class NormalizeEventTests(SimpleTestCase):
         self.assertEqual(out["event_name"], "CompleteRegistration")
         self.assertTrue(out["ids"]["em"])
         self.assertTrue(out["ids"]["external_id"])
+
+    def test_normalize_event_discards_placeholder_ip(self):
+        payload = {
+            "event_name": "Subscribe",
+            "properties": {},
+            "user": {"id": "456"},
+            "context": {"client_ip": "0"},
+        }
+        out = normalize_event(payload)
+        self.assertIsNone(out["network"]["client_ip"])

@@ -37,6 +37,7 @@ class UserSignedUpSignalTests(TestCase):
     @patch("pages.signals.Analytics.identify")
     def test_first_touch_traits_preserved_across_visits(self, mock_identify, mock_track):
         request = self.factory.get("/signup")
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
         middleware = SessionMiddleware(lambda req: None)
         middleware.process_request(request)
         request.session.save()
@@ -150,6 +151,7 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(attribution.last_landing_path, "/pricing/")
         self.assertEqual(attribution.segment_anonymous_id, "anon-123")
         self.assertEqual(attribution.ga_client_id, "GA1.2.111.222")
+        self.assertEqual(str(attribution.last_client_ip), "198.51.100.24")
 
 
 def _build_event_payload(
@@ -287,6 +289,36 @@ class SubscriptionSignalTests(TestCase):
         context = capi_kwargs["context"]
         self.assertIsNotNone(context)
         self.assertTrue(context.get("consent"))
+
+    @tag("batch_pages")
+    def test_subscription_event_includes_client_ip_from_attribution(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(billing_reason="subscription_create")
+        event = _build_djstripe_event(payload)
+
+        UserAttribution.objects.update_or_create(
+            user=self.user,
+            defaults={"last_client_ip": "203.0.113.5"},
+        )
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=12, subscriber=fresh_user)
+        sub.stripe_data['billing_reason'] = "subscription_create"
+        sub.billing_reason = "subscription_create"
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.mock_capi.assert_called_once()
+        context = self.mock_capi.call_args.kwargs["context"]
+        self.assertEqual(context.get("client_ip"), "203.0.113.5")
 
     @tag("batch_pages")
     def test_subscription_cycle_emits_renewed_event(self):
