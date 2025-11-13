@@ -104,10 +104,14 @@ def init_tracing(service_name: GobiiService) -> None:
         logger.debug("OpenTelemetry: Tracing explicitly disabled via GOBII_ENABLE_TRACING env var – skipping initialization")
         return
 
-    # 2.  If we are in a *local* environment (default during dev/tests) and the
-    #     user did *not* explicitly opt-in with a truthy flag, disable tracing.
-    if release_env == "local" and user_flag not in truthy:
-        logger.debug("OpenTelemetry: Local environment detected with no explicit opt-in – tracing disabled")
+    # 2.  If we are in a *local* environment (default during dev/tests) or a
+    #     build context (Docker build stage) and the user did *not* explicitly
+    #     opt-in with a truthy flag, disable tracing.
+    if release_env in {"local", "build"} and user_flag not in truthy:
+        logger.debug(
+            "OpenTelemetry: %s environment detected with no explicit opt-in – tracing disabled",
+            release_env,
+        )
         return
 
     # Otherwise: proceed with normal initialization (current behaviour for
