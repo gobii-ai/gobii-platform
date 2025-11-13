@@ -361,7 +361,7 @@ class Analytics:
 
         # If the peer isn't a trusted proxy, ignore headers and return the peer
         if not _is_trusted(peer_ip):
-            return str(peer_ip) if peer_ip else None
+            return str(peer_ip) if peer_ip else '0'
 
         # 2) Prefer Cloudflare headers when peer is trusted
         for header in ("HTTP_TRUE_CLIENT_IP", "HTTP_CF_CONNECTING_IP"):
