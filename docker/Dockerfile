@@ -59,13 +59,19 @@ ENV IN_DOCKER=1 \
     GOBII_RELEASE_ENV=build \
     DEBUG=0
 
+# Prime frontend dependencies before copying the rest of the repository so we
+# can leverage cached layers when only application code changes.
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefix frontend
+
 COPY . .
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir --editable .
 
-RUN npm ci --prefix frontend
-RUN npm run build --prefix frontend
+RUN --mount=type=cache,target=/root/.npm \
+    npm run build --prefix frontend
 
 ENV USE_EPHEMERAL_XVFB=true
 

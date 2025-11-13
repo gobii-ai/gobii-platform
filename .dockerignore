@@ -41,9 +41,14 @@ htmlcov/
 
 # Node / frontend noise
 node_modules/
+**/node_modules/
 npm-debug.log*
 yarn-error.log*
 pnpm-lock.yaml
+frontend/dist/
+frontend/.vite/
+frontend/node_modules/
+static/frontend/
 
 # OS files
 .DS_Store
@@ -59,4 +64,3 @@ staticfiles/
 
 # CI/CD metadata not needed in image
 .github/
-
