@@ -2453,11 +2453,18 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
     # Map endpoint -> extra context (e.g., last email subject or message snippet)
     recent_meta: dict[tuple[str, str], dict[str, str]] = {}
     for msg in recent_messages:
-        if msg.is_outbound and msg.to_endpoint:
-            key = (msg.to_endpoint.channel, msg.to_endpoint.address)
-        elif not msg.is_outbound:
-            key = (msg.from_endpoint.channel, msg.from_endpoint.address)
+        key: Optional[tuple[str, str]] = None
+        if msg.is_outbound:
+            if msg.to_endpoint:
+                key = (msg.to_endpoint.channel, msg.to_endpoint.address)
+            elif msg.conversation:
+                # Some outbound messages (e.g., send_chat_message) only have a conversation reference.
+                key = (msg.conversation.channel, msg.conversation.address)
         else:
+            if msg.from_endpoint:
+                key = (msg.from_endpoint.channel, msg.from_endpoint.address)
+
+        if key is None:
             continue
 
         if key not in recent_meta:
@@ -3401,7 +3408,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "direction": "outbound" if m.is_outbound else "inbound",
         }
         from_addr = m.from_endpoint.address
-        to_addr = m.to_endpoint.address if m.to_endpoint else None
+        if m.to_endpoint:
+            to_addr = m.to_endpoint.address
+        elif m.conversation:
+            to_addr = m.conversation.address
+        else:
+            to_addr = None
 
         if m.conversation and getattr(m.conversation, "is_peer_dm", False):
             peer_name = getattr(m.peer_agent, "name", "linked agent")
