@@ -159,7 +159,7 @@ def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any
             if isinstance(details, dict):
                 cached_tokens = int(details.get("cached_tokens") or 0)
             else:
-                cached_tokens = int(getattr(details, "cached_tokens", 0) or 0)
+                cached_tokens = int(_usage_attribute(details, "cached_tokens", 0) or 0)
 
     cached_tokens = min(cached_tokens, prompt_tokens)
     uncached_tokens = max(prompt_tokens - cached_tokens, 0)
@@ -185,7 +185,14 @@ def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any
                     custom_llm_provider=candidate_provider,
                 )
             except Exception:
+                logger.debug(
+                    "Failed to get model info from litellm for model=%s provider=%s",
+                    candidate_model,
+                    candidate_provider,
+                    exc_info=True,
+                )
                 model_info = None
+                
             if model_info:
                 break
         if model_info:
