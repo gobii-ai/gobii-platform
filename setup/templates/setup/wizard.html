@@ -107,12 +107,6 @@
                   {% endif %}
                 </div>
               </div>
-              <div class="flex flex-wrap items-center gap-3 rounded-3xl border border-dashed border-slate-200/70 px-5 py-4">
-                <button type="button" data-llm-test="orchestrator" class="inline-flex items-center rounded-2xl bg-brand-500/90 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-200/70 disabled:opacity-60">
-                  Test primary model
-                </button>
-                <p class="text-sm text-slate-500" data-test-status="orchestrator">Not tested yet.</p>
-              </div>
             </section>
 
             <section class="space-y-6">
@@ -213,11 +207,17 @@
                   </div>
                 </div>
               </div>
-              <div id="browser-test-block" class="hidden flex flex-wrap items-center gap-3 rounded-3xl border border-dashed border-slate-200/70 px-5 py-4">
-                <button type="button" data-llm-test="browser" class="inline-flex items-center rounded-2xl bg-brand-500/90 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-200/70 disabled:opacity-60">
-                  Test browser model
-                </button>
-                <p class="text-sm text-slate-500" data-test-status="browser">Not tested yet.</p>
+              <div class="rounded-3xl border border-slate-200/70 bg-white/70 px-5 py-4">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-slate-700/90">Connection test</p>
+                    <p class="text-xs text-slate-500">Verify this configuration by running a quick completion.</p>
+                  </div>
+                  <button type="button" data-llm-test="orchestrator" class="inline-flex items-center rounded-2xl bg-brand-500/90 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-200/70 disabled:opacity-60">
+                    Test primary model
+                  </button>
+                </div>
+                <p class="mt-2 text-sm text-slate-500" data-test-status="orchestrator">Not tested yet.</p>
               </div>
             </section>
 
@@ -293,6 +293,18 @@
                     {% endif %}
                   </div>
                 </div>
+                <div id="browser-test-block" class="rounded-3xl border border-slate-200/70 bg-white/70 px-5 py-4">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p class="text-sm font-medium text-slate-700/90">Browser test</p>
+                      <p class="text-xs text-slate-500">Verify the dedicated browser model responds.</p>
+                    </div>
+                    <button type="button" data-llm-test="browser" class="inline-flex items-center rounded-2xl bg-brand-500/90 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-200/70 disabled:opacity-60">
+                      Test browser model
+                    </button>
+                  </div>
+                  <p class="mt-2 text-sm text-slate-500" data-test-status="browser">Not tested yet.</p>
+                </div>
               </div>
               <div class="space-y-4 rounded-3xl border border-slate-200/70 p-6">
                 <p class="text-sm font-medium text-slate-700/90">Browser advanced options</p>
@@ -352,7 +364,6 @@
     const orchestratorVision = document.getElementById('id_orchestrator_supports_vision');
     const browserProvider = document.getElementById('id_browser_provider');
     const browserVision = document.getElementById('id_browser_supports_vision');
-    const browserTestBlock = document.getElementById('browser-test-block');
     const testButtons = document.querySelectorAll('[data-llm-test]');
 
     const VISION_DEFAULT_PROVIDERS = ['openai', 'anthropic', 'google'];
@@ -490,9 +501,6 @@
     function updateBrowserVisibility() {
       if (!browserToggle || !browserExtra) return;
       browserExtra.classList.toggle('hidden', browserToggle.checked);
-      if (browserTestBlock) {
-        browserTestBlock.classList.toggle('hidden', browserToggle.checked);
-      }
       if (browserToggle.checked) {
         resetStatus('browser');
       }
