@@ -35,15 +35,15 @@ from .middleware import is_initial_setup_complete
 logger = logging.getLogger(__name__)
 
 DEFAULT_ORCHESTRATOR_MODELS = {
-    LLMConfigForm.PROVIDER_OPENAI: "openai/gpt-4.1",
-    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter/z-ai/glm-4.5",
-    LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic/claude-sonnet-4-20250514",
-    LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
+    LLMConfigForm.PROVIDER_OPENAI: "gpt-4.1",
+    LLMConfigForm.PROVIDER_OPENROUTER: "z-ai/glm-4.6:exacto",
+    LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
+    LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/gpt-oss-120b",
 }
 
 DEFAULT_BROWSER_MODELS = {
     LLMConfigForm.PROVIDER_OPENAI: "gpt-4o-mini",
-    LLMConfigForm.PROVIDER_OPENROUTER: "z-ai/glm-4.5",
+    LLMConfigForm.PROVIDER_OPENROUTER: "z-ai/glm-4.6:exacto",
     LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
     LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507",
 }
@@ -72,6 +72,13 @@ PROVIDER_KEY_MAP = {
     LLMConfigForm.PROVIDER_OPENROUTER: "openrouter",
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks",
+}
+
+MODEL_PREFIXES = {
+    LLMConfigForm.PROVIDER_OPENAI: "openai/",
+    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter/",
+    LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic/",
+    LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_ai/",
 }
 
 
@@ -152,13 +159,15 @@ class SetupWizardView(View):
     # form defaults
     # ------------------------------------------------------------------
     def _default_llm_initial(self):
+        default_provider = LLMConfigForm.PROVIDER_OPENROUTER
         return {
-            "orchestrator_provider": LLMConfigForm.PROVIDER_OPENAI,
-            "orchestrator_model": DEFAULT_ORCHESTRATOR_MODELS.get(LLMConfigForm.PROVIDER_OPENAI, ""),
-            "orchestrator_supports_vision": True,
+            "orchestrator_provider": default_provider,
+            "orchestrator_model": DEFAULT_ORCHESTRATOR_MODELS.get(default_provider, ""),
+            "orchestrator_supports_vision": False,
             "browser_same_as_orchestrator": True,
-            "browser_model": DEFAULT_BROWSER_MODELS.get(LLMConfigForm.PROVIDER_OPENAI, ""),
-            "browser_supports_vision": True,
+            "browser_model": DEFAULT_BROWSER_MODELS.get(default_provider, ""),
+            "browser_supports_vision": False,
+            "browser_provider": default_provider,
         }
 
     def _ensure_database_ready(self) -> None:
@@ -228,6 +237,8 @@ class SetupWizardView(View):
         supports_tool_choice: bool = bool(data.get("orchestrator_supports_tool_choice"))
         use_parallel_tools: bool = bool(data.get("orchestrator_use_parallel_tools"))
         supports_vision: bool = bool(data.get("orchestrator_supports_vision"))
+        if provider_choice != LLMConfigForm.PROVIDER_CUSTOM:
+            model = self._normalize_model_identifier(provider_choice, model)
 
         if provider_choice == LLMConfigForm.PROVIDER_CUSTOM:
             provider = self._create_custom_provider(
@@ -293,6 +304,8 @@ class SetupWizardView(View):
             provider = orchestrator_provider
             provider_choice = self._provider_choice_from_provider(provider)
             model = data.get("browser_model", "").strip() or DEFAULT_BROWSER_MODELS.get(provider_choice, "")
+            if provider_choice and provider_choice != LLMConfigForm.PROVIDER_CUSTOM:
+                model = self._normalize_model_identifier(provider_choice, model)
             api_base = data.get("browser_api_base", "").strip()
             if not api_base:
                 api_base = orchestrator_endpoint.api_base or DEFAULT_BROWSER_BASE_URLS.get(provider_choice, "")
@@ -308,6 +321,8 @@ class SetupWizardView(View):
             provider_choice = data.get("browser_provider")
             api_key = data.get("browser_api_key", "")
             model = data.get("browser_model", "").strip() or DEFAULT_BROWSER_MODELS.get(provider_choice, "")
+            if provider_choice and provider_choice != LLMConfigForm.PROVIDER_CUSTOM:
+                model = self._normalize_model_identifier(provider_choice, model)
             api_base = data.get("browser_api_base", "").strip()
 
             if provider_choice == LLMConfigForm.PROVIDER_CUSTOM:
@@ -457,6 +472,15 @@ class SetupWizardView(View):
     def _provider_choice_from_provider(self, provider: LLMProvider) -> Optional[str]:
         reverse_map = {v: k for k, v in PROVIDER_KEY_MAP.items()}
         return reverse_map.get(provider.key)
+
+    def _normalize_model_identifier(self, provider_choice: str | None, model: str) -> str:
+        model = (model or "").strip()
+        if not model or not provider_choice:
+            return model
+        prefix = MODEL_PREFIXES.get(provider_choice)
+        if not prefix or model.startswith(prefix):
+            return model
+        return f"{prefix}{model}"
 
 
 def setup_complete_view(request):
