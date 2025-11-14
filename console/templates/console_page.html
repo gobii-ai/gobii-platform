@@ -5,6 +5,7 @@
 {% block head_extras %}
 	{% if subscribe_notification %}
   <script type="text/javascript">
+    {% if settings.META_PIXEL_ID %}
     if (typeof fbq !== "undefined") {
       var payload = {'value': {{ sub_price }}, 'currency': 'USD'};
       {% if subscribe_plan %}
@@ -16,6 +17,8 @@
       fbq('track', 'Subscribe', payload);
       {% endif %}
     }
+    {% endif %}
+    {% if settings.REDDIT_PIXEL_ID %}
     if (typeof rdt !== "undefined") {
       var redditPayload = {value: {{ sub_price }}, currency: 'USD'};
       {% if subscribe_plan %}
@@ -26,6 +29,22 @@
       {% endif %}
       rdt('track', 'Purchase', redditPayload);
     }
+    {% endif %}
+    {% if settings.TIKTOK_PIXEL_ID %}
+    if (typeof ttq !== 'undefined') {
+      ttq.track('Subscribe', {
+        "contents": [
+          {
+            "content_id": "{{ subscribe_plan|escapejs }}", // string. ID of the product. Example: "1077218".
+            "content_type": "{{ subscribe_plan|escapejs }}", // string. Either product or product_group.
+            "content_name": "{{ subscribe_plan|escapejs }}" // string. The name of the page or product. Example: "shirt".
+          }
+        ],
+        "value": "{{ sub_price }}", // number. Value of the order or items sold. Example: 100.
+        "currency": "USD" // string. The 4217 currency code. Example: "USD".
+      });
+    }
+    {% endif %}
   </script>
   {% endif %}
 {% endblock %}

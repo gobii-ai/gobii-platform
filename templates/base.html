@@ -112,18 +112,26 @@
 
   {% if environment.is_production and settings.TIKTOK_PIXEL_ID %}
     <!-- TikTok Pixel Code Start -->
-<script>
-!function (w, d, t) {
-  w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie","holdConsent","revokeConsent","grantConsent"],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(
-var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var r="https://analytics.tiktok.com/i18n/pixel/events.js",o=n&&n.partner;ttq._i=ttq._i||{},ttq._i[e]=[],ttq._i[e]._u=r,ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};n=document.createElement("script")
-;n.type="text/javascript",n.async=!0,n.src=r+"?sdkid="+e+"&lib="+t;e=document.getElementsByTagName("script")[0];e.parentNode.insertBefore(n,e)};
+    <script>
+    !function (w, d, t) {
+      w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie","holdConsent","revokeConsent","grantConsent"],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(
+    var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var r="https://analytics.tiktok.com/i18n/pixel/events.js",o=n&&n.partner;ttq._i=ttq._i||{},ttq._i[e]=[],ttq._i[e]._u=r,ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};n=document.createElement("script")
+    ;n.type="text/javascript",n.async=!0,n.src=r+"?sdkid="+e+"&lib="+t;e=document.getElementsByTagName("script")[0];e.parentNode.insertBefore(n,e)};
 
 
-  ttq.load('{{ settings.TIKTOK_PIXEL_ID }}');
-  ttq.page();
-}(window, document, 'ttq');
-</script>
-<!-- TikTok Pixel Code End -->
+      ttq.load('{{ settings.TIKTOK_PIXEL_ID }}');
+      ttq.page();
+    }(window, document, 'ttq');
+    </script>
+    {% if user.is_authenticated %}
+    <script>
+      ttq.identify({
+        "email": "{{ analytics.data.email_hash }}", // string. The email of the customer if available. It must be hashed with SHA-256 on the client side.
+        "external_id": "{{ analytics.data.id_hash }}" // string. Any unique identifier, such as loyalty membership IDs, user IDs, and external cookie IDs.It must be hashed with SHA-256 on the client side.
+      });
+    </script>
+    {%  endif %}
+    <!-- TikTok Pixel Code End -->
   {% endif %}
 
 
@@ -457,6 +465,12 @@ var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n
         }
         {% endif %}
 
+        {% if settings.TIKTOK_PIXEL_ID %}
+        if (typeof window.ttq === 'function') {
+          ttq.track('CompleteRegistration', {});
+        }
+        {% endif %}
+
         {% if settings.GA_MEASUREMENT_ID %}
         if (typeof window.gtag === 'function') {
           const utmParams = window.getUTMParams ? window.getUTMParams() : {};
@@ -497,30 +511,30 @@ var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n
   </script>
   {% endif %}
 
-  {% if show_signup_tracking %}
-   <script>
-    (function () {
-      if (typeof window.fbq !== 'function') return;
+  {% if show_signup_tracking and environment.is_production and settings.GOBII_PROPRIETARY_MODE %}
+    <script>
+      (function () {
+        if (typeof window.fbq !== 'function') return;
 
-      // --- pull any UTM cookies you created earlier (optional) ---
-      const utmParams = window.getUTMParams ? window.getUTMParams() : {};
-      const signupEventId = "{{ signup_event_id|default_if_none:'' }}";
-      const signupUserId = "{{ signup_user_id|default_if_none:'' }}";
+        // --- pull any UTM cookies you created earlier (optional) ---
+        const utmParams = window.getUTMParams ? window.getUTMParams() : {};
+        const signupEventId = "{{ signup_event_id|default_if_none:'' }}";
+        const signupUserId = "{{ signup_user_id|default_if_none:'' }}";
 
-      const options = {
-        external_id : signupUserId || "{{ user.id|default_if_none:'' }}",
-        em          : "{{ analytics.data.email_hash }}"
-      };
+        const options = {
+          external_id : signupUserId || "{{ user.id|default_if_none:'' }}",
+          em          : "{{ analytics.data.email_hash }}"
+        };
 
-      if (signupEventId) {
-        options.eventID = signupEventId;
-      }
+        if (signupEventId) {
+          options.eventID = signupEventId;
+        }
 
-      fbq('track', 'CompleteRegistration',
-          {...utmParams},
-          options);
-    })();
-  </script>
+        fbq('track', 'CompleteRegistration',
+            {...utmParams},
+            options);
+      })();
+    </script>
   {% endif %}
 
   <!-- block for head_extras -->
