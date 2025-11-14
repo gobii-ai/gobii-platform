@@ -6,6 +6,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.contrib.sites.models import Site
+from django.db import transaction
 from django.db.models import Count  # For annotated counts
 from django.db.models.expressions import OuterRef, Exists
 
@@ -2637,6 +2638,68 @@ class PersistentAgentSystemMessageAdmin(admin.ModelAdmin):
     raw_id_fields = ("agent", "created_by")
     readonly_fields = ("created_at", "delivered_at")
     ordering = ("-created_at",)
+    change_list_template = "admin/persistentagentsystemmessage_change_list.html"
+
+    def get_urls(self):  # pragma: no cover - simple URL wiring
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "broadcast/",
+                self.admin_site.admin_view(self.broadcast_message_view),
+                name="api_persistentagentsystemmessage_broadcast",
+            )
+        ]
+        return custom_urls + urls
+
+    def broadcast_message_view(self, request):
+        """Allow staff to issue a single system message to every persistent agent."""
+
+        form = SystemMessageForm(request.POST or None)
+        # Display a lightweight count in the UI so the admin knows the blast size.
+        agent_count = PersistentAgent.objects.count()
+
+        if request.method == "POST" and form.is_valid():
+            if not agent_count:
+                self.message_user(
+                    request,
+                    "No persistent agents exist to receive this broadcast.",
+                    level=messages.WARNING,
+                )
+                return HttpResponseRedirect(reverse("admin:api_persistentagentsystemmessage_changelist"))
+
+            message_body = form.cleaned_data["message"]
+            created_by = request.user if request.user.is_authenticated else None
+            agent_ids = list(PersistentAgent.objects.values_list("id", flat=True))
+            system_messages = [
+                PersistentAgentSystemMessage(
+                    agent_id=agent_id,
+                    body=message_body,
+                    created_by=created_by,
+                )
+                for agent_id in agent_ids
+            ]
+
+            with transaction.atomic():
+                PersistentAgentSystemMessage.objects.bulk_create(system_messages, batch_size=500)
+
+            self.message_user(
+                request,
+                f"Broadcast saved for {len(system_messages)} persistent agents. Event processing was not triggered automatically.",
+                level=messages.SUCCESS,
+            )
+            return HttpResponseRedirect(reverse("admin:api_persistentagentsystemmessage_changelist"))
+
+        context = {
+            "title": "Broadcast System Message",
+            "form": form,
+            "opts": self.model._meta,
+            "agent_count": agent_count,
+        }
+        return TemplateResponse(
+            request,
+            "admin/persistentagentsystemmessage_broadcast.html",
+            context,
+        )
 
 
 @admin.register(PersistentAgentMessage) 

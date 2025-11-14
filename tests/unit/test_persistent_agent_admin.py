@@ -235,3 +235,32 @@ class PersistentAgentAdminTests(TestCase):
         mock_delay.assert_called_once_with(str(self.persistent_agent.pk))
         messages = list(response.context["messages"])
         self.assertTrue(any("System message saved" in message.message for message in messages))
+
+    def test_system_message_broadcast_get_renders_form(self):
+        url = reverse("admin:api_persistentagentsystemmessage_broadcast")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Broadcast System Message")
+        self.assertContains(response, "Broadcast Message")
+
+    def test_system_message_broadcast_creates_records_without_processing(self):
+        extra_agent = self._create_agent(name="Second Agent")
+        url = reverse("admin:api_persistentagentsystemmessage_broadcast")
+
+        with patch("api.admin.process_agent_events_task.delay") as mock_delay:
+            response = self.client.post(
+                url,
+                data={"message": "Global directive"},
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_delay.assert_not_called()
+        for agent in (self.persistent_agent, extra_agent):
+            self.assertTrue(
+                PersistentAgentSystemMessage.objects.filter(agent=agent, body="Global directive").exists()
+            )
+
+        messages = list(response.context["messages"])
+        self.assertTrue(any("Broadcast saved for 2 persistent agents" in message.message for message in messages))
