@@ -3650,6 +3650,13 @@ class ConsoleUsageView(ConsoleViewMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
+class ConsoleLLMConfigView(ConsoleViewMixin, TemplateView):
+    template_name = "console/llm_config.html"
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - read-only shell
+        return HttpResponseNotAllowed(['GET'])
+
+
 class MCPServerOwnerMixin:
     """Shared owner resolution logic for MCP server management views."""
 
