@@ -2638,86 +2638,43 @@ class PersistentAgentSystemMessageAdmin(admin.ModelAdmin):
     raw_id_fields = ("agent", "created_by")
     readonly_fields = ("created_at", "delivered_at")
     ordering = ("-created_at",)
-    change_list_template = "admin/persistentagentsystemmessage_change_list.html"
 
-    def get_urls(self):  # pragma: no cover - simple URL wiring
-        urls = super().get_urls()
-        custom_urls = [
-            path(
-                "broadcast/",
-                self.admin_site.admin_view(self.broadcast_message_view),
-                name="api_persistentagentsystemmessage_broadcast",
-            )
-        ]
-        return custom_urls + urls
 
-    def broadcast_message_view(self, request):
-        """Allow staff to issue a single system message to every persistent agent."""
-
-        form = SystemMessageForm(request.POST or None)
-        # Display a lightweight count in the UI so the admin knows the blast size.
-        agent_count = PersistentAgent.objects.count()
-
-        if request.method == "POST" and form.is_valid():
-            if not agent_count:
-                self.message_user(
-                    request,
-                    "No persistent agents exist to receive this broadcast.",
-                    level=messages.WARNING,
-                )
-                return HttpResponseRedirect(reverse("admin:api_persistentagentsystemmessage_changelist"))
-
-            message_body = form.cleaned_data["message"]
-            created_by = request.user if request.user.is_authenticated else None
-            broadcast = PersistentAgentSystemMessageBroadcast.objects.create(
-                body=message_body,
-                created_by=created_by,
-            )
-            agent_ids = list(PersistentAgent.objects.values_list("id", flat=True))
-            system_messages = [
-                PersistentAgentSystemMessage(
-                    agent_id=agent_id,
-                    body=message_body,
-                    created_by=created_by,
-                    broadcast=broadcast,
-                )
-                for agent_id in agent_ids
-            ]
-
-            with transaction.atomic():
-                PersistentAgentSystemMessage.objects.bulk_create(system_messages, batch_size=500)
-
-            self.message_user(
-                request,
-                f"Broadcast saved for {len(system_messages)} persistent agents. Event processing was not triggered automatically.",
-                level=messages.SUCCESS,
-            )
-            return HttpResponseRedirect(reverse("admin:api_persistentagentsystemmessage_changelist"))
-
-        context = {
-            "title": "Broadcast System Message",
-            "form": form,
-            "opts": self.model._meta,
-            "agent_count": agent_count,
+class PersistentAgentSystemMessageBroadcastForm(forms.ModelForm):
+    class Meta:
+        model = PersistentAgentSystemMessageBroadcast
+        fields = ("body",)
+        widgets = {
+            "body": forms.Textarea(attrs={"rows": 5, "cols": 80}),
         }
-        return TemplateResponse(
-            request,
-            "admin/persistentagentsystemmessage_broadcast.html",
-            context,
-        )
+        help_texts = {
+            "body": "This directive will be duplicated for every persistent agent's system prompt.",
+        }
 
 
 @admin.register(PersistentAgentSystemMessageBroadcast)
 class PersistentAgentSystemMessageBroadcastAdmin(admin.ModelAdmin):
+    form = PersistentAgentSystemMessageBroadcastForm
     list_display = ("body_preview", "created_by", "created_at", "message_count")
     search_fields = ("body", "created_by__email")
-    readonly_fields = ("body", "created_by", "created_at", "message_count")
+    readonly_fields = ("created_by", "created_at", "message_count")
     ordering = ("-created_at",)
-    change_list_template = "admin/persistentagentsystemmessagebroadcast_change_list.html"
+    change_form_template = "admin/persistentagentsystemmessagebroadcast_change_form.html"
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.annotate(_message_count=Count("system_messages"))
+
+    def get_fields(self, request, obj=None):
+        if obj:
+            return ("body", "created_by", "created_at", "message_count")
+        return ("body",)
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj:
+            readonly.append("body")
+        return readonly
 
     @admin.display(description="Messages")
     def message_count(self, obj):
@@ -2727,9 +2684,46 @@ class PersistentAgentSystemMessageBroadcastAdmin(admin.ModelAdmin):
     def body_preview(self, obj):
         return (obj.body[:60] + "…") if len(obj.body) > 60 else obj.body
 
-    def has_add_permission(self, request, obj=None):
-        # Creation happens via the broadcast form to ensure fan-out occurs.
-        return False
+    def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        context = context or {}
+        context["agent_count"] = PersistentAgent.objects.count()
+        return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
+
+    def save_model(self, request, obj, form, change):
+        if change:
+            self.message_user(request, "Existing broadcasts cannot be edited.", level=messages.WARNING)
+            return
+
+        agent_ids = list(PersistentAgent.objects.values_list("id", flat=True))
+        if not agent_ids:
+            self.message_user(
+                request,
+                "No persistent agents exist to receive this broadcast.",
+                level=messages.WARNING,
+            )
+            return
+
+        created_by = request.user if request.user.is_authenticated else None
+        obj.created_by = created_by
+        system_messages = [
+            PersistentAgentSystemMessage(
+                agent_id=agent_id,
+                body=obj.body,
+                created_by=created_by,
+                broadcast=obj,
+            )
+            for agent_id in agent_ids
+        ]
+
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+            PersistentAgentSystemMessage.objects.bulk_create(system_messages, batch_size=500)
+
+        self.message_user(
+            request,
+            f"Broadcast saved for {len(system_messages)} persistent agents. Event processing was not triggered automatically.",
+            level=messages.SUCCESS,
+        )
 
 
 @admin.register(PersistentAgentMessage) 

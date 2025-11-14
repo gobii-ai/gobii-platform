@@ -242,21 +242,21 @@ class PersistentAgentAdminTests(TestCase):
         self.assertTrue(any("System message saved" in message.message for message in messages))
 
     def test_system_message_broadcast_get_renders_form(self):
-        url = reverse("admin:api_persistentagentsystemmessage_broadcast")
+        url = reverse("admin:api_persistentagentsystemmessagebroadcast_add")
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Broadcast System Message")
-        self.assertContains(response, "Broadcast Message")
+        self.assertContains(response, "Saving will")
 
     def test_system_message_broadcast_creates_records_without_processing(self):
         extra_agent = self._create_agent(name="Second Agent")
-        url = reverse("admin:api_persistentagentsystemmessage_broadcast")
+        url = reverse("admin:api_persistentagentsystemmessagebroadcast_add")
 
         with patch("api.admin.process_agent_events_task.delay") as mock_delay:
             response = self.client.post(
                 url,
-                data={"message": "Global directive"},
+                data={"body": "Global directive", "_save": "Save"},
                 follow=True,
             )
 
@@ -290,5 +290,4 @@ class PersistentAgentAdminTests(TestCase):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Broadcast Message to All Agents")
         self.assertContains(response, "hello")
