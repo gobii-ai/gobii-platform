@@ -76,7 +76,11 @@ from api.services import mcp_servers as mcp_server_service
 from ..tools.email_sender import execute_send_email, get_send_email_tool
 from ..tools.sms_sender import execute_send_sms, get_send_sms_tool
 from ..tools.search_web import execute_search_web, get_search_web_tool
-from ..tools.spawn_web_task import execute_spawn_web_task, get_spawn_web_task_tool
+from ..tools.spawn_web_task import (
+    execute_spawn_web_task,
+    get_spawn_web_task_tool,
+    get_browser_daily_task_limit,
+)
 from ..tools.schedule_updater import execute_update_schedule, get_update_schedule_tool
 from ..tools.charter_updater import execute_update_charter, get_update_charter_tool
 from ..tools.database_enabler import execute_enable_database, get_enable_database_tool
@@ -2481,6 +2485,7 @@ def _build_prompt_context(
         current_iteration=current_iteration,
         max_iterations=max_iterations,
         daily_credit_state=daily_credit_state,
+        agent=agent,
     )
 
     reasoning_streak_text = _get_reasoning_streak_prompt(reasoning_only_streak)
@@ -2954,6 +2959,7 @@ def _add_budget_awareness_sections(
     current_iteration: int,
     max_iterations: int,
     daily_credit_state: dict | None = None,
+    agent: PersistentAgent | None = None,
 ) -> bool:
     """Populate structured budget awareness sections in the prompt tree."""
 
@@ -3006,6 +3012,31 @@ def _add_budget_awareness_sections(
     except Exception:
         # Non-fatal; omit budget note
         pass
+
+    browser_agent_id = getattr(agent, "browser_use_agent_id", None) if agent else None
+    browser_daily_limit = get_browser_daily_task_limit()
+
+    if browser_agent_id and browser_daily_limit:
+        try:
+            start_of_day = dj_timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            tasks_today = BrowserUseAgentTask.objects.filter(
+                agent_id=browser_agent_id,
+                created_at__gte=start_of_day,
+            ).count()
+            summary = (
+                f"Browser task usage today: {tasks_today}/{browser_daily_limit}. "
+                "Limit resets daily at 00:00 UTC."
+            )
+            sections.append(("browser_task_usage", summary, 2, True))
+            remaining = browser_daily_limit - tasks_today
+            if remaining <= max(1, browser_daily_limit // 10):
+                warning_text = (
+                    f"WARNING: Only {max(0, remaining)} browser task(s) remain today. "
+                    "Prioritize the most important browsing work or resume after reset."
+                )
+                sections.append(("browser_task_usage_warning", warning_text, 2, True))
+        except Exception:
+            logger.warning("Failed to compute browser task usage for prompt.", exc_info=True)
 
     if daily_credit_state:
         try:
@@ -3847,7 +3878,7 @@ __all__ = ["process_agent_events"]
 
 def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
     """Add individual sections for each browser task to the provided promptree group."""
-    # ALL active tasks (no limit since we enforce max 5 during creation)
+    # ALL active tasks (spawn_web_task enforces the per-agent max during creation)
     browser_agent_id = getattr(agent, "browser_use_agent_id", None)
     if browser_agent_id:
         active_tasks = list(

@@ -6,7 +6,10 @@ including tool definition and execution logic.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+from django.conf import settings
+from django.utils import timezone
 
 from ...models import (
     PersistentAgent,
@@ -19,8 +22,37 @@ from ..core.budget import get_current_context as get_budget_context, AgentBudget
 logger = logging.getLogger(__name__)
 
 
+def get_browser_max_active_task_limit() -> Optional[int]:
+    """Return the configured max active browser task limit or None when unlimited."""
+    try:
+        value = int(getattr(settings, "BROWSER_AGENT_MAX_ACTIVE_TASKS", 3))
+        return value if value > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def get_browser_daily_task_limit() -> Optional[int]:
+    """Return the configured daily browser task limit or None when unlimited."""
+    try:
+        value = int(getattr(settings, "BROWSER_AGENT_DAILY_MAX_TASKS", 60))
+        return value if value > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def get_spawn_web_task_tool() -> Dict[str, Any]:
     """Return the spawn_web_task tool definition for the LLM."""
+    max_tasks = get_browser_max_active_task_limit()
+    daily_limit = get_browser_daily_task_limit()
+    limit_bits = []
+    if max_tasks:
+        limit_bits.append(f"Maximum {max_tasks} active tasks at once.")
+    if daily_limit:
+        limit_bits.append(f"Maximum {daily_limit} browser tasks per day.")
+    if not limit_bits:
+        limit_bits.append("Task limits enforced per deployment settings.")
+    limit_sentence = " ".join(limit_bits)
+
     return {
         "type": "function",
         "function": {
@@ -31,7 +63,7 @@ def get_spawn_web_task_tool() -> Dict[str, Any]:
                 "If you mention secrets, mention them using their direct name, e.g. google_username, not <<<google_username>>>. "
                 "Use stored secrets for classic username/password logins only. Do NOT request or attempt to use OAuth credentials (Google, Slack, etc.); "
                 "those are handled via MCP tools using connect/auth links. File uploads and downloads are NOT currently supported!!! "
-                "You will be automatically notified when the task completes and can see results in your context. Maximum 5 active tasks at once."
+                f"You will be automatically notified when the task completes and can see results in your context. {limit_sentence}"
             ),
             "parameters": {
                 "type": "object",
@@ -63,7 +95,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
     
     browser_use_agent = agent.browser_use_agent
 
-    # Check active task limit (max 5 active tasks per agent)
+    # Check active task limit from settings (per agent)
     active_count = BrowserUseAgentTask.objects.filter(
         agent=browser_use_agent,
         status__in=[
@@ -72,11 +104,29 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         ]
     ).count()
 
-    if active_count >= 5:
+    max_tasks = get_browser_max_active_task_limit()
+    if max_tasks and active_count >= max_tasks:
         return {
             "status": "error", 
-            "message": f"Maximum active task limit reached (5). Currently have {active_count} active tasks."
+            "message": f"Maximum active task limit reached ({max_tasks}). Currently have {active_count} active tasks."
         }
+
+    # Check daily task creation limit
+    daily_limit = get_browser_daily_task_limit()
+    if daily_limit:
+        start_of_day = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        daily_count = BrowserUseAgentTask.objects.filter(
+            agent=browser_use_agent,
+            created_at__gte=start_of_day,
+        ).count()
+        if daily_count >= daily_limit:
+            return {
+                "status": "error",
+                "message": (
+                    f"Daily browser task limit reached ({daily_limit}). "
+                    f"You have already started {daily_count} task(s) today."
+                ),
+            }
     
     # Log web task creation
     prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
