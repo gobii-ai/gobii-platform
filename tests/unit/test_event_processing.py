@@ -156,10 +156,7 @@ class PromptContextBuilderTests(TestCase):
                 self.assertEqual(event.get("from"), self.external_endpoint.address)
                 self.assertEqual(event.get("direction"), "inbound")
                 self.assertEqual(event.get("timestamp"), expected_timestamp)
-                self.assertEqual(
-                    event.get("type"),
-                    f"message_inbound_{self.external_endpoint.channel.lower()}",
-                )
+                self.assertEqual(event.get("type"), "message")
                 break
         self.assertTrue(found_message, "Expected inbound message event in unified history")
         
