@@ -95,9 +95,15 @@ class PromptContextBuilderTests(TestCase):
             nested = events.get("event")
             if isinstance(nested, list):
                 return nested
-            if nested:
+            if isinstance(nested, dict):
                 return [nested]
-            return list(events.values())
+            filtered = []
+            for key, value in events.items():
+                if key in {"events_note", "note"}:
+                    continue
+                if isinstance(value, dict):
+                    filtered.append(value)
+            return filtered
         return []
 
     def test_message_metadata_in_prompt(self):
@@ -128,8 +134,13 @@ class PromptContextBuilderTests(TestCase):
         # Verify the unified history event contains the inbound message metadata
         history_block = prompt_payload.get("variable", {}).get("unified_history", {})
         self.assertTrue(history_block)
-        self.assertIn("note", history_block)
-        self.assertIn("chronological", history_block["note"].lower())
+        events_block = history_block.get("events", {})
+        self.assertIsInstance(events_block, dict)
+        self.assertIn("note", events_block)
+        self.assertIn("chronological", events_block["note"].lower())
+        event_keys = [key for key in events_block.keys() if key != "note"]
+        self.assertTrue(event_keys, "Expected at least one event entry in unified history")
+        self.assertTrue(all(key.startswith("event_") for key in event_keys))
         events = self._get_history_events(history_block)
         self.assertIsInstance(events, list)
 
