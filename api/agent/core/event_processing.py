@@ -240,7 +240,7 @@ def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any
 
     zero = Decimal("0")
     uncached_cost = (input_price or zero) * Decimal(uncached_tokens)
-    cached_cost = (cache_read_price or input_price or zero) * Decimal(cached_tokens)
+    cached_cost = (cache_read_price or zero) * Decimal(cached_tokens)
     input_total = uncached_cost + cached_cost
     output_cost = (output_price or zero) * Decimal(completion_tokens)
     total_cost = input_total + output_cost
