@@ -3,8 +3,14 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, tag
 from django.urls import reverse
+from django.utils import timezone
 
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemMessage
+from api.models import (
+    BrowserUseAgent,
+    PersistentAgent,
+    PersistentAgentSystemMessage,
+    PersistentAgentSystemMessageBroadcast,
+)
 
 
 @tag("batch_api_persistent_agents")
@@ -235,3 +241,120 @@ class PersistentAgentAdminTests(TestCase):
         mock_delay.assert_called_once_with(str(self.persistent_agent.pk))
         messages = list(response.context["messages"])
         self.assertTrue(any("System message saved" in message.message for message in messages))
+
+    def test_system_message_broadcast_get_renders_form(self):
+        url = reverse("admin:api_persistentagentsystemmessagebroadcast_add")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Broadcast System Message")
+        self.assertContains(response, "Saving will")
+
+    def test_system_message_broadcast_creates_records_without_processing(self):
+        extra_agent = self._create_agent(name="Second Agent")
+        url = reverse("admin:api_persistentagentsystemmessagebroadcast_add")
+
+        with patch("api.admin.process_agent_events_task.delay") as mock_delay:
+            response = self.client.post(
+                url,
+                data={"body": "Global directive", "_save": "Save"},
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_delay.assert_not_called()
+        broadcast = PersistentAgentSystemMessageBroadcast.objects.get()
+        self.assertEqual(broadcast.body, "Global directive")
+        for agent in (self.persistent_agent, extra_agent):
+            self.assertTrue(
+                PersistentAgentSystemMessage.objects.filter(
+                    agent=agent, body="Global directive", broadcast=broadcast
+                ).exists()
+            )
+
+        messages = list(response.context["messages"])
+        self.assertTrue(any("Broadcast saved for 2 persistent agents" in message.message for message in messages))
+
+    def test_broadcast_changelist_lists_entries(self):
+        broadcast = PersistentAgentSystemMessageBroadcast.objects.create(
+            body="hello",
+            created_by=self.admin_user,
+        )
+        PersistentAgentSystemMessage.objects.create(
+            agent=self.persistent_agent,
+            body="hello",
+            created_by=self.admin_user,
+            broadcast=broadcast,
+        )
+
+        url = reverse("admin:api_persistentagentsystemmessagebroadcast_changelist")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "hello")
+
+    def test_broadcast_edit_updates_system_messages(self):
+        extra_agent = self._create_agent(name="Another Agent")
+        broadcast = PersistentAgentSystemMessageBroadcast.objects.create(
+            body="original",
+            created_by=self.admin_user,
+        )
+        for agent in (self.persistent_agent, extra_agent):
+            PersistentAgentSystemMessage.objects.create(
+                agent=agent,
+                body="original",
+                created_by=self.admin_user,
+                broadcast=broadcast,
+            )
+
+        url = reverse("admin:api_persistentagentsystemmessagebroadcast_change", args=[broadcast.pk])
+        response = self.client.post(
+            url,
+            data={"body": "updated broadcast", "_save": "Save"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        for agent in (self.persistent_agent, extra_agent):
+            self.assertTrue(
+                PersistentAgentSystemMessage.objects.filter(
+                    agent=agent,
+                    broadcast=broadcast,
+                    body="updated broadcast",
+                ).exists()
+            )
+
+        messages = list(response.context["messages"])
+        self.assertTrue(any("Broadcast updated" in message.message for message in messages))
+
+    def test_broadcast_edit_skips_delivered_messages(self):
+        broadcast = PersistentAgentSystemMessageBroadcast.objects.create(
+            body="initial",
+            created_by=self.admin_user,
+        )
+        delivered_message = PersistentAgentSystemMessage.objects.create(
+            agent=self.persistent_agent,
+            body="initial",
+            created_by=self.admin_user,
+            broadcast=broadcast,
+            delivered_at=timezone.now(),
+        )
+        pending_message = PersistentAgentSystemMessage.objects.create(
+            agent=self._create_agent(name="Pending Agent"),
+            body="initial",
+            created_by=self.admin_user,
+            broadcast=broadcast,
+        )
+
+        url = reverse("admin:api_persistentagentsystemmessagebroadcast_change", args=[broadcast.pk])
+        response = self.client.post(
+            url,
+            data={"body": "new text", "_save": "Save"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        delivered_message.refresh_from_db()
+        pending_message.refresh_from_db()
+        self.assertEqual(delivered_message.body, "initial")
+        self.assertEqual(pending_message.body, "new text")
