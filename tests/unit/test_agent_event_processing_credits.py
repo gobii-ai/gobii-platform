@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from api.models import (
     BrowserUseAgent,
+    BrowserUseAgentTask,
     PersistentAgent,
     PersistentAgentStep,
     PersistentAgentSystemStep,
@@ -586,3 +587,36 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertTrue(result)
         names = [call.args[0] for call in budget_group.section_text.call_args_list]
         self.assertNotIn("soft_target_progress", names)
+
+    def test_budget_sections_include_browser_task_usage(self):
+        critical_group = MagicMock()
+        budget_group = MagicMock()
+        critical_group.group.return_value = budget_group
+
+        BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            prompt="One",
+        )
+        BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            status=BrowserUseAgentTask.StatusChoices.FAILED,
+            prompt="Two",
+        )
+
+        with patch("config.settings.BROWSER_AGENT_DAILY_MAX_TASKS", 2):
+            result = _add_budget_awareness_sections(
+                critical_group,
+                current_iteration=1,
+                max_iterations=5,
+                daily_credit_state=None,
+                agent=self.agent,
+            )
+        self.assertTrue(result)
+        names = [call.args[0] for call in budget_group.section_text.call_args_list]
+        self.assertIn("browser_task_usage", names)
+        usage_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "browser_task_usage")
+        self.assertIn("2/2", usage_call.args[1])
+        self.assertIn("browser_task_usage_warning", names)

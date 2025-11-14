@@ -9,6 +9,7 @@ import logging
 from typing import Dict, Any, Optional
 
 from django.conf import settings
+from django.utils import timezone
 
 from ...models import (
     PersistentAgent,
@@ -30,14 +31,27 @@ def _max_active_tasks() -> Optional[int]:
         return None
 
 
+def _daily_task_limit() -> Optional[int]:
+    """Return the configured daily browser task limit or None when unlimited."""
+    try:
+        value = int(getattr(settings, "BROWSER_AGENT_DAILY_MAX_TASKS", 60))
+        return value if value > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def get_spawn_web_task_tool() -> Dict[str, Any]:
     """Return the spawn_web_task tool definition for the LLM."""
     max_tasks = _max_active_tasks()
-    limit_sentence = (
-        f"Maximum {max_tasks} active tasks at once."
-        if max_tasks
-        else "Maximum active task limit enforced per deployment settings."
-    )
+    daily_limit = _daily_task_limit()
+    limit_bits = []
+    if max_tasks:
+        limit_bits.append(f"Maximum {max_tasks} active tasks at once.")
+    if daily_limit:
+        limit_bits.append(f"Maximum {daily_limit} browser tasks per day.")
+    if not limit_bits:
+        limit_bits.append("Task limits enforced per deployment settings.")
+    limit_sentence = " ".join(limit_bits)
 
     return {
         "type": "function",
@@ -80,6 +94,11 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
     requested_secrets = params.get("secrets", [])
     
     browser_use_agent = agent.browser_use_agent
+    if not browser_use_agent:
+        return {
+            "status": "error",
+            "message": "This agent is not configured with a browser profile yet.",
+        }
 
     # Check active task limit from settings (per agent)
     active_count = BrowserUseAgentTask.objects.filter(
@@ -96,6 +115,23 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             "status": "error", 
             "message": f"Maximum active task limit reached ({max_tasks}). Currently have {active_count} active tasks."
         }
+
+    # Check daily task creation limit
+    daily_limit = _daily_task_limit()
+    if daily_limit:
+        start_of_day = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        daily_count = BrowserUseAgentTask.objects.filter(
+            agent=browser_use_agent,
+            created_at__gte=start_of_day,
+        ).count()
+        if daily_count >= daily_limit:
+            return {
+                "status": "error",
+                "message": (
+                    f"Daily browser task limit reached ({daily_limit}). "
+                    f"You have already started {daily_count} task(s) today."
+                ),
+            }
     
     # Log web task creation
     prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt

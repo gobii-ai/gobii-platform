@@ -230,3 +230,33 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             2,
             "No additional tasks should be created when the limit is reached",
         )
+
+    @override_settings(BROWSER_AGENT_DAILY_MAX_TASKS=2)
+    @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
+    @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
+    def test_spawn_respects_daily_task_limit(self, mock_process_task, _mock_consume_credit):
+        """Ensure the daily browser task limit stops additional spawns."""
+        mock_process_task.delay = MagicMock()
+
+        # Completed tasks still count toward the per-day total
+        BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            prompt="Daily task 1",
+        )
+        BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            status=BrowserUseAgentTask.StatusChoices.FAILED,
+            prompt="Daily task 2",
+        )
+
+        result = execute_spawn_web_task(
+            self.agent,
+            {"prompt": "Should fail due to daily limit"}
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("Daily browser task limit reached (2)", result.get("message", ""))
+        mock_process_task.delay.assert_not_called()

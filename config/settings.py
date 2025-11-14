@@ -700,6 +700,8 @@ LOGGING = {
 BROWSER_HEADLESS = env.bool("BROWSER_HEADLESS", default=False)
 # Maximum allowed concurrently active browser tasks per agent.
 BROWSER_AGENT_MAX_ACTIVE_TASKS = env.int("BROWSER_AGENT_MAX_ACTIVE_TASKS", default=3)
+# Maximum number of browser tasks an agent may spawn per calendar day.
+BROWSER_AGENT_DAILY_MAX_TASKS = env.int("BROWSER_AGENT_DAILY_MAX_TASKS", default=60)
 
 SOCIALACCOUNT_LOGIN_ON_GET = True
 

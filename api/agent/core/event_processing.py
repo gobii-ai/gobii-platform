@@ -2481,6 +2481,7 @@ def _build_prompt_context(
         current_iteration=current_iteration,
         max_iterations=max_iterations,
         daily_credit_state=daily_credit_state,
+        agent=agent,
     )
 
     reasoning_streak_text = _get_reasoning_streak_prompt(reasoning_only_streak)
@@ -2954,6 +2955,7 @@ def _add_budget_awareness_sections(
     current_iteration: int,
     max_iterations: int,
     daily_credit_state: dict | None = None,
+    agent: PersistentAgent | None = None,
 ) -> bool:
     """Populate structured budget awareness sections in the prompt tree."""
 
@@ -3006,6 +3008,36 @@ def _add_budget_awareness_sections(
     except Exception:
         # Non-fatal; omit budget note
         pass
+
+    browser_agent_id = getattr(agent, "browser_use_agent_id", None) if agent else None
+    browser_daily_limit: Optional[int]
+    try:
+        limit_candidate = int(getattr(settings, "BROWSER_AGENT_DAILY_MAX_TASKS", 60))
+        browser_daily_limit = limit_candidate if limit_candidate > 0 else None
+    except (TypeError, ValueError):
+        browser_daily_limit = None
+
+    if browser_agent_id and browser_daily_limit:
+        try:
+            start_of_day = dj_timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            tasks_today = BrowserUseAgentTask.objects.filter(
+                agent_id=browser_agent_id,
+                created_at__gte=start_of_day,
+            ).count()
+            summary = (
+                f"Browser task usage today: {tasks_today}/{browser_daily_limit}. "
+                "Limit resets daily at 00:00 UTC."
+            )
+            sections.append(("browser_task_usage", summary, 2, True))
+            remaining = browser_daily_limit - tasks_today
+            if remaining <= max(1, browser_daily_limit // 10):
+                warning_text = (
+                    f"WARNING: Only {max(0, remaining)} browser task(s) remain today. "
+                    "Prioritize the most important browsing work or resume after reset."
+                )
+                sections.append(("browser_task_usage_warning", warning_text, 2, True))
+        except Exception:
+            logger.warning("Failed to compute browser task usage for prompt.", exc_info=True)
 
     if daily_credit_state:
         try:
