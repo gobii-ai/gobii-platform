@@ -495,6 +495,13 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("SYSTEM NOTICE FROM GOBII OPERATIONS", content)
         self.assertIn("Drop everything and update the quarterly results deck today.", content)
 
+        sys_steps = PersistentAgentSystemStep.objects.filter(
+            code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
+            step__agent=self.agent,
+        )
+        self.assertEqual(sys_steps.count(), 1)
+        self.assertIn("Drop everything and update the quarterly results deck today.", sys_steps.first().step.description)
+
         directive.refresh_from_db()
         self.assertIsNotNone(directive.delivered_at)
 
@@ -505,6 +512,13 @@ class PromptContextBuilderTests(TestCase):
         second_system = next((m for m in second_context if m['role'] == 'system'), None)
         self.assertIsNotNone(second_system)
         self.assertNotIn("Drop everything and update the quarterly results deck today.", second_system['content'])
+        self.assertEqual(
+            PersistentAgentSystemStep.objects.filter(
+                code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
+                step__agent=self.agent,
+            ).count(),
+            1,
+        )
 
     def test_prompt_archive_saved_to_storage(self):
         """Prompt archives should be written to object storage as compressed JSON."""

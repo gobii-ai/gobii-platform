@@ -5691,6 +5691,7 @@ class PersistentAgentSystemStep(models.Model):
         CONTACTS_APPROVED = "CONTACTS_APPROVED", "Contacts Approved"
         LLM_CONFIGURATION_REQUIRED = "LLM_CONFIGURATION_REQUIRED", "LLM Configuration Required"
         PROACTIVE_TRIGGER = "PROACTIVE_TRIGGER", "Proactive Trigger"
+        SYSTEM_DIRECTIVE = "SYSTEM_DIRECTIVE", "System Directive"
         # Add more system-generated step codes here as needed.
 
     step = models.OneToOneField(

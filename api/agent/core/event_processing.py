@@ -3195,37 +3195,40 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
     Pending directives are marked as delivered so they only appear once.
     """
 
-    try:
-        pending_messages = list(
-            agent.system_prompt_messages.filter(
-                is_active=True,
-                delivered_at__isnull=True,
-            ).order_by("created_at")
-        )
-    except Exception:
-        logger.exception("Failed to load system prompt messages for agent %s", agent.id)
-        return ""
-
-    if not pending_messages:
-        return ""
-
     directives: list[str] = []
-    message_ids = []
-    for idx, message in enumerate(pending_messages, start=1):
-        text = (message.body or "").strip()
-        if not text:
-            text = "(No directive text provided)"
-        directives.append(f"{idx}. {text}")
-        message_ids.append(message.id)
+    message_payloads: list[tuple[PersistentAgentSystemMessage, str]] = []
 
-    if not directives:
-        return ""
-
-    now = dj_timezone.now()
     try:
-        PersistentAgentSystemMessage.objects.filter(id__in=message_ids).update(delivered_at=now)
+        with transaction.atomic():
+            pending_messages = list(
+                agent.system_prompt_messages.filter(
+                    is_active=True,
+                    delivered_at__isnull=True,
+                ).order_by("created_at")
+            )
+
+            if not pending_messages:
+                return ""
+
+            for idx, message in enumerate(pending_messages, start=1):
+                text = (message.body or "").strip()
+                if not text:
+                    text = "(No directive text provided)"
+                directives.append(f"{idx}. {text}")
+                message_payloads.append((message, text))
+
+            if not directives:
+                return ""
+
+            now = dj_timezone.now()
+            message_ids = [message.id for message, _ in message_payloads]
+            PersistentAgentSystemMessage.objects.filter(id__in=message_ids).update(delivered_at=now)
+            _record_system_directive_steps(agent, message_payloads)
     except Exception:
-        logger.exception("Failed to mark system prompt messages delivered for agent %s. These messages will not be injected in this cycle.", agent.id)
+        logger.exception(
+            "Failed to process system prompt messages for agent %s. These messages will not be injected in this cycle.",
+            agent.id,
+        )
         return ""
 
     header = (
@@ -3234,6 +3237,32 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
     )
     footer = "Acknowledge this notice in your reasoning and act on it immediately."
     return f"{header}\n" + "\n".join(directives) + f"\n{footer}"
+
+
+def _record_system_directive_steps(
+    agent: PersistentAgent,
+    message_payloads: list[tuple[PersistentAgentSystemMessage, str]],
+) -> None:
+    """Create audit steps for directives delivered to an agent."""
+
+    for message, directive_text in message_payloads:
+        description = f"System directive delivered:\n{directive_text}"
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description=description,
+        )
+
+        note_parts = [f"directive_id={message.id}"]
+        if message.broadcast_id:
+            note_parts.append(f"broadcast_id={message.broadcast_id}")
+        if message.created_by_id:
+            note_parts.append(f"created_by={message.created_by_id}")
+
+        PersistentAgentSystemStep.objects.create(
+            step=step,
+            code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
+            notes="; ".join(note_parts),
+        )
 
 
 def _get_system_instruction(
