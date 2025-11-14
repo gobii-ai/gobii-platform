@@ -2670,12 +2670,6 @@ class PersistentAgentSystemMessageBroadcastAdmin(admin.ModelAdmin):
             return ("body", "created_by", "created_at", "message_count")
         return ("body",)
 
-    def get_readonly_fields(self, request, obj=None):
-        readonly = list(super().get_readonly_fields(request, obj))
-        if obj:
-            readonly.append("body")
-        return readonly
-
     @admin.display(description="Messages")
     def message_count(self, obj):
         return getattr(obj, "_message_count", None) or obj.system_messages.count()
@@ -2691,7 +2685,24 @@ class PersistentAgentSystemMessageBroadcastAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         if change:
-            self.message_user(request, "Existing broadcasts cannot be edited.", level=messages.WARNING)
+            if "body" not in form.changed_data:
+                super().save_model(request, obj, form, change)
+                self.message_user(request, "No changes detected. Broadcast not updated.", level=messages.INFO)
+                return
+
+            with transaction.atomic():
+                super().save_model(request, obj, form, change)
+                updated = PersistentAgentSystemMessage.objects.filter(
+                    broadcast=obj,
+                    delivered_at__isnull=True,
+                ).update(body=obj.body)
+
+            plural = "s" if updated != 1 else ""
+            self.message_user(
+                request,
+                f"Broadcast updated and propagated to {updated} pending system message{plural}. Event processing was not triggered automatically.",
+                level=messages.SUCCESS,
+            )
             return
 
         agent_ids = list(PersistentAgent.objects.values_list("id", flat=True))
