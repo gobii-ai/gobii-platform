@@ -3608,6 +3608,28 @@ class MCPServerConfig(models.Model):
         self.headers_json_encrypted = self._encrypt_json(value)
 
 
+class PersistentAgentSystemMessageBroadcast(models.Model):
+    """Represents a single broadcast directive duplicated for all agents."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    body = models.TextField(help_text="Directive text sent to all persistent agents.")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="issued_agent_system_broadcasts",
+        help_text="Admin user that initiated this broadcast.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Broadcast at {self.created_at:%Y-%m-%d %H:%M:%S}"
+
+
 class PersistentAgentSystemMessage(models.Model):
     """
     High-priority system directives injected into an agent's system prompt.
@@ -3628,6 +3650,14 @@ class PersistentAgentSystemMessage(models.Model):
         blank=True,
         related_name="issued_agent_system_messages",
         help_text="Admin user that issued this directive.",
+    )
+    broadcast = models.ForeignKey(
+        PersistentAgentSystemMessageBroadcast,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="system_messages",
+        help_text="Broadcast that created this directive, if applicable.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     delivered_at = models.DateTimeField(

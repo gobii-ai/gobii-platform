@@ -4,7 +4,12 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, tag
 from django.urls import reverse
 
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemMessage
+from api.models import (
+    BrowserUseAgent,
+    PersistentAgent,
+    PersistentAgentSystemMessage,
+    PersistentAgentSystemMessageBroadcast,
+)
 
 
 @tag("batch_api_persistent_agents")
@@ -257,10 +262,33 @@ class PersistentAgentAdminTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_delay.assert_not_called()
+        broadcast = PersistentAgentSystemMessageBroadcast.objects.get()
+        self.assertEqual(broadcast.body, "Global directive")
         for agent in (self.persistent_agent, extra_agent):
             self.assertTrue(
-                PersistentAgentSystemMessage.objects.filter(agent=agent, body="Global directive").exists()
+                PersistentAgentSystemMessage.objects.filter(
+                    agent=agent, body="Global directive", broadcast=broadcast
+                ).exists()
             )
 
         messages = list(response.context["messages"])
         self.assertTrue(any("Broadcast saved for 2 persistent agents" in message.message for message in messages))
+
+    def test_broadcast_changelist_lists_entries(self):
+        broadcast = PersistentAgentSystemMessageBroadcast.objects.create(
+            body="hello",
+            created_by=self.admin_user,
+        )
+        PersistentAgentSystemMessage.objects.create(
+            agent=self.persistent_agent,
+            body="hello",
+            created_by=self.admin_user,
+            broadcast=broadcast,
+        )
+
+        url = reverse("admin:api_persistentagentsystemmessagebroadcast_changelist")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Broadcast Message to All Agents")
+        self.assertContains(response, "hello")

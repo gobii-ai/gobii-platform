@@ -26,7 +26,7 @@ from .models import (
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
-    PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage,
+    PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, ToolCreditCost,
@@ -2632,7 +2632,7 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
 
 @admin.register(PersistentAgentSystemMessage)
 class PersistentAgentSystemMessageAdmin(admin.ModelAdmin):
-    list_display = ("agent", "created_by", "created_at", "delivered_at", "is_active")
+    list_display = ("agent", "created_by", "created_at", "delivered_at", "is_active", "broadcast")
     list_filter = ("is_active", "delivered_at")
     search_fields = ("agent__name", "agent__user__email", "body")
     raw_id_fields = ("agent", "created_by")
@@ -2669,12 +2669,17 @@ class PersistentAgentSystemMessageAdmin(admin.ModelAdmin):
 
             message_body = form.cleaned_data["message"]
             created_by = request.user if request.user.is_authenticated else None
+            broadcast = PersistentAgentSystemMessageBroadcast.objects.create(
+                body=message_body,
+                created_by=created_by,
+            )
             agent_ids = list(PersistentAgent.objects.values_list("id", flat=True))
             system_messages = [
                 PersistentAgentSystemMessage(
                     agent_id=agent_id,
                     body=message_body,
                     created_by=created_by,
+                    broadcast=broadcast,
                 )
                 for agent_id in agent_ids
             ]
@@ -2700,6 +2705,31 @@ class PersistentAgentSystemMessageAdmin(admin.ModelAdmin):
             "admin/persistentagentsystemmessage_broadcast.html",
             context,
         )
+
+
+@admin.register(PersistentAgentSystemMessageBroadcast)
+class PersistentAgentSystemMessageBroadcastAdmin(admin.ModelAdmin):
+    list_display = ("body_preview", "created_by", "created_at", "message_count")
+    search_fields = ("body", "created_by__email")
+    readonly_fields = ("body", "created_by", "created_at", "message_count")
+    ordering = ("-created_at",)
+    change_list_template = "admin/persistentagentsystemmessagebroadcast_change_list.html"
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.annotate(_message_count=Count("system_messages"))
+
+    @admin.display(description="Messages")
+    def message_count(self, obj):
+        return getattr(obj, "_message_count", None) or obj.system_messages.count()
+
+    @admin.display(description="Preview")
+    def body_preview(self, obj):
+        return (obj.body[:60] + "…") if len(obj.body) > 60 else obj.body
+
+    def has_add_permission(self, request, obj=None):
+        # Creation happens via the broadcast form to ensure fan-out occurs.
+        return False
 
 
 @admin.register(PersistentAgentMessage) 
