@@ -2705,8 +2705,9 @@ class PersistentAgentSystemMessageBroadcastAdmin(admin.ModelAdmin):
             )
             return
 
-        agent_ids = list(PersistentAgent.objects.values_list("id", flat=True))
-        if not agent_ids:
+        agent_qs = PersistentAgent.objects.order_by("id").values_list("id", flat=True)
+        agent_count = agent_qs.count()
+        if agent_count == 0:
             self.message_user(
                 request,
                 "No persistent agents exist to receive this broadcast.",
@@ -2716,23 +2717,35 @@ class PersistentAgentSystemMessageBroadcastAdmin(admin.ModelAdmin):
 
         created_by = request.user if request.user.is_authenticated else None
         obj.created_by = created_by
-        system_messages = [
-            PersistentAgentSystemMessage(
-                agent_id=agent_id,
-                body=obj.body,
-                created_by=created_by,
-                broadcast=obj,
-            )
-            for agent_id in agent_ids
-        ]
+
+        def _batched(iterable, size):
+            batch = []
+            for item in iterable:
+                batch.append(item)
+                if len(batch) == size:
+                    yield batch
+                    batch = []
+            if batch:
+                yield batch
 
         with transaction.atomic():
             super().save_model(request, obj, form, change)
-            PersistentAgentSystemMessage.objects.bulk_create(system_messages, batch_size=500)
+            agent_iterator = agent_qs.iterator(chunk_size=1000)
+            for agent_batch in _batched(agent_iterator, 500):
+                system_messages = [
+                    PersistentAgentSystemMessage(
+                        agent_id=agent_id,
+                        body=obj.body,
+                        created_by=created_by,
+                        broadcast=obj,
+                    )
+                    for agent_id in agent_batch
+                ]
+                PersistentAgentSystemMessage.objects.bulk_create(system_messages, batch_size=500)
 
         self.message_user(
             request,
-            f"Broadcast saved for {len(system_messages)} persistent agents. Event processing was not triggered automatically.",
+            f"Broadcast saved for {agent_count} persistent agents. Event processing was not triggered automatically.",
             level=messages.SUCCESS,
         )
 
