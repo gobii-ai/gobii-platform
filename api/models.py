@@ -3627,6 +3627,8 @@ class PersistentAgentSystemMessageBroadcast(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
+        if self.created_at is None:
+            return "Broadcast (unsaved)"
         return f"Broadcast at {self.created_at:%Y-%m-%d %H:%M:%S}"
 
 
