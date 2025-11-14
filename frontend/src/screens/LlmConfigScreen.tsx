@@ -119,32 +119,8 @@ export function LlmConfigScreen() {
         <StatCard label="Active providers" value="4" icon={<PlugZap className="size-5" />} hint="OpenAI, Anthropic, Google, OpenRouter" />
         <StatCard label="Persistent endpoints" value="11" icon={<Atom className="size-5" />} hint="Across all token ranges" />
         <StatCard label="Browser models" value="2 configured" icon={<Globe className="size-5" />} hint="Primary + fallback" />
-        <StatCard label="Premium tiers" value="Enabled" icon={<Shield className="size-5" />} hint="Routing first loop traffic" />
+        <StatCard label="Premium failover tiers" value="Enabled" icon={<Shield className="size-5" />} hint="Routing first loop traffic" />
       </div>
-
-      <SectionCard
-        title="How traffic flows"
-        description="Every request walks the same pipeline. This view is read-only today but mirrors the real routing logic."
-        className="space-y-5"
-      >
-        <div className="grid gap-4 md:grid-cols-3">
-          {flowSteps.map((step) => (
-            <article
-              key={step.title}
-              className="rounded-2xl border border-slate-100/80 bg-slate-50/70 p-4 text-sm text-slate-600 shadow-inner"
-            >
-              <div className="flex items-center gap-3">
-                {step.icon}
-                <div>
-                  <p className="text-sm font-semibold text-slate-900/90">{step.title}</p>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">{step.hint}</p>
-                </div>
-              </div>
-              <p className="mt-3 leading-relaxed">{step.detail}</p>
-            </article>
-          ))}
-        </div>
-      </SectionCard>
 
       <SectionCard
         title="Provider inventory"
@@ -207,12 +183,12 @@ export function LlmConfigScreen() {
       </SectionCard>
 
       <SectionCard
-        title="Token tiers & failover order"
-        description="Map token ranges to weighted model tiers. Drag-and-drop and inline editing will come once APIs are wired."
+        title="Token-based failover tiers"
+        description="Map token ranges to weighted failover tiers."
       >
         <div className="grid gap-6 lg:grid-cols-2">
           <article className="rounded-2xl border border-slate-100/80 bg-white/80 p-4 shadow-sm">
-            <h3 className="text-sm font-semibold text-slate-900/90">Standard tiers</h3>
+            <h3 className="text-sm font-semibold text-slate-900/90">Standard failover tiers</h3>
             <p className="text-xs text-slate-500">Used for most traffic once premium routing is exhausted.</p>
             <div className="mt-4 space-y-3 text-sm text-slate-600">
               {standardTiers.map((tier) => (
@@ -234,7 +210,7 @@ export function LlmConfigScreen() {
             </div>
           </article>
           <article className="rounded-2xl border border-slate-100/80 bg-white/80 p-4 shadow-sm">
-            <h3 className="text-sm font-semibold text-slate-900/90">Premium tiers</h3>
+            <h3 className="text-sm font-semibold text-slate-900/90">Premium failover tiers</h3>
             <p className="text-xs text-slate-500">Prepended for new agents or upgraded plans before standard tiers.</p>
             <div className="mt-4 space-y-3 text-sm text-slate-600">
               {premiumTiers.map((tier) => (
@@ -291,15 +267,6 @@ export function LlmConfigScreen() {
       <SectionCard
         title="Other model consumers"
         description="Surface-level overview of summarization, embeddings, and tooling hints."
-        footer={
-          <p>
-            Need to change something immediately?{' '}
-            <a href="/console/agents/" className="text-blue-600 underline-offset-4 hover:underline">
-              Jump to the agent list
-            </a>
-            .
-          </p>
-        }
       >
         <ul className="space-y-3 text-sm text-slate-600">
           {workloadSummaries.map((workload) => (
