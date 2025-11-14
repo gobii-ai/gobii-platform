@@ -2670,8 +2670,8 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
 
         if key not in recent_meta:
             meta: dict[str, str] = {
-                "last_direction": "outbound" if msg.is_outbound else "inbound",
-                "last_timestamp": msg.timestamp.isoformat(),
+                "direction": "outbound" if msg.is_outbound else "inbound",
+                "timestamp": msg.timestamp.isoformat(),
             }
             if key[0] == CommsChannel.EMAIL:
                 subject = ""
@@ -2680,9 +2680,12 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
                 if subject:
                     meta["recent_subject"] = subject[:200]
             else:
+                ellipses = ""
+                if msg.body and len(msg.body) > 120:
+                    ellipses = "..."
                 body_preview = (msg.body or "")[:120].replace("\n", " ")
                 if body_preview:
-                    meta["recent_message"] = body_preview
+                    meta["recent_message"] = f"{body_preview}{ellipses}"
             recent_meta[key] = meta
 
     if recent_meta:
@@ -3602,7 +3605,6 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
         channel = m.from_endpoint.channel
         body = m.body or ""
-        event_prefix = f"message_{'outbound' if m.is_outbound else 'inbound'}"
         base_components = {
             "timestamp": m.timestamp.isoformat(),
             "channel": channel,
@@ -3614,7 +3616,6 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
         if m.conversation and getattr(m.conversation, "is_peer_dm", False):
             peer_name = getattr(m.peer_agent, "name", "linked agent")
-            event_type = f"{event_prefix}_peer_dm"
             components = dict(base_components)
             components["channel"] = "peer_dm"
             components["peer_name"] = peer_name
@@ -3624,7 +3625,6 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 components["to"] = to_addr
             components["content"] = body if body else "(no content)"
         else:
-            event_type = f"{event_prefix}_{channel.lower()}"
             components = dict(base_components)
             if from_addr:
                 components["from"] = from_addr
@@ -3657,8 +3657,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             else:
                 components["content"] = body if body else "(no content)"
 
-        components["type"] = event_type
-        structured_events.append((m.timestamp, event_type, components))
+        components["type"] = "message"
+        structured_events.append((m.timestamp, "message", components))
 
     # Include most recent completed browser tasks as structured events
     for t in completed_tasks:
@@ -3682,6 +3682,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         "note",
         (
             "Chronological list of recent tool calls, browser tasks, and messages. "
+            "Messages you received are marked as 'inbound' direction. Messages you sent are marked as 'outbound' direction. "
             "EVENTS ARE ORDERED FROM OLDEST TO NEWEST SO YOU CAN UNDERSTAND THE CONVERSATION FLOW. "
         ),
         weight=1,
