@@ -111,6 +111,7 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENT_SOFT_EXPIRED = 'Persistent Agent Soft Expired'
     PERSISTENT_AGENT_SOFT_LIMIT_EXCEEDED = 'Persistent Agent Soft Limit Exceeded'
     PERSISTENT_AGENT_HARD_LIMIT_EXCEEDED = 'Persistent Agent Hard Limit Exceeded'
+    PERSISTENT_AGENT_BROWSER_DAILY_LIMIT_REACHED = 'Persistent Agent Browser Daily Limit Reached'
     PERSISTENT_AGENT_SHUTDOWN = 'Persistent Agent Shutdown'
     PERSISTENT_AGENT_CHARTER_SUBMIT = 'Persistent Agent Charter Submitted'
     PERSISTENT_AGENTS_LISTED = 'Persistent Agents Listed'

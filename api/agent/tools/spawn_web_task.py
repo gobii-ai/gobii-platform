@@ -18,6 +18,7 @@ from ...models import (
     PersistentAgentSecret,
 )
 from ..core.budget import get_current_context as get_budget_context, AgentBudgetManager
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,24 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             created_at__gte=start_of_day,
         ).count()
         if daily_count >= daily_limit:
+            props = Analytics.with_org_properties(
+                {
+                    "agent_id": str(agent.id),
+                    "browser_agent_id": str(browser_use_agent.id) if browser_use_agent else None,
+                    "daily_limit": daily_limit,
+                    "tasks_started_today": daily_count,
+                },
+                organization_id=str(agent.organization_id) if getattr(agent, "organization_id", None) else None,
+            )
+            try:
+                Analytics.track_event(
+                    agent.user_id,
+                    AnalyticsEvent.PERSISTENT_AGENT_BROWSER_DAILY_LIMIT_REACHED,
+                    AnalyticsSource.AGENT,
+                    props,
+                )
+            except Exception:
+                logger.debug("Failed to emit analytics for browser daily limit", exc_info=True)
             return {
                 "status": "error",
                 "message": (

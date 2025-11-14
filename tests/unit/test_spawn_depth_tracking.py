@@ -14,6 +14,7 @@ from django.contrib.auth import get_user_model
 from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask
 from api.agent.core.budget import AgentBudgetManager, BudgetContext, set_current_context as set_budget_context
 from api.agent.tools.spawn_web_task import execute_spawn_web_task
+from util.analytics import AnalyticsEvent
 
 
 @tag("batch_spawn_depth")
@@ -232,9 +233,10 @@ class SpawnDepthTrackingTests(TransactionTestCase):
         )
 
     @override_settings(BROWSER_AGENT_DAILY_MAX_TASKS=2)
+    @patch('util.analytics.Analytics.track_event')
     @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
-    def test_spawn_respects_daily_task_limit(self, mock_process_task, _mock_consume_credit):
+    def test_spawn_respects_daily_task_limit(self, mock_process_task, _mock_consume_credit, mock_track_event):
         """Ensure the daily browser task limit stops additional spawns."""
         mock_process_task.delay = MagicMock()
 
@@ -260,3 +262,6 @@ class SpawnDepthTrackingTests(TransactionTestCase):
         self.assertEqual(result.get("status"), "error")
         self.assertIn("Daily browser task limit reached (2)", result.get("message", ""))
         mock_process_task.delay.assert_not_called()
+        mock_track_event.assert_called_once()
+        event_args, event_kwargs = mock_track_event.call_args
+        self.assertEqual(event_args[1], AnalyticsEvent.PERSISTENT_AGENT_BROWSER_DAILY_LIMIT_REACHED)
