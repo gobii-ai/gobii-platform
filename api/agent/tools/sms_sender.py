@@ -31,6 +31,15 @@ from urlextract import URLExtract
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
+
+def _should_continue_work(params: Dict[str, Any]) -> bool:
+    """Return True if the caller indicated additional work after this SMS."""
+    raw = params.get("will_continue_work")
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        return normalized in {"1", "true", "yes"}
+    return bool(raw)
+
 def get_send_sms_tool() -> Dict[str, Any]:
     """Return the SMS tool definition for the LLM."""
     return {
@@ -50,6 +59,10 @@ def get_send_sms_tool() -> Dict[str, Any]:
                         "description": "Additional E.164 phone numbers for group SMS (optional)"
                     },
                     "body": {"type": "string", "description": "SMS content."},
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": "Set true if you're just updating the user and will continue working immediately.",
+                    },
                 },
                 "required": ["to_number", "body"],
             },
@@ -63,6 +76,7 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
     to_number = params.get("to_number")
     body = strip_control_chars(params.get("body"))
     cc_numbers = params.get("cc_numbers", [])  # Optional list for group SMS
+    will_continue = _should_continue_work(params)
     
     # Temporary restriction on group SMS until Twilio Conversations API is implemented
     if cc_numbers:
@@ -153,7 +167,7 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
         return {
             "status": "ok",
             "message": f"SMS queued for {to_number}.",
-            "auto_sleep_ok": True,
+            "auto_sleep_ok": not will_continue,
         }
 
     except Exception as e:

@@ -88,6 +88,7 @@ from ..tools.tool_manager import (
     ensure_default_tools_enabled,
     execute_enabled_tool,
     get_enabled_tool_definitions,
+    SQLITE_TOOL_NAME,
 )
 from ..tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
 from ..tools.peer_dm import execute_send_agent_message, get_send_agent_message_tool
@@ -112,6 +113,7 @@ from ...models import (
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
     PersistentAgentSystemMessage,
+    PersistentAgentEnabledTool,
 )
 from .schedule_parser import ScheduleParser
 from config import settings
@@ -3317,6 +3319,7 @@ def _get_system_instruction(
         "Batch independent actions into one reply; if nothing else remains, include sleep_until_next_trigger right after them (example: send_email(...), update_charter(...), sleep_until_next_trigger()). "
         "If a later action truly depends on earlier tool output, wait for the next iteration, but whenever you send the user a message and have no dependencies pending you MUST add sleep_until_next_trigger in that reply so the cycle ends cleanly. "
         "EVERY REPLY MUST INCLUDE AT LEAST ONE TOOL CALL. If there is nothing to do, call sleep_until_next_trigger by itself and never respond twice to the same message. "
+        "If you send a status update but still have outstanding work, set 'will_continue_work': true on your send_* tool call so this cycle keeps running until you finish. "
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
@@ -3773,11 +3776,19 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_update_schedule_tool(),
         get_update_charter_tool(),
         get_secure_credentials_request_tool(),
-        get_enable_database_tool(),
         # MCP management tools
         get_search_tools_tool(),
         get_request_contact_permission_tool(),
     ]
+
+    include_enable_db_tool = True
+    if agent:
+        include_enable_db_tool = not PersistentAgentEnabledTool.objects.filter(
+            agent=agent, tool_full_name=SQLITE_TOOL_NAME
+        ).exists()
+
+    if include_enable_db_tool:
+        static_tools.append(get_enable_database_tool())
 
     if agent and agent.webhooks.exists():
         static_tools.append(get_send_webhook_tool())

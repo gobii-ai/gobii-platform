@@ -211,6 +211,29 @@ class PeerMessagingServiceTests(TestCase):
         self.assertEqual(response["status"], "ok")
         self.assertTrue(response.get("auto_sleep_ok"))
 
+    def test_execute_tool_continue_flag_disables_auto_sleep(self):
+        from api.agent.tools.peer_dm import execute_send_agent_message
+
+        with patch("api.agent.tools.peer_dm.PeerMessagingService") as service_cls:
+            service_cls.return_value.send_message.return_value = PeerSendResult(
+                status="ok",
+                message="delivered",
+                remaining_credits=1,
+                window_reset_at=timezone.now(),
+            )
+
+            response = execute_send_agent_message(
+                self.agent_a,
+                {
+                    "peer_agent_id": str(self.agent_b.id),
+                    "message": "still working",
+                    "will_continue_work": True,
+                },
+            )
+
+        self.assertEqual(response["status"], "ok")
+        self.assertFalse(response.get("auto_sleep_ok"))
+
 
 @tag("batch_peer_intro")
 class AgentPeerLinkSignalTests(TestCase):

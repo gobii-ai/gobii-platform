@@ -23,6 +23,15 @@ from ...services.web_sessions import get_active_web_session
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 
 
+def _should_continue_work(params: Dict[str, Any]) -> bool:
+    """Return True if the agent indicates more work right after this chat message."""
+    raw = params.get("will_continue_work")
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        return normalized in {"1", "true", "yes"}
+    return bool(raw)
+
+
 def get_send_chat_tool() -> Dict[str, Any]:
     """Definition for the send_chat_message tool exposed to the agent."""
 
@@ -48,6 +57,10 @@ def get_send_chat_tool() -> Dict[str, Any]:
                             "If omitted, the agent will reply to the latest active chat participant or preferred web contact."
                         ),
                     },
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": "Set true when this is just a quick update and you'll keep working immediately.",
+                    },
                 },
                 "required": ["body"],
             },
@@ -62,6 +75,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     body = (raw_body or "").strip()
     if not body:
         return {"status": "error", "message": "Message body is required."}
+    will_continue = _should_continue_work(params)
 
     max_len = getattr(settings, "WEB_CHAT_MESSAGE_MAX_LENGTH", 4000)
     if len(body) > max_len:
@@ -161,7 +175,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         "status": "ok",
         "message": f"Web chat message sent to {to_address}",
         "message_id": str(message.id),
-        "auto_sleep_ok": True,
+        "auto_sleep_ok": not will_continue,
     }
 
 

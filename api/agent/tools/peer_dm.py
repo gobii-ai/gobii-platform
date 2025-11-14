@@ -15,6 +15,15 @@ from ...models import PersistentAgent
 logger = logging.getLogger(__name__)
 
 
+def _should_continue_work(params: Dict[str, Any]) -> bool:
+    """Return True when the agent declares more work coming after this DM."""
+    raw = params.get("will_continue_work")
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        return normalized in {"1", "true", "yes"}
+    return bool(raw)
+
+
 def get_send_agent_message_tool() -> Dict[str, Any]:
     """Return the tool schema exposed to the LLM."""
     return {
@@ -36,6 +45,10 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": "The body of the message to send. Keep it brief and actionable.",
                     },
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": "Set true if you're coordinating but still have outstanding work this cycle.",
+                    },
                 },
                 "required": ["peer_agent_id", "message"],
             },
@@ -47,6 +60,7 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
     """Execute the peer messaging tool for the active agent."""
     peer_agent_id_raw = params.get("peer_agent_id")
     message = params.get("message")
+    will_continue = _should_continue_work(params)
 
     if not peer_agent_id_raw or not message:
         return {
@@ -113,5 +127,5 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
     if result.window_reset_at:
         payload["window_reset_at_iso"] = result.window_reset_at.isoformat()
     if result.status.lower() == "ok":
-        payload["auto_sleep_ok"] = True
+        payload["auto_sleep_ok"] = not will_continue
     return payload

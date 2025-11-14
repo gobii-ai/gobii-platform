@@ -396,6 +396,18 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(message.latest_status, DeliveryStatus.DELIVERED)
 
     @tag("batch_agent_chat")
+    def test_send_chat_tool_can_mark_continuation(self):
+        start_web_session(self.agent, self.user)
+        params = {
+            "body": "I'll keep working",
+            "to_address": self.user_address,
+            "will_continue_work": True,
+        }
+        result = execute_send_chat_message(self.agent, params)
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result.get("auto_sleep_ok"))
+
+    @tag("batch_agent_chat")
     def test_send_chat_tool_rejects_unlisted_address(self):
         start_web_session(self.agent, self.user)
         stranger_address = build_web_user_address(self.user.id + 999, self.agent.id)
