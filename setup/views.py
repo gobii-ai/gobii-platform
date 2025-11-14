@@ -130,7 +130,12 @@ def _build_test_params(provider_choice: str, model: str, api_key: str | None, ap
     if not resolved_key:
         raise ValueError("Provide an API key or configure environment variables for this provider.")
 
-    params: dict = {"temperature": 0.1, "api_key": resolved_key}
+    params: dict = {
+        "temperature": 0.1,
+        "api_key": resolved_key,
+        "max_tokens": 64,
+        "timeout": 15,
+    }
     if provider_choice == LLMConfigForm.PROVIDER_CUSTOM:
         if not api_base:
             raise ValueError("Custom providers require an API base URL.")
@@ -575,14 +580,8 @@ def test_llm_connection(request):
         return JsonResponse({"ok": False, "message": str(exc)}, status=400)
 
     messages = [
-        {
-            "role": "system",
-            "content": "You are Gobii's diagnostics assistant. Answer concisely.",
-        },
-        {
-            "role": "user",
-            "content": "Reply with a short confirmation that you are reachable.",
-        },
+        {"role": "system", "content": "You are a connectivity probe. Reply briefly."},
+        {"role": "user", "content": "Say READY."},
     ]
 
     try:
