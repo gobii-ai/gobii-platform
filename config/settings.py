@@ -698,6 +698,8 @@ LOGGING = {
 # - Defaults to False. Headed is necessary in a production environment to reduce bot detection. In a dev environment,
 #   headless is preferred to prevent a browser window from popping up periodically as the agent runs.
 BROWSER_HEADLESS = env.bool("BROWSER_HEADLESS", default=False)
+# Maximum allowed concurrently active browser tasks per agent.
+BROWSER_AGENT_MAX_ACTIVE_TASKS = env.int("BROWSER_AGENT_MAX_ACTIVE_TASKS", default=3)
 
 SOCIALACCOUNT_LOGIN_ON_GET = True
 

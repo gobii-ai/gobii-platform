@@ -3818,7 +3818,7 @@ __all__ = ["process_agent_events"]
 
 def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
     """Add individual sections for each browser task to the provided promptree group."""
-    # ALL active tasks (no limit since we enforce max 5 during creation)
+    # ALL active tasks (spawn_web_task enforces the per-agent max during creation)
     browser_agent_id = getattr(agent, "browser_use_agent_id", None)
     if browser_agent_id:
         active_tasks = list(

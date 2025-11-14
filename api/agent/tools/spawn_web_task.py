@@ -6,7 +6,9 @@ including tool definition and execution logic.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+from django.conf import settings
 
 from ...models import (
     PersistentAgent,
@@ -19,8 +21,24 @@ from ..core.budget import get_current_context as get_budget_context, AgentBudget
 logger = logging.getLogger(__name__)
 
 
+def _max_active_tasks() -> Optional[int]:
+    """Return the configured max active browser task limit or None when unlimited."""
+    try:
+        value = int(getattr(settings, "BROWSER_AGENT_MAX_ACTIVE_TASKS", 3))
+        return value if value > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def get_spawn_web_task_tool() -> Dict[str, Any]:
     """Return the spawn_web_task tool definition for the LLM."""
+    max_tasks = _max_active_tasks()
+    limit_sentence = (
+        f"Maximum {max_tasks} active tasks at once."
+        if max_tasks
+        else "Maximum active task limit enforced per deployment settings."
+    )
+
     return {
         "type": "function",
         "function": {
@@ -31,7 +49,7 @@ def get_spawn_web_task_tool() -> Dict[str, Any]:
                 "If you mention secrets, mention them using their direct name, e.g. google_username, not <<<google_username>>>. "
                 "Use stored secrets for classic username/password logins only. Do NOT request or attempt to use OAuth credentials (Google, Slack, etc.); "
                 "those are handled via MCP tools using connect/auth links. File uploads and downloads are NOT currently supported!!! "
-                "You will be automatically notified when the task completes and can see results in your context. Maximum 5 active tasks at once."
+                f"You will be automatically notified when the task completes and can see results in your context. {limit_sentence}"
             ),
             "parameters": {
                 "type": "object",
@@ -63,7 +81,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
     
     browser_use_agent = agent.browser_use_agent
 
-    # Check active task limit (max 5 active tasks per agent)
+    # Check active task limit from settings (per agent)
     active_count = BrowserUseAgentTask.objects.filter(
         agent=browser_use_agent,
         status__in=[
@@ -72,10 +90,11 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         ]
     ).count()
 
-    if active_count >= 5:
+    max_tasks = _max_active_tasks()
+    if max_tasks and active_count >= max_tasks:
         return {
             "status": "error", 
-            "message": f"Maximum active task limit reached (5). Currently have {active_count} active tasks."
+            "message": f"Maximum active task limit reached ({max_tasks}). Currently have {active_count} active tasks."
         }
     
     # Log web task creation
