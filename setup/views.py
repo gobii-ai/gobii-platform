@@ -377,8 +377,6 @@ class SetupWizardView(View):
             provider = orchestrator_provider
             provider_choice = self._provider_choice_from_provider(provider)
             model = data.get("browser_model", "").strip() or DEFAULT_BROWSER_MODELS.get(provider_choice, "")
-            if provider_choice and provider_choice != LLMConfigForm.PROVIDER_CUSTOM:
-                model = _normalize_model_identifier(provider_choice, model)
             api_base = data.get("browser_api_base", "").strip()
             if not api_base:
                 api_base = orchestrator_endpoint.api_base or DEFAULT_BROWSER_BASE_URLS.get(provider_choice, "")
@@ -394,8 +392,6 @@ class SetupWizardView(View):
             provider_choice = data.get("browser_provider")
             api_key = data.get("browser_api_key", "")
             model = data.get("browser_model", "").strip() or DEFAULT_BROWSER_MODELS.get(provider_choice, "")
-            if provider_choice and provider_choice != LLMConfigForm.PROVIDER_CUSTOM:
-                model = _normalize_model_identifier(provider_choice, model)
             api_base = data.get("browser_api_base", "").strip()
 
             if provider_choice == LLMConfigForm.PROVIDER_CUSTOM:

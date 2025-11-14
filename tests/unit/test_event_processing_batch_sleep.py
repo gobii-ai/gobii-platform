@@ -251,8 +251,8 @@ class TestBatchToolCallsWithSleep(TestCase):
         with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        # The loop should have needed a second pass (no auto-sleep without explicit sleep tool)
-        self.assertEqual(mock_completion.call_count, 2)
+        # Auto-sleep should fire after both actionable calls run, so only one completion is needed.
+        self.assertEqual(mock_completion.call_count, 1)
 
         mock_send_email.assert_called_once()
         mock_spawn_task.assert_called_once()
@@ -269,8 +269,8 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing._build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_auto_sleep_requires_sleep_tool_call(self, mock_completion, mock_build_prompt, *_mocks):
-        """Without an explicit sleep tool call, the loop should continue processing."""
+    def test_auto_sleep_triggers_without_sleep_tool_call(self, mock_completion, mock_build_prompt, *_mocks):
+        """Auto-sleep should trigger when all tool results allow it, even with no explicit sleep call."""
 
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
 
@@ -308,8 +308,8 @@ class TestBatchToolCallsWithSleep(TestCase):
         with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        # Ensure the loop ran a second completion rather than auto-sleeping early
-        self.assertEqual(mock_completion.call_count, 2)
+        # The loop should stop after the first completion because both tools allowed auto-sleep.
+        self.assertEqual(mock_completion.call_count, 1)
 
         # The actionable tool calls were still executed and recorded once each
         calls = list(PersistentAgentToolCall.objects.all().order_by('step__created_at'))
