@@ -22,7 +22,7 @@ from ..core.budget import get_current_context as get_budget_context, AgentBudget
 logger = logging.getLogger(__name__)
 
 
-def _max_active_tasks() -> Optional[int]:
+def get_browser_max_active_task_limit() -> Optional[int]:
     """Return the configured max active browser task limit or None when unlimited."""
     try:
         value = int(getattr(settings, "BROWSER_AGENT_MAX_ACTIVE_TASKS", 3))
@@ -31,7 +31,7 @@ def _max_active_tasks() -> Optional[int]:
         return None
 
 
-def _daily_task_limit() -> Optional[int]:
+def get_browser_daily_task_limit() -> Optional[int]:
     """Return the configured daily browser task limit or None when unlimited."""
     try:
         value = int(getattr(settings, "BROWSER_AGENT_DAILY_MAX_TASKS", 60))
@@ -42,8 +42,8 @@ def _daily_task_limit() -> Optional[int]:
 
 def get_spawn_web_task_tool() -> Dict[str, Any]:
     """Return the spawn_web_task tool definition for the LLM."""
-    max_tasks = _max_active_tasks()
-    daily_limit = _daily_task_limit()
+    max_tasks = get_browser_max_active_task_limit()
+    daily_limit = get_browser_daily_task_limit()
     limit_bits = []
     if max_tasks:
         limit_bits.append(f"Maximum {max_tasks} active tasks at once.")
@@ -104,7 +104,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         ]
     ).count()
 
-    max_tasks = _max_active_tasks()
+    max_tasks = get_browser_max_active_task_limit()
     if max_tasks and active_count >= max_tasks:
         return {
             "status": "error", 
@@ -112,7 +112,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         }
 
     # Check daily task creation limit
-    daily_limit = _daily_task_limit()
+    daily_limit = get_browser_daily_task_limit()
     if daily_limit:
         start_of_day = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         daily_count = BrowserUseAgentTask.objects.filter(

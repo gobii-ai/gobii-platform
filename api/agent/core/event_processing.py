@@ -76,7 +76,11 @@ from api.services import mcp_servers as mcp_server_service
 from ..tools.email_sender import execute_send_email, get_send_email_tool
 from ..tools.sms_sender import execute_send_sms, get_send_sms_tool
 from ..tools.search_web import execute_search_web, get_search_web_tool
-from ..tools.spawn_web_task import execute_spawn_web_task, get_spawn_web_task_tool
+from ..tools.spawn_web_task import (
+    execute_spawn_web_task,
+    get_spawn_web_task_tool,
+    get_browser_daily_task_limit,
+)
 from ..tools.schedule_updater import execute_update_schedule, get_update_schedule_tool
 from ..tools.charter_updater import execute_update_charter, get_update_charter_tool
 from ..tools.database_enabler import execute_enable_database, get_enable_database_tool
@@ -3010,12 +3014,7 @@ def _add_budget_awareness_sections(
         pass
 
     browser_agent_id = getattr(agent, "browser_use_agent_id", None) if agent else None
-    browser_daily_limit: Optional[int]
-    try:
-        limit_candidate = int(getattr(settings, "BROWSER_AGENT_DAILY_MAX_TASKS", 60))
-        browser_daily_limit = limit_candidate if limit_candidate > 0 else None
-    except (TypeError, ValueError):
-        browser_daily_limit = None
+    browser_daily_limit = get_browser_daily_task_limit()
 
     if browser_agent_id and browser_daily_limit:
         try:

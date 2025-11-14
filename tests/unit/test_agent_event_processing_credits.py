@@ -606,7 +606,7 @@ class PersistentAgentToolCreditTests(TestCase):
             prompt="Two",
         )
 
-        with patch("config.settings.BROWSER_AGENT_DAILY_MAX_TASKS", 2):
+        with override_settings(BROWSER_AGENT_DAILY_MAX_TASKS=2):
             result = _add_budget_awareness_sections(
                 critical_group,
                 current_iteration=1,
