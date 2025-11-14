@@ -11,7 +11,12 @@ from unittest.mock import patch, MagicMock
 
 import zstandard as zstd
 
-from api.agent.core.event_processing import _build_prompt_context, _run_agent_loop, PROMPT_TOKEN_BUDGET
+from api.agent.core.event_processing import (
+    _build_prompt_context,
+    _get_completed_process_run_count,
+    _run_agent_loop,
+    PROMPT_TOKEN_BUDGET,
+)
 from api.agent.core.promptree import Prompt
 from api.admin import PersistentAgentPromptArchiveAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
@@ -32,6 +37,7 @@ from api.models import (
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
     PersistentAgentCompletion,
+    PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
 )
 from constants.grant_types import GrantTypeChoices
@@ -612,11 +618,37 @@ class PromptContextBuilderTests(TestCase):
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
             from api.agent.core import event_processing as ep
             with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
-                _run_agent_loop(self.agent, is_first_run=False)
+                _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=3)
 
-        mock_helper.assert_called_once_with(agent=self.agent)
+        mock_helper.assert_called_once_with(agent=self.agent, run_sequence_number=3)
         call_kwargs = mock_completion.call_args.kwargs
         self.assertEqual(call_kwargs["preferred_config"], ("mock", "mock-model"))
+
+    def test_agent_loop_skips_preference_on_second_run(self):
+        """Agent loop should not request preferred configs on the agent's second run."""
+        response_message = MagicMock()
+        response_message.tool_calls = None
+        response_message.content = "Reasoning output"
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock()
+        response.choices = [response_choice]
+        response.model_extra = {}
+        token_usage = {
+            "model": "mock-model",
+            "provider": "mock-provider",
+        }
+        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
+             patch('api.agent.core.event_processing.ensure_comms_compacted'), \
+             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+             patch('api.agent.core.event_processing._get_recent_preferred_config', return_value=None) as mock_helper, \
+             patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+                _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=2)
+
+        mock_helper.assert_called_once_with(agent=self.agent, run_sequence_number=2)
+        call_kwargs = mock_completion.call_args.kwargs
+        self.assertIsNone(call_kwargs["preferred_config"])
 
     def test_completion_record_keeps_model_when_usage_missing(self):
         """PersistentAgentCompletion should store provider/model even if usage isn't provided."""
@@ -644,6 +676,49 @@ class PromptContextBuilderTests(TestCase):
         completion = PersistentAgentCompletion.objects.get(agent=self.agent)
         self.assertEqual(completion.llm_model, "mock-model")
         self.assertEqual(completion.llm_provider, "mock-provider")
+
+
+@tag("batch_event_processing")
+class AgentRunSequenceHelperTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="sequence_tester@example.com",
+            email="sequence_tester@example.com",
+            password="secret",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="SeqBA")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="SeqAgent",
+            charter="Test run sequence helper",
+            browser_use_agent=self.browser_agent,
+        )
+
+    def test_completed_run_count_ignores_non_processing_steps(self):
+        """Helper should ignore credit gate PROCESS_EVENTS system steps."""
+        skipped_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Skipped due to credits",
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=skipped_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes="credit_insufficient",
+        )
+
+        self.assertEqual(_get_completed_process_run_count(self.agent), 0)
+
+        run_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Process events",
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=run_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes="simplified",
+        )
+
+        self.assertEqual(_get_completed_process_run_count(self.agent), 1)
 
 @tag("batch_event_processing")
 class CronTriggerTaskTests(TestCase):
