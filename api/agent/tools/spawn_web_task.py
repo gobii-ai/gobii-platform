@@ -94,11 +94,6 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
     requested_secrets = params.get("secrets", [])
     
     browser_use_agent = agent.browser_use_agent
-    if not browser_use_agent:
-        return {
-            "status": "error",
-            "message": "This agent is not configured with a browser profile yet.",
-        }
 
     # Check active task limit from settings (per agent)
     active_count = BrowserUseAgentTask.objects.filter(
