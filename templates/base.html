@@ -159,7 +159,7 @@
       if (!{{ user.is_authenticated|yesno:"true,false" }}) return;
       if (typeof window.analytics === 'undefined') return; //Snippet blocked
       // Check if user method exists before calling it (may not be loaded on localhost)
-      if (analytics?.user && typeof analytics.user === 'function') {
+      if (typeof analytics.user === 'function') {
         if (analytics.user()?.id() === "{{ user.id }}") return;
       }
 
@@ -466,7 +466,7 @@
         {% endif %}
 
         {% if settings.TIKTOK_PIXEL_ID %}
-        if (typeof window.ttq === 'function') {
+        if (window.ttq && typeof window.ttq.track === 'function') {
           ttq.track('CompleteRegistration', {});
         }
         {% endif %}
