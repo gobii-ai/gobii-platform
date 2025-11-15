@@ -5,8 +5,6 @@ import {
   PlugZap,
   Shield,
   X,
-  ArrowRight,
-  ArrowLeft,
   Plus,
   Trash2,
   SlidersHorizontal,
@@ -22,7 +20,6 @@ import {
   BrainCircuit,
   Layers,
   ShieldCheck,
-  ShieldOff,
 } from 'lucide-react'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
@@ -239,14 +236,14 @@ function EditWeightsModal({ tier, onClose, onSave }: { tier: Tier; onClose: () =
 
 
 function TierCard({ tier, rangeName, onMove, onRemove, onAddEndpoint, onEditWeights, isFirst, isLast }: { tier: Tier, rangeName: string, onMove: (direction: 'up' | 'down') => void, onRemove: () => void, onAddEndpoint: () => void, onEditWeights: () => void, isFirst: boolean, isLast: boolean }) {
-  const borderColor = tier.premium ? 'border-emerald-200' : 'border-slate-100/80'
+  const borderColor = tier.premium ? 'border-emerald-200' : 'border-slate-200'
   const textColor = tier.premium ? 'text-emerald-700' : 'text-slate-500'
   const headerIcon = tier.premium ? <ShieldCheck className={`size-4 ${textColor}`} /> : <Layers className={`size-4 ${textColor}`} />
 
   return (
     <div className={`rounded-xl border ${borderColor} bg-white px-4 py-4`}>
       <div className={`flex items-center justify-between text-xs uppercase tracking-wide ${textColor}`}>
-        <span className="flex items-center gap-2">{headerIcon} {rangeName} range • {tier.name}</span>
+        <span className="flex items-center gap-2">{headerIcon} {tier.name}</span>
         <div className="flex items-center gap-1 text-xs">
           <button className={button.icon} type="button" onClick={() => onMove('up')} disabled={isFirst}>
             <ChevronUp className="size-4" />
@@ -284,35 +281,91 @@ function TierCard({ tier, rangeName, onMove, onRemove, onAddEndpoint, onEditWeig
   )
 }
 
-function RangeManager({ ranges, onUpdate, onAdd, onRemove }: { ranges: TokenRange[], onUpdate: (id: string, field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => void, onAdd: () => void, onRemove: (id: string) => void }) {
-    return (
-        <div className="space-y-4 rounded-2xl border border-slate-100/80 bg-white p-4 mb-6">
-            <h3 className="text-sm font-semibold text-slate-900/90 flex items-center gap-2"><Settings className="size-4 text-slate-500" /> Token Ranges</h3>
-            <div className="space-y-3">
-                {ranges.map(range => (
-                    <div key={range.id} className="grid grid-cols-12 items-center gap-3 text-sm">
-                        <div className="col-span-3 relative">
-                            <input type="text" value={range.name} onChange={e => onUpdate(range.id, 'name', e.target.value)} className="pl-8 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-                            <Layers className="size-4 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                        </div>
-                        <div className="col-span-3 relative">
-                            <input type="number" value={range.min_tokens} onChange={e => onUpdate(range.id, 'min_tokens', parseInt(e.target.value, 10))} className="pl-8 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-                            <ArrowRight className="size-4 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                        </div>
-                        <div className="col-span-1 text-center text-slate-400">-</div>
-                        <div className="col-span-3 relative">
-                            <input type="number" value={range.max_tokens ?? ''} placeholder="Infinity" onChange={e => onUpdate(range.id, 'max_tokens', e.target.value === '' ? null : parseInt(e.target.value, 10))} className="pl-8 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-                            <ArrowLeft className="size-4 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                        </div>
-                        <div className="col-span-2 text-right">
-                            <button type="button" className={button.iconDanger} onClick={() => onRemove(range.id)}><Trash2 className="size-4" /></button>
-                        </div>
-                    </div>
-                ))}
+function RangeSection({
+  range,
+  tiers,
+  onUpdate,
+  onRemove,
+  onAddTier,
+  ...tierActions
+}: {
+  range: TokenRange,
+  tiers: Tier[],
+  onUpdate: (id: string, field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => void,
+  onRemove: (id: string) => void,
+  onAddTier: (isPremium: boolean, rangeId: string) => void,
+  [key: string]: any // for other tier actions
+}) {
+  const standardTiers = tiers.filter(t => t.rangeId === range.id && !t.premium).sort((a, b) => a.order - b.order);
+  const premiumTiers = tiers.filter(t => t.rangeId === range.id && t.premium).sort((a, b) => a.order - b.order);
+
+  return (
+    <div className="rounded-2xl border border-slate-200/80 bg-white">
+        <div className="p-4 border-b border-slate-200/80 space-y-3">
+            <div className="grid grid-cols-12 items-center gap-3 text-sm">
+                <div className="col-span-12 sm:col-span-3 relative">
+                    <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Range Name</label>
+                    <input type="text" value={range.name} onChange={e => onUpdate(range.id, 'name', e.target.value)} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+                </div>
+                <div className="col-span-6 sm:col-span-3 relative">
+                    <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Min Tokens</label>
+                    <input type="number" value={range.min_tokens} onChange={e => onUpdate(range.id, 'min_tokens', parseInt(e.target.value, 10))} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+                </div>
+                <div className="col-span-6 sm:col-span-3 relative">
+                    <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Max Tokens</label>
+                    <input type="number" value={range.max_tokens ?? ''} placeholder="Infinity" onChange={e => onUpdate(range.id, 'max_tokens', e.target.value === '' ? null : parseInt(e.target.value, 10))} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+                </div>
+                <div className="col-span-12 sm:col-span-3 text-right">
+                    <button type="button" className={button.danger} onClick={() => onRemove(range.id)}><Trash2 className="size-4" /> Remove Range</button>
+                </div>
             </div>
-            <button type="button" className={button.secondary} onClick={onAdd}><Plus className="size-4" /> Add Range</button>
         </div>
-    )
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-slate-200/80">
+            <div className="bg-slate-50/80 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-slate-700">Standard Tiers</h4>
+                    <button type="button" className={button.secondary} onClick={() => onAddTier(false, range.id)}>
+                        <Plus className="size-4" /> Add
+                    </button>
+                </div>
+                {standardTiers.length > 0 ? standardTiers.map((tier, index) => (
+                    <TierCard
+                        key={tier.id}
+                        tier={tier}
+                        rangeName={range.name}
+                        onMove={(direction) => tierActions.moveTier(tier.id, direction)}
+                        onRemove={() => tierActions.removeTier(tier.id)}
+                        onAddEndpoint={() => tierActions.setAddingEndpointTier(tier)}
+                        onEditWeights={() => tierActions.setEditingWeightsTier(tier)}
+                        isFirst={index === 0}
+                        isLast={index === standardTiers.length - 1}
+                    />
+                )) : <p className="text-center text-xs text-slate-400 py-4">No standard tiers for this range.</p>}
+            </div>
+            <div className="bg-emerald-50/50 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-emerald-800">Premium Tiers</h4>
+                    <button type="button" className={button.secondary} onClick={() => onAddTier(true, range.id)}>
+                        <Plus className="size-4" /> Add
+                    </button>
+                </div>
+                {premiumTiers.length > 0 ? premiumTiers.map((tier, index) => (
+                    <TierCard
+                        key={tier.id}
+                        tier={tier}
+                        rangeName={range.name}
+                        onMove={(direction) => tierActions.moveTier(tier.id, direction)}
+                        onRemove={() => tierActions.removeTier(tier.id)}
+                        onAddEndpoint={() => tierActions.setAddingEndpointTier(tier)}
+                        onEditWeights={() => tierActions.setEditingWeightsTier(tier)}
+                        isFirst={index === 0}
+                        isLast={index === premiumTiers.length - 1}
+                    />
+                )) : <p className="text-center text-xs text-slate-400 py-4">No premium tiers for this range.</p>}
+            </div>
+        </div>
+    </div>
+  )
 }
 
 export function LlmConfigScreen() {
@@ -321,18 +374,13 @@ export function LlmConfigScreen() {
   const [editingWeightsTier, setEditingWeightsTier] = useState<Tier | null>(null)
   const [addingEndpointTier, setAddingEndpointTier] = useState<Tier | null>(null)
 
-  const standardTiers = tiers.filter((tier) => !tier.premium).sort((a, b) => a.order - b.order)
-  const premiumTiers = tiers.filter((tier) => tier.premium).sort((a, b) => a.order - b.order)
-
-  const getRangeName = (rangeId: string) => ranges.find(r => r.id === rangeId)?.name ?? 'Unknown'
-
-  const addTier = (isPremium: boolean) => {
-    const relevantTiers = tiers.filter(t => t.premium === isPremium);
+  const addTier = (isPremium: boolean, rangeId: string) => {
+    const relevantTiers = tiers.filter(t => t.premium === isPremium && t.rangeId === rangeId);
     const newOrder = relevantTiers.length > 0 ? Math.max(...relevantTiers.map(t => t.order)) + 1 : 1
     const newTier: Tier = {
       id: `new-tier-${Date.now()}`,
       name: `Tier ${newOrder}`,
-      rangeId: 'small', // Default to small range
+      rangeId: rangeId,
       order: newOrder,
       premium: isPremium,
       endpoints: [],
@@ -395,11 +443,14 @@ export function LlmConfigScreen() {
   }
 
   const handleAddRange = () => {
+    const lastRange = ranges.sort((a, b) => (a.max_tokens ?? Infinity) - (b.max_tokens ?? Infinity)).slice(-1)[0];
+    const newMinTokens = lastRange && lastRange.max_tokens !== null ? lastRange.max_tokens : 0;
+
     const newRange: TokenRange = {
         id: `range-${Date.now()}`,
         name: 'New Range',
-        min_tokens: 0,
-        max_tokens: 0,
+        min_tokens: newMinTokens,
+        max_tokens: newMinTokens + 10000,
     }
     setRanges([...ranges, newRange])
   }
@@ -498,93 +549,27 @@ export function LlmConfigScreen() {
         title="Token-based failover tiers"
         description="Manage token ranges, tier ordering, and weighted endpoints."
         actions={
-            <button type="button" className={button.primary} onClick={() => addTier(false)}>
-              <Plus className="size-4" /> Add Tier
+            <button type="button" className={button.primary} onClick={handleAddRange}>
+              <Plus className="size-4" /> Add Range
             </button>
         }
       >
-        <RangeManager ranges={ranges} onUpdate={handleRangeUpdate} onAdd={handleAddRange} onRemove={handleRemoveRange} />
-        <div className="grid gap-6 lg:grid-cols-2">
-          <article className="space-y-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900/90">Standard failover tiers</h3>
-                <p className="text-xs text-slate-500">Used for most traffic once premium routing is exhausted.</p>
-              </div>
-              <div className="flex-shrink-0">
-                <button type="button" className={button.secondary} onClick={() => addTier(false)}>
-                  <Plus className="size-4" /> Add tier
-                </button>
-              </div>
-            </div>
-            <div className="mt-4 space-y-4 text-sm text-slate-600">
-              {ranges.map(range => {
-                const rangeTiers = standardTiers.filter(t => t.rangeId === range.id);
-                if (rangeTiers.length === 0) return null;
-                return (
-                  <div key={`standard-${range.id}`}>
-                    <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">{range.name} Range</h4>
-                    <div className="space-y-3">
-                      {rangeTiers.map((tier, index) => (
-                        <TierCard
-                          key={tier.id}
-                          tier={tier}
-                          rangeName={getRangeName(tier.rangeId)}
-                          onMove={(direction) => moveTier(tier.id, direction)}
-                          onRemove={() => removeTier(tier.id)}
-                          onAddEndpoint={() => setAddingEndpointTier(tier)}
-                          onEditWeights={() => setEditingWeightsTier(tier)}
-                          isFirst={index === 0}
-                          isLast={index === rangeTiers.length - 1}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-               {standardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard tiers configured.</p>}
-            </div>
-          </article>
-          <article className="space-y-4 rounded-2xl border border-emerald-200/80 bg-emerald-50/50 p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900/90">Premium failover tiers</h3>
-                <p className="text-xs text-slate-500">Prepended for new agents or upgraded plans.</p>
-              </div>
-              <div className="flex-shrink-0">
-                <button type="button" className={button.secondary} onClick={() => addTier(true)}>
-                  <Plus className="size-4" /> Add premium tier
-                </button>
-              </div>
-            </div>
-            <div className="mt-4 space-y-4 text-sm text-slate-600">
-              {ranges.map(range => {
-                const rangeTiers = premiumTiers.filter(t => t.rangeId === range.id);
-                if (rangeTiers.length === 0) return null;
-                return (
-                  <div key={`premium-${range.id}`}>
-                    <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-emerald-800">{range.name} Range</h4>
-                    <div className="space-y-3">
-                      {rangeTiers.map((tier, index) => (
-                        <TierCard
-                          key={tier.id}
-                          tier={tier}
-                          rangeName={getRangeName(tier.rangeId)}
-                          onMove={(direction) => moveTier(tier.id, direction)}
-                          onRemove={() => removeTier(tier.id)}
-                          onAddEndpoint={() => setAddingEndpointTier(tier)}
-                          onEditWeights={() => setEditingWeightsTier(tier)}
-                          isFirst={index === 0}
-                          isLast={index === rangeTiers.length - 1}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-              {premiumTiers.length === 0 ? <p className="text-center text-xs text-slate-500 py-4">No premium tiers configured.</p> : null}
-            </div>
-          </article>
+        <div className="space-y-6">
+            {ranges.sort((a, b) => a.min_tokens - b.min_tokens).map(range => (
+                <RangeSection
+                    key={range.id}
+                    range={range}
+                    tiers={tiers}
+                    onAddTier={addTier}
+                    onUpdate={handleRangeUpdate}
+                    onRemove={handleRemoveRange}
+                    // Pass down other actions
+                    moveTier={moveTier}
+                    removeTier={removeTier}
+                    setAddingEndpointTier={setAddingEndpointTier}
+                    setEditingWeightsTier={setEditingWeightsTier}
+                />
+            ))}
         </div>
       </SectionCard>
 
