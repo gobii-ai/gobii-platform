@@ -27,6 +27,8 @@ import {
   Eye,
   Zap,
   ZapOff,
+  BookText,
+  Search,
 } from 'lucide-react'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
@@ -117,6 +119,19 @@ const initialBrowserTiers: Tier[] = [
     }
 ]
 
+const initialEmbeddingTiers: Tier[] = [
+    {
+        id: 'embed-std-1',
+        name: 'Tier 1',
+        rangeId: 'embedding',
+        order: 1,
+        premium: false,
+        endpoints: [
+            { id: 'e-ep1', label: 'openai/text-embedding-3-large', weight: 100 },
+        ],
+    },
+]
+
 const placeholderProviders = [
   {
     id: 'prov1',
@@ -152,27 +167,6 @@ const placeholderProviders = [
         { id: 'prov3-ep1', name: 'openai/gpt-5', temperature: 1.0, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: '' },
         { id: 'prov3-ep2', name: 'openai/gpt-4o', temperature: 0.7, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: '' },
     ]
-  },
-]
-
-const workloadSummaries = [
-  {
-    name: 'Summaries',
-    model: 'openai/gpt-4o-mini',
-    detail: 'Temperature forced to 0 for deterministic compression.',
-    icon: <FileCog className="size-5 text-blue-500" />
-  },
-  {
-    name: 'Search tools',
-    model: 'openrouter/z-ai/glm-4.6:exacto',
-    detail: 'Uses the same failover list; tool calling enabled.',
-    icon: <Bot className="size-5 text-blue-500" />
-  },
-  {
-    name: 'Embeddings',
-    model: 'text-embedding-3-large',
-    detail: 'Rotates monthly for cached comparisons.',
-    icon: <Palette className="size-5 text-blue-500" />
   },
 ]
 
@@ -470,7 +464,7 @@ function EndpointEditor({ endpoint, isEditing, onEditClick }: { endpoint: any, i
     }
 
     return (
-        <div className="rounded-lg bg-white shadow-sm">
+        <div className="rounded-lg bg-white shadow-sm border border-slate-200">
             <div className="flex items-center justify-between p-2">
                 <span className="text-sm font-mono text-slate-700">{endpoint.name}</span>
                 <div className="flex items-center gap-1">
@@ -533,12 +527,28 @@ function EndpointEditor({ endpoint, isEditing, onEditClick }: { endpoint: any, i
 export function LlmConfigScreen() {
   const [tiers, setTiers] = useState<Tier[]>(initialTiers)
   const [browserTiers, setBrowserTiers] = useState<Tier[]>(initialBrowserTiers)
+  const [embeddingTiers, setEmbeddingTiers] = useState<Tier[]>(initialEmbeddingTiers)
   const [ranges, setRanges] = useState<TokenRange[]>(initialRanges)
   const [providers, setProviders] = useState(placeholderProviders)
   const [addingEndpointTier, setAddingEndpointTier] = useState<Tier | null>(null)
 
+  const getTierStateSetter = (tierId: string): React.Dispatch<React.SetStateAction<Tier[]>> | null => {
+    if (tiers.some(t => t.id === tierId)) return setTiers;
+    if (browserTiers.some(t => t.id === tierId)) return setBrowserTiers;
+    if (embeddingTiers.some(t => t.id === tierId)) return setEmbeddingTiers;
+    return null;
+  }
+
   const addTier = (isPremium: boolean, rangeId: string) => {
-    const targetStateSetter = rangeId === 'browser' ? setBrowserTiers : setTiers;
+    let targetStateSetter: React.Dispatch<React.SetStateAction<Tier[]>>;
+    if (rangeId === 'browser') {
+        targetStateSetter = setBrowserTiers;
+    } else if (rangeId === 'embedding') {
+        targetStateSetter = setEmbeddingTiers;
+    } else {
+        targetStateSetter = setTiers;
+    }
+
     targetStateSetter(currentTiers => {
         const relevantTiers = currentTiers.filter(t => t.premium === isPremium && t.rangeId === rangeId);
         const newOrder = relevantTiers.length > 0 ? Math.max(...relevantTiers.map(t => t.order)) + 1 : 1
@@ -555,13 +565,14 @@ export function LlmConfigScreen() {
   }
 
   const removeTier = (tierId: string) => {
-    setTiers(tiers.filter(t => t.id !== tierId));
-    setBrowserTiers(browserTiers.filter(t => t.id !== tierId));
+    const targetStateSetter = getTierStateSetter(tierId);
+    if (!targetStateSetter) return;
+    targetStateSetter(currentTiers => currentTiers.filter(t => t.id !== tierId));
   }
 
   const moveTier = (tierId: string, direction: 'up' | 'down') => {
-    const tierExistsInOrchestrator = tiers.some(t => t.id === tierId);
-    const targetStateSetter = tierExistsInOrchestrator ? setTiers : setBrowserTiers;
+    const targetStateSetter = getTierStateSetter(tierId);
+    if (!targetStateSetter) return;
 
     targetStateSetter(currentTiers => {
         const tierToMove = currentTiers.find(t => t.id === tierId);
@@ -583,8 +594,8 @@ export function LlmConfigScreen() {
 
   const addEndpoint = (tierId: string, endpointLabel: string) => {
     if (!endpointLabel) return;
-    const tierExistsInOrchestrator = tiers.some(t => t.id === tierId);
-    const targetStateSetter = tierExistsInOrchestrator ? setTiers : setBrowserTiers;
+    const targetStateSetter = getTierStateSetter(tierId);
+    if (!targetStateSetter) return;
 
     targetStateSetter(currentTiers => {
       return currentTiers.map(t => {
@@ -608,8 +619,8 @@ export function LlmConfigScreen() {
   }
 
   const updateEndpointWeight = (tierId: string, endpointId: string, newWeight: number) => {
-    const tierExistsInOrchestrator = tiers.some(t => t.id === tierId);
-    const targetStateSetter = tierExistsInOrchestrator ? setTiers : setBrowserTiers;
+    const targetStateSetter = getTierStateSetter(tierId);
+    if (!targetStateSetter) return;
 
     targetStateSetter(currentTiers => currentTiers.map(tier => {
       if (tier.id !== tierId) return tier;
@@ -657,8 +668,8 @@ export function LlmConfigScreen() {
   };
 
   const removeEndpoint = (tierId: string, endpointId: string) => {
-    const tierExistsInOrchestrator = tiers.some(t => t.id === tierId);
-    const targetStateSetter = tierExistsInOrchestrator ? setTiers : setBrowserTiers;
+    const targetStateSetter = getTierStateSetter(tierId);
+    if (!targetStateSetter) return;
 
     targetStateSetter(currentTiers => currentTiers.map(t => {
       if (t.id === tierId) {
@@ -829,17 +840,53 @@ export function LlmConfigScreen() {
         title="Other model consumers"
         description="Surface-level overview of summarization, embeddings, and tooling hints."
       >
-        <ul className="space-y-3 text-sm text-slate-600">
-          {workloadSummaries.map((workload) => (
-            <li key={workload.name} className="flex items-center gap-3 rounded-2xl border border-slate-100/80 bg-white px-4 py-3">
-              {workload.icon}
-              <div>
-                <p className="font-semibold text-slate-900/90">{workload.name}</p>
-                <p>{workload.model} – {workload.detail}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-slate-200/80 bg-white p-4">
+                    <div className="flex items-start gap-3">
+                        <BookText className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                            <h4 className="font-semibold text-slate-900/90">Summaries</h4>
+                            <p className="text-sm text-slate-600">Uses the primary model from the <span className="font-semibold">Small</span> token range, with temperature forced to 0.</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="rounded-xl border border-slate-200/80 bg-white p-4">
+                    <div className="flex items-start gap-3">
+                        <Search className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                            <h4 className="font-semibold text-slate-900/90">Search Tools</h4>
+                            <p className="text-sm text-slate-600">The decision to use search is made by the main agent, using the fully-configurable Token-based failover tiers.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-start gap-3">
+                        <Palette className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                            <h4 className="font-semibold text-slate-900/90">Embeddings Tiers</h4>
+                            <p className="text-sm text-slate-600">A dedicated failover list for generating text embeddings.</p>
+                        </div>
+                    </div>
+                    <button type="button" className={button.secondary} onClick={() => addTier(false, 'embedding')}>
+                        <Plus className="size-4" /> Add Tier
+                    </button>
+                </div>
+                {embeddingTiers.map((tier, index) => (
+                    <TierCard
+                        key={tier.id}
+                        tier={tier}
+                        onMove={(direction) => moveTier(tier.id, direction)}
+                        onRemove={() => removeTier(tier.id)}
+                        onAddEndpoint={() => setAddingEndpointTier(tier)}
+                        onUpdateEndpointWeight={(endpointId: string, weight: number) => updateEndpointWeight(tier.id, endpointId, weight)}
+                        onRemoveEndpoint={(endpointId: string) => removeEndpoint(tier.id, endpointId)}
+                    />
+                ))}
+            </div>
+        </div>
       </SectionCard>
     </div>
   )
