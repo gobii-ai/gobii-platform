@@ -180,102 +180,56 @@ function AddEndpointModal({ tier, onClose, onAdd }: { tier: Tier; onClose: () =>
   )
 }
 
-function EditWeightsModal({ tier, onClose, onSave }: { tier: Tier; onClose: () => void; onSave: (tierId: string, endpoints: Endpoint[]) => void }) {
-  const [endpoints, setEndpoints] = useState(tier.endpoints)
-  const totalWeight = endpoints.reduce((sum, ep) => sum + ep.weight, 0)
-
-  const handleWeightChange = (endpointId: string, newWeight: string) => {
-    const weight = parseInt(newWeight, 10)
-    setEndpoints(currentEndpoints =>
-      currentEndpoints.map(ep =>
-        ep.id === endpointId ? { ...ep, weight: isNaN(weight) ? 0 : weight } : ep
-      )
-    )
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Edit Weights for {tier.name}</h3>
-          <button onClick={onClose} className={button.icon}>
-            <X className="size-5" />
-          </button>
-        </div>
-        <div className="mt-4 space-y-3">
-          {endpoints.map(endpoint => (
-            <div key={endpoint.id} className="flex items-center justify-between">
-              <label htmlFor={`weight-${endpoint.id}`} className="text-sm font-medium text-slate-800">{endpoint.label}</label>
-              <div className="flex items-center gap-2">
-                <input
-                  id={`weight-${endpoint.id}`}
-                  type="number"
-                  value={endpoint.weight}
-                  onChange={(e) => handleWeightChange(endpoint.id, e.target.value)}
-                  className="block w-24 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                />
-                <span className="text-sm text-slate-500">%</span>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 flex items-center justify-between">
-            <p className={`text-sm ${totalWeight !== 100 ? 'text-red-600' : 'text-slate-500'}`}>
-                Total: {totalWeight}%
-            </p>
-            {totalWeight !== 100 && <p className="text-xs text-red-500">Total weight must be 100%</p>}
-        </div>
-        <div className="mt-6 flex justify-end gap-3">
-          <button type="button" className={button.secondary} onClick={onClose}>Cancel</button>
-          <button type="button" className={button.primary} onClick={() => { onSave(tier.id, endpoints); onClose(); }} disabled={totalWeight !== 100}>Save Weights</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-
-function TierCard({ tier, rangeName, onMove, onRemove, onAddEndpoint, onEditWeights, isFirst, isLast }: { tier: Tier, rangeName: string, onMove: (direction: 'up' | 'down') => void, onRemove: () => void, onAddEndpoint: () => void, onEditWeights: () => void, isFirst: boolean, isLast: boolean }) {
+function TierCard({ tier, onMove, onRemove, onAddEndpoint, onUpdateEndpointWeight, onRemoveEndpoint }: { tier: Tier, onMove: (direction: 'up' | 'down') => void, onRemove: () => void, onAddEndpoint: () => void, onUpdateEndpointWeight: (endpointId: string, weight: number) => void, onRemoveEndpoint: (endpointId: string) => void }) {
   const borderColor = tier.premium ? 'border-emerald-200' : 'border-slate-200'
   const textColor = tier.premium ? 'text-emerald-700' : 'text-slate-500'
   const headerIcon = tier.premium ? <ShieldCheck className={`size-4 ${textColor}`} /> : <Layers className={`size-4 ${textColor}`} />
 
   return (
-    <div className={`rounded-xl border ${borderColor} bg-white px-4 py-4`}>
-      <div className={`flex items-center justify-between text-xs uppercase tracking-wide ${textColor}`}>
+    <div className={`rounded-xl border ${borderColor} bg-white`}>
+      <div className={`flex items-center justify-between p-4 text-xs uppercase tracking-wide ${textColor}`}>
         <span className="flex items-center gap-2">{headerIcon} {tier.name}</span>
         <div className="flex items-center gap-1 text-xs">
-          <button className={button.icon} type="button" onClick={() => onMove('up')} disabled={isFirst}>
-            <ChevronUp className="size-4" />
-          </button>
-          <button className={button.icon} type="button" onClick={() => onMove('down')} disabled={isLast}>
-            <ChevronDown className="size-4" />
-          </button>
-          <button className={button.iconDanger} type="button" onClick={onRemove}>
-            <Trash2 className="size-4" />
-          </button>
+          <button className={button.icon} type="button" onClick={() => onMove('up')}><ChevronUp className="size-4" /></button>
+          <button className={button.icon} type="button" onClick={() => onMove('down')}><ChevronDown className="size-4" /></button>
+          <button className={button.iconDanger} type="button" onClick={onRemove}><Trash2 className="size-4" /></button>
         </div>
       </div>
-      <div className="mt-2 flex items-center justify-between text-[13px] text-slate-500">
-        <span>Weighted endpoints</span>
-        <span>Tier order {tier.order}</span>
-      </div>
-      <ul className="mt-1 space-y-1">
-        {tier.endpoints.map((endpoint) => (
-          <li key={`${tier.id}-${endpoint.label}`} className="flex items-center justify-between text-sm font-medium text-slate-900/90">
-            <span className="flex items-center gap-2"><PlugZap className="size-4 text-slate-400" /> {endpoint.label}</span>
-            <span className={`text-xs font-mono ${textColor}`}>{endpoint.weight}%</span>
-          </li>
-        ))}
-         {tier.endpoints.length === 0 && <li className="text-center text-xs text-slate-400 py-2">No endpoints added.</li>}
-      </ul>
-      <div className="mt-3 flex gap-2 text-xs">
-        <button type="button" className={button.muted} onClick={onAddEndpoint}>
-          <Plus className="size-3" /> Add endpoint
-        </button>
-        <button type="button" className={button.muted} onClick={onEditWeights} disabled={tier.endpoints.length === 0}>
-          <SlidersHorizontal className="size-3" /> Edit weights
-        </button>
+      <div className="space-y-3 px-4 pb-4">
+        <div className="flex items-center justify-between text-[13px] text-slate-500">
+          <span>Weighted endpoints</span>
+          <span>Tier order {tier.order}</span>
+        </div>
+        <div className="space-y-3">
+          {tier.endpoints.map((endpoint) => (
+            <div key={endpoint.id} className="grid grid-cols-12 items-center gap-3 text-sm font-medium text-slate-900/90">
+              <span className="col-span-6 flex items-center gap-2 truncate"><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
+              <div className="col-span-6 flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={endpoint.weight}
+                  onChange={(e) => onUpdateEndpointWeight(endpoint.id, parseInt(e.target.value, 10))}
+                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <input
+                  type="number"
+                  value={endpoint.weight}
+                  onChange={(e) => onUpdateEndpointWeight(endpoint.id, parseInt(e.target.value, 10) || 0)}
+                  className="block w-20 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                />
+                <button onClick={() => onRemoveEndpoint(endpoint.id)} className={button.iconDanger}><X className="size-4" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {tier.endpoints.length === 0 && <div className="text-center text-xs text-slate-400 py-2">No endpoints added.</div>}
+        <div className="pt-2">
+            <button type="button" className={button.muted} onClick={onAddEndpoint}>
+                <Plus className="size-3" /> Add endpoint
+            </button>
+        </div>
       </div>
     </div>
   )
@@ -332,13 +286,11 @@ function RangeSection({
                     <TierCard
                         key={tier.id}
                         tier={tier}
-                        rangeName={range.name}
                         onMove={(direction) => tierActions.moveTier(tier.id, direction)}
                         onRemove={() => tierActions.removeTier(tier.id)}
                         onAddEndpoint={() => tierActions.setAddingEndpointTier(tier)}
-                        onEditWeights={() => tierActions.setEditingWeightsTier(tier)}
-                        isFirst={index === 0}
-                        isLast={index === standardTiers.length - 1}
+                        onUpdateEndpointWeight={(endpointId: string, weight: number) => tierActions.updateEndpointWeight(tier.id, endpointId, weight)}
+                        onRemoveEndpoint={(endpointId: string) => tierActions.removeEndpoint(tier.id, endpointId)}
                     />
                 )) : <p className="text-center text-xs text-slate-400 py-4">No standard tiers for this range.</p>}
             </div>
@@ -353,13 +305,11 @@ function RangeSection({
                     <TierCard
                         key={tier.id}
                         tier={tier}
-                        rangeName={range.name}
                         onMove={(direction) => tierActions.moveTier(tier.id, direction)}
                         onRemove={() => tierActions.removeTier(tier.id)}
                         onAddEndpoint={() => tierActions.setAddingEndpointTier(tier)}
-                        onEditWeights={() => tierActions.setEditingWeightsTier(tier)}
-                        isFirst={index === 0}
-                        isLast={index === premiumTiers.length - 1}
+                        onUpdateEndpointWeight={(endpointId: string, weight: number) => tierActions.updateEndpointWeight(tier.id, endpointId, weight)}
+                        onRemoveEndpoint={(endpointId: string) => tierActions.removeEndpoint(tier.id, endpointId)}
                     />
                 )) : <p className="text-center text-xs text-slate-400 py-4">No premium tiers for this range.</p>}
             </div>
@@ -371,7 +321,6 @@ function RangeSection({
 export function LlmConfigScreen() {
   const [tiers, setTiers] = useState<Tier[]>(initialTiers)
   const [ranges, setRanges] = useState<TokenRange[]>(initialRanges)
-  const [editingWeightsTier, setEditingWeightsTier] = useState<Tier | null>(null)
   const [addingEndpointTier, setAddingEndpointTier] = useState<Tier | null>(null)
 
   const addTier = (isPremium: boolean, rangeId: string) => {
@@ -412,30 +361,125 @@ export function LlmConfigScreen() {
 
   const addEndpoint = (tierId: string, endpointLabel: string) => {
     if (!endpointLabel) return;
-    let tierToUpdate: Tier | undefined;
-    const newTiers = tiers.map(t => {
+    setTiers(currentTiers => {
+      return currentTiers.map(t => {
         if (t.id === tierId) {
-            tierToUpdate = {
-                ...t,
-                endpoints: [...t.endpoints, { id: `ep-${Date.now()}`, label: endpointLabel, weight: 0 }],
-            };
-            return tierToUpdate;
+          const newEndpoints = [...t.endpoints, { id: `ep-${Date.now()}`, label: endpointLabel, weight: 0 }];
+          const totalWeight = newEndpoints.reduce((sum, ep) => sum + ep.weight, 0);
+          const numEndpoints = newEndpoints.length;
+          // Distribute weights evenly
+          const evenWeight = Math.floor(100 / numEndpoints);
+          const remainder = 100 % numEndpoints;
+          const finalEndpoints = newEndpoints.map((ep, index) => ({
+            ...ep,
+            weight: index < remainder ? evenWeight + 1 : evenWeight,
+          }));
+
+          return { ...t, endpoints: finalEndpoints };
         }
         return t;
+      });
     });
-    setTiers(newTiers);
-
-    if (tierToUpdate) {
-        setEditingWeightsTier(tierToUpdate);
-    }
   }
 
-  const saveWeights = (tierId: string, updatedEndpoints: Endpoint[]) => {
-    setTiers(currentTiers =>
-      currentTiers.map(t =>
-        t.id === tierId ? { ...t, endpoints: updatedEndpoints } : t
-      )
-    )
+  const updateEndpointWeight = (tierId: string, endpointId: string, newWeight: number) => {
+    setTiers(currentTiers => currentTiers.map(tier => {
+      if (tier.id !== tierId) return tier;
+
+      const endpoints = tier.endpoints;
+      const updatedEndpointIndex = endpoints.findIndex(e => e.id === endpointId);
+      if (updatedEndpointIndex === -1) return tier;
+
+      const oldWeight = endpoints[updatedEndpointIndex].weight;
+      const delta = newWeight - oldWeight;
+
+      // Clamp the new weight
+      newWeight = Math.max(0, Math.min(100, newWeight));
+
+      const updatedEndpoints = [...endpoints];
+      updatedEndpoints[updatedEndpointIndex] = { ...updatedEndpoints[updatedEndpointIndex], weight: newWeight };
+
+      if (endpoints.length > 1) {
+        let remainingDelta = oldWeight - newWeight;
+        const otherEndpoints = updatedEndpoints.filter(e => e.id !== endpointId);
+        let totalOtherWeight = otherEndpoints.reduce((sum, e) => sum + e.weight, 0);
+
+        if (totalOtherWeight > 0) {
+            for (let i = 0; i < otherEndpoints.length; i++) {
+                const endpoint = otherEndpoints[i];
+                const proportionalDelta = remainingDelta * (endpoint.weight / totalOtherWeight);
+                const targetEndpoint = updatedEndpoints.find(e => e.id === endpoint.id)!;
+                targetEndpoint.weight += proportionalDelta;
+            }
+        } else if (otherEndpoints.length > 0) {
+            // Distribute equally if other weights are zero
+            const equalDelta = remainingDelta / otherEndpoints.length;
+            otherEndpoints.forEach(endpoint => {
+                const targetEndpoint = updatedEndpoints.find(e => e.id === endpoint.id)!;
+                targetEndpoint.weight += equalDelta;
+            });
+        }
+      }
+      
+      // Final pass to ensure total is 100 and round weights
+      let currentTotal = updatedEndpoints.reduce((sum, e) => sum + e.weight, 0);
+      const error = 100 - currentTotal;
+
+      // Distribute rounding error
+      if (error !== 0 && updatedEndpoints.length > 0) {
+          const endpointToAdjust = updatedEndpoints.find(e => e.id !== endpointId) || updatedEndpoints[0];
+          endpointToAdjust.weight += error;
+      }
+
+      // Round all weights and correct final sum
+      let roundedTotal = 0;
+      updatedEndpoints.forEach(ep => {
+          ep.weight = Math.round(ep.weight);
+          roundedTotal += ep.weight;
+      });
+
+      let finalError = 100 - roundedTotal;
+      if (finalError !== 0 && updatedEndpoints.length > 0) {
+          const endpointToAdjust = updatedEndpoints.sort((a,b) => b.weight - a.weight)[0];
+          endpointToAdjust.weight += finalError;
+      }
+
+
+      return { ...tier, endpoints: updatedEndpoints };
+    }));
+  };
+
+  const removeEndpoint = (tierId: string, endpointId: string) => {
+    setTiers(currentTiers => currentTiers.map(t => {
+      if (t.id === tierId) {
+        const newEndpoints = t.endpoints.filter(e => e.id !== endpointId);
+        // After removing, redistribute weights to sum to 100
+        const totalWeight = newEndpoints.reduce((sum, ep) => sum + ep.weight, 0);
+        if (totalWeight > 0 && newEndpoints.length > 0) {
+            const scale = 100 / totalWeight;
+            let redistributedTotal = 0;
+            newEndpoints.forEach((ep, index) => {
+                const newW = Math.round(ep.weight * scale);
+                ep.weight = newW;
+                redistributedTotal += newW;
+            });
+            // Correct rounding errors
+            const error = 100 - redistributedTotal;
+            if (error !== 0) {
+                newEndpoints[0].weight += error;
+            }
+        } else if (newEndpoints.length > 0) {
+            // If all weights were 0, distribute evenly
+            const evenWeight = Math.floor(100 / newEndpoints.length);
+            const remainder = 100 % newEndpoints.length;
+            newEndpoints.forEach((ep, index) => {
+                ep.weight = index < remainder ? evenWeight + 1 : evenWeight;
+            });
+        }
+        return { ...t, endpoints: newEndpoints };
+      }
+      return t;
+    }));
   }
 
   const handleRangeUpdate = (id: string, field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => {
@@ -463,7 +507,6 @@ export function LlmConfigScreen() {
 
   return (
     <div className="space-y-8">
-      {editingWeightsTier && <EditWeightsModal tier={editingWeightsTier} onClose={() => setEditingWeightsTier(null)} onSave={saveWeights} />}
       {addingEndpointTier && <AddEndpointModal tier={addingEndpointTier} onClose={() => setAddingEndpointTier(null)} onAdd={addEndpoint} />}
 
       <div className="gobii-card-base space-y-2 px-6 py-6">
@@ -567,7 +610,8 @@ export function LlmConfigScreen() {
                     moveTier={moveTier}
                     removeTier={removeTier}
                     setAddingEndpointTier={setAddingEndpointTier}
-                    setEditingWeightsTier={setEditingWeightsTier}
+                    updateEndpointWeight={updateEndpointWeight}
+                    removeEndpoint={removeEndpoint}
                 />
             ))}
         </div>
