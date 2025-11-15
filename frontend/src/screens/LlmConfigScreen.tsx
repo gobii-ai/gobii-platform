@@ -65,8 +65,9 @@ const initialTiers: Tier[] = [
     order: 1,
     premium: false,
     endpoints: [
-      { id: 'ep1', label: 'openai/gpt-5', weight: 70 },
+      { id: 'ep1', label: 'openai/gpt-5', weight: 50 },
       { id: 'ep2', label: 'anthropic/claude-sonnet-4', weight: 30 },
+      { id: 'ep-new', label: 'new-endpoint/some-model', weight: 20 },
     ],
   },
   {
