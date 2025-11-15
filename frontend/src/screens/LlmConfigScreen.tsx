@@ -24,6 +24,9 @@ import {
   Beaker,
   LoaderCircle,
   Check,
+  Eye,
+  Zap,
+  ZapOff,
 } from 'lucide-react'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
@@ -123,8 +126,8 @@ const placeholderProviders = [
     backend: 'OpenAI-compatible',
     usage: 'Primary for long-context + premium workloads.',
     endpoints: [
-        { id: 'prov1-ep1', name: 'openrouter/z-ai/glm-4.6:exacto' },
-        { id: 'prov1-ep2', name: 'openrouter/google/gemini-pro' },
+        { id: 'prov1-ep1', name: 'openrouter/z-ai/glm-4.6:exacto', temperature: 0.8, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: 'https://openrouter.ai/api/v1' },
+        { id: 'prov1-ep2', name: 'openrouter/google/gemini-pro', temperature: 0.9, supports_vision: false, supports_tool_choice: true, use_parallel_tool_calls: false, api_base: 'https://openrouter.ai/api/v1' },
     ]
   },
   {
@@ -135,7 +138,7 @@ const placeholderProviders = [
     backend: 'Native API',
     usage: 'Used when Claude reasoning is preferred.',
     endpoints: [
-        { id: 'prov2-ep1', name: 'anthropic/claude-sonnet-4' },
+        { id: 'prov2-ep1', name: 'anthropic/claude-sonnet-4', temperature: 1.0, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: '' },
     ]
   },
   {
@@ -146,8 +149,8 @@ const placeholderProviders = [
     backend: 'Native API',
     usage: 'Default for summaries and quick iterations.',
     endpoints: [
-        { id: 'prov3-ep1', name: 'openai/gpt-5' },
-        { id: 'prov3-ep2', name: 'openai/gpt-4o' },
+        { id: 'prov3-ep1', name: 'openai/gpt-5', temperature: 1.0, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: '' },
+        { id: 'prov3-ep2', name: 'openai/gpt-4o', temperature: 0.7, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: '' },
     ]
   },
 ]
@@ -360,29 +363,10 @@ function RangeSection({
 
 function ProviderCard({ provider }: { provider: any }) {
     const [activeTab, setActiveTab] = useState('endpoints');
-    const [testStatus, setTestStatus] = useState<{[key: string]: 'idle' | 'testing' | 'success' | 'failed'}>({});
+    const [editingEndpoint, setEditingEndpoint] = useState<any | null>(null);
 
-    const handleTest = (endpointId: string) => {
-        setTestStatus(prev => ({ ...prev, [endpointId]: 'testing' }));
-        setTimeout(() => {
-            const success = Math.random() > 0.3; // Simulate success/failure
-            setTestStatus(prev => ({ ...prev, [endpointId]: success ? 'success' : 'failed' }));
-            setTimeout(() => setTestStatus(prev => ({ ...prev, [endpointId]: 'idle' })), 2000);
-        }, 1500);
-    }
-
-    const TestButton = ({ endpointId }: { endpointId: string }) => {
-        const status = testStatus[endpointId] || 'idle';
-        if (status === 'testing') {
-            return <button className={button.muted} disabled><LoaderCircle className="size-4 animate-spin" /> Testing...</button>
-        }
-        if (status === 'success') {
-            return <button className={`${button.muted} bg-emerald-50 text-emerald-700`} disabled><Check className="size-4" /> Success</button>
-        }
-        if (status === 'failed') {
-            return <button className={`${button.muted} bg-rose-50 text-rose-700`} disabled><X className="size-4" /> Failed</button>
-        }
-        return <button className={button.muted} onClick={() => handleTest(endpointId)}><Beaker className="size-4" /> Test</button>
+    const handleEditClick = (endpoint: any) => {
+        setEditingEndpoint(endpoint.id === editingEndpoint?.id ? null : endpoint);
     }
 
     return (
@@ -419,16 +403,14 @@ function ProviderCard({ provider }: { provider: any }) {
                         <div className="flex items-center justify-end">
                             <button className={button.muted}><Plus className="size-3" /> Add endpoint</button>
                         </div>
-                        <div className="space-y-2 rounded-lg bg-slate-50 p-2">
+                        <div className="space-y-2">
                             {provider.endpoints.map((endpoint: any) => (
-                                <div key={endpoint.id} className="flex items-center justify-between rounded-md bg-white p-2">
-                                    <span className="text-sm font-mono text-slate-700">{endpoint.name}</span>
-                                    <div className="flex items-center gap-1">
-                                        <TestButton endpointId={endpoint.id} />
-                                        <button className={button.icon}><Pencil className="size-4" /></button>
-                                        <button className={button.iconDanger}><Trash2 className="size-4" /></button>
-                                    </div>
-                                </div>
+                                <EndpointEditor 
+                                    key={endpoint.id} 
+                                    endpoint={endpoint} 
+                                    isEditing={editingEndpoint?.id === endpoint.id}
+                                    onEditClick={() => handleEditClick(endpoint)}
+                                />
                             ))}
                         </div>
                     </div>
@@ -458,6 +440,77 @@ function ProviderCard({ provider }: { provider: any }) {
                 )}
             </div>
         </article>
+    )
+}
+
+function EndpointEditor({ endpoint, isEditing, onEditClick }: { endpoint: any, isEditing: boolean, onEditClick: () => void }) {
+    const [testStatus, setTestStatus] = useState('idle');
+
+    const handleTest = () => {
+        setTestStatus('testing');
+        setTimeout(() => {
+            const success = Math.random() > 0.3;
+            setTestStatus(success ? 'success' : 'failed');
+            setTimeout(() => setTestStatus('idle'), 2000);
+        }, 1500);
+    }
+
+    const TestButton = () => {
+        if (testStatus === 'testing') {
+            return <button className={button.muted} disabled><LoaderCircle className="size-4 animate-spin" /> Testing...</button>
+        }
+        if (testStatus === 'success') {
+            return <button className={`${button.muted} bg-emerald-50 text-emerald-700`} disabled><Check className="size-4" /> Success</button>
+        }
+        if (testStatus === 'failed') {
+            return <button className={`${button.muted} bg-rose-50 text-rose-700`} disabled><X className="size-4" /> Failed</button>
+        }
+        return <button className={button.muted} onClick={handleTest}><Beaker className="size-4" /> Test</button>
+    }
+
+    return (
+        <div className="rounded-lg bg-slate-50">
+            <div className="flex items-center justify-between rounded-md bg-white p-2 shadow-sm">
+                <span className="text-sm font-mono text-slate-700">{endpoint.name}</span>
+                <div className="flex items-center gap-1">
+                    <TestButton />
+                    <button className={button.icon} onClick={onEditClick}><Pencil className="size-4" /></button>
+                    <button className={button.iconDanger}><Trash2 className="size-4" /></button>
+                </div>
+            </div>
+            {isEditing && (
+                <div className="p-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs text-slate-500">Temperature</label>
+                            <input type="range" min="0" max="2" step="0.1" defaultValue={endpoint.temperature} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500">API Base URL</label>
+                            <input type="text" defaultValue={endpoint.api_base} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+                        </div>
+                    </div>
+                    <div className="flex items-center space-x-6">
+                        <label className="flex items-center gap-2 text-sm text-slate-700">
+                            <input type="checkbox" defaultChecked={endpoint.supports_vision} className="rounded border-slate-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" />
+                            <Eye className="size-4" /> Supports Vision
+                        </label>
+                         <label className="flex items-center gap-2 text-sm text-slate-700">
+                            <input type="checkbox" defaultChecked={endpoint.supports_tool_choice} className="rounded border-slate-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" />
+                            <Zap className="size-4" /> Tool Choice
+                        </label>
+                         <label className="flex items-center gap-2 text-sm text-slate-700">
+                            <input type="checkbox" defaultChecked={endpoint.use_parallel_tool_calls} className="rounded border-slate-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" />
+                            <ZapOff className="size-4" /> Parallel Calls
+                        </label>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <button className={button.secondary} onClick={onEditClick}>Cancel</button>
+                        <button className={button.primary}>Save Changes</button>
+                    </div>
+                </div>
+            )}
+        </div>
     )
 }
 
