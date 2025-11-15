@@ -1,10 +1,12 @@
-import { AlertCircle, Atom, Globe, PlugZap, ServerCog, Shield, Workflow } from 'lucide-react'
+import { AlertCircle, Atom, Globe, PlugZap, Shield } from 'lucide-react'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
 
 type PlaceholderTier = {
   id: string
   name: string
+  range: 'Small' | 'Medium' | 'Large'
+  order: number
   premium?: boolean
   endpoints: Array<{ label: string; weight: string }>
 }
@@ -12,7 +14,9 @@ type PlaceholderTier = {
 const placeholderTiers: PlaceholderTier[] = [
   {
     id: 'small-standard',
-    name: 'Small range – Tier 1',
+    name: 'Tier 1',
+    range: 'Small',
+    order: 1,
     endpoints: [
       { label: 'openai/gpt-5', weight: '70%' },
       { label: 'anthropic/claude-sonnet-4', weight: '30%' },
@@ -20,14 +24,18 @@ const placeholderTiers: PlaceholderTier[] = [
   },
   {
     id: 'small-standard-2',
-    name: 'Small range – Tier 2',
+    name: 'Tier 2',
+    range: 'Small',
+    order: 2,
     endpoints: [
       { label: 'vertex_ai/gemini-2.5-pro', weight: '100%' },
     ],
   },
   {
     id: 'medium-premium',
-    name: 'Medium range – Premium Tier',
+    name: 'Premium Tier',
+    range: 'Medium',
+    order: 1,
     premium: true,
     endpoints: [
       { label: 'openrouter/z-ai/glm-4.6:exacto', weight: '60%' },
@@ -63,27 +71,6 @@ const placeholderProviders = [
   },
 ]
 
-const flowSteps = [
-  {
-    title: 'Provider credentials',
-    detail: 'Keys + env fallbacks captured in LLMProvider records.',
-    icon: <PlugZap className="size-5 text-blue-600" aria-hidden="true" />,
-    hint: '4 active providers',
-  },
-  {
-    title: 'Persistent endpoints',
-    detail: 'Each endpoint defines a LiteLLM model string + capabilities.',
-    icon: <ServerCog className="size-5 text-indigo-600" aria-hidden="true" />,
-    hint: '11 total endpoints',
-  },
-  {
-    title: 'Token tiers',
-    detail: 'Ranges + tier weights decide the failover order per request.',
-    icon: <Workflow className="size-5 text-slate-600" aria-hidden="true" />,
-    hint: 'Premium tiers optional',
-  },
-]
-
 const workloadSummaries = [
   {
     name: 'Summaries',
@@ -105,6 +92,17 @@ const workloadSummaries = [
 export function LlmConfigScreen() {
   const standardTiers = placeholderTiers.filter((tier) => !tier.premium)
   const premiumTiers = placeholderTiers.filter((tier) => tier.premium)
+
+  const button = {
+    primary:
+      'inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40',
+    secondary:
+      'inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200/60',
+    muted:
+      'inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200/60',
+    danger:
+      'inline-flex items-center justify-center rounded-xl px-3 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60',
+  }
 
   return (
     <div className="space-y-8">
@@ -128,15 +126,18 @@ export function LlmConfigScreen() {
         actions={
           <button
             type="button"
-            className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className={button.primary}
           >
             Add provider
           </button>
         }
       >
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {placeholderProviders.map((provider) => (
-            <article key={provider.name} className="rounded-2xl border border-slate-100/80 bg-white/80 p-5 shadow-sm">
+            <article
+              key={provider.name}
+              className="space-y-4 rounded-2xl border border-slate-100/80 bg-white px-5 py-5"
+            >
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-slate-900/90">{provider.name}</h3>
@@ -147,33 +148,24 @@ export function LlmConfigScreen() {
                 </span>
               </div>
               <dl className="mt-4 space-y-2 text-sm text-slate-600">
-                <div className="flex justify-between">
-                  <dt>Env fallback</dt>
-                  <dd className="font-medium text-slate-900/90">{provider.fallback}</dd>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Env fallback</p>
+                  <p className="font-medium text-slate-900/90">{provider.fallback}</p>
                 </div>
-                <div className="flex justify-between">
-                  <dt>Browser backend</dt>
-                  <dd className="font-medium text-slate-900/90">{provider.backend}</dd>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Browser backend</p>
+                  <p className="font-medium text-slate-900/90">{provider.backend}</p>
                 </div>
               </dl>
               <p className="mt-3 text-xs text-slate-500">{provider.usage}</p>
               <div className="mt-4 flex flex-wrap gap-2 text-sm">
-                <button
-                  className="rounded-2xl border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                  type="button"
-                >
+                <button className={button.secondary} type="button">
                   Manage endpoints
                 </button>
-                <button
-                  className="rounded-2xl border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                  type="button"
-                >
+                <button className={button.secondary} type="button">
                   Rotate key
                 </button>
-                <button
-                  className="rounded-2xl border border-transparent px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-50"
-                  type="button"
-                >
+                <button className={button.danger} type="button">
                   Disable
                 </button>
               </div>
@@ -187,19 +179,20 @@ export function LlmConfigScreen() {
         description="Map token ranges to weighted failover tiers."
       >
         <div className="grid gap-6 lg:grid-cols-2">
-          <article className="rounded-2xl border border-slate-100/80 bg-white/80 p-4 shadow-sm">
+          <article className="space-y-3 rounded-2xl border border-slate-100/80 bg-white">
             <h3 className="text-sm font-semibold text-slate-900/90">Standard failover tiers</h3>
             <p className="text-xs text-slate-500">Used for most traffic once premium routing is exhausted.</p>
             <div className="mt-4 space-y-3 text-sm text-slate-600">
               {standardTiers.map((tier) => (
-                <div key={tier.id} className="rounded-xl border border-slate-100/80 bg-slate-50 px-3 py-3">
-                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-500">
-                    <span>{tier.name}</span>
-                    <span>Order #{tier.id.split('-').pop()}</span>
+                <div key={tier.id} className="rounded-xl border border-slate-100/80 bg-white px-4 py-3">
+                  <div className="text-xs uppercase tracking-wide text-slate-500">{tier.range} range • {tier.name}</div>
+                  <div className="flex items-center justify-between text-[13px] text-slate-500">
+                    <span>Tier order {tier.order}</span>
+                    <span>Weighted endpoints</span>
                   </div>
                   <ul className="mt-2 space-y-1">
                     {tier.endpoints.map((endpoint) => (
-                      <li key={`${tier.id}-${endpoint.label}`} className="flex items-center justify-between font-medium text-slate-900/90">
+                      <li key={`${tier.id}-${endpoint.label}`} className="flex items-center justify-between text-sm font-medium text-slate-900/90">
                         <span>{endpoint.label}</span>
                         <span className="text-xs text-slate-500">{endpoint.weight}</span>
                       </li>
@@ -209,21 +202,22 @@ export function LlmConfigScreen() {
               ))}
             </div>
           </article>
-          <article className="rounded-2xl border border-slate-100/80 bg-white/80 p-4 shadow-sm">
+          <article className="space-y-3 rounded-2xl border border-slate-100/80 bg-white">
             <h3 className="text-sm font-semibold text-slate-900/90">Premium failover tiers</h3>
             <p className="text-xs text-slate-500">Prepended for new agents or upgraded plans before standard tiers.</p>
             <div className="mt-4 space-y-3 text-sm text-slate-600">
               {premiumTiers.map((tier) => (
-                <div key={tier.id} className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-3">
-                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-emerald-700">
-                    <span>{tier.name}</span>
-                    <span>Order #{tier.id.split('-').pop()}</span>
+                <div key={tier.id} className="rounded-xl border border-emerald-200 bg-white px-4 py-3">
+                  <div className="text-xs uppercase tracking-wide text-emerald-700">{tier.range} range • {tier.name}</div>
+                  <div className="flex items-center justify-between text-[13px] text-emerald-700/80">
+                    <span>Tier order {tier.order}</span>
+                    <span>Weighted endpoints</span>
                   </div>
                   <ul className="mt-2 space-y-1">
                     {tier.endpoints.map((endpoint) => (
-                      <li key={`${tier.id}-${endpoint.label}`} className="flex items-center justify-between font-medium text-slate-900/90">
+                      <li key={`${tier.id}-${endpoint.label}`} className="flex items-center justify-between text-sm font-medium text-slate-900/90">
                         <span>{endpoint.label}</span>
-                        <span className="text-xs text-slate-600">{endpoint.weight}</span>
+                        <span className="text-xs text-emerald-700">{endpoint.weight}</span>
                       </li>
                     ))}
                   </ul>
@@ -241,27 +235,38 @@ export function LlmConfigScreen() {
         actions={
           <button
             type="button"
-            className="rounded-2xl border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className={button.secondary}
           >
-            Edit policy
+            Configure browser routing
           </button>
         }
       >
-        <div className="space-y-3">
-          <div className="rounded-2xl border border-slate-100/80 bg-slate-50/70 p-4 text-sm text-slate-600">
-            Dedicated browser endpoint: <span className="font-medium text-slate-900/90">z-ai/glm-4.5 (OpenRouter)</span>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-slate-100/80 bg-white px-5 py-4 text-sm text-slate-600">
+            Dedicated browser endpoint
+            {' '}
+            <span className="font-medium text-slate-900/90">z-ai/glm-4.5 (OpenRouter)</span>
+            {' '}
+            stored in
+            {' '}
+            <code className="rounded bg-slate-100 px-1 py-0.5 text-xs text-slate-600">BrowserModelEndpoint</code>.
           </div>
-          <ul className="grid gap-3 text-sm text-slate-600 md:grid-cols-2">
-            <li className="rounded-2xl border border-slate-100/80 bg-white/80 p-4">
-              <p className="font-semibold text-slate-900/90">Primary tasks</p>
-              <p className="text-xs text-slate-500">Form filling, long-running browsing, screenshot capture.</p>
-            </li>
-            <li className="rounded-2xl border border-slate-100/80 bg-white/80 p-4">
-              <p className="font-semibold text-slate-900/90">Fallback behavior</p>
-              <p className="text-xs text-slate-500">Falls back to orchestrator config if dedicated endpoint disabled.</p>
-            </li>
-          </ul>
+          <div className="rounded-2xl border border-slate-100/80 bg-white px-5 py-4 text-sm text-slate-600">
+            Policy fallback
+            {' '}
+            <p className="text-xs text-slate-500">Reuses the orchestrator failover tiers when disabled or unhealthy.</p>
+          </div>
         </div>
+        <ul className="grid gap-3 text-sm text-slate-600 md:grid-cols-2">
+          <li className="rounded-2xl border border-slate-100/80 bg-white px-4 py-3">
+            <p className="font-semibold text-slate-900/90">Primary tasks</p>
+            <p className="text-xs text-slate-500">Form filling, long-running browsing, screenshot capture.</p>
+          </li>
+          <li className="rounded-2xl border border-slate-100/80 bg-white px-4 py-3">
+            <p className="font-semibold text-slate-900/90">Monitoring hints</p>
+            <p className="text-xs text-slate-500">Latency spikes or 4xx errors push traffic back to the orchestrator tiers.</p>
+          </li>
+        </ul>
       </SectionCard>
 
       <SectionCard
@@ -270,7 +275,7 @@ export function LlmConfigScreen() {
       >
         <ul className="space-y-3 text-sm text-slate-600">
           {workloadSummaries.map((workload) => (
-            <li key={workload.name} className="flex items-center gap-3 rounded-2xl border border-slate-100/80 bg-white/80 p-4">
+            <li key={workload.name} className="flex items-center gap-3 rounded-2xl border border-slate-100/80 bg-white px-4 py-3">
               <AlertCircle className="size-5 text-blue-500" aria-hidden="true" />
               <div>
                 <p className="font-semibold text-slate-900/90">{workload.name}</p>

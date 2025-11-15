@@ -12,7 +12,7 @@ type SectionCardProps = {
 export function SectionCard({ title, description, actions, children, footer, className }: SectionCardProps) {
   return (
     <section className={`gobii-card-base space-y-4 px-6 py-6 ${className ?? ''}`}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-900/90">{title}</h2>
           {description ? <p className="text-sm text-slate-500">{description}</p> : null}
