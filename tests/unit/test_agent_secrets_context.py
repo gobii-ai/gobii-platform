@@ -25,18 +25,10 @@ from api.agent.tools.secure_credentials_request import (
 User = get_user_model()
 
 
-def _keys_by_status(entries, status):
-    return {
-        entry.get("key")
-        for entry in entries
-        if entry.get("status") == status
-    }
-
-
 @tag("batch_agent_secrets_ctx")
 class GetSecretsBlockTests(TestCase):
     """Test the _get_secrets_block function that includes secrets in agent context."""
-    
+
     def setUp(self):
         """Set up test agent and user."""
         self.user = User.objects.create_user(
@@ -53,7 +45,7 @@ class GetSecretsBlockTests(TestCase):
             browser_use_agent=self.browser_agent,
             name="TestAgent"
         )
-    
+
     def test_only_fulfilled_secrets_in_context(self):
         """Test that only secrets with requested=False appear in context."""
         # Create fulfilled secrets (should appear)
@@ -66,7 +58,7 @@ class GetSecretsBlockTests(TestCase):
             requested=False,
             encrypted_value=b"encrypted_value_1"
         )
-        
+
         fulfilled_secret2 = PersistentAgentSecret.objects.create(
             agent=self.agent,
             domain_pattern="https://auth.example.com",
@@ -75,7 +67,7 @@ class GetSecretsBlockTests(TestCase):
             requested=False,
             encrypted_value=b"encrypted_value_2"
         )
-        
+
         # Create requested secrets (should NOT appear)
         requested_secret1 = PersistentAgentSecret.objects.create(
             agent=self.agent,
@@ -85,7 +77,7 @@ class GetSecretsBlockTests(TestCase):
             requested=True,
             encrypted_value=b""  # Empty as it's just requested
         )
-        
+
         requested_secret2 = PersistentAgentSecret.objects.create(
             agent=self.agent,
             domain_pattern="https://waiting.example.com",
@@ -94,27 +86,26 @@ class GetSecretsBlockTests(TestCase):
             requested=True,
             encrypted_value=b""
         )
-        
+
         # Get the secrets block
         result = _get_secrets_block(self.agent)
 
-        available_keys = _keys_by_status(result, "available")
-        pending_keys = _keys_by_status(result, "pending")
-
         # Verify fulfilled secrets ARE in the result
-        self.assertIn("api_key", available_keys)
-        self.assertIn("auth_token", available_keys)
+        self.assertIn("api_key", result)
+        self.assertIn("auth_token", result)
+        self.assertIn("API Key", result)
+        self.assertIn("Auth Token", result)
+        self.assertIn("https://api.example.com", result)
+        self.assertIn("https://auth.example.com", result)
 
-        domains = {entry["domain"] for entry in result}
-        self.assertIn("https://api.example.com", domains)
-        self.assertIn("https://auth.example.com", domains)
-        self.assertIn("https://pending.example.com", domains)
-        self.assertIn("https://waiting.example.com", domains)
+        # Verify requested secrets are surfaced as pending (not as available)
+        self.assertIn("Pending credential requests", result)
+        self.assertIn("follow up with the user", result)
+        self.assertIn("pending_secret", result)
+        self.assertIn("waiting_secret", result)
+        self.assertIn("https://pending.example.com", result)
+        self.assertIn("https://waiting.example.com", result)
 
-        # Verify requested secrets are surfaced as pending
-        self.assertIn("pending_secret", pending_keys)
-        self.assertIn("waiting_secret", pending_keys)
-    
     def test_no_secrets_returns_empty_message(self):
         """Test that when no fulfilled secrets exist, appropriate message is returned."""
         # Create only requested secrets
@@ -126,12 +117,12 @@ class GetSecretsBlockTests(TestCase):
             requested=True,
             encrypted_value=b""
         )
-        
+
         result = _get_secrets_block(self.agent)
-        
-        pending_keys = _keys_by_status(result, "pending")
-        self.assertIn("requested_key", pending_keys)
-    
+
+        self.assertIn("Pending credential requests", result)
+        self.assertIn("requested_key", result)
+
     def test_secrets_grouped_by_domain(self):
         """Test that secrets are properly grouped by domain pattern."""
         # Create multiple secrets for same domain
@@ -143,7 +134,7 @@ class GetSecretsBlockTests(TestCase):
             requested=False,
             encrypted_value=b"encrypted1"
         )
-        
+
         PersistentAgentSecret.objects.create(
             agent=self.agent,
             domain_pattern="*.google.com",
@@ -152,7 +143,7 @@ class GetSecretsBlockTests(TestCase):
             requested=False,
             encrypted_value=b"encrypted2"
         )
-        
+
         # Create secret for different domain
         PersistentAgentSecret.objects.create(
             agent=self.agent,
@@ -162,17 +153,28 @@ class GetSecretsBlockTests(TestCase):
             requested=False,
             encrypted_value=b"encrypted3"
         )
-        
+
         result = _get_secrets_block(self.agent)
-        
-        domains = {entry["domain"] for entry in result}
-        self.assertSetEqual(domains, {"*.github.com", "*.google.com"})
-        
-        available_keys = _keys_by_status(result, "available")
-        self.assertIn("google_api_key", available_keys)
-        self.assertIn("google_secret", available_keys)
-        self.assertIn("github_token", available_keys)
-    
+
+        # Check structure
+        self.assertIn("Domain: *.github.com", result)
+        self.assertIn("Domain: *.google.com", result)
+
+        # Check that all secrets are present
+        self.assertIn("google_api_key", result)
+        self.assertIn("google_secret", result)
+        self.assertIn("github_token", result)
+
+        # Verify ordering - domains should be alphabetically sorted
+        lines = result.split('\n')
+        # Find domain lines
+        domain_lines = [i for i, line in enumerate(lines) if "Domain:" in line]
+        self.assertEqual(len(domain_lines), 2)
+
+        # GitHub should come before Google alphabetically
+        self.assertIn("*.github.com", lines[domain_lines[0]])
+        self.assertIn("*.google.com", lines[domain_lines[1]])
+
     def test_mixed_requested_and_fulfilled_secrets(self):
         """Test filtering when both requested and fulfilled secrets exist."""
         # Create a mix of secrets
@@ -184,7 +186,7 @@ class GetSecretsBlockTests(TestCase):
             requested=False,
             encrypted_value=b"has_value"
         )
-        
+
         requested1 = PersistentAgentSecret.objects.create(
             agent=self.agent,
             domain_pattern="https://api.com",  # Same domain as fulfilled
@@ -193,7 +195,7 @@ class GetSecretsBlockTests(TestCase):
             requested=True,
             encrypted_value=b""
         )
-        
+
         fulfilled2 = PersistentAgentSecret.objects.create(
             agent=self.agent,
             domain_pattern="https://other.com",
@@ -202,25 +204,26 @@ class GetSecretsBlockTests(TestCase):
             requested=False,
             encrypted_value=b"value"
         )
-        
-        result = _get_secrets_block(self.agent)
-        
-        available_keys = _keys_by_status(result, "available")
-        pending_keys = _keys_by_status(result, "pending")
 
-        self.assertIn("fulfilled_key", available_keys)
-        self.assertIn("other_key", available_keys)
-        self.assertIn("requested_secret", pending_keys)
-        
-        domains = {entry["domain"] for entry in result}
-        self.assertIn("https://api.com", domains)
-        self.assertIn("https://other.com", domains)
+        result = _get_secrets_block(self.agent)
+
+        # Fulfilled secrets should be listed as available
+        self.assertIn("fulfilled_key", result)
+        self.assertIn("other_key", result)
+
+        # Pending secrets should be surfaced under the pending section
+        self.assertIn("Pending credential requests", result)
+        self.assertIn("requested_secret", result)
+
+        # Both domains with fulfilled secrets should appear
+        self.assertIn("https://api.com", result)
+        self.assertIn("https://other.com", result)
 
 
 @tag("batch_agent_secrets_ctx")
 class SecureCredentialsRequestToolTests(TestCase):
     """Test the secure_credentials_request tool execution."""
-    
+
     def setUp(self):
         """Set up test agent and user."""
         self.user = User.objects.create_user(
@@ -237,16 +240,16 @@ class SecureCredentialsRequestToolTests(TestCase):
             browser_use_agent=self.browser_agent,
             name="TestAgent"
         )
-    
+
     def test_tool_definition_structure(self):
         """Test that the tool definition has correct structure."""
         tool_def = get_secure_credentials_request_tool()
-        
+
         self.assertEqual(tool_def["type"], "function")
         self.assertEqual(tool_def["function"]["name"], "secure_credentials_request")
         self.assertIn("credentials", tool_def["function"]["parameters"]["properties"])
         self.assertIn("credentials", tool_def["function"]["parameters"]["required"])
-    
+
     def test_create_new_credential_requests(self):
         """Test creating new credential requests."""
         params = {
@@ -265,34 +268,34 @@ class SecureCredentialsRequestToolTests(TestCase):
                 }
             ]
         }
-        
+
         result = execute_secure_credentials_request(self.agent, params)
-        
+
         # Check result
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["created_count"], 2)
         self.assertIn("Successfully created 2 credential request(s)", result["message"])
         self.assertIn("API Key", result["message"])
         self.assertIn("Secret Token", result["message"])
-        
+
         # Verify secrets were created with requested=True
         created_secrets = PersistentAgentSecret.objects.filter(agent=self.agent)
         self.assertEqual(created_secrets.count(), 2)
-        
+
         for secret in created_secrets:
             self.assertTrue(secret.requested)
             self.assertEqual(secret.encrypted_value, b"")  # Empty for requested
-        
+
         # Verify specific secrets
         api_key_secret = created_secrets.get(key="api_key")
         self.assertEqual(api_key_secret.name, "API Key")
         self.assertEqual(api_key_secret.domain_pattern, "https://api.example.com")
         self.assertEqual(api_key_secret.description, "Key for API access")
-        
+
         auth_token_secret = created_secrets.get(key="auth_token")
         self.assertEqual(auth_token_secret.name, "Secret Token")
         self.assertEqual(auth_token_secret.domain_pattern, "*.auth.example.com")
-    
+
     def test_duplicate_request_skipped(self):
         """Requesting an already-requested credential does not duplicate and reports success."""
         # Create an existing requested credential
@@ -304,7 +307,7 @@ class SecureCredentialsRequestToolTests(TestCase):
             requested=True,
             encrypted_value=b""
         )
-        
+
         # Try to request the same credential again
         params = {
             "credentials": [
@@ -316,12 +319,12 @@ class SecureCredentialsRequestToolTests(TestCase):
                 }
             ]
         }
-        
+
         result = execute_secure_credentials_request(self.agent, params)
         # Treated as already present; we still communicate success without creating duplicates
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["created_count"], 1)
-        
+
         # Verify only one secret exists
         secrets = PersistentAgentSecret.objects.filter(
             agent=self.agent,
@@ -330,7 +333,7 @@ class SecureCredentialsRequestToolTests(TestCase):
         )
         self.assertEqual(secrets.count(), 1)
         self.assertTrue(secrets.first().requested)
-    
+
     def test_re_request_already_fulfilled_secret(self):
         """Requesting a fulfilled credential converts it to requested again (refresh)."""
         # Create a fulfilled secret
@@ -342,7 +345,7 @@ class SecureCredentialsRequestToolTests(TestCase):
             requested=False,
             encrypted_value=b"encrypted_value_here"
         )
-        
+
         # Try to request a credential with same key and domain
         params = {
             "credentials": [
@@ -354,7 +357,7 @@ class SecureCredentialsRequestToolTests(TestCase):
                 }
             ]
         }
-        
+
         result = execute_secure_credentials_request(self.agent, params)
         # Now treated as ok (converted to requested)
         self.assertEqual(result["status"], "ok")
@@ -367,14 +370,15 @@ class SecureCredentialsRequestToolTests(TestCase):
 
         # It should appear in the pending section while requested
         context_block = _get_secrets_block(self.agent)
-        self.assertIn("api_key", _keys_by_status(context_block, "pending"))
+        self.assertIn("Pending credential requests", context_block)
+        self.assertIn("api_key", context_block)
 
         # Simulate fulfilling again and ensure it appears
         fulfilled.set_value("new-value")
         fulfilled.requested = False
         fulfilled.save()
         context_block2 = _get_secrets_block(self.agent)
-        self.assertIn("api_key", _keys_by_status(context_block2, "available"))
+        self.assertIn("api_key", context_block2)
 
 
 from django.urls import reverse
@@ -430,7 +434,7 @@ class AgentSecretsRequestViewTests(TestCase):
         self.assertFalse(s1.requested)
         self.assertTrue(s2.requested)
 
-    
+
     def test_missing_required_fields(self):
         """Test that missing required fields in credentials causes error."""
         # Missing domain_pattern
@@ -444,48 +448,48 @@ class AgentSecretsRequestViewTests(TestCase):
                 }
             ]
         }
-        
+
         result = execute_secure_credentials_request(self.agent, params)
-        
+
         self.assertIn("error", result["status"].lower())
         self.assertIn("Missing required fields", result["message"])
-        
+
         # Verify no secret was created
         self.assertEqual(PersistentAgentSecret.objects.filter(agent=self.agent).count(), 0)
-    
+
     def test_empty_credentials_list(self):
         """Test that empty credentials list returns error."""
         params = {
             "credentials": []
         }
-        
+
         result = execute_secure_credentials_request(self.agent, params)
-        
+
         self.assertEqual(result["status"], "error")
         # The actual implementation checks if credentials list is empty before checking individual items
         # But based on the test output, it seems to give a different error message
         self.assertIn("invalid", result["message"].lower())
-    
+
     def test_invalid_params_format(self):
         """Test that invalid params format is handled gracefully."""
         # credentials not a list
         params = {
             "credentials": "not a list"
         }
-        
+
         result = execute_secure_credentials_request(self.agent, params)
-        
+
         self.assertEqual(result["status"], "error")
         self.assertIn("Missing or invalid", result["message"])
-        
+
         # Missing credentials entirely
         params = {}
-        
+
         result = execute_secure_credentials_request(self.agent, params)
-        
+
         self.assertEqual(result["status"], "error")
         self.assertIn("Missing or invalid", result["message"])
-    
+
     @patch('api.agent.tools.secure_credentials_request.reverse')
     @patch('django.contrib.sites.models.Site.objects.get_current')
     def test_url_generation_in_response(self, mock_site, mock_reverse):
@@ -493,7 +497,7 @@ class AgentSecretsRequestViewTests(TestCase):
         # Mock the site and URL generation
         mock_site.return_value = Mock(domain="example.com")
         mock_reverse.return_value = f"/console/agents/{self.agent.id}/secrets/request/"
-        
+
         params = {
             "credentials": [
                 {
@@ -504,14 +508,14 @@ class AgentSecretsRequestViewTests(TestCase):
                 }
             ]
         }
-        
+
         result = execute_secure_credentials_request(self.agent, params)
-        
+
         self.assertEqual(result["status"], "ok")
         expected_url = f"https://example.com/console/agents/{self.agent.id}/secrets/request/"
         self.assertIn(expected_url, result["message"])
         self.assertIn("securely enter the requested credentials", result["message"])
-    
+
     def test_mixed_success_and_errors(self):
         """Test handling of partial success when some credentials succeed and others fail."""
         # Create an existing fulfilled secret
@@ -523,7 +527,7 @@ class AgentSecretsRequestViewTests(TestCase):
             requested=False,
             encrypted_value=b"value"
         )
-        
+
         params = {
             "credentials": [
                 {
@@ -545,15 +549,15 @@ class AgentSecretsRequestViewTests(TestCase):
                 }
             ]
         }
-        
+
         result = execute_secure_credentials_request(self.agent, params)
-        
+
         # Partial success: one new and one re-request created; one invalid failed
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["created_count"], 2)
         self.assertIn("errors", result)
         self.assertEqual(len(result["errors"]), 1)
-        
+
         # Verify only the successful one was created
         created = PersistentAgentSecret.objects.filter(
             agent=self.agent,
@@ -566,7 +570,7 @@ class AgentSecretsRequestViewTests(TestCase):
 @tag("batch_agent_secrets_ctx")
 class SecretContextIntegrationTests(TestCase):
     """Integration tests for the full secret request → fulfill → context flow."""
-    
+
     def setUp(self):
         """Set up test agent and user."""
         self.user = User.objects.create_user(
@@ -583,7 +587,7 @@ class SecretContextIntegrationTests(TestCase):
             browser_use_agent=self.browser_agent,
             name="TestAgent"
         )
-    
+
     def test_full_request_fulfill_context_flow(self):
         """Test the complete flow from request to fulfillment to context inclusion."""
         # Step 1: Agent requests credentials
@@ -597,39 +601,41 @@ class SecretContextIntegrationTests(TestCase):
                 }
             ]
         }
-        
+
         result = execute_secure_credentials_request(self.agent, request_params)
         self.assertEqual(result["status"], "ok")
-        
+
         # Step 2: Verify secret is surfaced as pending but not usable yet
         context_before = _get_secrets_block(self.agent)
-        self.assertIn("api_key", _keys_by_status(context_before, "pending"))
-        
+        self.assertIn("Pending credential requests", context_before)
+        self.assertIn("api_key", context_before)
+
         # Step 3: Simulate user providing the credential value
         secret = PersistentAgentSecret.objects.get(
             agent=self.agent,
             key="api_key"
         )
         self.assertTrue(secret.requested)
-        
+
         # Fulfill the secret (this is what the console view does)
         secret.set_value("super-secret-api-key-value")
         secret.requested = False
         secret.save()
-        
+
         # Step 4: Verify secret now appears in context
         context_after = _get_secrets_block(self.agent)
-        self.assertIn("api_key", _keys_by_status(context_after, "available"))
-        domains_after = {entry["domain"] for entry in context_after}
-        self.assertIn("https://api.example.com", domains_after)
-        
+        self.assertNotEqual(context_after, "No secrets configured.")
+        self.assertIn("api_key", context_after)
+        self.assertIn("API Key", context_after)
+        self.assertIn("https://api.example.com", context_after)
+
         # Verify the actual value is NOT in the context (only metadata)
-        self.assertNotIn("super-secret-api-key-value", str(context_after))
-    
+        self.assertNotIn("super-secret-api-key-value", context_after)
+
     def test_http_request_only_uses_fulfilled_secrets(self):
         """Test that http_request tool only has access to fulfilled secrets."""
         from api.agent.tools.http_request import execute_http_request
-        
+
         # Create one fulfilled and one requested secret
         fulfilled = PersistentAgentSecret.objects.create(
             agent=self.agent,
@@ -641,7 +647,7 @@ class SecretContextIntegrationTests(TestCase):
         )
         fulfilled.set_value("fulfilled_value")
         fulfilled.save()
-        
+
         requested = PersistentAgentSecret.objects.create(
             agent=self.agent,
             domain_pattern="https://api.com",
@@ -650,7 +656,7 @@ class SecretContextIntegrationTests(TestCase):
             requested=True,
             encrypted_value=b""
         )
-        
+
         # Mock the proxy and request
         with patch('api.agent.tools.http_request.select_proxy_for_persistent_agent') as mock_proxy:
             with patch('requests.request') as mock_request:
@@ -661,7 +667,7 @@ class SecretContextIntegrationTests(TestCase):
                     iter_content=lambda chunk_size: [b'ok'],
                     close=lambda: None
                 )
-                
+
                 # Make request with placeholders for both secrets
                 params = {
                     "method": "GET",
@@ -671,16 +677,16 @@ class SecretContextIntegrationTests(TestCase):
                         "X-Requested": "<<<requested_key>>>"
                     }
                 }
-                
+
                 result = execute_http_request(self.agent, params)
-                
+
                 # Check that the actual request was made with correct substitution
                 mock_request.assert_called_once()
                 call_args = mock_request.call_args
                 headers = call_args[1]["headers"]
-                
+
                 # Fulfilled secret should be substituted
                 self.assertEqual(headers["X-Fulfilled"], "fulfilled_value")
-                
+
                 # Requested secret should remain as placeholder
                 self.assertEqual(headers["X-Requested"], "<<<requested_key>>>")
