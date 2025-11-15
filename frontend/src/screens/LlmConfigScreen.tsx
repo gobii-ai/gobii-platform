@@ -236,7 +236,6 @@ function TierCard({ tier, onMove, onRemove, onAddEndpoint, onUpdateEndpointWeigh
       <div className="space-y-3 px-4 pb-4">
         <div className="flex items-center justify-between text-[13px] text-slate-500">
           <span>Weighted endpoints</span>
-          <span>Tier order {tier.order}</span>
         </div>
         <div className="space-y-3">
           {tier.endpoints
@@ -469,39 +468,47 @@ export function LlmConfigScreen() {
   const [addingEndpointTier, setAddingEndpointTier] = useState<Tier | null>(null)
 
   const addTier = (isPremium: boolean, rangeId: string) => {
-    const relevantTiers = tiers.filter(t => t.premium === isPremium && t.rangeId === rangeId);
-    const newOrder = relevantTiers.length > 0 ? Math.max(...relevantTiers.map(t => t.order)) + 1 : 1
-    const newTier: Tier = {
-      id: `new-tier-${Date.now()}`,
-      name: `Tier ${newOrder}`,
-      rangeId: rangeId,
-      order: newOrder,
-      premium: isPremium,
-      endpoints: [],
-    }
-    setTiers([...tiers, newTier])
+    const targetStateSetter = rangeId === 'browser' ? setBrowserTiers : setTiers;
+    targetStateSetter(currentTiers => {
+        const relevantTiers = currentTiers.filter(t => t.premium === isPremium && t.rangeId === rangeId);
+        const newOrder = relevantTiers.length > 0 ? Math.max(...relevantTiers.map(t => t.order)) + 1 : 1
+        const newTier: Tier = {
+          id: `new-tier-${Date.now()}`,
+          name: `Tier ${newOrder}`,
+          rangeId: rangeId,
+          order: newOrder,
+          premium: isPremium,
+          endpoints: [],
+        }
+        return [...currentTiers, newTier];
+    });
   }
 
   const removeTier = (tierId: string) => {
-    setTiers(tiers.filter(t => t.id !== tierId))
+    setTiers(tiers.filter(t => t.id !== tierId));
+    setBrowserTiers(browserTiers.filter(t => t.id !== tierId));
   }
 
   const moveTier = (tierId: string, direction: 'up' | 'down') => {
-    const tierToMove = tiers.find(t => t.id === tierId);
-    if (!tierToMove) return;
+    const tierExistsInOrchestrator = tiers.some(t => t.id === tierId);
+    const targetStateSetter = tierExistsInOrchestrator ? setTiers : setBrowserTiers;
 
-    const siblings = tiers.filter(t => t.premium === tierToMove.premium && t.rangeId === tierToMove.rangeId).sort((a, b) => a.order - b.order);
-    const currentIndex = siblings.findIndex(t => t.id === tierId);
+    targetStateSetter(currentTiers => {
+        const tierToMove = currentTiers.find(t => t.id === tierId);
+        if (!tierToMove) return currentTiers;
 
-    if (direction === 'up' && currentIndex > 0) {
-      const otherTier = siblings[currentIndex - 1];
-      [tierToMove.order, otherTier.order] = [otherTier.order, tierToMove.order];
-    } else if (direction === 'down' && currentIndex < siblings.length - 1) {
-      const otherTier = siblings[currentIndex + 1];
-      [tierToMove.order, otherTier.order] = [otherTier.order, tierToMove.order];
-    }
+        const siblings = currentTiers.filter(t => t.premium === tierToMove.premium && t.rangeId === tierToMove.rangeId).sort((a, b) => a.order - b.order);
+        const currentIndex = siblings.findIndex(t => t.id === tierId);
 
-    setTiers([...tiers]);
+        if (direction === 'up' && currentIndex > 0) {
+          const otherTier = siblings[currentIndex - 1];
+          [tierToMove.order, otherTier.order] = [otherTier.order, tierToMove.order];
+        } else if (direction === 'down' && currentIndex < siblings.length - 1) {
+          const otherTier = siblings[currentIndex + 1];
+          [tierToMove.order, otherTier.order] = [otherTier.order, tierToMove.order];
+        }
+        return [...currentTiers];
+    });
   };
 
   const addEndpoint = (tierId: string, endpointLabel: string) => {
@@ -537,46 +544,45 @@ export function LlmConfigScreen() {
     targetStateSetter(currentTiers => currentTiers.map(tier => {
       if (tier.id !== tierId) return tier;
 
-      const endpoints = tier.endpoints;
-      const updatedEndpointIndex = endpoints.findIndex(e => e.id === endpointId);
-      if (updatedEndpointIndex === -1) return tier;
-
-      const oldWeight = endpoints[updatedEndpointIndex].weight;
       newWeight = Math.max(0, Math.min(100, newWeight));
-      const delta = oldWeight - newWeight;
+      const activeEndpoint = tier.endpoints.find(e => e.id === endpointId);
+      if (!activeEndpoint) return tier;
 
-      const updatedEndpoints = endpoints.map(e => e.id === endpointId ? { ...e, weight: newWeight } : e);
-
-      if (endpoints.length > 1) {
-        let otherEndpoints = updatedEndpoints.filter(e => e.id !== endpointId);
-        let totalOtherWeight = otherEndpoints.reduce((sum, e) => sum + e.weight, 0);
-        
-        if (totalOtherWeight > 0) {
-            otherEndpoints.forEach(ep => {
-                let proportionalDelta = delta * (ep.weight / totalOtherWeight);
-                ep.weight += proportionalDelta;
-            });
-        } else if (otherEndpoints.length > 0) {
-            const equalDelta = delta / otherEndpoints.length;
-            otherEndpoints.forEach(ep => {
-                ep.weight += equalDelta;
-            });
-        }
-      }
+      const otherEndpoints = tier.endpoints.filter(e => e.id !== endpointId);
+      const remainder = 100 - newWeight;
       
+      let finalEndpoints: Endpoint[] = [];
+
+      if (otherEndpoints.length > 0) {
+        const totalOtherWeight = otherEndpoints.reduce((sum, e) => sum + e.weight, 0);
+        if (totalOtherWeight > 0) {
+          otherEndpoints.forEach(ep => {
+            ep.weight = (ep.weight / totalOtherWeight) * remainder;
+          });
+        } else {
+          const equalShare = remainder / otherEndpoints.length;
+          otherEndpoints.forEach(ep => {
+            ep.weight = equalShare;
+          });
+        }
+        finalEndpoints = [...otherEndpoints, { ...activeEndpoint, weight: newWeight }];
+      } else {
+        finalEndpoints = [{ ...activeEndpoint, weight: 100 }];
+      }
+
       let roundedTotal = 0;
-      updatedEndpoints.forEach(ep => {
-          ep.weight = Math.round(ep.weight);
-          roundedTotal += ep.weight;
+      finalEndpoints.forEach(ep => {
+        ep.weight = Math.round(ep.weight);
+        roundedTotal += ep.weight;
       });
 
-      let finalError = 100 - roundedTotal;
-      if (finalError !== 0 && updatedEndpoints.length > 0) {
-          const endpointToAdjust = updatedEndpoints.find(e => e.id !== endpointId) || updatedEndpoints[0];
-          endpointToAdjust.weight += finalError;
+      const roundingError = 100 - roundedTotal;
+      if (roundingError !== 0 && finalEndpoints.length > 0) {
+          const endpointToAdjust = finalEndpoints.find(e => e.id === endpointId) || finalEndpoints[0];
+          endpointToAdjust.weight += roundingError;
       }
 
-      return { ...tier, endpoints: updatedEndpoints };
+      return { ...tier, endpoints: finalEndpoints };
     }));
   };
 
