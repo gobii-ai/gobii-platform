@@ -820,6 +820,11 @@ LINKEDIN_PARTNER_ID = env(
     default=_proprietary_default("analytics", "LINKEDIN_PARTNER_ID"),
 )
 
+TIKTOK_PIXEL_ID = env(
+    "TIKTOK_PIXEL_ID",
+    default=_proprietary_default("analytics", "TIKTOK_PIXEL_ID"),
+)
+
 FACEBOOK_PIXEL_ID = env(
     "FACEBOOK_PIXEL_ID",
     default=META_PIXEL_ID,

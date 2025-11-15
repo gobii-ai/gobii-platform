@@ -140,6 +140,11 @@ def analytics(request):
                     if request.user.is_authenticated
                     else request.session.get('signup_email_hash', "")
                 ),
+                "id_hash": (
+                    sha256_hex(str(request.user.id))
+                    if request.user.is_authenticated
+                    else ""
+                )
             }
         }
     }
