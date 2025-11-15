@@ -363,10 +363,10 @@ function RangeSection({
 
 function ProviderCard({ provider }: { provider: any }) {
     const [activeTab, setActiveTab] = useState('endpoints');
-    const [editingEndpoint, setEditingEndpoint] = useState<any | null>(null);
+    const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null);
 
-    const handleEditClick = (endpoint: any) => {
-        setEditingEndpoint(endpoint.id === editingEndpoint?.id ? null : endpoint);
+    const handleEditClick = (endpointId: string) => {
+        setEditingEndpointId(endpointId === editingEndpointId ? null : endpointId);
     }
 
     return (
@@ -408,8 +408,8 @@ function ProviderCard({ provider }: { provider: any }) {
                                 <EndpointEditor 
                                     key={endpoint.id} 
                                     endpoint={endpoint} 
-                                    isEditing={editingEndpoint?.id === endpoint.id}
-                                    onEditClick={() => handleEditClick(endpoint)}
+                                    isEditing={editingEndpointId === endpoint.id}
+                                    onEditClick={() => handleEditClick(endpoint.id)}
                                 />
                             ))}
                         </div>
@@ -445,6 +445,7 @@ function ProviderCard({ provider }: { provider: any }) {
 
 function EndpointEditor({ endpoint, isEditing, onEditClick }: { endpoint: any, isEditing: boolean, onEditClick: () => void }) {
     const [testStatus, setTestStatus] = useState('idle');
+    const [temperature, setTemperature] = useState(endpoint.temperature);
 
     const handleTest = () => {
         setTestStatus('testing');
@@ -469,8 +470,8 @@ function EndpointEditor({ endpoint, isEditing, onEditClick }: { endpoint: any, i
     }
 
     return (
-        <div className="rounded-lg bg-slate-50">
-            <div className="flex items-center justify-between rounded-md bg-white p-2 shadow-sm">
+        <div className="rounded-lg bg-white shadow-sm">
+            <div className="flex items-center justify-between p-2">
                 <span className="text-sm font-mono text-slate-700">{endpoint.name}</span>
                 <div className="flex items-center gap-1">
                     <TestButton />
@@ -479,11 +480,26 @@ function EndpointEditor({ endpoint, isEditing, onEditClick }: { endpoint: any, i
                 </div>
             </div>
             {isEditing && (
-                <div className="p-4 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 space-y-4 border-t border-slate-200/80">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="text-xs text-slate-500">Temperature</label>
-                            <input type="range" min="0" max="2" step="0.1" defaultValue={endpoint.temperature} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
+                            <div className="flex items-center gap-2 mt-1">
+                                <input 
+                                    type="range" 
+                                    min="0" max="2" step="0.1" 
+                                    value={temperature} 
+                                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" 
+                                />
+                                <input 
+                                    type="number" 
+                                    min="0" max="2" step="0.1" 
+                                    value={temperature} 
+                                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                                    className="block w-20 rounded-lg border-slate-300 text-right shadow-sm sm:text-sm"
+                                />
+                            </div>
                         </div>
                         <div>
                             <label className="text-xs text-slate-500">API Base URL</label>
