@@ -110,7 +110,7 @@
   <!-- End Reddit Pixel -->
   {% endif %}
 
-  {% if environment.is_production and settings.TIKTOK_PIXEL_ID %}
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.TIKTOK_PIXEL_ID %}
     <!-- TikTok Pixel Code Start -->
     <script>
     !function (w, d, t) {
@@ -126,8 +126,8 @@
     {% if user.is_authenticated %}
     <script>
       ttq.identify({
-        "email": "{{ analytics.data.email_hash }}", // string. The email of the customer if available. It must be hashed with SHA-256 on the client side.
-        "external_id": "{{ analytics.data.id_hash }}" // string. Any unique identifier, such as loyalty membership IDs, user IDs, and external cookie IDs.It must be hashed with SHA-256 on the client side.
+        "email": "{{ analytics.data.email_hash }}",
+        "external_id": "{{ analytics.data.id_hash }}"
       });
     </script>
     {%  endif %}
