@@ -20,6 +20,7 @@ import {
   BrainCircuit,
   Layers,
   ShieldCheck,
+  Pencil,
 } from 'lucide-react'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
@@ -88,28 +89,39 @@ const initialTiers: Tier[] = [
 
 const placeholderProviders = [
   {
+    id: 'prov1',
     name: 'OpenRouter',
-    endpoints: 3,
     status: 'Healthy',
     fallback: 'OPENROUTER_API_KEY',
     backend: 'OpenAI-compatible',
     usage: 'Primary for long-context + premium workloads.',
+    endpoints: [
+        { id: 'prov1-ep1', name: 'openrouter/z-ai/glm-4.6:exacto' },
+        { id: 'prov1-ep2', name: 'openrouter/google/gemini-pro' },
+    ]
   },
   {
+    id: 'prov2',
     name: 'Anthropic',
-    endpoints: 3,
     status: 'Healthy',
     fallback: 'ANTHROPIC_API_KEY',
     backend: 'Native API',
     usage: 'Used when Claude reasoning is preferred.',
+    endpoints: [
+        { id: 'prov2-ep1', name: 'anthropic/claude-sonnet-4' },
+    ]
   },
   {
+    id: 'prov3',
     name: 'OpenAI',
-    endpoints: 3,
     status: 'Healthy',
     fallback: 'OPENAI_API_KEY',
     backend: 'Native API',
     usage: 'Default for summaries and quick iterations.',
+    endpoints: [
+        { id: 'prov3-ep1', name: 'openai/gpt-5' },
+        { id: 'prov3-ep2', name: 'openai/gpt-4o' },
+    ]
   },
 ]
 
@@ -318,9 +330,75 @@ function RangeSection({
   )
 }
 
+function ProviderCard({ provider }: { provider: any }) {
+    return (
+        <article className="rounded-2xl border border-slate-200/80 bg-white p-4">
+            <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="flex-shrink-0 rounded-full bg-slate-100 p-2">
+                        <BrainCircuit className="size-5 text-slate-600" />
+                    </div>
+                    <div>
+                        <h3 className="text-base font-semibold text-slate-900/90">{provider.name}</h3>
+                        <p className="text-xs text-slate-500">{provider.endpoints.length} endpoints</p>
+                    </div>
+                </div>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/80 px-3 py-1 text-xs font-medium text-emerald-700">
+                  <ShieldCheck className="size-3.5" /> {provider.status}
+                </span>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                {/* Left Column: Endpoints */}
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-semibold text-slate-800">Endpoints</h4>
+                        <button className={button.muted}><Plus className="size-3" /> Add</button>
+                    </div>
+                    <div className="space-y-2 rounded-lg bg-slate-50 p-2">
+                        {provider.endpoints.map((endpoint: any) => (
+                            <div key={endpoint.id} className="flex items-center justify-between rounded-md bg-white p-2">
+                                <span className="text-sm font-mono text-slate-700">{endpoint.name}</span>
+                                <div className="flex items-center gap-1">
+                                    <button className={button.icon}><Pencil className="size-4" /></button>
+                                    <button className={button.iconDanger}><Trash2 className="size-4" /></button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Right Column: Settings */}
+                <div className="space-y-4">
+                    <dl className="space-y-3 text-sm text-slate-600">
+                        <div>
+                            <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><KeyRound className="size-4" /> Env fallback</dt>
+                            <dd className="font-medium text-slate-900/90 pl-6">{provider.fallback}</dd>
+                        </div>
+                        <div>
+                            <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><Server className="size-4" /> Browser backend</dt>
+                            <dd className="font-medium text-slate-900/90 pl-6">{provider.backend}</dd>
+                        </div>
+                    </dl>
+                    <div className="border-t border-slate-200/80" />
+                    <div className="flex flex-wrap gap-2 text-sm">
+                        <button className={button.muted} type="button">
+                          <KeyRound className="size-3.5" /> Rotate key
+                        </button>
+                        <button className={button.danger} type="button">
+                          <ToggleRight className="size-3.5" /> Disable
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </article>
+    )
+}
+
 export function LlmConfigScreen() {
   const [tiers, setTiers] = useState<Tier[]>(initialTiers)
   const [ranges, setRanges] = useState<TokenRange[]>(initialRanges)
+  const [providers, setProviders] = useState(placeholderProviders)
   const [addingEndpointTier, setAddingEndpointTier] = useState<Tier | null>(null)
 
   const addTier = (isPremium: boolean, rangeId: string) => {
@@ -365,17 +443,17 @@ export function LlmConfigScreen() {
       return currentTiers.map(t => {
         if (t.id === tierId) {
           const newEndpoints = [...t.endpoints, { id: `ep-${Date.now()}`, label: endpointLabel, weight: 0 }];
-          const totalWeight = newEndpoints.reduce((sum, ep) => sum + ep.weight, 0);
           const numEndpoints = newEndpoints.length;
-          // Distribute weights evenly
-          const evenWeight = Math.floor(100 / numEndpoints);
-          const remainder = 100 % numEndpoints;
-          const finalEndpoints = newEndpoints.map((ep, index) => ({
-            ...ep,
-            weight: index < remainder ? evenWeight + 1 : evenWeight,
-          }));
-
-          return { ...t, endpoints: finalEndpoints };
+          if (numEndpoints > 0) {
+              const evenWeight = Math.floor(100 / numEndpoints);
+              const remainder = 100 % numEndpoints;
+              const finalEndpoints = newEndpoints.map((ep, index) => ({
+                ...ep,
+                weight: index < remainder ? evenWeight + 1 : evenWeight,
+              }));
+              return { ...t, endpoints: finalEndpoints };
+          }
+          return { ...t, endpoints: newEndpoints };
         }
         return t;
       });
@@ -391,47 +469,31 @@ export function LlmConfigScreen() {
       if (updatedEndpointIndex === -1) return tier;
 
       const oldWeight = endpoints[updatedEndpointIndex].weight;
-      const delta = newWeight - oldWeight;
-
-      // Clamp the new weight
       newWeight = Math.max(0, Math.min(100, newWeight));
+      const delta = oldWeight - newWeight;
 
-      const updatedEndpoints = [...endpoints];
-      updatedEndpoints[updatedEndpointIndex] = { ...updatedEndpoints[updatedEndpointIndex], weight: newWeight };
+      const updatedEndpoints = endpoints.map(e => e.id === endpointId ? { ...e, weight: newWeight } : e);
 
       if (endpoints.length > 1) {
-        let remainingDelta = oldWeight - newWeight;
-        const otherEndpoints = updatedEndpoints.filter(e => e.id !== endpointId);
+        let otherEndpoints = updatedEndpoints.filter(e => e.id !== endpointId);
         let totalOtherWeight = otherEndpoints.reduce((sum, e) => sum + e.weight, 0);
-
+        
         if (totalOtherWeight > 0) {
-            for (let i = 0; i < otherEndpoints.length; i++) {
-                const endpoint = otherEndpoints[i];
-                const proportionalDelta = remainingDelta * (endpoint.weight / totalOtherWeight);
-                const targetEndpoint = updatedEndpoints.find(e => e.id === endpoint.id)!;
-                targetEndpoint.weight += proportionalDelta;
-            }
+            let distributedDelta = 0;
+            otherEndpoints.forEach(ep => {
+                let proportionalDelta = delta * (ep.weight / totalOtherWeight);
+                ep.weight += proportionalDelta;
+                distributedDelta += proportionalDelta;
+            });
         } else if (otherEndpoints.length > 0) {
-            // Distribute equally if other weights are zero
-            const equalDelta = remainingDelta / otherEndpoints.length;
-            otherEndpoints.forEach(endpoint => {
-                const targetEndpoint = updatedEndpoints.find(e => e.id === endpoint.id)!;
-                targetEndpoint.weight += equalDelta;
+            const equalDelta = delta / otherEndpoints.length;
+            otherEndpoints.forEach(ep => {
+                ep.weight += equalDelta;
             });
         }
       }
       
       // Final pass to ensure total is 100 and round weights
-      let currentTotal = updatedEndpoints.reduce((sum, e) => sum + e.weight, 0);
-      const error = 100 - currentTotal;
-
-      // Distribute rounding error
-      if (error !== 0 && updatedEndpoints.length > 0) {
-          const endpointToAdjust = updatedEndpoints.find(e => e.id !== endpointId) || updatedEndpoints[0];
-          endpointToAdjust.weight += error;
-      }
-
-      // Round all weights and correct final sum
       let roundedTotal = 0;
       updatedEndpoints.forEach(ep => {
           ep.weight = Math.round(ep.weight);
@@ -444,7 +506,6 @@ export function LlmConfigScreen() {
           endpointToAdjust.weight += finalError;
       }
 
-
       return { ...tier, endpoints: updatedEndpoints };
     }));
   };
@@ -453,7 +514,6 @@ export function LlmConfigScreen() {
     setTiers(currentTiers => currentTiers.map(t => {
       if (t.id === tierId) {
         const newEndpoints = t.endpoints.filter(e => e.id !== endpointId);
-        // After removing, redistribute weights to sum to 100
         const totalWeight = newEndpoints.reduce((sum, ep) => sum + ep.weight, 0);
         if (totalWeight > 0 && newEndpoints.length > 0) {
             const scale = 100 / totalWeight;
@@ -463,13 +523,9 @@ export function LlmConfigScreen() {
                 ep.weight = newW;
                 redistributedTotal += newW;
             });
-            // Correct rounding errors
             const error = 100 - redistributedTotal;
-            if (error !== 0) {
-                newEndpoints[0].weight += error;
-            }
+            if (error !== 0) newEndpoints[0].weight += error;
         } else if (newEndpoints.length > 0) {
-            // If all weights were 0, distribute evenly
             const evenWeight = Math.floor(100 / newEndpoints.length);
             const remainder = 100 % newEndpoints.length;
             newEndpoints.forEach((ep, index) => {
@@ -500,7 +556,6 @@ export function LlmConfigScreen() {
   }
 
   const handleRemoveRange = (id: string) => {
-    // Also remove tiers associated with this range
     setTiers(tiers.filter(t => t.rangeId !== id))
     setRanges(ranges.filter(r => r.id !== id))
   }
@@ -535,55 +590,12 @@ export function LlmConfigScreen() {
           </button>
         }
       >
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {placeholderProviders.map((provider) => (
-            <article
-              key={provider.name}
-              className="space-y-4 rounded-2xl border border-slate-100/80 bg-white px-5 py-5"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="flex-shrink-0 rounded-full bg-slate-100 p-2">
-                        <BrainCircuit className="size-5 text-slate-600" />
-                    </div>
-                    <div>
-                        <h3 className="text-base font-semibold text-slate-900/90">{provider.name}</h3>
-                        <p className="text-xs text-slate-500">{provider.endpoints} endpoints</p>
-                    </div>
-                </div>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/80 px-3 py-1 text-xs font-medium text-emerald-700">
-                  <ShieldCheck className="size-3.5" /> {provider.status}
-                </span>
-              </div>
-              <dl className="mt-4 space-y-3 text-sm text-slate-600">
-                <div className="flex items-start gap-2">
-                    <KeyRound className="size-4 text-slate-400 mt-0.5" />
-                    <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-400">Env fallback</p>
-                        <p className="font-medium text-slate-900/90">{provider.fallback}</p>
-                    </div>
-                </div>
-                <div className="flex items-start gap-2">
-                    <Server className="size-4 text-slate-400 mt-0.5" />
-                    <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-400">Browser backend</p>
-                        <p className="font-medium text-slate-900/90">{provider.backend}</p>
-                    </div>
-                </div>
-              </dl>
-              <p className="mt-3 text-xs text-slate-500">{provider.usage}</p>
-              <div className="mt-4 flex flex-wrap gap-2 text-sm">
-                <button className={button.muted} type="button">
-                  <Settings className="size-3.5" /> Manage endpoints
-                </button>
-                <button className={button.muted} type="button">
-                  <KeyRound className="size-3.5" /> Rotate key
-                </button>
-                <button className={button.danger} type="button">
-                  <ToggleRight className="size-3.5" /> Disable
-                </button>
-              </div>
-            </article>
+        <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
+          {providers.map((provider) => (
+            <ProviderCard
+              key={provider.id}
+              provider={provider}
+            />
           ))}
         </div>
       </SectionCard>
