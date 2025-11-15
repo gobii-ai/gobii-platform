@@ -13,7 +13,7 @@ type PlaceholderTier = {
 
 const placeholderTiers: PlaceholderTier[] = [
   {
-    id: 'small-standard',
+    id: 'small-tier-1',
     name: 'Tier 1',
     range: 'Small',
     order: 1,
@@ -23,7 +23,7 @@ const placeholderTiers: PlaceholderTier[] = [
     ],
   },
   {
-    id: 'small-standard-2',
+    id: 'small-tier-2',
     name: 'Tier 2',
     range: 'Small',
     order: 2,
@@ -32,8 +32,8 @@ const placeholderTiers: PlaceholderTier[] = [
     ],
   },
   {
-    id: 'medium-premium',
-    name: 'Premium Tier',
+    id: 'medium-premium-1',
+    name: 'Premium Tier 1',
     range: 'Medium',
     order: 1,
     premium: true,
@@ -176,21 +176,53 @@ export function LlmConfigScreen() {
 
       <SectionCard
         title="Token-based failover tiers"
-        description="Map token ranges to weighted failover tiers."
+        description="Manage token ranges, tier ordering, and weighted endpoints."
+        actions={
+          <div className="flex gap-2">
+            <button type="button" className={button.secondary}>
+              Manage ranges
+            </button>
+            <button type="button" className={button.primary}>
+              Add tier
+            </button>
+          </div>
+        }
       >
         <div className="grid gap-6 lg:grid-cols-2">
-          <article className="space-y-3 rounded-2xl border border-slate-100/80 bg-white">
-            <h3 className="text-sm font-semibold text-slate-900/90">Standard failover tiers</h3>
-            <p className="text-xs text-slate-500">Used for most traffic once premium routing is exhausted.</p>
+          <article className="space-y-4 rounded-2xl border border-slate-100/80 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900/90">Standard failover tiers</h3>
+                <p className="text-xs text-slate-500">Used for most traffic once premium routing is exhausted.</p>
+              </div>
+              <div className="flex gap-2 text-xs text-slate-500">
+                <button type="button" className={button.secondary}>
+                  Add tier
+                </button>
+              </div>
+            </div>
             <div className="mt-4 space-y-3 text-sm text-slate-600">
               {standardTiers.map((tier) => (
-                <div key={tier.id} className="rounded-xl border border-slate-100/80 bg-white px-4 py-3">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">{tier.range} range • {tier.name}</div>
-                  <div className="flex items-center justify-between text-[13px] text-slate-500">
-                    <span>Tier order {tier.order}</span>
-                    <span>Weighted endpoints</span>
+                <div key={tier.id} className="rounded-xl border border-slate-100/80 bg-white px-4 py-4">
+                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-500">
+                    <span>{tier.range} range • {tier.name}</span>
+                    <div className="flex items-center gap-2 text-xs">
+                      <button className="text-blue-600 hover:underline" type="button">
+                        Move up
+                      </button>
+                      <button className="text-blue-600 hover:underline" type="button">
+                        Move down
+                      </button>
+                      <button className="text-rose-600 hover:underline" type="button">
+                        Remove
+                      </button>
+                    </div>
                   </div>
-                  <ul className="mt-2 space-y-1">
+                  <div className="mt-2 flex items-center justify-between text-[13px] text-slate-500">
+                    <span>Weighted endpoints</span>
+                    <span>Tier order {tier.order}</span>
+                  </div>
+                  <ul className="mt-1 space-y-1">
                     {tier.endpoints.map((endpoint) => (
                       <li key={`${tier.id}-${endpoint.label}`} className="flex items-center justify-between text-sm font-medium text-slate-900/90">
                         <span>{endpoint.label}</span>
@@ -198,22 +230,52 @@ export function LlmConfigScreen() {
                       </li>
                     ))}
                   </ul>
+                  <div className="mt-2 flex gap-2 text-xs">
+                    <button type="button" className={button.secondary}>
+                      Add endpoint
+                    </button>
+                    <button type="button" className={button.secondary}>
+                      Edit weights
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </article>
-          <article className="space-y-3 rounded-2xl border border-slate-100/80 bg-white">
-            <h3 className="text-sm font-semibold text-slate-900/90">Premium failover tiers</h3>
-            <p className="text-xs text-slate-500">Prepended for new agents or upgraded plans before standard tiers.</p>
+          <article className="space-y-4 rounded-2xl border border-slate-100/80 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900/90">Premium failover tiers</h3>
+                <p className="text-xs text-slate-500">Prepended for new agents or upgraded plans before standard tiers.</p>
+              </div>
+              <div className="flex gap-2 text-xs text-slate-500">
+                <button type="button" className={button.secondary}>
+                  Add premium tier
+                </button>
+              </div>
+            </div>
             <div className="mt-4 space-y-3 text-sm text-slate-600">
               {premiumTiers.map((tier) => (
-                <div key={tier.id} className="rounded-xl border border-emerald-200 bg-white px-4 py-3">
-                  <div className="text-xs uppercase tracking-wide text-emerald-700">{tier.range} range • {tier.name}</div>
-                  <div className="flex items-center justify-between text-[13px] text-emerald-700/80">
-                    <span>Tier order {tier.order}</span>
-                    <span>Weighted endpoints</span>
+                <div key={tier.id} className="rounded-xl border border-emerald-200 bg-white px-4 py-4">
+                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-emerald-700">
+                    <span>{tier.range} range • {tier.name}</span>
+                    <div className="flex items-center gap-2 text-xs">
+                      <button className="text-blue-600 hover:underline" type="button">
+                        Move up
+                      </button>
+                      <button className="text-blue-600 hover:underline" type="button">
+                        Move down
+                      </button>
+                      <button className="text-rose-600 hover:underline" type="button">
+                        Remove
+                      </button>
+                    </div>
                   </div>
-                  <ul className="mt-2 space-y-1">
+                  <div className="mt-2 flex items-center justify-between text-[13px] text-slate-500">
+                    <span>Weighted endpoints</span>
+                    <span>Tier order {tier.order}</span>
+                  </div>
+                  <ul className="mt-1 space-y-1">
                     {tier.endpoints.map((endpoint) => (
                       <li key={`${tier.id}-${endpoint.label}`} className="flex items-center justify-between text-sm font-medium text-slate-900/90">
                         <span>{endpoint.label}</span>
@@ -221,6 +283,14 @@ export function LlmConfigScreen() {
                       </li>
                     ))}
                   </ul>
+                  <div className="mt-2 flex gap-2 text-xs">
+                    <button type="button" className={button.secondary}>
+                      Add endpoint
+                    </button>
+                    <button type="button" className={button.secondary}>
+                      Edit weights
+                    </button>
+                  </div>
                 </div>
               ))}
               {premiumTiers.length === 0 ? <p className="text-xs text-slate-500">No premium tier configured.</p> : null}
