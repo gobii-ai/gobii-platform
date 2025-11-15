@@ -35,9 +35,9 @@
       ttq.track('Subscribe', {
         "contents": [
           {
-            "content_id": "{{ subscribe_plan|escapejs }}", // string. ID of the product. Example: "1077218".
-            "content_type": "{{ subscribe_plan|escapejs }}", // string. Either product or product_group.
-            "content_name": "{{ subscribe_plan|escapejs }}" // string. The name of the page or product. Example: "shirt".
+            "content_id": "{{ subscribe_plan|escapejs }}",
+            "content_type": "product",
+            "content_name": "{{ subscribe_plan|escapejs }}"
           }
         ],
         "value": "{{ sub_price }}", // number. Value of the order or items sold. Example: 100.
