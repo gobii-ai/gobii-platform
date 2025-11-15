@@ -216,7 +216,9 @@ function TierCard({ tier, onMove, onRemove, onAddEndpoint, onUpdateEndpointWeigh
           <span>Tier order {tier.order}</span>
         </div>
         <div className="space-y-3">
-          {tier.endpoints.map((endpoint) => (
+          {tier.endpoints
+            .sort((a, b) => a.label.localeCompare(b.label))
+            .map((endpoint) => (
             <div key={endpoint.id} className="grid grid-cols-12 items-center gap-3 text-sm font-medium text-slate-900/90">
               <span className="col-span-6 flex items-center gap-2 truncate"><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
               <div className="col-span-6 flex items-center gap-2">
@@ -543,7 +545,7 @@ export function LlmConfigScreen() {
 
       let finalError = 100 - roundedTotal;
       if (finalError !== 0 && updatedEndpoints.length > 0) {
-          const endpointToAdjust = updatedEndpoints.sort((a,b) => b.weight - a.weight)[0];
+          const endpointToAdjust = updatedEndpoints.find(e => e.id !== endpointId) || updatedEndpoints[0];
           endpointToAdjust.weight += finalError;
       }
 
