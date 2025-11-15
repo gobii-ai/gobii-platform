@@ -820,6 +820,11 @@ LINKEDIN_PARTNER_ID = env(
     default=_proprietary_default("analytics", "LINKEDIN_PARTNER_ID"),
 )
 
+TIKTOK_PIXEL_ID = env(
+    "TIKTOK_PIXEL_ID",
+    default=_proprietary_default("analytics", "TIKTOK_PIXEL_ID"),
+)
+
 FACEBOOK_PIXEL_ID = env(
     "FACEBOOK_PIXEL_ID",
     default=META_PIXEL_ID,
@@ -1004,6 +1009,3 @@ ENABLE_DEFAULT_AGENT_EMAIL = env.bool(
 # FBP Cookie
 FBP_COOKIE_NAME = "_fbp"
 FBP_MAX_AGE = 90 * 24 * 60 * 60  # 90 days
-
-
-TIKTOK_PIXEL_ID = env.str("TIKTOK_PIXEL_ID", default="")
