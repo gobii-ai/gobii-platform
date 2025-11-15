@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import heapq
-import json
 import math
-from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -61,17 +59,14 @@ class _Node:
     use_jinja2: bool = False
     children: List["_Node"] = field(default_factory=list)
     text: str = ""
-    rendered_content: Any = ""
     tokens: int = 0
     shrunk: bool = False
     non_shrinkable: bool = False
-    value_is_json: bool = False
-    render_as_list: bool = False
     _prompt: Optional["Prompt"] = None  # Reference to parent prompt for accessing shrinkers
     
-    def group(self, name: str, *, weight: int = 1, as_list: bool = False) -> "_Node":
+    def group(self, name: str, *, weight: int = 1) -> "_Node":
         """Create a sub-group within this node."""
-        child = _Node(name, weight, _prompt=self._prompt, render_as_list=as_list)
+        child = _Node(name, weight, _prompt=self._prompt)
         self.children.append(child)
         return child
     
@@ -110,7 +105,7 @@ class _Node:
 class Prompt:
     """
     Tree‑structured prompt builder that globally allocates the token budget.
-    Client usage remains unchanged, but `render()` now returns minified JSON.
+    Client usage remains unchanged.
     """
 
     # ------------------------------------------------------------------ #
@@ -134,8 +129,8 @@ class Prompt:
         self._tokens_after_fitting: int = 0
 
     # builder shortcuts ---------------------------------------------------
-    def group(self, name: str, *, weight: int = 1, as_list: bool = False) -> _Node:
-        child = _Node(name, weight, _prompt=self, render_as_list=as_list)
+    def group(self, name: str, *, weight: int = 1) -> _Node:
+        child = _Node(name, weight, _prompt=self)
         self.root.children.append(child)
         return child
 
@@ -182,8 +177,7 @@ class Prompt:
 
         # Pre‑compute overhead (wrapper tag) & total tokens
         for n in leaves:
-            snippet_tokens = self._tok(self._json_snippet(n))
-            overhead = max(0, snippet_tokens - n.tokens)
+            overhead = self._tok(f"<{n.name}></{n.name}>")
             n._overhead_tokens = overhead  # type: ignore[attr-defined]
             n._length = n.tokens + overhead  # type: ignore[attr-defined]
 
@@ -197,6 +191,9 @@ class Prompt:
             overhead = n._overhead_tokens  # type: ignore[attr-defined]
 
             if n.tokens + overhead <= budget:
+                # Fits unshrunk: just wrap
+                n.text = f"<{n.name}>{n.text}</{n.name}>"
+                n.tokens = self._tok(n.text)
                 n.shrunk = False
             else:
                 shrinker_fn: Optional[Callable[[str, float], str]] = None
@@ -207,40 +204,20 @@ class Prompt:
                         else self.shrinkers.get(n.shrinker)
                     )
                 self._shrink(n, shrinker_fn, budget)
-            final_snippet = self._json_snippet(n)
-            n.tokens = self._tok(final_snippet)
 
         self._tokens_after_fitting = sum(n.tokens for n in leaves)
         self._last = leaves
 
         # Assemble nested output with group tags
-        def _merge(container: OrderedDict, key: str, value: Any) -> None:
-            if key in container:
-                existing = container[key]
-                if isinstance(existing, list):
-                    existing.append(value)
-                else:
-                    container[key] = [existing, value]
-            else:
-                container[key] = value
-
-        def _assemble(node: _Node):
+        def _assemble(node: _Node) -> str:
             if node.children:
-                if node.render_as_list:
-                    return [_assemble(child) for child in node.children]
-                obj = OrderedDict()
-                for child in node.children:
-                    child_payload = _assemble(child)
-                    _merge(obj, child.name, child_payload)
-                return obj
-            return node.rendered_content
+                inner = "\n".join(_assemble(c) for c in node.children)
+                if node.name == "root":
+                    return inner  # Skip wrapping the synthetic root
+                return f"<{node.name}>" + inner + f"</{node.name}>"
+            return node.text
 
-        assembled = _assemble(self.root)
-        if isinstance(assembled, OrderedDict):
-            output = json.dumps(assembled, separators=(",", ":"), ensure_ascii=False)
-        else:
-            output = json.dumps({"root": assembled}, separators=(",", ":"), ensure_ascii=False)
-
+        output = _assemble(self.root)
         self._tokens_after_fitting = self._tok(output)
         return output
 
@@ -270,31 +247,17 @@ class Prompt:
             n.tokens = sum(c.tokens for c in n.children)
             return
 
-        raw_value = n.renderer(ctx) if callable(n.renderer) else n.renderer
+        raw = n.renderer(ctx) if callable(n.renderer) else str(n.renderer)
         if n.use_jinja2:
             try:
                 import jinja2
 
-                raw_value = jinja2.Template(str(raw_value)).render(**ctx)
+                raw = jinja2.Template(raw).render(**ctx)
             except ImportError:
                 pass
 
-        if isinstance(raw_value, str):
-            serialized = raw_value
-            n.rendered_content = raw_value
-            n.value_is_json = False
-        else:
-            try:
-                serialized = json.dumps(raw_value, ensure_ascii=False, separators=(",", ":"))
-                n.rendered_content = json.loads(serialized)
-                n.value_is_json = True
-            except (TypeError, ValueError, json.JSONDecodeError):
-                serialized = str(raw_value)
-                n.rendered_content = serialized
-                n.value_is_json = False
-
-        n.text = serialized
-        n.tokens = self._tok(serialized)
+        n.text = raw
+        n.tokens = self._tok(raw)
 
     def _flat(self, n: _Node) -> List[_Node]:
         return (
@@ -302,21 +265,6 @@ class Prompt:
             if not n.children
             else [leaf for c in n.children for leaf in self._flat(c)]
         )
-
-    def _json_snippet(
-        self,
-        n: _Node,
-        value_text: Optional[str] = None,
-        *,
-        value_is_json: Optional[bool] = None,
-    ) -> str:
-        payload = n.text if value_text is None else value_text
-        payload_is_json = n.value_is_json if value_is_json is None else value_is_json
-        if payload_is_json:
-            value_repr = payload
-        else:
-            value_repr = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        return f'{{"{n.name}":{value_repr}}}'
 
     # ── global allocation (water‑filling) ───────────────────────────────
     def _allocate(self, leaves: List[_Node], budget: int) -> List[int]:
@@ -398,20 +346,16 @@ class Prompt:
             r = min(1.0, budget / max(1, n.tokens))
             for _ in range(12):  # iterative refinement
                 shrunk_text = fn(base, r)
-                snippet = self._json_snippet(n, value_text=shrunk_text, value_is_json=False)
-                current = self._tok(snippet)
+                wrapped = f"<{n.name}>{shrunk_text}</{n.name}>"
+                current = self._tok(wrapped)
                 if current <= budget:
-                    n.text = shrunk_text
-                    n.rendered_content = shrunk_text
-                    n.value_is_json = False
-                    n.tokens = self._tok(shrunk_text)
+                    n.text = wrapped
+                    n.tokens = current
                     break
                 r *= 0.80
             else:
-                n.text = shrunk_text
-                n.rendered_content = shrunk_text
-                n.value_is_json = False
-                n.tokens = self._tok(shrunk_text)
+                n.text = wrapped
+                n.tokens = self._tok(wrapped)
         else:
             self._hard_truncate(n, budget)
 
@@ -419,31 +363,32 @@ class Prompt:
 
     def _hard_truncate(self, n: _Node, budget: int):
         """Byte‑level tail‑preserving hard truncate."""
-        marker_tpl = "[{d} BYTES TRUNCATED]"
-        marker_tokens = self._tok(marker_tpl.format(d=0))
+        tag_open = f"<{n.name}>"
+        tag_close = f"</{n.name}>"
+        tag_overhead = self._tok(tag_open + tag_close)
 
-        available = max(0, budget - marker_tokens)
+        marker_tpl = "[{d} BYTES TRUNCATED]"
+        dummy_marker = marker_tpl.format(d=0)
+        marker_tokens = self._tok(dummy_marker)
+
+        content_budget = max(0, budget - tag_overhead - marker_tokens)
+
         raw_bytes = n.text.encode()
-        if len(raw_bytes) <= available:
+        if len(raw_bytes) <= content_budget:
             kept_bytes = raw_bytes
         else:
-            kept_bytes = raw_bytes[-max(1, available) :]
+            kept_bytes = raw_bytes[-content_budget:]
 
         kept_text = kept_bytes.decode("utf-8", "ignore")
         dropped = max(0, len(raw_bytes) - len(kept_bytes))
         marker = marker_tpl.format(d=dropped)
 
-        content = f"{marker} {kept_text}".strip()
-        n.text = content
-        n.rendered_content = content
-        n.value_is_json = False
-        n.tokens = self._tok(content)
+        final = f"{tag_open}{marker} {kept_text}{tag_close}"
+        n.text = final
+        n.tokens = self._tok(final)
 
         # Last‑ditch clamp if estimator is off
-        snippet = self._json_snippet(n, value_text=content, value_is_json=False)
-        if self._tok(snippet) > budget:
-            words = content.split()
-            trimmed_content = " ".join(words[: max(1, min(len(words), budget))])
-            n.text = trimmed_content
-            n.rendered_content = trimmed_content
-            n.tokens = self._tok(trimmed_content)
+        if n.tokens > budget:
+            words = final.split()
+            n.text = " ".join(words[:budget])
+            n.tokens = self._tok(n.text)
