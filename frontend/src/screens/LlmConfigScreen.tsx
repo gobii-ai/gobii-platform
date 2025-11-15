@@ -90,6 +90,29 @@ const initialTiers: Tier[] = [
   },
 ]
 
+const initialBrowserTiers: Tier[] = [
+    {
+        id: 'browser-std-1',
+        name: 'Tier 1',
+        rangeId: 'browser',
+        order: 1,
+        premium: false,
+        endpoints: [
+            { id: 'bep1', label: 'openrouter/z-ai/glm-4.5', weight: 100 },
+        ],
+    },
+    {
+        id: 'browser-std-2',
+        name: 'Tier 2',
+        rangeId: 'browser',
+        order: 2,
+        premium: false,
+        endpoints: [
+            { id: 'bep2', label: 'openai/gpt-4o', weight: 100 },
+        ],
+    }
+]
+
 const placeholderProviders = [
   {
     id: 'prov1',
@@ -440,6 +463,7 @@ function ProviderCard({ provider }: { provider: any }) {
 
 export function LlmConfigScreen() {
   const [tiers, setTiers] = useState<Tier[]>(initialTiers)
+  const [browserTiers, setBrowserTiers] = useState<Tier[]>(initialBrowserTiers)
   const [ranges, setRanges] = useState<TokenRange[]>(initialRanges)
   const [providers, setProviders] = useState(placeholderProviders)
   const [addingEndpointTier, setAddingEndpointTier] = useState<Tier | null>(null)
@@ -482,7 +506,10 @@ export function LlmConfigScreen() {
 
   const addEndpoint = (tierId: string, endpointLabel: string) => {
     if (!endpointLabel) return;
-    setTiers(currentTiers => {
+    const tierExistsInOrchestrator = tiers.some(t => t.id === tierId);
+    const targetStateSetter = tierExistsInOrchestrator ? setTiers : setBrowserTiers;
+
+    targetStateSetter(currentTiers => {
       return currentTiers.map(t => {
         if (t.id === tierId) {
           const newEndpoints = [...t.endpoints, { id: `ep-${Date.now()}`, label: endpointLabel, weight: 0 }];
@@ -504,7 +531,10 @@ export function LlmConfigScreen() {
   }
 
   const updateEndpointWeight = (tierId: string, endpointId: string, newWeight: number) => {
-    setTiers(currentTiers => currentTiers.map(tier => {
+    const tierExistsInOrchestrator = tiers.some(t => t.id === tierId);
+    const targetStateSetter = tierExistsInOrchestrator ? setTiers : setBrowserTiers;
+
+    targetStateSetter(currentTiers => currentTiers.map(tier => {
       if (tier.id !== tierId) return tier;
 
       const endpoints = tier.endpoints;
@@ -522,11 +552,9 @@ export function LlmConfigScreen() {
         let totalOtherWeight = otherEndpoints.reduce((sum, e) => sum + e.weight, 0);
         
         if (totalOtherWeight > 0) {
-            let distributedDelta = 0;
             otherEndpoints.forEach(ep => {
                 let proportionalDelta = delta * (ep.weight / totalOtherWeight);
                 ep.weight += proportionalDelta;
-                distributedDelta += proportionalDelta;
             });
         } else if (otherEndpoints.length > 0) {
             const equalDelta = delta / otherEndpoints.length;
@@ -536,7 +564,6 @@ export function LlmConfigScreen() {
         }
       }
       
-      // Final pass to ensure total is 100 and round weights
       let roundedTotal = 0;
       updatedEndpoints.forEach(ep => {
           ep.weight = Math.round(ep.weight);
@@ -554,7 +581,10 @@ export function LlmConfigScreen() {
   };
 
   const removeEndpoint = (tierId: string, endpointId: string) => {
-    setTiers(currentTiers => currentTiers.map(t => {
+    const tierExistsInOrchestrator = tiers.some(t => t.id === tierId);
+    const targetStateSetter = tierExistsInOrchestrator ? setTiers : setBrowserTiers;
+
+    targetStateSetter(currentTiers => currentTiers.map(t => {
       if (t.id === tierId) {
         const newEndpoints = t.endpoints.filter(e => e.id !== endpointId);
         const totalWeight = newEndpoints.reduce((sum, ep) => sum + ep.weight, 0);
@@ -567,7 +597,7 @@ export function LlmConfigScreen() {
                 redistributedTotal += newW;
             });
             const error = 100 - redistributedTotal;
-            if (error !== 0) newEndpoints[0].weight += error;
+            if (error !== 0 && newEndpoints.length > 0) newEndpoints[0].weight += error;
         } else if (newEndpoints.length > 0) {
             const evenWeight = Math.floor(100 / newEndpoints.length);
             const remainder = 100 % newEndpoints.length;
@@ -675,41 +705,48 @@ export function LlmConfigScreen() {
       <SectionCard
         title="Browser-use models"
         description="The browser agent can share the orchestrator model or run a dedicated stack."
-        actions={
-          <button
-            type="button"
-            className={button.secondary}
-          >
-            <Settings className="size-4" /> Configure browser routing
-          </button>
-        }
       >
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-slate-100/80 bg-white px-5 py-4 text-sm text-slate-600">
-            Dedicated browser endpoint
-            {' '}
-            <span className="font-medium text-slate-900/90">z-ai/glm-4.5 (OpenRouter)</span>
-            {' '}
-            stored in
-            {' '}
-            <code className="rounded bg-slate-100 px-1 py-0.5 text-xs text-slate-600">BrowserModelEndpoint</code>.
-          </div>
-          <div className="rounded-2xl border border-slate-100/80 bg-white px-5 py-4 text-sm text-slate-600">
-            Policy fallback
-            {' '}
-            <p className="text-xs text-slate-500">Reuses the orchestrator failover tiers when disabled or unhealthy.</p>
-          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
+                <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-slate-700">Standard Tiers</h4>
+                    <button type="button" className={button.secondary} onClick={() => addTier(false, 'browser')}>
+                        <Plus className="size-4" /> Add
+                    </button>
+                </div>
+                {browserTiers.filter(t => !t.premium).map((tier, index) => (
+                    <TierCard
+                        key={tier.id}
+                        tier={tier}
+                        onMove={(direction) => moveTier(tier.id, direction)}
+                        onRemove={() => removeTier(tier.id)}
+                        onAddEndpoint={() => setAddingEndpointTier(tier)}
+                        onUpdateEndpointWeight={(endpointId: string, weight: number) => updateEndpointWeight(tier.id, endpointId, weight)}
+                        onRemoveEndpoint={(endpointId: string) => removeEndpoint(tier.id, endpointId)}
+                    />
+                ))}
+            </div>
+            <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
+                <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-emerald-800">Premium Tiers</h4>
+                    <button type="button" className={button.secondary} onClick={() => addTier(true, 'browser')}>
+                        <Plus className="size-4" /> Add
+                    </button>
+                </div>
+                 {browserTiers.filter(t => t.premium).length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers for this range.</p>}
+                 {browserTiers.filter(t => t.premium).map((tier, index) => (
+                    <TierCard
+                        key={tier.id}
+                        tier={tier}
+                        onMove={(direction) => moveTier(tier.id, direction)}
+                        onRemove={() => removeTier(tier.id)}
+                        onAddEndpoint={() => setAddingEndpointTier(tier)}
+                        onUpdateEndpointWeight={(endpointId: string, weight: number) => updateEndpointWeight(tier.id, endpointId, weight)}
+                        onRemoveEndpoint={(endpointId: string) => removeEndpoint(tier.id, endpointId)}
+                    />
+                ))}
+            </div>
         </div>
-        <ul className="grid gap-3 text-sm text-slate-600 md:grid-cols-2">
-          <li className="rounded-2xl border border-slate-100/80 bg-white px-4 py-3">
-            <p className="font-semibold text-slate-900/90">Primary tasks</p>
-            <p className="text-xs text-slate-500">Form filling, long-running browsing, screenshot capture.</p>
-          </li>
-          <li className="rounded-2xl border border-slate-100/80 bg-white px-4 py-3">
-            <p className="font-semibold text-slate-900/90">Monitoring hints</p>
-            <p className="text-xs text-slate-500">Latency spikes or 4xx errors push traffic back to the orchestrator tiers.</p>
-          </li>
-        </ul>
       </SectionCard>
 
       <SectionCard
