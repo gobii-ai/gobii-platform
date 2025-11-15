@@ -21,6 +21,9 @@ import {
   Layers,
   ShieldCheck,
   Pencil,
+  Beaker,
+  LoaderCircle,
+  Check,
 } from 'lucide-react'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
@@ -267,7 +270,7 @@ function RangeSection({
 
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white">
-        <div className="p-4 border-b border-slate-200/80 space-y-3">
+        <div className="p-4 space-y-3">
             <div className="grid grid-cols-12 items-center gap-3 text-sm">
                 <div className="col-span-12 sm:col-span-3 relative">
                     <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Range Name</label>
@@ -286,8 +289,8 @@ function RangeSection({
                 </div>
             </div>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-slate-200/80">
-            <div className="bg-slate-50/80 p-4 space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
+            <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
                 <div className="flex items-center justify-between">
                     <h4 className="text-sm font-semibold text-slate-700">Standard Tiers</h4>
                     <button type="button" className={button.secondary} onClick={() => onAddTier(false, range.id)}>
@@ -306,7 +309,7 @@ function RangeSection({
                     />
                 )) : <p className="text-center text-xs text-slate-400 py-4">No standard tiers for this range.</p>}
             </div>
-            <div className="bg-emerald-50/50 p-4 space-y-3">
+            <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
                 <div className="flex items-center justify-between">
                     <h4 className="text-sm font-semibold text-emerald-800">Premium Tiers</h4>
                     <button type="button" className={button.secondary} onClick={() => onAddTier(true, range.id)}>
@@ -331,9 +334,35 @@ function RangeSection({
 }
 
 function ProviderCard({ provider }: { provider: any }) {
+    const [activeTab, setActiveTab] = useState('endpoints');
+    const [testStatus, setTestStatus] = useState<{[key: string]: 'idle' | 'testing' | 'success' | 'failed'}>({});
+
+    const handleTest = (endpointId: string) => {
+        setTestStatus(prev => ({ ...prev, [endpointId]: 'testing' }));
+        setTimeout(() => {
+            const success = Math.random() > 0.3; // Simulate success/failure
+            setTestStatus(prev => ({ ...prev, [endpointId]: success ? 'success' : 'failed' }));
+            setTimeout(() => setTestStatus(prev => ({ ...prev, [endpointId]: 'idle' })), 2000);
+        }, 1500);
+    }
+
+    const TestButton = ({ endpointId }: { endpointId: string }) => {
+        const status = testStatus[endpointId] || 'idle';
+        if (status === 'testing') {
+            return <button className={button.muted} disabled><LoaderCircle className="size-4 animate-spin" /> Testing...</button>
+        }
+        if (status === 'success') {
+            return <button className={`${button.muted} bg-emerald-50 text-emerald-700`} disabled><Check className="size-4" /> Success</button>
+        }
+        if (status === 'failed') {
+            return <button className={`${button.muted} bg-rose-50 text-rose-700`} disabled><X className="size-4" /> Failed</button>
+        }
+        return <button className={button.muted} onClick={() => handleTest(endpointId)}><Beaker className="size-4" /> Test</button>
+    }
+
     return (
-        <article className="rounded-2xl border border-slate-200/80 bg-white p-4">
-            <div className="flex items-start justify-between">
+        <article className="rounded-2xl border border-slate-200/80 bg-white">
+            <div className="flex items-start justify-between p-4">
                 <div className="flex items-center gap-3">
                     <div className="flex-shrink-0 rounded-full bg-slate-100 p-2">
                         <BrainCircuit className="size-5 text-slate-600" />
@@ -348,48 +377,60 @@ function ProviderCard({ provider }: { provider: any }) {
                 </span>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                {/* Left Column: Endpoints */}
-                <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                        <h4 className="text-sm font-semibold text-slate-800">Endpoints</h4>
-                        <button className={button.muted}><Plus className="size-3" /> Add</button>
-                    </div>
-                    <div className="space-y-2 rounded-lg bg-slate-50 p-2">
-                        {provider.endpoints.map((endpoint: any) => (
-                            <div key={endpoint.id} className="flex items-center justify-between rounded-md bg-white p-2">
-                                <span className="text-sm font-mono text-slate-700">{endpoint.name}</span>
-                                <div className="flex items-center gap-1">
-                                    <button className={button.icon}><Pencil className="size-4" /></button>
-                                    <button className={button.iconDanger}><Trash2 className="size-4" /></button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
+            <div className="border-b border-slate-200/80 px-4">
+                <nav className="-mb-px flex space-x-6" aria-label="Tabs">
+                    <button onClick={() => setActiveTab('endpoints')} className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium ${activeTab === 'endpoints' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}>
+                        Endpoints
+                    </button>
+                    <button onClick={() => setActiveTab('settings')} className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium ${activeTab === 'settings' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}>
+                        Settings
+                    </button>
+                </nav>
+            </div>
 
-                {/* Right Column: Settings */}
-                <div className="space-y-4">
-                    <dl className="space-y-3 text-sm text-slate-600">
-                        <div>
-                            <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><KeyRound className="size-4" /> Env fallback</dt>
-                            <dd className="font-medium text-slate-900/90 pl-6">{provider.fallback}</dd>
+            <div className="p-4">
+                {activeTab === 'endpoints' && (
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-end">
+                            <button className={button.muted}><Plus className="size-3" /> Add endpoint</button>
                         </div>
-                        <div>
-                            <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><Server className="size-4" /> Browser backend</dt>
-                            <dd className="font-medium text-slate-900/90 pl-6">{provider.backend}</dd>
+                        <div className="space-y-2 rounded-lg bg-slate-50 p-2">
+                            {provider.endpoints.map((endpoint: any) => (
+                                <div key={endpoint.id} className="flex items-center justify-between rounded-md bg-white p-2">
+                                    <span className="text-sm font-mono text-slate-700">{endpoint.name}</span>
+                                    <div className="flex items-center gap-1">
+                                        <TestButton endpointId={endpoint.id} />
+                                        <button className={button.icon}><Pencil className="size-4" /></button>
+                                        <button className={button.iconDanger}><Trash2 className="size-4" /></button>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
-                    </dl>
-                    <div className="border-t border-slate-200/80" />
-                    <div className="flex flex-wrap gap-2 text-sm">
-                        <button className={button.muted} type="button">
-                          <KeyRound className="size-3.5" /> Rotate key
-                        </button>
-                        <button className={button.danger} type="button">
-                          <ToggleRight className="size-3.5" /> Disable
-                        </button>
                     </div>
-                </div>
+                )}
+                {activeTab === 'settings' && (
+                    <div className="space-y-4">
+                        <dl className="space-y-3 text-sm text-slate-600">
+                            <div>
+                                <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><KeyRound className="size-4" /> Env fallback</dt>
+                                <dd className="font-medium text-slate-900/90 pl-6">{provider.fallback}</dd>
+                            </div>
+                            <div>
+                                <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><Server className="size-4" /> Browser backend</dt>
+                                <dd className="font-medium text-slate-900/90 pl-6">{provider.backend}</dd>
+                            </div>
+                        </dl>
+                        <div className="border-t border-slate-200/80 my-4" />
+                        <div className="flex flex-wrap gap-2 text-sm">
+                            <button className={button.muted} type="button">
+                              <KeyRound className="size-3.5" /> Rotate key
+                            </button>
+                            <button className={button.danger} type="button">
+                              <ToggleRight className="size-3.5" /> Disable
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </article>
     )
