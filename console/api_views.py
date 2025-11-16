@@ -320,11 +320,37 @@ def _swap_orders(queryset, item, direction: str) -> bool:
     model = queryset.model
     min_order = queryset.aggregate(min_order=Min("order")).get("min_order")
     sentinel = (min_order if min_order is not None else 0) - 1
+    original_item_order = item.order
+    original_other_order = other.order
+    new_item_order = original_other_order
+    new_other_order = original_item_order
+    original_item_description = (item.description or "").strip() if hasattr(item, "description") else ""
+    original_other_description = (other.description or "").strip() if hasattr(other, "description") else ""
+
+    def _should_reset_description(description: str, previous_order: int) -> bool:
+        if not description:
+            return True
+        return description == f"Tier {previous_order}"
+
+    def _should_reset_to_next(description: str, new_order: int) -> bool:
+        if not description:
+            return True
+        return description == f"Tier {new_order}"
+
     with transaction.atomic():
         model.objects.filter(pk=item.pk).update(order=sentinel)
-        model.objects.filter(pk=other.pk).update(order=item.order)
-        model.objects.filter(pk=item.pk).update(order=other.order)
+        model.objects.filter(pk=other.pk).update(order=original_item_order)
+        model.objects.filter(pk=item.pk).update(order=original_other_order)
+        if model is PersistentLLMTier:
+            if _should_reset_description(original_item_description, original_item_order) or _should_reset_to_next(original_item_description, new_item_order):
+                model.objects.filter(pk=item.pk).update(description=f"Tier {new_item_order}")
+            if _should_reset_description(original_other_description, original_other_order) or _should_reset_to_next(original_other_description, new_other_order):
+                model.objects.filter(pk=other.pk).update(description=f"Tier {new_other_order}")
     item.order, other.order = other.order, item.order
+    if isinstance(item, PersistentLLMTier) and (_should_reset_description(original_item_description, original_item_order) or _should_reset_to_next(original_item_description, new_item_order)):
+        item.description = f"Tier {new_item_order}"
+    if isinstance(other, PersistentLLMTier) and (_should_reset_description(original_other_description, original_other_order) or _should_reset_to_next(original_other_description, new_other_order)):
+        other.description = f"Tier {new_other_order}"
     return True
 
 

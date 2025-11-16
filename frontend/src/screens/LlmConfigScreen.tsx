@@ -320,6 +320,30 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
   }))
 }
 
+const shouldResetName = (name?: string) => {
+  if (!name) return true
+  const trimmed = name.trim()
+  if (!trimmed) return true
+  return /^tier\s+\d+$/i.test(trimmed)
+}
+
+const applySequentialFallbackNames = (tiers: Tier[], keySelector: (tier: Tier) => string) => {
+  const groups: Record<string, Tier[]> = {}
+  tiers.forEach((tier) => {
+    const key = keySelector(tier)
+    if (!groups[key]) groups[key] = []
+    groups[key].push(tier)
+  })
+  Object.values(groups).forEach((group) => {
+    group.sort((a, b) => a.order - b.order)
+    group.forEach((tier, index) => {
+      if (shouldResetName(tier.name)) {
+        tier.name = `Tier ${index + 1}`
+      }
+    })
+  })
+}
+
 function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRange[]; tiers: Tier[] } {
   const mappedRanges: TokenRange[] = ranges.map((range) => ({
     id: range.id,
@@ -332,7 +356,7 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
     range.tiers.forEach((tier) => {
       mappedTiers.push({
         id: tier.id,
-        name: tier.description || `Tier ${tier.order}`,
+        name: (tier.description || '').trim(),
         order: tier.order,
         rangeId: range.id,
         premium: tier.is_premium,
@@ -345,14 +369,15 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
       })
     })
   })
+  applySequentialFallbackNames(mappedTiers, (tier) => `${tier.rangeId}:${tier.premium ? 'premium' : 'standard'}`)
   return { ranges: mappedRanges, tiers: mappedTiers }
 }
 
 function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
   if (!policy) return []
-  return policy.tiers.map((tier) => ({
+  const tiers = policy.tiers.map((tier) => ({
     id: tier.id,
-    name: tier.description || `Tier ${tier.order}`,
+    name: (tier.description || '').trim(),
     order: tier.order,
     rangeId: 'browser',
     premium: tier.is_premium,
@@ -363,12 +388,14 @@ function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
       weight: Math.round(endpoint.weight),
     })),
   }))
+  applySequentialFallbackNames(tiers, (tier) => `${tier.rangeId}:${tier.premium ? 'premium' : 'standard'}`)
+  return tiers
 }
 
 function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
-  return tiers.map((tier) => ({
+  const mapped = tiers.map((tier) => ({
     id: tier.id,
-    name: tier.description || `Tier ${tier.order}`,
+    name: (tier.description || '').trim(),
     order: tier.order,
     rangeId: 'embedding',
     premium: false,
@@ -379,6 +406,8 @@ function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
       weight: Math.round(endpoint.weight),
     })),
   }))
+  applySequentialFallbackNames(mapped, () => 'embedding')
+  return mapped
 }
 
 function AddEndpointModal({
