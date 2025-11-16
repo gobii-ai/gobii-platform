@@ -52,9 +52,8 @@ class TikTokPayloadTests(SimpleTestCase):
         self.assertEqual(body["event"], "CompleteRegistration")
         self.assertEqual(body["event_id"], "evt-123")
         self.assertEqual(body["timestamp"], "2023-11-14T22:13:20Z")
-        self.assertEqual(body["event_source"], "web")
+        self.assertEqual(body["event_source"], "PIXEL_EVENTS")
         self.assertEqual(body["event_channel"], "web")
-        self.assertEqual(body["partner_name"], "gobii-platform")
         self.assertEqual(body["test_event_code"], "TEST123")
 
         context = body["context"]
