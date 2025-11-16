@@ -10,6 +10,7 @@ import httpx
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
+from django.db.models import Min
 from django.http import HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -307,8 +308,8 @@ def _next_embedding_order() -> int:
 def _swap_orders(queryset, item, direction: str) -> bool:
     siblings = list(queryset.order_by("order"))
     try:
-        index = siblings.index(item)
-    except ValueError:
+        index = next(i for i, sibling in enumerate(siblings) if sibling.pk == item.pk)
+    except StopIteration:
         return False
     if direction == "up" and index == 0:
         return False
@@ -316,9 +317,14 @@ def _swap_orders(queryset, item, direction: str) -> bool:
         return False
     target_index = index - 1 if direction == "up" else index + 1
     other = siblings[target_index]
+    model = queryset.model
+    min_order = queryset.aggregate(min_order=Min("order")).get("min_order")
+    sentinel = (min_order if min_order is not None else 0) - 1
+    with transaction.atomic():
+        model.objects.filter(pk=item.pk).update(order=sentinel)
+        model.objects.filter(pk=other.pk).update(order=item.order)
+        model.objects.filter(pk=item.pk).update(order=other.order)
     item.order, other.order = other.order, item.order
-    item.save(update_fields=["order"])
-    other.save(update_fields=["order"])
     return True
 
 

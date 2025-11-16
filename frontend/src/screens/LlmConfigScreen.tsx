@@ -118,6 +118,7 @@ type MutationOptions = {
   successMessage?: string
   context?: string
   busyKey?: string
+  busyKeys?: string[]
   rethrow?: boolean
 }
 
@@ -157,8 +158,9 @@ function useAsyncFeedback(): AsyncFeedback {
   }
 
   const runWithFeedback = async <T,>(operation: () => Promise<T>, options: MutationOptions = {}) => {
-    const { label, successMessage, context, busyKey } = options
-    if (busyKey) adjustCounter(setBusyCounts, busyKey, 1)
+    const { label, successMessage, context, busyKey, busyKeys = [] } = options
+    const activeBusyKeys = [busyKey, ...busyKeys].filter((key): key is string => Boolean(key))
+    activeBusyKeys.forEach((key) => adjustCounter(setBusyCounts, key, 1))
     if (label) adjustCounter(setLabelCounts, label, 1)
     try {
       const result = await operation()
@@ -184,7 +186,7 @@ function useAsyncFeedback(): AsyncFeedback {
       throw error
     } finally {
       if (label) adjustCounter(setLabelCounts, label, -1)
-      if (busyKey) adjustCounter(setBusyCounts, busyKey, -1)
+      activeBusyKeys.forEach((key) => adjustCounter(setBusyCounts, key, -1))
     }
   }
 
@@ -906,7 +908,8 @@ function TierCard({
     if (!canAdjustWeights) return
     onCommitEndpointWeights(tier, scope)
   }
-  const moveBusy = isActionBusy(actionKey(scope, tier.id, 'move'))
+  const rangeMoveBusy = scope === 'persistent' ? isActionBusy(actionKey('persistent-range', tier.rangeId, 'move')) : false
+  const moveBusy = rangeMoveBusy || isActionBusy(actionKey(scope, tier.id, 'move'))
   const removeBusy = isActionBusy(actionKey(scope, tier.id, 'remove'))
   const addBusy = isActionBusy(actionKey(scope, tier.id, 'attach-endpoint'))
   const removingEndpoint = tier.endpoints.some((endpoint) => isActionBusy(actionKey('tier-endpoint', endpoint.id, 'remove')))
@@ -1466,10 +1469,11 @@ export function LlmConfigScreen() {
       busyKey: actionKey('range', rangeId, isPremium ? 'add-premium-tier' : 'add-standard-tier'),
       context: 'Persistent tier',
     })
-  const handleTierMove = (tierId: string, direction: 'up' | 'down') =>
+  const handleTierMove = (rangeId: string, tierId: string, direction: 'up' | 'down') =>
     runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }), {
       label: direction === 'up' ? 'Moving tier up…' : 'Moving tier down…',
       busyKey: actionKey('persistent', tierId, 'move'),
+      busyKeys: [actionKey('persistent-range', rangeId, 'move')],
       context: 'Persistent tier',
     })
   const handleTierRemove = (tierId: string) =>
@@ -1684,232 +1688,232 @@ export function LlmConfigScreen() {
     <>
       <ActivityDock notices={notices} activeLabels={activeLabels} onDismiss={dismissNotice} />
       <div className="space-y-8">
-      <div className="gobii-card-base space-y-2 px-6 py-6">
-        <h1 className="text-2xl font-semibold text-slate-900/90">LLM configuration</h1>
-        <p className="text-sm text-slate-600">Review providers, endpoints, and token tiers powering orchestrator, browser-use, and embedding flows.</p>
-      </div>
-      {overviewQuery.isError && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700 flex items-center gap-2">
-          <AlertCircle className="size-4" />
-          Unable to load configuration. Please refresh.
+        <div className="gobii-card-base space-y-2 px-6 py-6">
+          <h1 className="text-2xl font-semibold text-slate-900/90">LLM configuration</h1>
+          <p className="text-sm text-slate-600">Review providers, endpoints, and token tiers powering orchestrator, browser-use, and embedding flows.</p>
         </div>
-      )}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {statsCards.map((card) => (
-          <StatCard key={card.label} label={card.label} value={card.value} hint={card.hint} icon={card.icon} />
-        ))}
-      </div>
-      <SectionCard
-        title="Provider inventory"
-        description="Toggle providers on/off, rotate keys, and review exposed endpoints."
-      >
-        <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
-          {providers.map((provider) => (
-            <ProviderCard
-              key={provider.id}
-              provider={provider}
-              isBusy={isBusy}
-              handlers={{
-                onRotateKey: handleProviderRotateKey,
-                onToggleEnabled: handleProviderToggle,
-                onAddEndpoint: handleProviderAddEndpoint,
-                onSaveEndpoint: handleProviderSaveEndpoint,
-                onDeleteEndpoint: handleProviderDeleteEndpoint,
-                onClearKey: handleProviderClearKey,
-              }}
-            />
+        {overviewQuery.isError && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700 flex items-center gap-2">
+            <AlertCircle className="size-4" />
+            Unable to load configuration. Please refresh.
+          </div>
+        )}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {statsCards.map((card) => (
+            <StatCard key={card.label} label={card.label} value={card.value} hint={card.hint} icon={card.icon} />
           ))}
-          {providers.length === 0 && (
-            <div className="col-span-2">
+        </div>
+        <SectionCard
+          title="Provider inventory"
+          description="Toggle providers on/off, rotate keys, and review exposed endpoints."
+        >
+          <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
+            {providers.map((provider) => (
+              <ProviderCard
+                key={provider.id}
+                provider={provider}
+                isBusy={isBusy}
+                handlers={{
+                  onRotateKey: handleProviderRotateKey,
+                  onToggleEnabled: handleProviderToggle,
+                  onAddEndpoint: handleProviderAddEndpoint,
+                  onSaveEndpoint: handleProviderSaveEndpoint,
+                  onDeleteEndpoint: handleProviderDeleteEndpoint,
+                  onClearKey: handleProviderClearKey,
+                }}
+              />
+            ))}
+            {providers.length === 0 && (
+              <div className="col-span-2">
+                <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-500">
+                  {overviewQuery.isPending ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <LoaderCircle className="size-5 animate-spin" /> Loading providers...
+                    </div>
+                  ) : (
+                    'No providers found.'
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </SectionCard>
+        <SectionCard
+          title="Token-based failover tiers"
+          description="Manage token ranges, tier ordering, and weighted endpoints."
+          actions={
+            <button type="button" className={button.primary} onClick={handleAddRange}>
+              <PlusCircle className="size-4" /> Add range
+            </button>
+          }
+        >
+          <div className="space-y-6">
+            {persistentStructures.ranges.map((range) => (
+              <RangeSection
+                key={range.id}
+                range={range}
+                tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
+                onAddTier={(isPremium) => handleTierAdd(range.id, isPremium)}
+                onUpdate={(field, value) => handleRangeUpdate(range.id, field, value)}
+                onRemove={() =>
+                  runMutation(() => llmApi.deleteTokenRange(range.id), {
+                    successMessage: 'Range removed',
+                    label: 'Removing range…',
+                    busyKey: actionKey('range', range.id, 'remove'),
+                    context: range.name,
+                  })
+                }
+              onMoveTier={(tierId, direction) => handleTierMove(range.id, tierId, direction)}
+                onRemoveTier={handleTierRemove}
+                onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
+                onStageEndpointWeight={stageTierEndpointWeight}
+                onCommitEndpointWeights={commitTierEndpointWeights}
+                onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'persistent')}
+                pendingWeights={pendingWeights}
+                savingTierIds={savingTierIds}
+                dirtyTierIds={dirtyTierIds}
+                isActionBusy={isBusy}
+              />
+            ))}
+            {persistentStructures.ranges.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-500">
                 {overviewQuery.isPending ? (
                   <div className="flex items-center justify-center gap-2">
-                    <LoaderCircle className="size-5 animate-spin" /> Loading providers...
+                    <LoaderCircle className="size-5 animate-spin" /> Loading ranges...
                   </div>
                 ) : (
-                  'No providers found.'
+                  'No token ranges configured yet.'
                 )}
               </div>
+            )}
+          </div>
+        </SectionCard>
+        <SectionCard
+          title="Browser-use models"
+          description="Dedicated tiers for browser automations."
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-slate-700">Standard tiers</h4>
+                <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(false)}>
+                  <PlusCircle className="size-4" /> Add
+                </button>
+              </div>
+              {browserTiers.filter((tier) => !tier.premium).map((tier) => (
+                <TierCard
+                  key={tier.id}
+                  tier={tier}
+                  pendingWeights={pendingWeights}
+                  scope="browser"
+                  isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
+                  isSaving={savingTierIds.has(`browser:${tier.id}`)}
+                  onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
+                  onRemove={() => handleBrowserTierRemove(tier.id)}
+                  onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
+                  onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
+                  onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
+                  onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
+                  isActionBusy={isBusy}
+                />
+              ))}
             </div>
-          )}
-        </div>
-      </SectionCard>
-      <SectionCard
-        title="Token-based failover tiers"
-        description="Manage token ranges, tier ordering, and weighted endpoints."
-        actions={
-          <button type="button" className={button.primary} onClick={handleAddRange}>
-            <PlusCircle className="size-4" /> Add range
-          </button>
-        }
-      >
-        <div className="space-y-6">
-          {persistentStructures.ranges.map((range) => (
-            <RangeSection
-              key={range.id}
-              range={range}
-              tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
-              onAddTier={(isPremium) => handleTierAdd(range.id, isPremium)}
-              onUpdate={(field, value) => handleRangeUpdate(range.id, field, value)}
-              onRemove={() =>
-                runMutation(() => llmApi.deleteTokenRange(range.id), {
-                  successMessage: 'Range removed',
-                  label: 'Removing range…',
-                  busyKey: actionKey('range', range.id, 'remove'),
-                  context: range.name,
-                })
-              }
-              onMoveTier={(tierId, direction) => handleTierMove(tierId, direction)}
-              onRemoveTier={handleTierRemove}
-              onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
-              onStageEndpointWeight={stageTierEndpointWeight}
-              onCommitEndpointWeights={commitTierEndpointWeights}
-              onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'persistent')}
-              pendingWeights={pendingWeights}
-              savingTierIds={savingTierIds}
-              dirtyTierIds={dirtyTierIds}
-              isActionBusy={isBusy}
-            />
-          ))}
-          {persistentStructures.ranges.length === 0 && (
-            <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-500">
-              {overviewQuery.isPending ? (
-                <div className="flex items-center justify-center gap-2">
-                  <LoaderCircle className="size-5 animate-spin" /> Loading ranges...
+            <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-emerald-800">Premium tiers</h4>
+                <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(true)}>
+                  <PlusCircle className="size-4" /> Add
+                </button>
+              </div>
+              {browserTiers.filter((tier) => tier.premium).map((tier) => (
+                <TierCard
+                  key={tier.id}
+                  tier={tier}
+                  pendingWeights={pendingWeights}
+                  scope="browser"
+                  isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
+                  isSaving={savingTierIds.has(`browser:${tier.id}`)}
+                  onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
+                  onRemove={() => handleBrowserTierRemove(tier.id)}
+                  onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
+                  onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
+                  onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
+                  onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
+                  isActionBusy={isBusy}
+                />
+              ))}
+            </div>
+          </div>
+        </SectionCard>
+        <SectionCard
+          title="Other model consumers"
+          description="Surface-level overview of summarization, embeddings, and tooling hints."
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-slate-200/80 bg-white p-4">
+                <div className="flex items-start gap-3">
+                  <BookText className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-slate-900/90">Summaries</h4>
+                    <p className="text-sm text-slate-600">Uses the primary model from the smallest token range, temperature forced to 0.</p>
+                  </div>
                 </div>
-              ) : (
-                'No token ranges configured yet.'
-              )}
-            </div>
-          )}
-        </div>
-      </SectionCard>
-      <SectionCard
-        title="Browser-use models"
-        description="Dedicated tiers for browser automations."
-      >
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold text-slate-700">Standard tiers</h4>
-              <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(false)}>
-                <PlusCircle className="size-4" /> Add
-              </button>
-            </div>
-            {browserTiers.filter((tier) => !tier.premium).map((tier) => (
-              <TierCard
-                key={tier.id}
-                tier={tier}
-                pendingWeights={pendingWeights}
-                scope="browser"
-                isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
-                isSaving={savingTierIds.has(`browser:${tier.id}`)}
-                onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
-                onRemove={() => handleBrowserTierRemove(tier.id)}
-                onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
-                onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
-                onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
-                isActionBusy={isBusy}
-              />
-            ))}
-          </div>
-          <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold text-emerald-800">Premium tiers</h4>
-              <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(true)}>
-                <PlusCircle className="size-4" /> Add
-              </button>
-            </div>
-            {browserTiers.filter((tier) => tier.premium).map((tier) => (
-              <TierCard
-                key={tier.id}
-                tier={tier}
-                pendingWeights={pendingWeights}
-                scope="browser"
-                isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
-                isSaving={savingTierIds.has(`browser:${tier.id}`)}
-                onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
-                onRemove={() => handleBrowserTierRemove(tier.id)}
-                onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
-                onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
-                onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
-                isActionBusy={isBusy}
-              />
-            ))}
-          </div>
-        </div>
-      </SectionCard>
-      <SectionCard
-        title="Other model consumers"
-        description="Surface-level overview of summarization, embeddings, and tooling hints."
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="rounded-xl border border-slate-200/80 bg-white p-4">
-              <div className="flex items-start gap-3">
-                <BookText className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-semibold text-slate-900/90">Summaries</h4>
-                  <p className="text-sm text-slate-600">Uses the primary model from the smallest token range, temperature forced to 0.</p>
+              </div>
+              <div className="rounded-xl border border-slate-200/80 bg-white p-4">
+                <div className="flex items-start gap-3">
+                  <Search className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-slate-900/90">Search tools</h4>
+                    <p className="text-sm text-slate-600">Decisions are delegated to the main agent tiers.</p>
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="rounded-xl border border-slate-200/80 bg-white p-4">
-              <div className="flex items-start gap-3">
-                <Search className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-semibold text-slate-900/90">Search tools</h4>
-                  <p className="text-sm text-slate-600">Decisions are delegated to the main agent tiers.</p>
+            <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-start gap-3">
+                  <PlugZap className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-slate-900/90">Embedding tiers</h4>
+                    <p className="text-sm text-slate-600">Fallback order for generating embeddings.</p>
+                  </div>
                 </div>
+                <button type="button" className={button.secondary} onClick={handleEmbeddingTierAdd}>
+                  <PlusCircle className="size-4" /> Add tier
+                </button>
               </div>
+              {embeddingTiers.map((tier) => (
+                <TierCard
+                  key={tier.id}
+                  tier={tier}
+                  pendingWeights={pendingWeights}
+                  scope="embedding"
+                  isDirty={dirtyTierIds.has(`embedding:${tier.id}`)}
+                  isSaving={savingTierIds.has(`embedding:${tier.id}`)}
+                  onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
+                  onRemove={() => handleEmbeddingTierRemove(tier.id)}
+                  onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
+                  onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
+                  onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'embedding')}
+                  onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'embedding')}
+                  isActionBusy={isBusy}
+                />
+              ))}
+              {embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
             </div>
           </div>
-          <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-start gap-3">
-                <PlugZap className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-semibold text-slate-900/90">Embedding tiers</h4>
-                  <p className="text-sm text-slate-600">Fallback order for generating embeddings.</p>
-                </div>
-              </div>
-              <button type="button" className={button.secondary} onClick={handleEmbeddingTierAdd}>
-                <PlusCircle className="size-4" /> Add tier
-              </button>
-            </div>
-            {embeddingTiers.map((tier) => (
-              <TierCard
-                key={tier.id}
-                tier={tier}
-                pendingWeights={pendingWeights}
-                scope="embedding"
-                isDirty={dirtyTierIds.has(`embedding:${tier.id}`)}
-                isSaving={savingTierIds.has(`embedding:${tier.id}`)}
-                onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
-                onRemove={() => handleEmbeddingTierRemove(tier.id)}
-                onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
-                onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
-                onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'embedding')}
-                onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'embedding')}
-                isActionBusy={isBusy}
-              />
-            ))}
-            {embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
-          </div>
-        </div>
-      </SectionCard>
-      {endpointModal && (
-        <AddEndpointModal
-          tier={endpointModal.tier}
-          scope={endpointModal.scope}
-          choices={endpointChoices}
-          busy={isBusy(actionKey(endpointModal.scope, endpointModal.tier.id, 'attach-endpoint'))}
-          onAdd={(endpointId) => submitTierEndpoint(endpointId)}
-          onClose={() => setEndpointModal(null)}
-        />
-      )}
+        </SectionCard>
+        {endpointModal && (
+          <AddEndpointModal
+            tier={endpointModal.tier}
+            scope={endpointModal.scope}
+            choices={endpointChoices}
+            busy={isBusy(actionKey(endpointModal.scope, endpointModal.tier.id, 'attach-endpoint'))}
+            onAdd={(endpointId) => submitTierEndpoint(endpointId)}
+            onClose={() => setEndpointModal(null)}
+          />
+        )}
       </div>
     </>
   )
