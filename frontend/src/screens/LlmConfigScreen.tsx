@@ -99,10 +99,11 @@ type EndpointFormValues = {
   supportsVision?: boolean
 }
 
-const clampWeight = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
+const clampWeight = (value: number, min: number = 0, max: number = 100) => Math.max(min, Math.min(max, Math.round(value)))
 
 function rebalanceTierWeights(tier: Tier, tierEndpointId: string, desiredWeight: number) {
-  const clamped = clampWeight(desiredWeight)
+  const minWeight = tier.endpoints.length > 1 ? 1 : 100
+  const clamped = clampWeight(desiredWeight, minWeight)
   const endpoints = tier.endpoints
   if (endpoints.length <= 1) {
     const only = endpoints[0]
@@ -125,17 +126,55 @@ function rebalanceTierWeights(tier: Tier, tierEndpointId: string, desiredWeight:
 
   let runningTotal = clamped
   redistributed = redistributed.map((entry) => {
-    const rounded = clampWeight(entry.weight)
+    const rounded = clampWeight(entry.weight, 1)
     runningTotal += rounded
     return { ...entry, weight: rounded }
   })
 
   const roundingError = 100 - runningTotal
   if (roundingError !== 0 && redistributed.length > 0) {
-    redistributed[0].weight = clampWeight(redistributed[0].weight + roundingError)
+    redistributed[0].weight = clampWeight(redistributed[0].weight + roundingError, 1)
   }
 
   return [{ id: target.id, weight: clamped }, ...redistributed]
+}
+
+function distributeEvenWeights(endpointIds: string[]): Record<string, number> {
+  if (endpointIds.length === 0) {
+    return {}
+  }
+  if (endpointIds.length === 1) {
+    return { [endpointIds[0]]: 100 }
+  }
+
+  const count = endpointIds.length
+  const base = Math.floor(100 / count)
+  const remainder = 100 % count
+  let weights = endpointIds.map((_, index) => base + (index < remainder ? 1 : 0)).map((weight) => Math.max(1, weight))
+
+  let total = weights.reduce((sum, weight) => sum + weight, 0)
+  if (total > 100) {
+    let excess = total - 100
+    for (let i = weights.length - 1; i >= 0 && excess > 0; i -= 1) {
+      const reducible = Math.min(weights[i] - 1, excess)
+      if (reducible > 0) {
+        weights[i] -= reducible
+        excess -= reducible
+      }
+    }
+  } else if (total < 100) {
+    let deficit = 100 - total
+    for (let i = 0; i < weights.length && deficit > 0; i += 1) {
+      weights[i] += 1
+      deficit -= 1
+    }
+  }
+
+  const result: Record<string, number> = {}
+  endpointIds.forEach((id, index) => {
+    result[id] = weights[index]
+  })
+  return result
 }
 
 function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
@@ -626,23 +665,31 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose }: Add
 function TierCard({
   tier,
   pendingWeights,
+  scope,
   onMove,
   onRemove,
   onAddEndpoint,
-  onUpdateEndpointWeight,
+  onStageEndpointWeight,
+  onCommitEndpointWeights,
   onRemoveEndpoint,
 }: {
   tier: Tier
   pendingWeights: Record<string, number>
+  scope: TierScope
   onMove: (direction: 'up' | 'down') => void
   onRemove: () => void
   onAddEndpoint: () => void
-  onUpdateEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number) => void
+  onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
+  onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
   onRemoveEndpoint: (tierEndpointId: string) => void
 }) {
   const headerIcon = tier.premium ? <ShieldCheck className="size-4 text-emerald-700" /> : <Layers className="size-4 text-slate-500" />
   const canAdjustWeights = tier.endpoints.length > 1
   const disabledHint = canAdjustWeights ? '' : 'At least two endpoints are required to rebalance weights.'
+  const handleCommit = () => {
+    if (!canAdjustWeights) return
+    onCommitEndpointWeights(tier, scope)
+  }
   return (
     <div className={`rounded-xl border ${tier.premium ? 'border-emerald-200' : 'border-slate-200'} bg-white`}>
       <div className="flex items-center justify-between p-4 text-xs uppercase tracking-wide text-slate-500">
@@ -668,24 +715,28 @@ function TierCard({
                     type="range"
                     min="0"
                     max="100"
-                    value={weightValue}
-                    onChange={(event) => {
-                      if (!canAdjustWeights) return
-                      onUpdateEndpointWeight(tier, endpoint.id, parseInt(event.target.value, 10))
-                    }}
-                    disabled={!canAdjustWeights}
-                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-                />
-                <input
-                  type="number"
                   value={weightValue}
                   onChange={(event) => {
                     if (!canAdjustWeights) return
-                    onUpdateEndpointWeight(tier, endpoint.id, parseInt(event.target.value, 10) || 0)
+                    onStageEndpointWeight(tier, endpoint.id, parseInt(event.target.value, 10), scope)
                   }}
                   disabled={!canAdjustWeights}
-                  className="block w-20 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                />
+                  onMouseUp={handleCommit}
+                  onTouchEnd={handleCommit}
+                  onPointerUp={handleCommit}
+                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+              />
+              <input
+                type="number"
+                value={weightValue}
+                onChange={(event) => {
+                  if (!canAdjustWeights) return
+                  onStageEndpointWeight(tier, endpoint.id, parseInt(event.target.value, 10) || 0, scope)
+                }}
+                disabled={!canAdjustWeights}
+                onBlur={handleCommit}
+                className="block w-20 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+              />
                 <button onClick={() => onRemoveEndpoint(endpoint.id)} className={button.iconDanger}><X className="size-4" /></button>
               </div>
             </div>
@@ -714,7 +765,8 @@ function RangeSection({
   onMoveTier,
   onRemoveTier,
   onAddEndpoint,
-  onUpdateEndpointWeight,
+  onStageEndpointWeight,
+  onCommitEndpointWeights,
   onRemoveEndpoint,
   pendingWeights,
 }: {
@@ -726,7 +778,8 @@ function RangeSection({
   onMoveTier: (tierId: string, direction: 'up' | 'down') => void
   onRemoveTier: (tierId: string) => void
   onAddEndpoint: (tier: Tier) => void
-  onUpdateEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number) => void
+  onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
+  onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
   onRemoveEndpoint: (tierEndpointId: string) => void
   pendingWeights: Record<string, number>
 }) {
@@ -762,18 +815,20 @@ function RangeSection({
             </button>
           </div>
           {standardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard tiers.</p>}
-        {standardTiers.map((tier) => (
+          {standardTiers.map((tier) => (
             <TierCard
               key={tier.id}
               tier={tier}
               pendingWeights={pendingWeights}
+              scope="persistent"
               onMove={(direction) => onMoveTier(tier.id, direction)}
               onRemove={() => onRemoveTier(tier.id)}
               onAddEndpoint={() => onAddEndpoint(tier)}
-              onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => onUpdateEndpointWeight(currentTier, tierEndpointId, weight)}
+              onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
+              onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
               onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
             />
-        ))}
+          ))}
         </div>
         <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
           <div className="flex items-center justify-between">
@@ -783,18 +838,20 @@ function RangeSection({
             </button>
           </div>
           {premiumTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers.</p>}
-        {premiumTiers.map((tier) => (
+          {premiumTiers.map((tier) => (
             <TierCard
               key={tier.id}
               tier={tier}
               pendingWeights={pendingWeights}
+              scope="persistent"
               onMove={(direction) => onMoveTier(tier.id, direction)}
               onRemove={() => onRemoveTier(tier.id)}
               onAddEndpoint={() => onAddEndpoint(tier)}
-              onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => onUpdateEndpointWeight(currentTier, tierEndpointId, weight)}
+              onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
+              onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
               onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
             />
-        ))}
+          ))}
         </div>
       </div>
     </div>
@@ -808,6 +865,7 @@ export function LlmConfigScreen() {
   const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
   const fixingSinglesRef = useRef(false)
+  const stagedWeightsRef = useRef<Record<string, { scope: TierScope; updates: { id: string; weight: number }[] }>>({})
 
   const overviewQuery = useQuery({
     queryKey: ['llm-overview'],
@@ -1022,7 +1080,7 @@ const parseNumber = (value?: string) => {
   const handleTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }))
   const handleTierRemove = (tierId: string) => runMutation(() => llmApi.deletePersistentTier(tierId), 'Tier removed')
 
-  const handleTierEndpointWeight = (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => {
+  const stageTierEndpointWeight = (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => {
     const updates = rebalanceTierWeights(tier, tierEndpointId, weight)
     if (!updates.length) return
     setPendingWeights((prev) => {
@@ -1032,14 +1090,25 @@ const parseNumber = (value?: string) => {
       })
       return next
     })
+    stagedWeightsRef.current[`${scope}:${tier.id}`] = { scope, updates }
+  }
+
+  const commitTierEndpointWeights = (tier: Tier, scope: TierScope) => {
+    const key = `${scope}:${tier.id}`
+    const staged = stagedWeightsRef.current[key]
+    if (!staged) return
+    delete stagedWeightsRef.current[key]
     const mutation = () => {
-      if (scope === 'browser') {
-        return Promise.all(updates.map((entry) => llmApi.updateBrowserTierEndpoint(entry.id, { weight: entry.weight })))
-      }
-      if (scope === 'embedding') {
-        return Promise.all(updates.map((entry) => llmApi.updateEmbeddingTierEndpoint(entry.id, { weight: entry.weight })))
-      }
-      return Promise.all(updates.map((entry) => llmApi.updatePersistentTierEndpoint(entry.id, { weight: entry.weight })))
+      const ops = staged.updates.map((entry) => {
+        if (scope === 'browser') {
+          return llmApi.updateBrowserTierEndpoint(entry.id, { weight: entry.weight })
+        }
+        if (scope === 'embedding') {
+          return llmApi.updateEmbeddingTierEndpoint(entry.id, { weight: entry.weight })
+        }
+        return llmApi.updatePersistentTierEndpoint(entry.id, { weight: entry.weight })
+      })
+      return Promise.all(ops)
     }
     return runMutation(mutation)
   }
@@ -1067,17 +1136,44 @@ const parseNumber = (value?: string) => {
   const submitTierEndpoint = (endpointId: string) => {
     if (!endpointModal) return
     const { tier, scope } = endpointModal
-    const update = (weight: number) => ({ endpoint_id: endpointId, weight })
-    const targetWeight = tier.endpoints.length === 0 ? 100 : Math.floor(100 / (tier.endpoints.length + 1))
-    const mutation = () => {
+
+    const mutation = async () => {
+      const payload = { endpoint_id: endpointId, weight: tier.endpoints.length === 0 ? 100 : 50 }
+      let response: { tier_endpoint_id?: string } = {}
       if (scope === 'browser') {
-        return llmApi.addBrowserTierEndpoint(tier.id, update(targetWeight))
+        response = await llmApi.addBrowserTierEndpoint(tier.id, payload) as { tier_endpoint_id?: string }
+      } else if (scope === 'embedding') {
+        response = await llmApi.addEmbeddingTierEndpoint(tier.id, payload) as { tier_endpoint_id?: string }
+      } else {
+        response = await llmApi.addPersistentTierEndpoint(tier.id, payload) as { tier_endpoint_id?: string }
       }
-      if (scope === 'embedding') {
-        return llmApi.addEmbeddingTierEndpoint(tier.id, update(targetWeight))
+      const newTierEndpointId = response?.tier_endpoint_id
+      if (!newTierEndpointId) {
+        return
       }
-      return llmApi.addPersistentTierEndpoint(tier.id, update(targetWeight))
+
+      const evenWeights = distributeEvenWeights([...tier.endpoints.map((endpoint) => endpoint.id), newTierEndpointId])
+      setPendingWeights((prev) => {
+        const next = { ...prev }
+        Object.entries(evenWeights).forEach(([tierEndpointId, weight]) => {
+          next[tierEndpointId] = weight
+        })
+        return next
+      })
+
+      const updates = Object.entries(evenWeights).map(([tierEndpointId, weight]) => {
+        if (scope === 'browser') {
+          return llmApi.updateBrowserTierEndpoint(tierEndpointId, { weight })
+        }
+        if (scope === 'embedding') {
+          return llmApi.updateEmbeddingTierEndpoint(tierEndpointId, { weight })
+        }
+        return llmApi.updatePersistentTierEndpoint(tierEndpointId, { weight })
+      })
+
+      await Promise.all(updates)
     }
+
     runMutation(mutation, 'Endpoint added')
   }
 
@@ -1169,7 +1265,8 @@ const parseNumber = (value?: string) => {
               onMoveTier={(tierId, direction) => handleTierMove(tierId, direction)}
               onRemoveTier={handleTierRemove}
               onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
-              onUpdateEndpointWeight={(tier, tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'persistent')}
+              onStageEndpointWeight={stageTierEndpointWeight}
+              onCommitEndpointWeights={commitTierEndpointWeights}
               onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'persistent')}
               pendingWeights={pendingWeights}
             />
@@ -1204,10 +1301,12 @@ const parseNumber = (value?: string) => {
                 key={tier.id}
                 tier={tier}
                 pendingWeights={pendingWeights}
+                scope="browser"
                 onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
                 onRemove={() => handleBrowserTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => handleTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
+                onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
+                onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
               />
             ))}
@@ -1224,10 +1323,12 @@ const parseNumber = (value?: string) => {
                 key={tier.id}
                 tier={tier}
                 pendingWeights={pendingWeights}
+                scope="browser"
                 onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
                 onRemove={() => handleBrowserTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => handleTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
+                onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
+                onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
               />
             ))}
@@ -1277,10 +1378,12 @@ const parseNumber = (value?: string) => {
                 key={tier.id}
                 tier={tier}
                 pendingWeights={pendingWeights}
+                scope="embedding"
                 onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
                 onRemove={() => handleEmbeddingTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
-                onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => handleTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
+                onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
+                onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'embedding')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'embedding')}
               />
             ))}
