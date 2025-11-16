@@ -666,6 +666,8 @@ function TierCard({
   tier,
   pendingWeights,
   scope,
+  isDirty,
+  isSaving,
   onMove,
   onRemove,
   onAddEndpoint,
@@ -676,6 +678,8 @@ function TierCard({
   tier: Tier
   pendingWeights: Record<string, number>
   scope: TierScope
+  isDirty: boolean
+  isSaving: boolean
   onMove: (direction: 'up' | 'down') => void
   onRemove: () => void
   onAddEndpoint: () => void
@@ -703,13 +707,18 @@ function TierCard({
       <div className="space-y-3 px-4 pb-4">
         <div className="flex items-center justify-between text-[13px] text-slate-500">
           <span>Weighted endpoints</span>
+          {isSaving ? (
+            <span className="text-xs text-blue-500">Saving…</span>
+          ) : isDirty ? (
+            <span className="text-xs text-amber-500">Pending…</span>
+          ) : null}
         </div>
         <div className="space-y-3">
           {tier.endpoints.map((endpoint) => {
             const weightValue = pendingWeights[endpoint.id] ?? endpoint.weight
             return (
               <div key={endpoint.id} className="grid grid-cols-12 items-center gap-3 text-sm font-medium text-slate-900/90">
-                <span className="col-span-6 flex items-center gap-2 truncate"><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
+                <span className="col-span-6 flex items-center gap-2 truncate" title={endpoint.label}><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
                 <div className="col-span-6 flex items-center gap-2">
                   <input
                     type="range"
@@ -769,6 +778,8 @@ function RangeSection({
   onCommitEndpointWeights,
   onRemoveEndpoint,
   pendingWeights,
+  savingTierIds,
+  dirtyTierIds,
 }: {
   range: TokenRange
   tiers: Tier[]
@@ -782,6 +793,8 @@ function RangeSection({
   onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
   onRemoveEndpoint: (tierEndpointId: string) => void
   pendingWeights: Record<string, number>
+  savingTierIds: Set<string>
+  dirtyTierIds: Set<string>
 }) {
   const standardTiers = tiers.filter((tier) => !tier.premium).sort((a, b) => a.order - b.order)
   const premiumTiers = tiers.filter((tier) => tier.premium).sort((a, b) => a.order - b.order)
@@ -820,6 +833,8 @@ function RangeSection({
               key={tier.id}
               tier={tier}
               pendingWeights={pendingWeights}
+              isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
+              isSaving={savingTierIds.has(`persistent:${tier.id}`)}
               scope="persistent"
               onMove={(direction) => onMoveTier(tier.id, direction)}
               onRemove={() => onRemoveTier(tier.id)}
@@ -843,6 +858,8 @@ function RangeSection({
               key={tier.id}
               tier={tier}
               pendingWeights={pendingWeights}
+              isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
+              isSaving={savingTierIds.has(`persistent:${tier.id}`)}
               scope="persistent"
               onMove={(direction) => onMoveTier(tier.id, direction)}
               onRemove={() => onRemoveTier(tier.id)}
@@ -864,6 +881,8 @@ export function LlmConfigScreen() {
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
   const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
+  const [savingTierIds, setSavingTierIds] = useState<Set<string>>(new Set())
+  const [dirtyTierIds, setDirtyTierIds] = useState<Set<string>>(new Set())
   const fixingSinglesRef = useRef(false)
   const stagedWeightsRef = useRef<Record<string, { scope: TierScope; updates: { id: string; weight: number }[] }>>({})
 
@@ -882,6 +901,7 @@ export function LlmConfigScreen() {
 
   useEffect(() => {
     setPendingWeights({})
+    setDirtyTierIds(new Set())
   }, [overviewQuery.data])
 
   useEffect(() => {
@@ -1090,7 +1110,13 @@ const parseNumber = (value?: string) => {
       })
       return next
     })
-    stagedWeightsRef.current[`${scope}:${tier.id}`] = { scope, updates }
+    const key = `${scope}:${tier.id}`
+    stagedWeightsRef.current[key] = { scope, updates }
+    setDirtyTierIds((prev) => {
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
   }
 
   const commitTierEndpointWeights = (tier: Tier, scope: TierScope) => {
@@ -1098,6 +1124,11 @@ const parseNumber = (value?: string) => {
     const staged = stagedWeightsRef.current[key]
     if (!staged) return
     delete stagedWeightsRef.current[key]
+    setSavingTierIds((prev) => {
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
     const mutation = () => {
       const ops = staged.updates.map((entry) => {
         if (scope === 'browser') {
@@ -1110,7 +1141,18 @@ const parseNumber = (value?: string) => {
       })
       return Promise.all(ops)
     }
-    return runMutation(mutation)
+    return runMutation(mutation).finally(() => {
+      setSavingTierIds((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+      setDirtyTierIds((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    })
   }
 
   const handleTierEndpointRemove = (tierEndpointId: string, scope: TierScope) => {
@@ -1269,6 +1311,8 @@ const parseNumber = (value?: string) => {
               onCommitEndpointWeights={commitTierEndpointWeights}
               onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'persistent')}
               pendingWeights={pendingWeights}
+              savingTierIds={savingTierIds}
+              dirtyTierIds={dirtyTierIds}
             />
           ))}
           {persistentStructures.ranges.length === 0 && (
@@ -1302,6 +1346,8 @@ const parseNumber = (value?: string) => {
                 tier={tier}
                 pendingWeights={pendingWeights}
                 scope="browser"
+                isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
+                isSaving={savingTierIds.has(`browser:${tier.id}`)}
                 onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
                 onRemove={() => handleBrowserTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
@@ -1324,6 +1370,8 @@ const parseNumber = (value?: string) => {
                 tier={tier}
                 pendingWeights={pendingWeights}
                 scope="browser"
+                isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
+                isSaving={savingTierIds.has(`browser:${tier.id}`)}
                 onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
                 onRemove={() => handleBrowserTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
@@ -1379,6 +1427,8 @@ const parseNumber = (value?: string) => {
                 tier={tier}
                 pendingWeights={pendingWeights}
                 scope="embedding"
+                isDirty={dirtyTierIds.has(`embedding:${tier.id}`)}
+                isSaving={savingTierIds.has(`embedding:${tier.id}`)}
                 onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
                 onRemove={() => handleEmbeddingTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
