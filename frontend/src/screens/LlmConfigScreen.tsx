@@ -16,7 +16,7 @@ import {
   Search,
   Layers,
 } from 'lucide-react'
-import React, { useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
@@ -63,6 +63,8 @@ type ProviderEndpointCard = {
   name: string
   enabled: boolean
   api_base?: string
+  browser_base_url?: string
+  max_output_tokens?: number | null
   temperature?: number | null
   supports_vision?: boolean
   supports_tool_choice?: boolean
@@ -77,10 +79,25 @@ type ProviderCardData = {
   backend: string
   fallback: string
   enabled: boolean
+  envVar?: string
+  supportsSafety: boolean
+  vertexProject: string
+  vertexLocation: string
   endpoints: ProviderEndpointCard[]
 }
 
 type TierScope = 'persistent' | 'browser' | 'embedding'
+
+type EndpointFormValues = {
+  model: string
+  temperature?: string
+  api_base?: string
+  browser_base_url?: string
+  max_output_tokens?: string
+  supportsToolChoice?: boolean
+  useParallelToolCalls?: boolean
+  supportsVision?: boolean
+}
 
 function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
   return input.map((provider) => ({
@@ -89,12 +106,18 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
     status: provider.status,
     backend: provider.browser_backend,
     fallback: provider.env_var || 'Not configured',
+    envVar: provider.env_var,
+    supportsSafety: provider.supports_safety_identifier,
+    vertexProject: provider.vertex_project,
+    vertexLocation: provider.vertex_location,
     enabled: provider.enabled,
     endpoints: provider.endpoints.map((endpoint) => ({
       id: endpoint.id,
       name: endpoint.model,
       enabled: endpoint.enabled,
-      api_base: endpoint.api_base || endpoint.browser_base_url || '',
+      api_base: endpoint.api_base,
+      browser_base_url: endpoint.browser_base_url,
+      max_output_tokens: endpoint.max_output_tokens ?? null,
       temperature: endpoint.temperature_override ?? null,
       supports_vision: endpoint.supports_vision,
       supports_tool_choice: endpoint.supports_tool_choice,
@@ -234,9 +257,335 @@ function AddEndpointModal({
   )
 }
 
+type ProviderCardHandlers = {
+  onRotateKey: (providerId: string) => void
+  onToggleEnabled: (providerId: string, enabled: boolean) => void
+  onAddEndpoint: (providerId: string, type: llmApi.ProviderEndpoint['type'], values: EndpointFormValues & { key: string }) => void
+  onSaveEndpoint: (endpoint: ProviderEndpointCard, values: EndpointFormValues) => void
+  onDeleteEndpoint: (endpoint: ProviderEndpointCard) => void
+  onClearKey: (providerId: string) => void
+}
+
+function ProviderCard({ provider, handlers }: { provider: ProviderCardData; handlers: ProviderCardHandlers }) {
+  const [activeTab, setActiveTab] = useState<'endpoints' | 'settings'>('endpoints')
+  const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null)
+  const [addingType, setAddingType] = useState<llmApi.ProviderEndpoint['type'] | null>(null)
+
+  return (
+    <article className="rounded-2xl border border-slate-200/80 bg-white">
+      <div className="flex items-center justify-between p-4">
+        <div>
+          <h3 className="text-base font-semibold text-slate-900/90">{provider.name}</h3>
+          <p className="text-xs text-slate-500">{provider.endpoints.length} endpoints</p>
+        </div>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${provider.enabled ? 'bg-emerald-50/80 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+          <ShieldCheck className="size-3.5" /> {provider.status}
+        </span>
+      </div>
+      <div className="border-b border-slate-200/80 px-4">
+        <nav className="-mb-px flex space-x-6" aria-label="Tabs">
+          <button onClick={() => setActiveTab('endpoints')} className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium ${activeTab === 'endpoints' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}>
+            Endpoints
+          </button>
+          <button onClick={() => setActiveTab('settings')} className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium ${activeTab === 'settings' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}>
+            Settings
+          </button>
+        </nav>
+      </div>
+      <div className="p-4 space-y-4">
+        {activeTab === 'endpoints' && (
+          <>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-600">Manage provider endpoints</p>
+              <div className="flex gap-2">
+                <button className={button.secondary} onClick={() => setAddingType('persistent')}>
+                  <Plus className="size-4" /> Persistent
+                </button>
+                <button className={button.secondary} onClick={() => setAddingType('browser')}>
+                  <Plus className="size-4" /> Browser
+                </button>
+                <button className={button.secondary} onClick={() => setAddingType('embedding')}>
+                  <Plus className="size-4" /> Embedding
+                </button>
+              </div>
+            </div>
+            {provider.endpoints.length === 0 && <p className="text-sm text-slate-500">No endpoints linked.</p>}
+            <div className="space-y-3">
+              {provider.endpoints.map((endpoint) => {
+                const isEditing = editingEndpointId === endpoint.id
+                return (
+                  <div key={endpoint.id} className="rounded-lg border border-slate-200 p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900/90">{endpoint.name}</p>
+                        <p className="text-xs text-slate-500 uppercase">{endpoint.type}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button className={button.muted} onClick={() => setEditingEndpointId(isEditing ? null : endpoint.id)}>
+                          {isEditing ? 'Close' : 'Edit'}
+                        </button>
+                        <button className={button.iconDanger} onClick={() => handlers.onDeleteEndpoint(endpoint)}>
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    </div>
+                    {isEditing && (
+                      <EndpointEditor
+                        endpoint={endpoint}
+                        onCancel={() => setEditingEndpointId(null)}
+                        onSave={(values) => {
+                          handlers.onSaveEndpoint(endpoint, values)
+                          setEditingEndpointId(null)
+                        }}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+        {activeTab === 'settings' && (
+          <div className="space-y-4 text-sm text-slate-600">
+            <div>
+              <p className="font-semibold text-slate-900/90">Environment fallback</p>
+              <p className="text-xs text-slate-500 break-all">{provider.fallback}</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs text-slate-500 uppercase">Backend</p>
+                <p className="font-medium text-slate-900/90">{provider.backend}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase">Safety identifiers</p>
+                <p className="font-medium text-slate-900/90">{provider.supportsSafety ? 'Supported' : 'Disabled'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase">Vertex project</p>
+                <p className="font-medium text-slate-900/90">{provider.vertexProject || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase">Vertex location</p>
+                <p className="font-medium text-slate-900/90">{provider.vertexLocation || '—'}</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button className={button.primary} onClick={() => handlers.onRotateKey(provider.id)}>
+                <KeyRound className="size-4" /> Rotate key
+              </button>
+              <button className={button.secondary} onClick={() => handlers.onClearKey(provider.id)}>
+                Clear key
+              </button>
+              <button className={button.muted} onClick={() => handlers.onToggleEnabled(provider.id, !provider.enabled)}>
+                {provider.enabled ? 'Disable provider' : 'Enable provider'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      {addingType && (
+        <AddProviderEndpointModal
+          providerName={provider.name}
+          type={addingType}
+          onClose={() => setAddingType(null)}
+          onSubmit={(values) => {
+            handlers.onAddEndpoint(provider.id, addingType!, values)
+            setAddingType(null)
+          }}
+        />
+      )}
+    </article>
+  )
+}
+
+type EndpointEditorProps = {
+  endpoint: ProviderEndpointCard
+  onSave: (values: EndpointFormValues) => void
+  onCancel: () => void
+}
+
+function EndpointEditor({ endpoint, onSave, onCancel }: EndpointEditorProps) {
+  const [model, setModel] = useState(endpoint.name)
+  const [temperature, setTemperature] = useState(endpoint.temperature?.toString() ?? '')
+  const [apiBase, setApiBase] = useState(endpoint.api_base || endpoint.browser_base_url || '')
+  const [maxTokens, setMaxTokens] = useState(endpoint.max_output_tokens?.toString() ?? '')
+  const [supportsVision, setSupportsVision] = useState(Boolean(endpoint.supports_vision))
+  const [supportsToolChoice, setSupportsToolChoice] = useState(Boolean(endpoint.supports_tool_choice))
+  const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
+
+  const handleSave = () => {
+    const values: EndpointFormValues = {
+      model,
+      temperature,
+      api_base: apiBase,
+      browser_base_url: apiBase,
+      max_output_tokens: maxTokens,
+      supportsToolChoice: supportsToolChoice,
+      useParallelToolCalls: parallelTools,
+      supportsVision: supportsVision,
+    }
+    onSave(values)
+  }
+
+  const isBrowser = endpoint.type === 'browser'
+  const isEmbedding = endpoint.type === 'embedding'
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-500">Model identifier</label>
+          <input value={model} onChange={(event) => setModel(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+        </div>
+        {!isBrowser && (
+          <div>
+            <label className="text-xs text-slate-500">Temperature override</label>
+            <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+          </div>
+        )}
+        <div>
+          <label className="text-xs text-slate-500">API base URL</label>
+          <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://api.example.com/v1" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+        </div>
+        {isBrowser && (
+          <div>
+            <label className="text-xs text-slate-500">Max output tokens</label>
+            <input type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="Default" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+          </div>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-4 text-sm">
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+          Vision
+        </label>
+        {!isEmbedding && (
+          <label className="inline-flex items-center gap-2">
+            <input type="checkbox" checked={supportsToolChoice} onChange={(event) => setSupportsToolChoice(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+            Tool choice
+          </label>
+        )}
+        {!isEmbedding && (
+          <label className="inline-flex items-center gap-2">
+            <input type="checkbox" checked={parallelTools} onChange={(event) => setParallelTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+            Parallel calls
+          </label>
+        )}
+      </div>
+      <div className="flex justify-end gap-2">
+        <button className={button.secondary} onClick={onCancel}>Cancel</button>
+        <button className={button.primary} onClick={handleSave}>Save changes</button>
+      </div>
+    </div>
+  )
+}
+
+type AddProviderEndpointModalProps = {
+  providerName: string
+  type: llmApi.ProviderEndpoint['type']
+  onSubmit: (values: EndpointFormValues & { key: string }) => void
+  onClose: () => void
+}
+
+function AddProviderEndpointModal({ providerName, type, onSubmit, onClose }: AddProviderEndpointModalProps) {
+  const [key, setKey] = useState('')
+  const [model, setModel] = useState('')
+  const [apiBase, setApiBase] = useState('')
+  const [maxTokens, setMaxTokens] = useState('')
+  const [supportsVision, setSupportsVision] = useState(false)
+  const [supportsTools, setSupportsTools] = useState(true)
+  const [parallelTools, setParallelTools] = useState(true)
+  const [temperature, setTemperature] = useState('')
+
+  const title = {
+    persistent: 'Add persistent endpoint',
+    browser: 'Add browser endpoint',
+    embedding: 'Add embedding endpoint',
+  }[type]
+
+  const handleSubmit = () => {
+    onSubmit({
+      key,
+      model,
+      api_base: apiBase,
+      browser_base_url: apiBase,
+      max_output_tokens: maxTokens,
+      supportsVision,
+      supportsToolChoice: supportsTools,
+      useParallelToolCalls: parallelTools,
+      temperature,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <button onClick={onClose} className={button.icon}>
+            <X className="size-5" />
+          </button>
+        </div>
+        <p className="text-sm text-slate-500 mt-1">{providerName}</p>
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-500">Endpoint key</label>
+              <input value={key} onChange={(event) => setKey(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Model identifier</label>
+              <input value={model} onChange={(event) => setModel(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+            </div>
+            {(type === 'persistent' || type === 'embedding') && (
+              <div>
+                <label className="text-xs text-slate-500">Temperature override</label>
+                <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+              </div>
+            )}
+            {type === 'browser' && (
+              <div>
+                <label className="text-xs text-slate-500">Max output tokens</label>
+                <input type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="Default" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+              </div>
+            )}
+            <div className="md:col-span-2">
+              <label className="text-xs text-slate-500">API base URL</label>
+              <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://api.example.com/v1" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-4 text-sm">
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+              Vision
+            </label>
+            {type !== 'embedding' && (
+              <>
+                <label className="inline-flex items-center gap-2">
+                  <input type="checkbox" checked={supportsTools} onChange={(event) => setSupportsTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+                  Tool choice
+                </label>
+                <label className="inline-flex items-center gap-2">
+                  <input type="checkbox" checked={parallelTools} onChange={(event) => setParallelTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+                  Parallel calls
+                </label>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <button className={button.secondary} onClick={onClose}>Cancel</button>
+          <button className={button.primary} onClick={handleSubmit} disabled={!key || !model}>
+            <Plus className="size-4" /> Add endpoint
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TierCard({
   tier,
-  scope,
   onMove,
   onRemove,
   onAddEndpoint,
@@ -244,7 +593,6 @@ function TierCard({
   onRemoveEndpoint,
 }: {
   tier: Tier
-  scope: TierScope
   onMove: (direction: 'up' | 'down') => void
   onRemove: () => void
   onAddEndpoint: () => void
@@ -320,8 +668,8 @@ function RangeSection({
   onMoveTier: (tierId: string, direction: 'up' | 'down') => void
   onRemoveTier: (tierId: string) => void
   onAddEndpoint: (tier: Tier) => void
-  onUpdateEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number) => void
-  onRemoveEndpoint: (tier: Tier, tierEndpointId: string) => void
+  onUpdateEndpointWeight: (tierEndpointId: string, weight: number) => void
+  onRemoveEndpoint: (tierEndpointId: string) => void
 }) {
   const standardTiers = tiers.filter((tier) => !tier.premium).sort((a, b) => a.order - b.order)
   const premiumTiers = tiers.filter((tier) => tier.premium).sort((a, b) => a.order - b.order)
@@ -356,16 +704,15 @@ function RangeSection({
           </div>
           {standardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard tiers.</p>}
           {standardTiers.map((tier) => (
-            <TierCard
-              key={tier.id}
-              tier={tier}
-              scope="persistent"
-              onMove={(direction) => onMoveTier(tier.id, direction)}
-              onRemove={() => onRemoveTier(tier.id)}
-              onAddEndpoint={() => onAddEndpoint(tier)}
-              onUpdateEndpointWeight={(tierEndpointId, weight) => onUpdateEndpointWeight(tier, tierEndpointId, weight)}
-              onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tier, tierEndpointId)}
-            />
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                onMove={(direction) => onMoveTier(tier.id, direction)}
+                onRemove={() => onRemoveTier(tier.id)}
+                onAddEndpoint={() => onAddEndpoint(tier)}
+                onUpdateEndpointWeight={(tierEndpointId, weight) => onUpdateEndpointWeight(tierEndpointId, weight)}
+                onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+              />
           ))}
         </div>
         <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
@@ -377,16 +724,15 @@ function RangeSection({
           </div>
           {premiumTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers.</p>}
           {premiumTiers.map((tier) => (
-            <TierCard
-              key={tier.id}
-              tier={tier}
-              scope="persistent"
-              onMove={(direction) => onMoveTier(tier.id, direction)}
-              onRemove={() => onRemoveTier(tier.id)}
-              onAddEndpoint={() => onAddEndpoint(tier)}
-              onUpdateEndpointWeight={(tierEndpointId, weight) => onUpdateEndpointWeight(tier, tierEndpointId, weight)}
-              onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tier, tierEndpointId)}
-            />
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                onMove={(direction) => onMoveTier(tier.id, direction)}
+                onRemove={() => onRemoveTier(tier.id)}
+                onAddEndpoint={() => onAddEndpoint(tier)}
+                onUpdateEndpointWeight={(tierEndpointId, weight) => onUpdateEndpointWeight(tierEndpointId, weight)}
+                onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+              />
           ))}
         </div>
       </div>
@@ -430,6 +776,105 @@ export function LlmConfigScreen() {
     }
   }
 
+  const promptForKey = (message: string) => {
+    const value = window.prompt(message)
+    if (!value) return null
+    return value.trim()
+  }
+
+  const handleProviderRotateKey = (providerId: string) => {
+    const next = promptForKey('Enter the new admin API key')
+    if (!next) return
+    runMutation(() => llmApi.updateProvider(providerId, { api_key: next }), 'API key updated')
+  }
+
+  const handleProviderClearKey = (providerId: string) => {
+    runMutation(() => llmApi.updateProvider(providerId, { clear_api_key: true }), 'Stored API key cleared')
+  }
+
+  const handleProviderToggle = (providerId: string, enabled: boolean) => {
+    runMutation(() => llmApi.updateProvider(providerId, { enabled }), enabled ? 'Provider enabled' : 'Provider disabled')
+  }
+
+  const parseNumber = (value?: string) => {
+    if (value === undefined) return undefined
+    const trimmed = value.trim()
+    if (!trimmed) return undefined
+    const parsed = Number(trimmed)
+    return Number.isNaN(parsed) ? undefined : parsed
+  }
+
+  const handleProviderAddEndpoint = (
+    providerId: string,
+    type: llmApi.ProviderEndpoint['type'],
+    values: EndpointFormValues & { key: string },
+  ) => {
+    const kind: 'persistent' | 'browser' | 'embedding' = type === 'browser' ? 'browser' : type === 'embedding' ? 'embedding' : 'persistent'
+    const payload: Record<string, unknown> = {
+      provider_id: providerId,
+      key: values.key,
+    }
+    if (type === 'browser') {
+      payload.browser_model = values.model
+      payload.model = values.model
+      payload.browser_base_url = values.browser_base_url || values.api_base || ''
+      const maxTokens = parseNumber(values.max_output_tokens)
+      if (maxTokens !== undefined) payload.max_output_tokens = maxTokens
+      payload.supports_vision = Boolean(values.supportsVision)
+      payload.enabled = true
+    } else if (type === 'embedding') {
+      payload.model = values.model
+      payload.litellm_model = values.model
+      payload.api_base = values.api_base || ''
+      payload.enabled = true
+    } else {
+      payload.model = values.model
+      payload.litellm_model = values.model
+      payload.api_base = values.api_base || ''
+      const temp = parseNumber(values.temperature)
+      payload.temperature_override = temp ?? null
+      payload.supports_tool_choice = values.supportsToolChoice ?? true
+      payload.use_parallel_tool_calls = values.useParallelToolCalls ?? true
+      payload.supports_vision = values.supportsVision ?? false
+      payload.enabled = true
+    }
+    runMutation(() => llmApi.createEndpoint(kind, payload), 'Endpoint added')
+  }
+
+  const handleProviderSaveEndpoint = (endpoint: ProviderEndpointCard, values: EndpointFormValues) => {
+    const kind: 'persistent' | 'browser' | 'embedding' = endpoint.type === 'browser' ? 'browser' : endpoint.type === 'embedding' ? 'embedding' : 'persistent'
+    const payload: Record<string, unknown> = {}
+    if (values.model) {
+      payload.model = values.model
+      if (kind === 'browser') payload.browser_model = values.model
+      if (kind !== 'browser') payload.litellm_model = values.model
+    }
+    if (values.api_base) {
+      payload.api_base = values.api_base
+      if (kind === 'browser') payload.browser_base_url = values.api_base
+    }
+    if (values.browser_base_url) {
+      payload.browser_base_url = values.browser_base_url
+    }
+    if (kind === 'browser' && values.max_output_tokens !== undefined) {
+      const parsed = parseNumber(values.max_output_tokens)
+      payload.max_output_tokens = parsed ?? null
+    }
+    if (kind !== 'browser' && values.temperature !== undefined) {
+      const parsed = parseNumber(values.temperature)
+      payload.temperature_override = parsed ?? null
+    }
+    if (values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
+    if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
+    if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
+    runMutation(() => llmApi.updateEndpoint(kind, endpoint.id, payload), 'Endpoint updated')
+  }
+
+  const handleProviderDeleteEndpoint = (endpoint: ProviderEndpointCard) => {
+    const kind: 'persistent' | 'browser' | 'embedding' = endpoint.type === 'browser' ? 'browser' : endpoint.type === 'embedding' ? 'embedding' : 'persistent'
+    runMutation(() => llmApi.deleteEndpoint(kind, endpoint.id), 'Endpoint removed')
+  }
+
   const handleRangeUpdate = (rangeId: string, field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => {
     const payload: Record<string, string | number | null> = {}
     payload[field] = value
@@ -448,7 +893,7 @@ export function LlmConfigScreen() {
   const handleTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }))
   const handleTierRemove = (tierId: string) => runMutation(() => llmApi.deletePersistentTier(tierId), 'Tier removed')
 
-  const handleTierEndpointWeight = (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => {
+  const handleTierEndpointWeight = (tierEndpointId: string, weight: number, scope: TierScope) => {
     if (scope === 'browser') {
       return runMutation(() => llmApi.updateBrowserTierEndpoint(tierEndpointId, { weight }))
     }
@@ -529,43 +974,18 @@ export function LlmConfigScreen() {
       >
         <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
           {providers.map((provider) => (
-            <article key={provider.id} className="rounded-2xl border border-slate-200/80 bg-white">
-              <div className="flex items-center justify-between p-4">
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900/90">{provider.name}</h3>
-                  <p className="text-xs text-slate-500">{provider.endpoints.length} endpoints</p>
-                </div>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/80 px-3 py-1 text-xs font-medium text-emerald-700">
-                  <ShieldCheck className="size-3.5" /> {provider.status}
-                </span>
-              </div>
-              <div className="border-t border-slate-200/80 p-4 space-y-3">
-                <dl className="space-y-3 text-sm text-slate-600">
-                  <div>
-                    <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><KeyRound className="size-4" /> Env fallback</dt>
-                    <dd className="font-medium text-slate-900/90 pl-6">{provider.fallback}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs uppercase tracking-wide text-slate-400">Backend</dt>
-                    <dd className="font-medium text-slate-900/90">{provider.backend}</dd>
-                  </div>
-                </dl>
-                <div className="border-t border-slate-200/80 pt-4 space-y-2">
-                  {provider.endpoints.length === 0 && <p className="text-sm text-slate-500">No endpoints linked.</p>}
-                  {provider.endpoints.map((endpoint) => (
-                    <div key={endpoint.id} className="rounded-lg border border-slate-200 px-3 py-2 text-sm flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-slate-900/90">{endpoint.name}</p>
-                        <p className="text-xs text-slate-500">{endpoint.type}</p>
-                      </div>
-                      <span className={`text-xs font-semibold ${endpoint.enabled ? 'text-emerald-600' : 'text-slate-500'}`}>
-                        {endpoint.enabled ? 'Enabled' : 'Disabled'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </article>
+            <ProviderCard
+              key={provider.id}
+              provider={provider}
+              handlers={{
+                onRotateKey: handleProviderRotateKey,
+                onToggleEnabled: handleProviderToggle,
+                onAddEndpoint: handleProviderAddEndpoint,
+                onSaveEndpoint: handleProviderSaveEndpoint,
+                onDeleteEndpoint: handleProviderDeleteEndpoint,
+                onClearKey: handleProviderClearKey,
+              }}
+            />
           ))}
           {providers.length === 0 && (
             <div className="col-span-2">
@@ -603,8 +1023,8 @@ export function LlmConfigScreen() {
               onMoveTier={(tierId, direction) => handleTierMove(tierId, direction)}
               onRemoveTier={handleTierRemove}
               onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
-              onUpdateEndpointWeight={(tier, tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'persistent')}
-              onRemoveEndpoint={(tier, tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'persistent')}
+              onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tierEndpointId, weight, 'persistent')}
+              onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'persistent')}
             />
           ))}
           {persistentStructures.ranges.length === 0 && (
@@ -636,11 +1056,10 @@ export function LlmConfigScreen() {
               <TierCard
                 key={tier.id}
                 tier={tier}
-                scope="browser"
                 onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
                 onRemove={() => handleBrowserTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'browser')}
+                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tierEndpointId, weight, 'browser')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
               />
             ))}
@@ -656,11 +1075,10 @@ export function LlmConfigScreen() {
               <TierCard
                 key={tier.id}
                 tier={tier}
-                scope="browser"
                 onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
                 onRemove={() => handleBrowserTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'browser')}
+                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tierEndpointId, weight, 'browser')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
               />
             ))}
@@ -709,11 +1127,10 @@ export function LlmConfigScreen() {
               <TierCard
                 key={tier.id}
                 tier={tier}
-                scope="embedding"
                 onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
                 onRemove={() => handleEmbeddingTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
-                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'embedding')}
+                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tierEndpointId, weight, 'embedding')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'embedding')}
               />
             ))}
