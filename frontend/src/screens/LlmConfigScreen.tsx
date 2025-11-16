@@ -20,7 +20,8 @@ import {
   Search,
   Layers,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
@@ -103,6 +104,106 @@ type EndpointFormValues = {
   supportsVision?: boolean
 }
 
+const actionKey = (...parts: Array<string | number | null | undefined>) => parts.filter(Boolean).join(':')
+
+type ActionToast = {
+  id: string
+  intent: 'success' | 'error'
+  message: string
+  context?: string
+}
+
+type MutationOptions = {
+  label?: string
+  successMessage?: string
+  context?: string
+  busyKey?: string
+  rethrow?: boolean
+}
+
+type AsyncFeedback = {
+  runWithFeedback: <T>(operation: () => Promise<T>, options?: MutationOptions) => Promise<T>
+  isBusy: (key: string) => boolean
+  activeLabels: string[]
+  toasts: ActionToast[]
+  dismissToast: (id: string) => void
+}
+
+function useAsyncFeedback(): AsyncFeedback {
+  const [busyCounts, setBusyCounts] = useState<Record<string, number>>({})
+  const [labelCounts, setLabelCounts] = useState<Record<string, number>>({})
+  const [toasts, setToasts] = useState<ActionToast[]>([])
+  const toastSeqRef = useRef(0)
+
+  const adjustCounter = (setter: Dispatch<SetStateAction<Record<string, number>>>, key: string, delta: number) => {
+    if (!key) return
+    setter((prev) => {
+      const next = { ...prev }
+      next[key] = (next[key] ?? 0) + delta
+      if (next[key] <= 0) {
+        delete next[key]
+      }
+      return next
+    })
+  }
+
+  const pushToast = (toast: ActionToast) => {
+    setToasts((prev) => [...prev, toast])
+    if (toast.intent === 'success' && typeof window !== 'undefined') {
+      window.setTimeout(() => {
+        setToasts((current) => current.filter((entry) => entry.id !== toast.id))
+      }, 4000)
+    }
+  }
+
+  const runWithFeedback = async <T,>(operation: () => Promise<T>, options: MutationOptions = {}) => {
+    const { label, successMessage, context, busyKey } = options
+    if (busyKey) adjustCounter(setBusyCounts, busyKey, 1)
+    if (label) adjustCounter(setLabelCounts, label, 1)
+    try {
+      const result = await operation()
+      if (successMessage) {
+        const toast: ActionToast = {
+          id: `toast-${toastSeqRef.current += 1}`,
+          intent: 'success',
+          message: successMessage,
+          context,
+        }
+        pushToast(toast)
+      }
+      return result
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Request failed'
+      const toast: ActionToast = {
+        id: `toast-${toastSeqRef.current += 1}`,
+        intent: 'error',
+        message,
+        context,
+      }
+      pushToast(toast)
+      throw error
+    } finally {
+      if (label) adjustCounter(setLabelCounts, label, -1)
+      if (busyKey) adjustCounter(setBusyCounts, busyKey, -1)
+    }
+  }
+
+  return {
+    runWithFeedback,
+    isBusy: (key: string) => Boolean(key && busyCounts[key]),
+    activeLabels: Object.keys(labelCounts),
+    toasts,
+    dismissToast: (id: string) => setToasts((prev) => prev.filter((toast) => toast.id !== id)),
+  }
+}
+
+const modalRoot = typeof document !== 'undefined' ? document.body : null
+
+function ModalPortal({ children }: { children: ReactNode }) {
+  if (!modalRoot) return null
+  return createPortal(children, modalRoot)
+}
+
 const clampWeight = (value: number, min: number = 0, max: number = 100) => Math.max(min, Math.min(max, Math.round(value)))
 
 function rebalanceTierWeights(tier: Tier, tierEndpointId: string, desiredWeight: number) {
@@ -179,6 +280,14 @@ function distributeEvenWeights(endpointIds: string[]): Record<string, number> {
     result[id] = weights[index]
   })
   return result
+}
+
+const parseNumber = (value?: string) => {
+  if (value === undefined) return undefined
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const parsed = Number(trimmed)
+  return Number.isNaN(parsed) ? undefined : parsed
 }
 
 function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
@@ -276,12 +385,14 @@ function AddEndpointModal({
   choices,
   onAdd,
   onClose,
+  busy,
 }: {
   tier: Tier
   scope: TierScope
   choices: llmApi.EndpointChoices
-  onAdd: (endpointId: string) => void
+  onAdd: (endpointId: string) => Promise<void> | void
   onClose: () => void
+  busy?: boolean
 }) {
   const endpoints = scope === 'browser'
     ? choices.browser_endpoints
@@ -289,69 +400,87 @@ function AddEndpointModal({
       ? choices.embedding_endpoints
       : choices.persistent_endpoints
   const [selected, setSelected] = useState(endpoints[0]?.id || '')
+  const [submitting, setSubmitting] = useState(false)
+  const isSubmitting = Boolean(busy || submitting)
+
+  const handleAdd = async () => {
+    if (!selected) return
+    setSubmitting(true)
+    try {
+      await onAdd(selected)
+      onClose()
+    } catch {
+      // toast already shown
+    } finally {
+      setSubmitting(false)
+    }
+  }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Add endpoint to {tier.name}</h3>
-          <button onClick={onClose} className={button.icon}>
-            <X className="size-5" />
-          </button>
-        </div>
-        <div className="mt-4">
-          {endpoints.length === 0 ? (
-            <p className="text-sm text-slate-500">No endpoints available for this tier.</p>
-          ) : (
-            <>
-              <label className="text-sm font-medium text-slate-700">Endpoint</label>
-              <select
-                className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                value={selected}
-                onChange={(event) => setSelected(event.target.value)}
-              >
-                {endpoints.map((endpoint) => (
-                  <option key={endpoint.id} value={endpoint.id}>
-                    {endpoint.label || endpoint.model}
-                  </option>
-                ))}
-              </select>
-            </>
-          )}
-        </div>
-        <div className="mt-6 flex justify-end gap-3">
-          <button type="button" className={button.secondary} onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={button.primary}
-            onClick={() => {
-              if (selected) onAdd(selected)
-              onClose()
-            }}
-            disabled={!selected}
-          >
-            <Plus className="size-4" /> Add endpoint
-          </button>
+    <ModalPortal>
+      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Add endpoint to {tier.name}</h3>
+            <button onClick={onClose} className={button.icon}>
+              <X className="size-5" />
+            </button>
+          </div>
+          <div className="mt-4">
+            {endpoints.length === 0 ? (
+              <p className="text-sm text-slate-500">No endpoints available for this tier.</p>
+            ) : (
+              <>
+                <label className="text-sm font-medium text-slate-700">Endpoint</label>
+                <select
+                  className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  value={selected}
+                  onChange={(event) => setSelected(event.target.value)}
+                >
+                  {endpoints.map((endpoint) => (
+                    <option key={endpoint.id} value={endpoint.id}>
+                      {endpoint.label || endpoint.model}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
+          <div className="mt-6 flex justify-end gap-3">
+            <button type="button" className={button.secondary} onClick={onClose} disabled={isSubmitting}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={button.primary}
+              onClick={handleAdd}
+              disabled={!selected || isSubmitting}
+            >
+              {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add endpoint
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </ModalPortal>
   )
 }
 
 type ProviderCardHandlers = {
-  onRotateKey: (providerId: string) => void
-  onToggleEnabled: (providerId: string, enabled: boolean) => void
-  onAddEndpoint: (providerId: string, type: llmApi.ProviderEndpoint['type'], values: EndpointFormValues & { key: string }) => void
-  onSaveEndpoint: (endpoint: ProviderEndpointCard, values: EndpointFormValues) => void
-  onDeleteEndpoint: (endpoint: ProviderEndpointCard) => void
-  onClearKey: (providerId: string) => void
+  onRotateKey: (provider: ProviderCardData) => Promise<void>
+  onToggleEnabled: (provider: ProviderCardData, enabled: boolean) => Promise<void>
+  onAddEndpoint: (provider: ProviderCardData, type: llmApi.ProviderEndpoint['type'], values: EndpointFormValues & { key: string }) => Promise<void>
+  onSaveEndpoint: (endpoint: ProviderEndpointCard, values: EndpointFormValues) => Promise<void>
+  onDeleteEndpoint: (endpoint: ProviderEndpointCard) => Promise<void>
+  onClearKey: (provider: ProviderCardData) => Promise<void>
 }
 
-function ProviderCard({ provider, handlers }: { provider: ProviderCardData; handlers: ProviderCardHandlers }) {
+function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean }) {
   const [activeTab, setActiveTab] = useState<'endpoints' | 'settings'>('endpoints')
   const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null)
   const [addingType, setAddingType] = useState<llmApi.ProviderEndpoint['type'] | null>(null)
+  const rotateBusy = isBusy(actionKey('provider', provider.id, 'rotate'))
+  const clearBusy = isBusy(actionKey('provider', provider.id, 'clear'))
+  const toggleBusy = isBusy(actionKey('provider', provider.id, 'toggle'))
+  const creatingEndpoint = isBusy(actionKey('provider', provider.id, 'create-endpoint'))
 
   return (
     <article className="rounded-2xl border border-slate-200/80 bg-white">
@@ -395,6 +524,8 @@ function ProviderCard({ provider, handlers }: { provider: ProviderCardData; hand
             <div className="space-y-3">
               {provider.endpoints.map((endpoint) => {
                 const isEditing = editingEndpointId === endpoint.id
+                const deleteBusy = isBusy(actionKey('endpoint', endpoint.id, 'delete'))
+                const endpointSaving = isBusy(actionKey('endpoint', endpoint.id, 'update'))
                 return (
                   <div key={endpoint.id} className="rounded-lg border border-slate-200 p-3">
                     <div className="flex items-center justify-between">
@@ -406,18 +537,23 @@ function ProviderCard({ provider, handlers }: { provider: ProviderCardData; hand
                         <button className={button.muted} onClick={() => setEditingEndpointId(isEditing ? null : endpoint.id)}>
                           {isEditing ? 'Close' : 'Edit'}
                         </button>
-                        <button className={button.iconDanger} onClick={() => handlers.onDeleteEndpoint(endpoint)}>
-                          <Trash2 className="size-4" />
+                        <button className={button.iconDanger} onClick={() => handlers.onDeleteEndpoint(endpoint).catch(() => {})} disabled={deleteBusy}>
+                          {deleteBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
                         </button>
                       </div>
                     </div>
                     {isEditing && (
                       <EndpointEditor
                         endpoint={endpoint}
+                        saving={endpointSaving}
                         onCancel={() => setEditingEndpointId(null)}
-                        onSave={(values) => {
-                          handlers.onSaveEndpoint(endpoint, values)
-                          setEditingEndpointId(null)
+                        onSave={async (values) => {
+                          try {
+                            await handlers.onSaveEndpoint(endpoint, values)
+                            setEditingEndpointId(null)
+                          } catch {
+                            // toast already shown
+                          }
                         }}
                       />
                     )}
@@ -452,14 +588,14 @@ function ProviderCard({ provider, handlers }: { provider: ProviderCardData; hand
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button className={button.primary} onClick={() => handlers.onRotateKey(provider.id)}>
-                <KeyRound className="size-4" /> Rotate key
+              <button className={button.primary} onClick={() => handlers.onRotateKey(provider).catch(() => {})} disabled={rotateBusy}>
+                {rotateBusy ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />} Rotate key
               </button>
-              <button className={button.secondary} onClick={() => handlers.onClearKey(provider.id)}>
-                Clear key
+              <button className={button.secondary} onClick={() => handlers.onClearKey(provider).catch(() => {})} disabled={clearBusy}>
+                {clearBusy ? <Loader2 className="size-4 animate-spin" /> : null} Clear key
               </button>
-              <button className={button.muted} onClick={() => handlers.onToggleEnabled(provider.id, !provider.enabled)}>
-                {provider.enabled ? 'Disable provider' : 'Enable provider'}
+              <button className={button.muted} onClick={() => handlers.onToggleEnabled(provider, !provider.enabled).catch(() => {})} disabled={toggleBusy}>
+                {toggleBusy ? 'Working…' : provider.enabled ? 'Disable provider' : 'Enable provider'}
               </button>
             </div>
           </div>
@@ -469,10 +605,15 @@ function ProviderCard({ provider, handlers }: { provider: ProviderCardData; hand
         <AddProviderEndpointModal
           providerName={provider.name}
           type={addingType}
+          busy={creatingEndpoint}
           onClose={() => setAddingType(null)}
-          onSubmit={(values) => {
-            handlers.onAddEndpoint(provider.id, addingType!, values)
-            setAddingType(null)
+          onSubmit={async (values) => {
+            try {
+              await handlers.onAddEndpoint(provider, addingType!, values)
+              setAddingType(null)
+            } catch {
+              // toast already shown
+            }
           }}
         />
       )}
@@ -482,11 +623,12 @@ function ProviderCard({ provider, handlers }: { provider: ProviderCardData; hand
 
 type EndpointEditorProps = {
   endpoint: ProviderEndpointCard
-  onSave: (values: EndpointFormValues) => void
+  saving?: boolean
+  onSave: (values: EndpointFormValues) => Promise<void> | void
   onCancel: () => void
 }
 
-function EndpointEditor({ endpoint, onSave, onCancel }: EndpointEditorProps) {
+function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorProps) {
   const [model, setModel] = useState(endpoint.name)
   const [temperature, setTemperature] = useState(endpoint.temperature?.toString() ?? '')
   const [apiBase, setApiBase] = useState(endpoint.api_base || endpoint.browser_base_url || '')
@@ -555,8 +697,10 @@ function EndpointEditor({ endpoint, onSave, onCancel }: EndpointEditorProps) {
         )}
       </div>
       <div className="flex justify-end gap-2">
-        <button className={button.secondary} onClick={onCancel}>Cancel</button>
-        <button className={button.primary} onClick={handleSave}>Save changes</button>
+        <button className={button.secondary} onClick={onCancel} disabled={saving}>Cancel</button>
+        <button className={button.primary} onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null} Save changes
+        </button>
       </div>
     </div>
   )
@@ -565,11 +709,12 @@ function EndpointEditor({ endpoint, onSave, onCancel }: EndpointEditorProps) {
 type AddProviderEndpointModalProps = {
   providerName: string
   type: llmApi.ProviderEndpoint['type']
-  onSubmit: (values: EndpointFormValues & { key: string }) => void
+  busy?: boolean
+  onSubmit: (values: EndpointFormValues & { key: string }) => Promise<void> | void
   onClose: () => void
 }
 
-function AddProviderEndpointModal({ providerName, type, onSubmit, onClose }: AddProviderEndpointModalProps) {
+function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy }: AddProviderEndpointModalProps) {
   const [key, setKey] = useState('')
   const [model, setModel] = useState('')
   const [apiBase, setApiBase] = useState('')
@@ -578,6 +723,8 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose }: Add
   const [supportsTools, setSupportsTools] = useState(true)
   const [parallelTools, setParallelTools] = useState(true)
   const [temperature, setTemperature] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const isSubmitting = busy || submitting
 
   const title = {
     persistent: 'Add persistent endpoint',
@@ -585,28 +732,34 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose }: Add
     embedding: 'Add embedding endpoint',
   }[type]
 
-  const handleSubmit = () => {
-    onSubmit({
-      key,
-      model,
-      api_base: apiBase,
-      browser_base_url: apiBase,
-      max_output_tokens: maxTokens,
-      supportsVision,
-      supportsToolChoice: supportsTools,
-      useParallelToolCalls: parallelTools,
-      temperature,
-    })
+  const handleSubmit = async () => {
+    setSubmitting(true)
+    try {
+      await onSubmit({
+        key,
+        model,
+        api_base: apiBase,
+        browser_base_url: apiBase,
+        max_output_tokens: maxTokens,
+        supportsVision,
+        supportsToolChoice: supportsTools,
+        useParallelToolCalls: parallelTools,
+        temperature,
+      })
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <button onClick={onClose} className={button.icon}>
-            <X className="size-5" />
-          </button>
+    <ModalPortal>
+      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
+        <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            <button onClick={onClose} className={button.icon}>
+              <X className="size-5" />
+            </button>
         </div>
         <p className="text-sm text-slate-500 mt-1">{providerName}</p>
         <div className="mt-4 space-y-3">
@@ -656,12 +809,40 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose }: Add
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-2">
-          <button className={button.secondary} onClick={onClose}>Cancel</button>
-          <button className={button.primary} onClick={handleSubmit} disabled={!key || !model}>
-            <Plus className="size-4" /> Add endpoint
+          <button className={button.secondary} onClick={onClose} disabled={isSubmitting}>Cancel</button>
+          <button className={button.primary} onClick={handleSubmit} disabled={!key || !model || isSubmitting}>
+            {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add endpoint
           </button>
         </div>
       </div>
+      </div>
+    </ModalPortal>
+  )
+}
+
+function ToastStack({ toasts, onDismiss }: { toasts: ActionToast[]; onDismiss: (id: string) => void }) {
+  if (toasts.length === 0) return null
+  return (
+    <div className="space-y-2">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`flex items-start justify-between gap-3 rounded-lg border px-4 py-2 text-sm ${toast.intent === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-800'}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-start gap-2">
+            {toast.intent === 'success' ? <ShieldCheck className="size-4" /> : <AlertCircle className="size-4" />}
+            <div>
+              {toast.context ? <p className="font-semibold">{toast.context}</p> : null}
+              <p>{toast.message}</p>
+            </div>
+          </div>
+          <button className={button.icon} onClick={() => onDismiss(toast.id)} aria-label="Dismiss notification">
+            <X className="size-4" />
+          </button>
+        </div>
+      ))}
     </div>
   )
 }
@@ -678,6 +859,7 @@ function TierCard({
   onStageEndpointWeight,
   onCommitEndpointWeights,
   onRemoveEndpoint,
+  isActionBusy,
 }: {
   tier: Tier
   pendingWeights: Record<string, number>
@@ -690,6 +872,7 @@ function TierCard({
   onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
   onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
   onRemoveEndpoint: (tierEndpointId: string) => void
+  isActionBusy: (key: string) => boolean
 }) {
   const headerIcon = tier.premium ? <ShieldCheck className="size-4 text-emerald-700" /> : <Layers className="size-4 text-slate-500" />
   const canAdjustWeights = tier.endpoints.length > 1
@@ -698,26 +881,48 @@ function TierCard({
     if (!canAdjustWeights) return
     onCommitEndpointWeights(tier, scope)
   }
+  const moveBusy = isActionBusy(actionKey(scope, tier.id, 'move'))
+  const removeBusy = isActionBusy(actionKey(scope, tier.id, 'remove'))
+  const addBusy = isActionBusy(actionKey(scope, tier.id, 'attach-endpoint'))
+  const removingEndpoint = tier.endpoints.some((endpoint) => isActionBusy(actionKey('tier-endpoint', endpoint.id, 'remove')))
+
+  const inlineStatus = (() => {
+    if (isSaving) {
+      return { icon: <Loader2 className="size-3 animate-spin" aria-hidden />, text: 'Saving…', className: 'text-blue-500' }
+    }
+    if (isDirty) {
+      return { icon: <Clock3 className="size-3 animate-pulse" aria-hidden />, text: 'Pending…', className: 'text-amber-500' }
+    }
+    if (addBusy) {
+      return { icon: <Loader2 className="size-3 animate-spin" aria-hidden />, text: 'Adding endpoint…', className: 'text-blue-500' }
+    }
+    if (removingEndpoint) {
+      return { icon: <Loader2 className="size-3 animate-spin" aria-hidden />, text: 'Removing endpoint…', className: 'text-rose-500' }
+    }
+    return null
+  })()
   return (
     <div className={`rounded-xl border ${tier.premium ? 'border-emerald-200' : 'border-slate-200'} bg-white`}>
       <div className="flex items-center justify-between p-4 text-xs uppercase tracking-wide text-slate-500">
         <span className="flex items-center gap-2">{headerIcon} {tier.name}</span>
         <div className="flex items-center gap-1 text-xs">
-          <button className={button.icon} type="button" onClick={() => onMove('up')}><ChevronUp className="size-4" /></button>
-          <button className={button.icon} type="button" onClick={() => onMove('down')}><ChevronDown className="size-4" /></button>
-          <button className={button.iconDanger} type="button" onClick={onRemove}><Trash2 className="size-4" /></button>
+          <button className={button.icon} type="button" onClick={() => onMove('up')} disabled={moveBusy}>
+            {moveBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronUp className="size-4" />}
+          </button>
+          <button className={button.icon} type="button" onClick={() => onMove('down')} disabled={moveBusy}>
+            {moveBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronDown className="size-4" />}
+          </button>
+          <button className={button.iconDanger} type="button" onClick={onRemove} disabled={removeBusy}>
+            {removeBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+          </button>
         </div>
       </div>
       <div className="space-y-3 px-4 pb-4">
         <div className="flex items-center justify-between text-[13px] text-slate-500">
           <span>Weighted endpoints</span>
-          {isSaving ? (
-            <span className="flex items-center gap-1 text-xs text-blue-500" aria-live="polite">
-              <Loader2 className="size-3 animate-spin" aria-hidden /> Saving…
-            </span>
-          ) : isDirty ? (
-            <span className="flex items-center gap-1 text-xs text-amber-500" aria-live="polite">
-              <Clock3 className="size-3 animate-pulse" aria-hidden /> Pending…
+          {inlineStatus ? (
+            <span className={`flex items-center gap-1 text-xs ${inlineStatus.className}`} aria-live="polite">
+              {inlineStatus.icon} {inlineStatus.text}
             </span>
           ) : null}
         </div>
@@ -766,8 +971,8 @@ function TierCard({
           )}
         </div>
         <div className="pt-2">
-          <button type="button" className={button.muted} onClick={onAddEndpoint}>
-            <PlusCircle className="size-3" /> Add endpoint
+          <button type="button" className={button.muted} onClick={onAddEndpoint} disabled={addBusy}>
+            {addBusy ? <Loader2 className="size-3 animate-spin" /> : <PlusCircle className="size-3" />} Add endpoint
           </button>
         </div>
       </div>
@@ -790,10 +995,11 @@ function RangeSection({
   pendingWeights,
   savingTierIds,
   dirtyTierIds,
+  isActionBusy,
 }: {
   range: TokenRange
   tiers: Tier[]
-  onUpdate: (field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => void
+  onUpdate: (field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => Promise<void> | void
   onRemove: () => void
   onAddTier: (isPremium: boolean) => void
   onMoveTier: (tierId: string, direction: 'up' | 'down') => void
@@ -805,27 +1011,96 @@ function RangeSection({
   pendingWeights: Record<string, number>
   savingTierIds: Set<string>
   dirtyTierIds: Set<string>
+  isActionBusy: (key: string) => boolean
 }) {
   const standardTiers = tiers.filter((tier) => !tier.premium).sort((a, b) => a.order - b.order)
   const premiumTiers = tiers.filter((tier) => tier.premium).sort((a, b) => a.order - b.order)
+  const [nameInput, setNameInput] = useState(range.name)
+  const [minInput, setMinInput] = useState(range.min_tokens.toString())
+  const [maxInput, setMaxInput] = useState(range.max_tokens?.toString() ?? '')
+
+  useEffect(() => {
+    setNameInput(range.name)
+    setMinInput(range.min_tokens.toString())
+    setMaxInput(range.max_tokens?.toString() ?? '')
+  }, [range])
+
+  const nameBusy = isActionBusy(actionKey('range', range.id, 'name'))
+  const minBusy = isActionBusy(actionKey('range', range.id, 'min_tokens'))
+  const maxBusy = isActionBusy(actionKey('range', range.id, 'max_tokens'))
+  const removeBusy = isActionBusy(actionKey('range', range.id, 'remove'))
+
+  const commitField = (field: 'name' | 'min_tokens' | 'max_tokens') => {
+    if (field === 'name') {
+      const trimmed = nameInput.trim()
+      if (!trimmed || trimmed === range.name) {
+        setNameInput(range.name)
+        return
+      }
+      Promise.resolve(onUpdate('name', trimmed)).catch(() => setNameInput(range.name))
+      return
+    }
+    if (field === 'min_tokens') {
+      const parsed = Number(minInput)
+      if (Number.isNaN(parsed)) {
+        setMinInput(range.min_tokens.toString())
+        return
+      }
+      if (parsed === range.min_tokens) return
+      Promise.resolve(onUpdate('min_tokens', parsed)).catch(() => setMinInput(range.min_tokens.toString()))
+      return
+    }
+    const parsed = maxInput === '' ? null : Number(maxInput)
+    if (maxInput !== '' && Number.isNaN(parsed as number)) {
+      setMaxInput(range.max_tokens?.toString() ?? '')
+      return
+    }
+    if (parsed === range.max_tokens) return
+    Promise.resolve(onUpdate('max_tokens', parsed)).catch(() => setMaxInput(range.max_tokens?.toString() ?? ''))
+  }
+
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white">
       <div className="p-4 space-y-3">
         <div className="grid grid-cols-12 items-center gap-3 text-sm">
           <div className="col-span-12 sm:col-span-3 relative">
             <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Range Name</label>
-            <input type="text" value={range.name} onChange={(event) => onUpdate('name', event.target.value)} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+            <input
+              type="text"
+              value={nameInput}
+              disabled={nameBusy}
+              onChange={(event) => setNameInput(event.target.value)}
+              onBlur={() => commitField('name')}
+              className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            />
           </div>
           <div className="col-span-6 sm:col-span-3 relative">
             <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Min Tokens</label>
-            <input type="number" value={range.min_tokens} onChange={(event) => onUpdate('min_tokens', parseInt(event.target.value, 10))} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+            <input
+              type="number"
+              value={minInput}
+              disabled={minBusy}
+              onChange={(event) => setMinInput(event.target.value)}
+              onBlur={() => commitField('min_tokens')}
+              className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            />
           </div>
           <div className="col-span-6 sm:col-span-3 relative">
             <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Max Tokens</label>
-            <input type="number" value={range.max_tokens ?? ''} placeholder="Infinity" onChange={(event) => onUpdate('max_tokens', event.target.value === '' ? null : parseInt(event.target.value, 10))} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+            <input
+              type="number"
+              value={maxInput}
+              disabled={maxBusy}
+              placeholder="Infinity"
+              onChange={(event) => setMaxInput(event.target.value)}
+              onBlur={() => commitField('max_tokens')}
+              className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            />
           </div>
           <div className="col-span-12 sm:col-span-3 text-right">
-            <button type="button" className={button.danger} onClick={onRemove}><Trash2 className="size-4" /> Remove Range</button>
+            <button type="button" className={button.danger} onClick={onRemove} disabled={removeBusy}>
+              {removeBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Remove Range
+            </button>
           </div>
         </div>
       </div>
@@ -852,6 +1127,7 @@ function RangeSection({
               onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
               onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
               onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+              isActionBusy={isActionBusy}
             />
           ))}
         </div>
@@ -877,6 +1153,7 @@ function RangeSection({
               onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
               onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
               onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+              isActionBusy={isActionBusy}
             />
           ))}
         </div>
@@ -887,13 +1164,11 @@ function RangeSection({
 
 export function LlmConfigScreen() {
   const queryClient = useQueryClient()
-  const [banner, setBanner] = useState<string | null>(null)
-  const [errorBanner, setErrorBanner] = useState<string | null>(null)
+  const { runWithFeedback, isBusy, activeLabels, toasts, dismissToast } = useAsyncFeedback()
   const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
   const [savingTierIds, setSavingTierIds] = useState<Set<string>>(new Set())
   const [dirtyTierIds, setDirtyTierIds] = useState<Set<string>>(new Set())
-  const [globalActionLabel, setGlobalActionLabel] = useState<string | null>(null)
   const fixingSinglesRef = useRef(false)
   const stagedWeightsRef = useRef<Record<string, { scope: TierScope; updates: { id: string; weight: number }[] }>>({})
 
@@ -969,9 +1244,21 @@ export function LlmConfigScreen() {
     }
 
     fixingSinglesRef.current = true
+    const affectedIds = Object.keys(pending)
     setPendingWeights((prev) => ({ ...prev, ...pending }))
-    Promise.all(operations)
-      .then(() => invalidateOverview())
+    runMutation(() => Promise.all(operations), {
+      label: 'Auto-fixing weights…',
+      busyKey: actionKey('auto-fix'),
+      context: 'LLM configuration',
+      rethrow: true,
+    })
+      .catch(() => {
+        setPendingWeights((prev) => {
+          const next = { ...prev }
+          affectedIds.forEach((id) => delete next[id])
+          return next
+        })
+      })
       .finally(() => {
         fixingSinglesRef.current = false
       })
@@ -979,24 +1266,16 @@ export function LlmConfigScreen() {
 
   const invalidateOverview = () => queryClient.invalidateQueries({ queryKey: ['llm-overview'] })
 
-  const runMutation = async (action: () => Promise<unknown>, success?: string, label?: string) => {
+  const runMutation = async <T,>(action: () => Promise<T>, options?: MutationOptions) => {
+    const { rethrow, ...feedbackOptions } = options ?? {}
     try {
-      if (label) setGlobalActionLabel(label)
-      await action()
-      await invalidateOverview()
-      if (success) {
-        setBanner(success)
-        setErrorBanner(null)
-      }
+      await runWithFeedback(async () => {
+        const result = await action()
+        await invalidateOverview()
+        return result
+      }, feedbackOptions)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Request failed'
-      setErrorBanner(message)
-      setBanner(null)
-    }
-    finally {
-      if (label) {
-        setGlobalActionLabel((current) => (current === label ? null : current))
-      }
+      if (rethrow) throw error
     }
   }
 
@@ -1006,40 +1285,48 @@ export function LlmConfigScreen() {
     return value.trim()
   }
 
-  const handleProviderRotateKey = (providerId: string) => {
+  const handleProviderRotateKey = (provider: ProviderCardData) => {
     const next = promptForKey('Enter the new admin API key')
-    if (!next) return
-    runMutation(() => llmApi.updateProvider(providerId, { api_key: next }), 'API key updated', 'Rotating API key…')
+    if (!next) return Promise.resolve()
+    return runMutation(() => llmApi.updateProvider(provider.id, { api_key: next }), {
+      successMessage: 'API key updated',
+      label: 'Rotating API key…',
+      busyKey: actionKey('provider', provider.id, 'rotate'),
+      context: provider.name,
+      rethrow: true,
+    })
   }
 
-  const handleProviderClearKey = (providerId: string) => {
-    runMutation(() => llmApi.updateProvider(providerId, { clear_api_key: true }), 'Stored API key cleared', 'Clearing API key…')
+  const handleProviderClearKey = (provider: ProviderCardData) => {
+    return runMutation(() => llmApi.updateProvider(provider.id, { clear_api_key: true }), {
+      successMessage: 'Stored API key cleared',
+      label: 'Clearing API key…',
+      busyKey: actionKey('provider', provider.id, 'clear'),
+      context: provider.name,
+      rethrow: true,
+    })
   }
 
-  const handleProviderToggle = (providerId: string, enabled: boolean) => {
-    runMutation(
-      () => llmApi.updateProvider(providerId, { enabled }),
-      enabled ? 'Provider enabled' : 'Provider disabled',
-      enabled ? 'Enabling provider…' : 'Disabling provider…',
+  const handleProviderToggle = (provider: ProviderCardData, enabled: boolean) => {
+    return runMutation(
+      () => llmApi.updateProvider(provider.id, { enabled }),
+      {
+        successMessage: enabled ? 'Provider enabled' : 'Provider disabled',
+        label: enabled ? 'Enabling provider…' : 'Disabling provider…',
+        busyKey: actionKey('provider', provider.id, 'toggle'),
+        context: provider.name,
+      },
     )
   }
 
-const parseNumber = (value?: string) => {
-  if (value === undefined) return undefined
-  const trimmed = value.trim()
-  if (!trimmed) return undefined
-  const parsed = Number(trimmed)
-  return Number.isNaN(parsed) ? undefined : parsed
-}
-
   const handleProviderAddEndpoint = (
-    providerId: string,
+    provider: ProviderCardData,
     type: llmApi.ProviderEndpoint['type'],
     values: EndpointFormValues & { key: string },
   ) => {
     const kind: 'persistent' | 'browser' | 'embedding' = type === 'browser' ? 'browser' : type === 'embedding' ? 'embedding' : 'persistent'
     const payload: Record<string, unknown> = {
-      provider_id: providerId,
+      provider_id: provider.id,
       key: values.key,
     }
     if (type === 'browser') {
@@ -1066,7 +1353,13 @@ const parseNumber = (value?: string) => {
       payload.supports_vision = values.supportsVision ?? false
       payload.enabled = true
     }
-    runMutation(() => llmApi.createEndpoint(kind, payload), 'Endpoint added', 'Creating endpoint…')
+    return runMutation(() => llmApi.createEndpoint(kind, payload), {
+      successMessage: 'Endpoint added',
+      label: 'Creating endpoint…',
+      busyKey: actionKey('provider', provider.id, 'create-endpoint'),
+      context: provider.name,
+      rethrow: true,
+    })
   }
 
   const handleProviderSaveEndpoint = (endpoint: ProviderEndpointCard, values: EndpointFormValues) => {
@@ -1095,18 +1388,34 @@ const parseNumber = (value?: string) => {
     if (values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
     if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
-    runMutation(() => llmApi.updateEndpoint(kind, endpoint.id, payload), 'Endpoint updated')
+    return runMutation(() => llmApi.updateEndpoint(kind, endpoint.id, payload), {
+      successMessage: 'Endpoint updated',
+      label: 'Saving endpoint…',
+      busyKey: actionKey('endpoint', endpoint.id, 'update'),
+      context: endpoint.name,
+      rethrow: true,
+    })
   }
 
   const handleProviderDeleteEndpoint = (endpoint: ProviderEndpointCard) => {
     const kind: 'persistent' | 'browser' | 'embedding' = endpoint.type === 'browser' ? 'browser' : endpoint.type === 'embedding' ? 'embedding' : 'persistent'
-    runMutation(() => llmApi.deleteEndpoint(kind, endpoint.id), 'Endpoint removed')
+    return runMutation(() => llmApi.deleteEndpoint(kind, endpoint.id), {
+      successMessage: 'Endpoint removed',
+      label: 'Removing endpoint…',
+      busyKey: actionKey('endpoint', endpoint.id, 'delete'),
+      context: endpoint.name,
+    })
   }
 
   const handleRangeUpdate = (rangeId: string, field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => {
     const payload: Record<string, string | number | null> = {}
     payload[field] = value
-    runMutation(() => llmApi.updateTokenRange(rangeId, payload))
+    return runMutation(() => llmApi.updateTokenRange(rangeId, payload), {
+      label: 'Saving range…',
+      busyKey: actionKey('range', rangeId, field),
+      context: 'Token range',
+      rethrow: true,
+    })
   }
 
   const handleAddRange = () => {
@@ -1114,18 +1423,37 @@ const parseNumber = (value?: string) => {
     const last = sorted.at(-1)
     const baseMin = last?.max_tokens ?? 0
     const name = `Range ${sorted.length + 1}`
-    runMutation(
+    return runMutation(
       () => llmApi.createTokenRange({ name, min_tokens: baseMin, max_tokens: baseMin + 10000 }),
-      'Range added',
-      'Creating range…',
+      {
+        successMessage: 'Range added',
+        label: 'Creating range…',
+        busyKey: actionKey('range', 'create'),
+        context: name,
+      },
     )
   }
 
   const handleTierAdd = (rangeId: string, isPremium: boolean) =>
-    runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium }), 'Tier added', 'Creating tier…')
-  const handleTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }))
+    runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium }), {
+      successMessage: 'Tier added',
+      label: 'Creating tier…',
+      busyKey: actionKey('range', rangeId, isPremium ? 'add-premium-tier' : 'add-standard-tier'),
+      context: 'Persistent tier',
+    })
+  const handleTierMove = (tierId: string, direction: 'up' | 'down') =>
+    runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }), {
+      label: direction === 'up' ? 'Moving tier up…' : 'Moving tier down…',
+      busyKey: actionKey('persistent', tierId, 'move'),
+      context: 'Persistent tier',
+    })
   const handleTierRemove = (tierId: string) =>
-    runMutation(() => llmApi.deletePersistentTier(tierId), 'Tier removed', 'Removing tier…')
+    runMutation(() => llmApi.deletePersistentTier(tierId), {
+      successMessage: 'Tier removed',
+      label: 'Removing tier…',
+      busyKey: actionKey('persistent', tierId, 'remove'),
+      context: 'Persistent tier',
+    })
 
   const stageTierEndpointWeight = (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => {
     const updates = rebalanceTierWeights(tier, tierEndpointId, weight)
@@ -1168,7 +1496,11 @@ const parseNumber = (value?: string) => {
       })
       return Promise.all(ops)
     }
-    return runMutation(mutation).finally(() => {
+    return runMutation(mutation, {
+      label: 'Saving weights…',
+      busyKey: actionKey('tier', tier.id, 'weights'),
+      context: `${tier.name} weights`,
+    }).finally(() => {
       setSavingTierIds((prev) => {
         const next = new Set(prev)
         next.delete(key)
@@ -1184,31 +1516,77 @@ const parseNumber = (value?: string) => {
 
   const handleTierEndpointRemove = (tierEndpointId: string, scope: TierScope) => {
     if (scope === 'browser') {
-      return runMutation(() => llmApi.deleteBrowserTierEndpoint(tierEndpointId), 'Endpoint removed', 'Removing endpoint…')
+      return runMutation(() => llmApi.deleteBrowserTierEndpoint(tierEndpointId), {
+        successMessage: 'Endpoint removed',
+        label: 'Removing endpoint…',
+        busyKey: actionKey('tier-endpoint', tierEndpointId, 'remove'),
+        context: 'Browser tier',
+      })
     }
     if (scope === 'embedding') {
-      return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId), 'Endpoint removed', 'Removing endpoint…')
+      return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId), {
+        successMessage: 'Endpoint removed',
+        label: 'Removing endpoint…',
+        busyKey: actionKey('tier-endpoint', tierEndpointId, 'remove'),
+        context: 'Embedding tier',
+      })
     }
-    return runMutation(() => llmApi.deletePersistentTierEndpoint(tierEndpointId), 'Endpoint removed', 'Removing endpoint…')
+    return runMutation(() => llmApi.deletePersistentTierEndpoint(tierEndpointId), {
+      successMessage: 'Endpoint removed',
+      label: 'Removing endpoint…',
+      busyKey: actionKey('tier-endpoint', tierEndpointId, 'remove'),
+      context: 'Persistent tier',
+    })
   }
 
   const handleBrowserTierAdd = (isPremium: boolean) =>
-    runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), 'Browser tier added', 'Creating browser tier…')
-  const handleBrowserTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updateBrowserTier(tierId, { move: direction }))
+    runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), {
+      successMessage: 'Browser tier added',
+      label: 'Creating browser tier…',
+      busyKey: actionKey('browser', isPremium ? 'premium-add' : 'standard-add'),
+      context: 'Browser tiers',
+    })
+  const handleBrowserTierMove = (tierId: string, direction: 'up' | 'down') =>
+    runMutation(() => llmApi.updateBrowserTier(tierId, { move: direction }), {
+      label: direction === 'up' ? 'Moving browser tier up…' : 'Moving browser tier down…',
+      busyKey: actionKey('browser', tierId, 'move'),
+      context: 'Browser tiers',
+    })
   const handleBrowserTierRemove = (tierId: string) =>
-    runMutation(() => llmApi.deleteBrowserTier(tierId), 'Browser tier removed', 'Removing browser tier…')
+    runMutation(() => llmApi.deleteBrowserTier(tierId), {
+      successMessage: 'Browser tier removed',
+      label: 'Removing browser tier…',
+      busyKey: actionKey('browser', tierId, 'remove'),
+      context: 'Browser tiers',
+    })
 
-  const handleEmbeddingTierAdd = () => runMutation(() => llmApi.createEmbeddingTier({}), 'Embedding tier added', 'Creating embedding tier…')
-  const handleEmbeddingTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updateEmbeddingTier(tierId, { move: direction }))
+  const handleEmbeddingTierAdd = () => runMutation(() => llmApi.createEmbeddingTier({}), {
+    successMessage: 'Embedding tier added',
+    label: 'Creating embedding tier…',
+    busyKey: actionKey('embedding', 'add'),
+    context: 'Embedding tiers',
+  })
+  const handleEmbeddingTierMove = (tierId: string, direction: 'up' | 'down') =>
+    runMutation(() => llmApi.updateEmbeddingTier(tierId, { move: direction }), {
+      label: direction === 'up' ? 'Moving embedding tier up…' : 'Moving embedding tier down…',
+      busyKey: actionKey('embedding', tierId, 'move'),
+      context: 'Embedding tiers',
+    })
   const handleEmbeddingTierRemove = (tierId: string) =>
-    runMutation(() => llmApi.deleteEmbeddingTier(tierId), 'Embedding tier removed', 'Removing embedding tier…')
+    runMutation(() => llmApi.deleteEmbeddingTier(tierId), {
+      successMessage: 'Embedding tier removed',
+      label: 'Removing embedding tier…',
+      busyKey: actionKey('embedding', tierId, 'remove'),
+      context: 'Embedding tiers',
+    })
 
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => setEndpointModal({ tier, scope })
 
-  const submitTierEndpoint = (endpointId: string) => {
+  const submitTierEndpoint = async (endpointId: string) => {
     if (!endpointModal) return
     const { tier, scope } = endpointModal
 
+    let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const payload = { endpoint_id: endpointId, weight: tier.endpoints.length === 0 ? 100 : 50 }
       let response: { tier_endpoint_id?: string } = {}
@@ -1225,6 +1603,7 @@ const parseNumber = (value?: string) => {
       }
 
       const evenWeights = distributeEvenWeights([...tier.endpoints.map((endpoint) => endpoint.id), newTierEndpointId])
+      stagedWeights = evenWeights
       setPendingWeights((prev) => {
         const next = { ...prev }
         Object.entries(evenWeights).forEach(([tierEndpointId, weight]) => {
@@ -1246,7 +1625,27 @@ const parseNumber = (value?: string) => {
       await Promise.all(updates)
     }
 
-    runMutation(mutation, 'Endpoint added', 'Adding endpoint…')
+    const busyKey = actionKey(scope, tier.id, 'attach-endpoint')
+    try {
+      await runMutation(mutation, {
+        successMessage: 'Endpoint added',
+        label: 'Adding endpoint…',
+        busyKey,
+        context: tier.name,
+        rethrow: true,
+      })
+    } catch (error) {
+      setPendingWeights((prev) => {
+        const next = { ...prev }
+        if (stagedWeights) {
+          Object.keys(stagedWeights).forEach((key) => {
+            delete next[key]
+          })
+        }
+        return next
+      })
+      throw error
+    }
   }
 
   const statsCards = [
@@ -1258,13 +1657,18 @@ const parseNumber = (value?: string) => {
 
   return (
     <div className="space-y-8">
-      {banner && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">{banner}</div>
-      )}
-      {errorBanner && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700 flex items-center gap-2">
-          <AlertCircle className="size-4" />
-          {errorBanner}
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      {activeLabels.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700" aria-live="polite">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          <span className="font-semibold">Working</span>
+          <div className="flex flex-wrap gap-2">
+            {activeLabels.map((label) => (
+              <span key={label} className="rounded-full bg-white/80 px-2 py-0.5 text-xs text-blue-700">
+                {label}
+              </span>
+            ))}
+          </div>
         </div>
       )}
       <div className="gobii-card-base space-y-2 px-6 py-6">
@@ -1282,12 +1686,6 @@ const parseNumber = (value?: string) => {
           <StatCard key={card.label} label={card.label} value={card.value} hint={card.hint} icon={card.icon} />
         ))}
       </div>
-      {globalActionLabel && (
-        <div className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700">
-          <Loader2 className="size-4 animate-spin" aria-hidden />
-          <span>{globalActionLabel}</span>
-        </div>
-      )}
       <SectionCard
         title="Provider inventory"
         description="Toggle providers on/off, rotate keys, and review exposed endpoints."
@@ -1297,6 +1695,7 @@ const parseNumber = (value?: string) => {
             <ProviderCard
               key={provider.id}
               provider={provider}
+              isBusy={isBusy}
               handlers={{
                 onRotateKey: handleProviderRotateKey,
                 onToggleEnabled: handleProviderToggle,
@@ -1339,7 +1738,14 @@ const parseNumber = (value?: string) => {
               tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
               onAddTier={(isPremium) => handleTierAdd(range.id, isPremium)}
               onUpdate={(field, value) => handleRangeUpdate(range.id, field, value)}
-              onRemove={() => runMutation(() => llmApi.deleteTokenRange(range.id), 'Range removed', 'Removing range…')}
+              onRemove={() =>
+                runMutation(() => llmApi.deleteTokenRange(range.id), {
+                  successMessage: 'Range removed',
+                  label: 'Removing range…',
+                  busyKey: actionKey('range', range.id, 'remove'),
+                  context: range.name,
+                })
+              }
               onMoveTier={(tierId, direction) => handleTierMove(tierId, direction)}
               onRemoveTier={handleTierRemove}
               onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
@@ -1349,6 +1755,7 @@ const parseNumber = (value?: string) => {
               pendingWeights={pendingWeights}
               savingTierIds={savingTierIds}
               dirtyTierIds={dirtyTierIds}
+              isActionBusy={isBusy}
             />
           ))}
           {persistentStructures.ranges.length === 0 && (
@@ -1390,6 +1797,7 @@ const parseNumber = (value?: string) => {
                 onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
                 onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
+                isActionBusy={isBusy}
               />
             ))}
           </div>
@@ -1414,6 +1822,7 @@ const parseNumber = (value?: string) => {
                 onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
                 onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
+                isActionBusy={isBusy}
               />
             ))}
           </div>
@@ -1471,6 +1880,7 @@ const parseNumber = (value?: string) => {
                 onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
                 onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'embedding')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'embedding')}
+                isActionBusy={isBusy}
               />
             ))}
             {embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
@@ -1482,6 +1892,7 @@ const parseNumber = (value?: string) => {
           tier={endpointModal.tier}
           scope={endpointModal.scope}
           choices={endpointChoices}
+          busy={isBusy(actionKey(endpointModal.scope, endpointModal.tier.id, 'attach-endpoint'))}
           onAdd={(endpointId) => submitTierEndpoint(endpointId)}
           onClose={() => setEndpointModal(null)}
         />
