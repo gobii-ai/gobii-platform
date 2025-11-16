@@ -7,168 +7,20 @@ import {
   X,
   Plus,
   Trash2,
-  SlidersHorizontal,
   ChevronUp,
   ChevronDown,
   KeyRound,
-  Server,
-  ToggleRight,
-  Settings,
-  Palette,
-  FileCog,
-  Bot,
-  BrainCircuit,
-  Layers,
   ShieldCheck,
-  Pencil,
-  Beaker,
   LoaderCircle,
-  Check,
-  Eye,
-  Zap,
-  ZapOff,
   BookText,
   Search,
+  Layers,
 } from 'lucide-react'
+import React, { useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
-import React, { useState } from 'react'
-
-type Endpoint = {
-  id: string
-  label: string
-  weight: number
-}
-
-type TokenRange = {
-  id: string;
-  name: string;
-  min_tokens: number;
-  max_tokens: number | null; // null for infinity
-};
-
-type Tier = {
-  id: string
-  rangeId: string;
-  name: string
-  order: number
-  premium: boolean
-  endpoints: Endpoint[]
-}
-
-const initialRanges: TokenRange[] = [
-    { id: 'small', name: 'Small', min_tokens: 0, max_tokens: 7500 },
-    { id: 'medium', name: 'Medium', min_tokens: 7500, max_tokens: 20000 },
-    { id: 'large', name: 'Large', min_tokens: 20000, max_tokens: null },
-]
-
-const initialTiers: Tier[] = [
-  {
-    id: 'small-tier-1',
-    name: 'Tier 1',
-    rangeId: 'small',
-    order: 1,
-    premium: false,
-    endpoints: [
-      { id: 'ep1', label: 'openai/gpt-5', weight: 50 },
-      { id: 'ep2', label: 'anthropic/claude-sonnet-4', weight: 30 },
-      { id: 'ep-new', label: 'new-endpoint/some-model', weight: 20 },
-    ],
-  },
-  {
-    id: 'small-tier-2',
-    name: 'Tier 2',
-    rangeId: 'small',
-    order: 2,
-    premium: false,
-    endpoints: [{ id: 'ep3', label: 'vertex_ai/gemini-2.5-pro', weight: 100 }],
-  },
-  {
-    id: 'medium-premium-1',
-    name: 'Premium Tier 1',
-    rangeId: 'medium',
-    order: 1,
-    premium: true,
-    endpoints: [
-      { id: 'ep4', label: 'openrouter/z-ai/glm-4.6:exacto', weight: 60 },
-      { id: 'ep5', label: 'openai/gpt-5', weight: 40 },
-    ],
-  },
-]
-
-const initialBrowserTiers: Tier[] = [
-    {
-        id: 'browser-std-1',
-        name: 'Tier 1',
-        rangeId: 'browser',
-        order: 1,
-        premium: false,
-        endpoints: [
-            { id: 'bep1', label: 'openrouter/z-ai/glm-4.5', weight: 100 },
-        ],
-    },
-    {
-        id: 'browser-std-2',
-        name: 'Tier 2',
-        rangeId: 'browser',
-        order: 2,
-        premium: false,
-        endpoints: [
-            { id: 'bep2', label: 'openai/gpt-4o', weight: 100 },
-        ],
-    }
-]
-
-const initialEmbeddingTiers: Tier[] = [
-    {
-        id: 'embed-std-1',
-        name: 'Tier 1',
-        rangeId: 'embedding',
-        order: 1,
-        premium: false,
-        endpoints: [
-            { id: 'e-ep1', label: 'openai/text-embedding-3-large', weight: 100 },
-        ],
-    },
-]
-
-const placeholderProviders = [
-  {
-    id: 'prov1',
-    name: 'OpenRouter',
-    status: 'Healthy',
-    fallback: 'OPENROUTER_API_KEY',
-    backend: 'OpenAI-compatible',
-    usage: 'Primary for long-context + premium workloads.',
-    endpoints: [
-        { id: 'prov1-ep1', name: 'openrouter/z-ai/glm-4.6:exacto', temperature: 0.8, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: 'https://openrouter.ai/api/v1' },
-        { id: 'prov1-ep2', name: 'openrouter/google/gemini-pro', temperature: 0.9, supports_vision: false, supports_tool_choice: true, use_parallel_tool_calls: false, api_base: 'https://openrouter.ai/api/v1' },
-    ]
-  },
-  {
-    id: 'prov2',
-    name: 'Anthropic',
-    status: 'Healthy',
-    fallback: 'ANTHROPIC_API_KEY',
-    backend: 'Native API',
-    usage: 'Used when Claude reasoning is preferred.',
-    endpoints: [
-        { id: 'prov2-ep1', name: 'anthropic/claude-sonnet-4', temperature: 1.0, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: '' },
-    ]
-  },
-  {
-    id: 'prov3',
-    name: 'OpenAI',
-    status: 'Healthy',
-    fallback: 'OPENAI_API_KEY',
-    backend: 'Native API',
-    usage: 'Default for summaries and quick iterations.',
-    endpoints: [
-        { id: 'prov3-ep1', name: 'openai/gpt-5', temperature: 1.0, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: '' },
-        { id: 'prov3-ep2', name: 'openai/gpt-4o', temperature: 0.7, supports_vision: true, supports_tool_choice: true, use_parallel_tool_calls: true, api_base: '' },
-    ]
-  },
-]
+import * as llmApi from '../api/llmConfig'
 
 const button = {
   primary:
@@ -179,51 +31,230 @@ const button = {
     'inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200/60 disabled:opacity-50 disabled:cursor-not-allowed',
   danger:
     'inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60 disabled:opacity-50 disabled:cursor-not-allowed',
-  link: 'text-blue-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed',
-  dangerLink: 'text-rose-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed',
   icon: 'p-2 text-slate-500 hover:bg-slate-100 rounded-full transition',
-  iconDanger: 'p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition'
+  iconDanger: 'p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition',
 }
 
-function AddEndpointModal({ tier, onClose, onAdd }: { tier: Tier; onClose: () => void; onAdd: (tierId: string, endpointLabel: string) => void }) {
-  const [label, setLabel] = useState('')
+type TierEndpoint = {
+  id: string
+  endpointId: string
+  label: string
+  weight: number
+}
+
+type Tier = {
+  id: string
+  name: string
+  order: number
+  rangeId: string
+  premium: boolean
+  endpoints: TierEndpoint[]
+}
+
+type TokenRange = {
+  id: string
+  name: string
+  min_tokens: number
+  max_tokens: number | null
+}
+
+type ProviderEndpointCard = {
+  id: string
+  name: string
+  enabled: boolean
+  api_base?: string
+  temperature?: number | null
+  supports_vision?: boolean
+  supports_tool_choice?: boolean
+  use_parallel_tool_calls?: boolean
+  type: llmApi.ProviderEndpoint['type']
+}
+
+type ProviderCardData = {
+  id: string
+  name: string
+  status: string
+  backend: string
+  fallback: string
+  enabled: boolean
+  endpoints: ProviderEndpointCard[]
+}
+
+type TierScope = 'persistent' | 'browser' | 'embedding'
+
+function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
+  return input.map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    status: provider.status,
+    backend: provider.browser_backend,
+    fallback: provider.env_var || 'Not configured',
+    enabled: provider.enabled,
+    endpoints: provider.endpoints.map((endpoint) => ({
+      id: endpoint.id,
+      name: endpoint.model,
+      enabled: endpoint.enabled,
+      api_base: endpoint.api_base || endpoint.browser_base_url || '',
+      temperature: endpoint.temperature_override ?? null,
+      supports_vision: endpoint.supports_vision,
+      supports_tool_choice: endpoint.supports_tool_choice,
+      use_parallel_tool_calls: endpoint.use_parallel_tool_calls,
+      type: endpoint.type,
+    })),
+  }))
+}
+
+function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRange[]; tiers: Tier[] } {
+  const mappedRanges: TokenRange[] = ranges.map((range) => ({
+    id: range.id,
+    name: range.name,
+    min_tokens: range.min_tokens,
+    max_tokens: range.max_tokens,
+  }))
+  const mappedTiers: Tier[] = []
+  ranges.forEach((range) => {
+    range.tiers.forEach((tier) => {
+      mappedTiers.push({
+        id: tier.id,
+        name: tier.description || `Tier ${tier.order}`,
+        order: tier.order,
+        rangeId: range.id,
+        premium: tier.is_premium,
+        endpoints: tier.endpoints.map((endpoint) => ({
+          id: endpoint.id,
+          endpointId: endpoint.endpoint_id,
+          label: endpoint.label,
+          weight: Math.round(endpoint.weight),
+        })),
+      })
+    })
+  })
+  return { ranges: mappedRanges, tiers: mappedTiers }
+}
+
+function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
+  if (!policy) return []
+  return policy.tiers.map((tier) => ({
+    id: tier.id,
+    name: tier.description || `Tier ${tier.order}`,
+    order: tier.order,
+    rangeId: 'browser',
+    premium: tier.is_premium,
+    endpoints: tier.endpoints.map((endpoint) => ({
+      id: endpoint.id,
+      endpointId: endpoint.endpoint_id,
+      label: endpoint.label,
+      weight: Math.round(endpoint.weight),
+    })),
+  }))
+}
+
+function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
+  return tiers.map((tier) => ({
+    id: tier.id,
+    name: tier.description || `Tier ${tier.order}`,
+    order: tier.order,
+    rangeId: 'embedding',
+    premium: false,
+    endpoints: tier.endpoints.map((endpoint) => ({
+      id: endpoint.id,
+      endpointId: endpoint.endpoint_id,
+      label: endpoint.label,
+      weight: Math.round(endpoint.weight),
+    })),
+  }))
+}
+
+function AddEndpointModal({
+  tier,
+  scope,
+  choices,
+  onAdd,
+  onClose,
+}: {
+  tier: Tier
+  scope: TierScope
+  choices: llmApi.EndpointChoices
+  onAdd: (endpointId: string) => void
+  onClose: () => void
+}) {
+  const endpoints = scope === 'browser'
+    ? choices.browser_endpoints
+    : scope === 'embedding'
+      ? choices.embedding_endpoints
+      : choices.persistent_endpoints
+  const [selected, setSelected] = useState(endpoints[0]?.id || '')
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Add Endpoint to {tier.name}</h3>
+          <h3 className="text-lg font-semibold">Add endpoint to {tier.name}</h3>
           <button onClick={onClose} className={button.icon}>
             <X className="size-5" />
           </button>
         </div>
         <div className="mt-4">
-          <label htmlFor="endpoint-label" className="text-sm font-medium text-slate-700">Endpoint Label</label>
-          <input
-            id="endpoint-label"
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-            placeholder="e.g., openai/gpt-4o"
-          />
+          {endpoints.length === 0 ? (
+            <p className="text-sm text-slate-500">No endpoints available for this tier.</p>
+          ) : (
+            <>
+              <label className="text-sm font-medium text-slate-700">Endpoint</label>
+              <select
+                className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                value={selected}
+                onChange={(event) => setSelected(event.target.value)}
+              >
+                {endpoints.map((endpoint) => (
+                  <option key={endpoint.id} value={endpoint.id}>
+                    {endpoint.label || endpoint.model}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
         <div className="mt-6 flex justify-end gap-3">
-          <button type="button" className={button.secondary} onClick={onClose}>Cancel</button>
-          <button type="button" className={button.primary} onClick={() => { onAdd(tier.id, label); onClose(); }}><Plus className="size-4" /> Add Endpoint</button>
+          <button type="button" className={button.secondary} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={button.primary}
+            onClick={() => {
+              if (selected) onAdd(selected)
+              onClose()
+            }}
+            disabled={!selected}
+          >
+            <Plus className="size-4" /> Add endpoint
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
-function TierCard({ tier, onMove, onRemove, onAddEndpoint, onUpdateEndpointWeight, onRemoveEndpoint }: { tier: Tier, onMove: (direction: 'up' | 'down') => void, onRemove: () => void, onAddEndpoint: () => void, onUpdateEndpointWeight: (endpointId: string, weight: number) => void, onRemoveEndpoint: (endpointId: string) => void }) {
-  const borderColor = tier.premium ? 'border-emerald-200' : 'border-slate-200'
-  const textColor = tier.premium ? 'text-emerald-700' : 'text-slate-500'
-  const headerIcon = tier.premium ? <ShieldCheck className={`size-4 ${textColor}`} /> : <Layers className={`size-4 ${textColor}`} />
-
+function TierCard({
+  tier,
+  scope,
+  onMove,
+  onRemove,
+  onAddEndpoint,
+  onUpdateEndpointWeight,
+  onRemoveEndpoint,
+}: {
+  tier: Tier
+  scope: TierScope
+  onMove: (direction: 'up' | 'down') => void
+  onRemove: () => void
+  onAddEndpoint: () => void
+  onUpdateEndpointWeight: (tierEndpointId: string, weight: number) => void
+  onRemoveEndpoint: (tierEndpointId: string) => void
+}) {
+  const headerIcon = tier.premium ? <ShieldCheck className="size-4 text-emerald-700" /> : <Layers className="size-4 text-slate-500" />
   return (
-    <div className={`rounded-xl border ${borderColor} bg-white`}>
-      <div className={`flex items-center justify-between p-4 text-xs uppercase tracking-wide ${textColor}`}>
+    <div className={`rounded-xl border ${tier.premium ? 'border-emerald-200' : 'border-slate-200'} bg-white`}>
+      <div className="flex items-center justify-between p-4 text-xs uppercase tracking-wide text-slate-500">
         <span className="flex items-center gap-2">{headerIcon} {tier.name}</span>
         <div className="flex items-center gap-1 text-xs">
           <button className={button.icon} type="button" onClick={() => onMove('up')}><ChevronUp className="size-4" /></button>
@@ -236,9 +267,7 @@ function TierCard({ tier, onMove, onRemove, onAddEndpoint, onUpdateEndpointWeigh
           <span>Weighted endpoints</span>
         </div>
         <div className="space-y-3">
-          {tier.endpoints
-            .sort((a, b) => a.label.localeCompare(b.label))
-            .map((endpoint) => (
+          {tier.endpoints.map((endpoint) => (
             <div key={endpoint.id} className="grid grid-cols-12 items-center gap-3 text-sm font-medium text-slate-900/90">
               <span className="col-span-6 flex items-center gap-2 truncate"><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
               <div className="col-span-6 flex items-center gap-2">
@@ -247,13 +276,13 @@ function TierCard({ tier, onMove, onRemove, onAddEndpoint, onUpdateEndpointWeigh
                   min="0"
                   max="100"
                   value={endpoint.weight}
-                  onChange={(e) => onUpdateEndpointWeight(endpoint.id, parseInt(e.target.value, 10))}
+                  onChange={(event) => onUpdateEndpointWeight(endpoint.id, parseInt(event.target.value, 10))}
                   className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
                 />
                 <input
                   type="number"
                   value={endpoint.weight}
-                  onChange={(e) => onUpdateEndpointWeight(endpoint.id, parseInt(e.target.value, 10) || 0)}
+                  onChange={(event) => onUpdateEndpointWeight(endpoint.id, parseInt(event.target.value, 10) || 0)}
                   className="block w-20 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
                 />
                 <button onClick={() => onRemoveEndpoint(endpoint.id)} className={button.iconDanger}><X className="size-4" /></button>
@@ -261,11 +290,10 @@ function TierCard({ tier, onMove, onRemove, onAddEndpoint, onUpdateEndpointWeigh
             </div>
           ))}
         </div>
-        {tier.endpoints.length === 0 && <div className="text-center text-xs text-slate-400 py-2">No endpoints added.</div>}
         <div className="pt-2">
-            <button type="button" className={button.muted} onClick={onAddEndpoint}>
-                <Plus className="size-3" /> Add endpoint
-            </button>
+          <button type="button" className={button.muted} onClick={onAddEndpoint}>
+            <Plus className="size-3" /> Add endpoint
+          </button>
         </div>
       </div>
     </div>
@@ -278,616 +306,430 @@ function RangeSection({
   onUpdate,
   onRemove,
   onAddTier,
-  ...tierActions
+  onMoveTier,
+  onRemoveTier,
+  onAddEndpoint,
+  onUpdateEndpointWeight,
+  onRemoveEndpoint,
 }: {
-  range: TokenRange,
-  tiers: Tier[],
-  onUpdate: (id: string, field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => void,
-  onRemove: (id: string) => void,
-  onAddTier: (isPremium: boolean, rangeId: string) => void,
-  [key: string]: any // for other tier actions
+  range: TokenRange
+  tiers: Tier[]
+  onUpdate: (field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => void
+  onRemove: () => void
+  onAddTier: (isPremium: boolean) => void
+  onMoveTier: (tierId: string, direction: 'up' | 'down') => void
+  onRemoveTier: (tierId: string) => void
+  onAddEndpoint: (tier: Tier) => void
+  onUpdateEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number) => void
+  onRemoveEndpoint: (tier: Tier, tierEndpointId: string) => void
 }) {
-  const standardTiers = tiers.filter(t => t.rangeId === range.id && !t.premium).sort((a, b) => a.order - b.order);
-  const premiumTiers = tiers.filter(t => t.rangeId === range.id && t.premium).sort((a, b) => a.order - b.order);
-
+  const standardTiers = tiers.filter((tier) => !tier.premium).sort((a, b) => a.order - b.order)
+  const premiumTiers = tiers.filter((tier) => tier.premium).sort((a, b) => a.order - b.order)
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white">
-        <div className="p-4 space-y-3">
-            <div className="grid grid-cols-12 items-center gap-3 text-sm">
-                <div className="col-span-12 sm:col-span-3 relative">
-                    <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Range Name</label>
-                    <input type="text" value={range.name} onChange={e => onUpdate(range.id, 'name', e.target.value)} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-                </div>
-                <div className="col-span-6 sm:col-span-3 relative">
-                    <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Min Tokens</label>
-                    <input type="number" value={range.min_tokens} onChange={e => onUpdate(range.id, 'min_tokens', parseInt(e.target.value, 10))} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-                </div>
-                <div className="col-span-6 sm:col-span-3 relative">
-                    <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Max Tokens</label>
-                    <input type="number" value={range.max_tokens ?? ''} placeholder="Infinity" onChange={e => onUpdate(range.id, 'max_tokens', e.target.value === '' ? null : parseInt(e.target.value, 10))} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-                </div>
-                <div className="col-span-12 sm:col-span-3 text-right">
-                    <button type="button" className={button.danger} onClick={() => onRemove(range.id)}><Trash2 className="size-4" /> Remove Range</button>
-                </div>
-            </div>
+      <div className="p-4 space-y-3">
+        <div className="grid grid-cols-12 items-center gap-3 text-sm">
+          <div className="col-span-12 sm:col-span-3 relative">
+            <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Range Name</label>
+            <input type="text" value={range.name} onChange={(event) => onUpdate('name', event.target.value)} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+          </div>
+          <div className="col-span-6 sm:col-span-3 relative">
+            <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Min Tokens</label>
+            <input type="number" value={range.min_tokens} onChange={(event) => onUpdate('min_tokens', parseInt(event.target.value, 10))} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+          </div>
+          <div className="col-span-6 sm:col-span-3 relative">
+            <label className="absolute -top-2 left-2 text-xs text-slate-400 bg-white px-1">Max Tokens</label>
+            <input type="number" value={range.max_tokens ?? ''} placeholder="Infinity" onChange={(event) => onUpdate('max_tokens', event.target.value === '' ? null : parseInt(event.target.value, 10))} className="block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+          </div>
+          <div className="col-span-12 sm:col-span-3 text-right">
+            <button type="button" className={button.danger} onClick={onRemove}><Trash2 className="size-4" /> Remove Range</button>
+          </div>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
-            <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
-                <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold text-slate-700">Standard Tiers</h4>
-                    <button type="button" className={button.secondary} onClick={() => onAddTier(false, range.id)}>
-                        <Plus className="size-4" /> Add
-                    </button>
-                </div>
-                {standardTiers.length > 0 ? standardTiers.map((tier, index) => (
-                    <TierCard
-                        key={tier.id}
-                        tier={tier}
-                        onMove={(direction) => tierActions.moveTier(tier.id, direction)}
-                        onRemove={() => tierActions.removeTier(tier.id)}
-                        onAddEndpoint={() => tierActions.setAddingEndpointTier(tier)}
-                        onUpdateEndpointWeight={(endpointId: string, weight: number) => tierActions.updateEndpointWeight(tier.id, endpointId, weight)}
-                        onRemoveEndpoint={(endpointId: string) => tierActions.removeEndpoint(tier.id, endpointId)}
-                    />
-                )) : <p className="text-center text-xs text-slate-400 py-4">No standard tiers for this range.</p>}
-            </div>
-            <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
-                <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold text-emerald-800">Premium Tiers</h4>
-                    <button type="button" className={button.secondary} onClick={() => onAddTier(true, range.id)}>
-                        <Plus className="size-4" /> Add
-                    </button>
-                </div>
-                {premiumTiers.length > 0 ? premiumTiers.map((tier, index) => (
-                    <TierCard
-                        key={tier.id}
-                        tier={tier}
-                        onMove={(direction) => tierActions.moveTier(tier.id, direction)}
-                        onRemove={() => tierActions.removeTier(tier.id)}
-                        onAddEndpoint={() => tierActions.setAddingEndpointTier(tier)}
-                        onUpdateEndpointWeight={(endpointId: string, weight: number) => tierActions.updateEndpointWeight(tier.id, endpointId, weight)}
-                        onRemoveEndpoint={(endpointId: string) => tierActions.removeEndpoint(tier.id, endpointId)}
-                    />
-                )) : <p className="text-center text-xs text-slate-400 py-4">No premium tiers for this range.</p>}
-            </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
+        <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-slate-700">Standard tiers</h4>
+            <button type="button" className={button.secondary} onClick={() => onAddTier(false)}>
+              <Plus className="size-4" /> Add
+            </button>
+          </div>
+          {standardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard tiers.</p>}
+          {standardTiers.map((tier) => (
+            <TierCard
+              key={tier.id}
+              tier={tier}
+              scope="persistent"
+              onMove={(direction) => onMoveTier(tier.id, direction)}
+              onRemove={() => onRemoveTier(tier.id)}
+              onAddEndpoint={() => onAddEndpoint(tier)}
+              onUpdateEndpointWeight={(tierEndpointId, weight) => onUpdateEndpointWeight(tier, tierEndpointId, weight)}
+              onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tier, tierEndpointId)}
+            />
+          ))}
         </div>
+        <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-emerald-800">Premium tiers</h4>
+            <button type="button" className={button.secondary} onClick={() => onAddTier(true)}>
+              <Plus className="size-4" /> Add
+            </button>
+          </div>
+          {premiumTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers.</p>}
+          {premiumTiers.map((tier) => (
+            <TierCard
+              key={tier.id}
+              tier={tier}
+              scope="persistent"
+              onMove={(direction) => onMoveTier(tier.id, direction)}
+              onRemove={() => onRemoveTier(tier.id)}
+              onAddEndpoint={() => onAddEndpoint(tier)}
+              onUpdateEndpointWeight={(tierEndpointId, weight) => onUpdateEndpointWeight(tier, tierEndpointId, weight)}
+              onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tier, tierEndpointId)}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
 
-function ProviderCard({ provider }: { provider: any }) {
-    const [activeTab, setActiveTab] = useState('endpoints');
-    const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null);
+export function LlmConfigScreen() {
+  const queryClient = useQueryClient()
+  const [banner, setBanner] = useState<string | null>(null)
+  const [errorBanner, setErrorBanner] = useState<string | null>(null)
+  const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
 
-    const handleEditClick = (endpointId: string) => {
-        setEditingEndpointId(endpointId === editingEndpointId ? null : endpointId);
+  const overviewQuery = useQuery({
+    queryKey: ['llm-overview'],
+    queryFn: ({ signal }) => llmApi.fetchLlmOverview(signal),
+    refetchOnWindowFocus: false,
+  })
+
+  const stats = overviewQuery.data?.stats
+  const providers = useMemo(() => mapProviders(overviewQuery.data?.providers), [overviewQuery.data?.providers])
+  const persistentStructures = useMemo(() => mapPersistentData(overviewQuery.data?.persistent.ranges), [overviewQuery.data?.persistent.ranges])
+  const browserTiers = useMemo(() => mapBrowserTiers(overviewQuery.data?.browser ?? null), [overviewQuery.data?.browser])
+  const embeddingTiers = useMemo(() => mapEmbeddingTiers(overviewQuery.data?.embeddings.tiers), [overviewQuery.data?.embeddings.tiers])
+  const endpointChoices = overviewQuery.data?.choices ?? { persistent_endpoints: [], browser_endpoints: [], embedding_endpoints: [] }
+
+  const invalidateOverview = () => queryClient.invalidateQueries({ queryKey: ['llm-overview'] })
+
+  const runMutation = async (action: () => Promise<unknown>, success?: string) => {
+    try {
+      await action()
+      await invalidateOverview()
+      if (success) {
+        setBanner(success)
+        setErrorBanner(null)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Request failed'
+      setErrorBanner(message)
+      setBanner(null)
     }
+  }
 
-    return (
-        <article className="rounded-2xl border border-slate-200/80 bg-white">
-            <div className="flex items-start justify-between p-4">
-                <div className="flex items-center gap-3">
-                    <div className="flex-shrink-0 rounded-full bg-slate-100 p-2">
-                        <BrainCircuit className="size-5 text-slate-600" />
-                    </div>
-                    <div>
-                        <h3 className="text-base font-semibold text-slate-900/90">{provider.name}</h3>
-                        <p className="text-xs text-slate-500">{provider.endpoints.length} endpoints</p>
-                    </div>
+  const handleRangeUpdate = (rangeId: string, field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => {
+    const payload: Record<string, string | number | null> = {}
+    payload[field] = value
+    runMutation(() => llmApi.updateTokenRange(rangeId, payload))
+  }
+
+  const handleAddRange = () => {
+    const sorted = [...persistentStructures.ranges].sort((a, b) => (a.max_tokens ?? Infinity) - (b.max_tokens ?? Infinity))
+    const last = sorted.at(-1)
+    const baseMin = last?.max_tokens ?? 0
+    const name = `Range ${sorted.length + 1}`
+    runMutation(() => llmApi.createTokenRange({ name, min_tokens: baseMin, max_tokens: baseMin + 10000 }), 'Range added')
+  }
+
+  const handleTierAdd = (rangeId: string, isPremium: boolean) => runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium }), 'Tier added')
+  const handleTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }))
+  const handleTierRemove = (tierId: string) => runMutation(() => llmApi.deletePersistentTier(tierId), 'Tier removed')
+
+  const handleTierEndpointWeight = (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => {
+    if (scope === 'browser') {
+      return runMutation(() => llmApi.updateBrowserTierEndpoint(tierEndpointId, { weight }))
+    }
+    if (scope === 'embedding') {
+      return runMutation(() => llmApi.updateEmbeddingTierEndpoint(tierEndpointId, { weight }))
+    }
+    return runMutation(() => llmApi.updatePersistentTierEndpoint(tierEndpointId, { weight }))
+  }
+
+  const handleTierEndpointRemove = (tierEndpointId: string, scope: TierScope) => {
+    if (scope === 'browser') {
+      return runMutation(() => llmApi.deleteBrowserTierEndpoint(tierEndpointId), 'Endpoint removed')
+    }
+    if (scope === 'embedding') {
+      return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId), 'Endpoint removed')
+    }
+    return runMutation(() => llmApi.deletePersistentTierEndpoint(tierEndpointId), 'Endpoint removed')
+  }
+
+  const handleBrowserTierAdd = (isPremium: boolean) => runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), 'Browser tier added')
+  const handleBrowserTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updateBrowserTier(tierId, { move: direction }))
+  const handleBrowserTierRemove = (tierId: string) => runMutation(() => llmApi.deleteBrowserTier(tierId), 'Browser tier removed')
+
+  const handleEmbeddingTierAdd = () => runMutation(() => llmApi.createEmbeddingTier({}), 'Embedding tier added')
+  const handleEmbeddingTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updateEmbeddingTier(tierId, { move: direction }))
+  const handleEmbeddingTierRemove = (tierId: string) => runMutation(() => llmApi.deleteEmbeddingTier(tierId), 'Embedding tier removed')
+
+  const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => setEndpointModal({ tier, scope })
+
+  const submitTierEndpoint = (endpointId: string) => {
+    if (!endpointModal) return
+    const { tier, scope } = endpointModal
+    if (scope === 'browser') {
+      runMutation(() => llmApi.addBrowserTierEndpoint(tier.id, { endpoint_id: endpointId, weight: 100 }), 'Endpoint added')
+    } else if (scope === 'embedding') {
+      runMutation(() => llmApi.addEmbeddingTierEndpoint(tier.id, { endpoint_id: endpointId, weight: 100 }), 'Endpoint added')
+    } else {
+      runMutation(() => llmApi.addPersistentTierEndpoint(tier.id, { endpoint_id: endpointId, weight: 100 }), 'Endpoint added')
+    }
+  }
+
+  const statsCards = [
+    { label: 'Active providers', value: stats ? String(stats.active_providers) : '—', hint: 'Enabled vendors', icon: <PlugZap className="size-5" /> },
+    { label: 'Persistent endpoints', value: stats ? String(stats.persistent_endpoints) : '—', hint: 'LLMs available for agents', icon: <Atom className="size-5" /> },
+    { label: 'Browser models', value: stats ? String(stats.browser_endpoints) : '—', hint: 'Available to browser-use', icon: <Globe className="size-5" /> },
+    { label: 'Premium tiers', value: stats ? String(stats.premium_persistent_tiers) : '—', hint: 'High-trust failover', icon: <Shield className="size-5" /> },
+  ]
+
+  return (
+    <div className="space-y-8">
+      {banner && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">{banner}</div>
+      )}
+      {errorBanner && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700 flex items-center gap-2">
+          <AlertCircle className="size-4" />
+          {errorBanner}
+        </div>
+      )}
+      <div className="gobii-card-base space-y-2 px-6 py-6">
+        <h1 className="text-2xl font-semibold text-slate-900/90">LLM configuration</h1>
+        <p className="text-sm text-slate-600">Review providers, endpoints, and token tiers powering orchestrator, browser-use, and embedding flows.</p>
+      </div>
+      {overviewQuery.isError && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700 flex items-center gap-2">
+          <AlertCircle className="size-4" />
+          Unable to load configuration. Please refresh.
+        </div>
+      )}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {statsCards.map((card) => (
+          <StatCard key={card.label} label={card.label} value={card.value} hint={card.hint} icon={card.icon} />
+        ))}
+      </div>
+      <SectionCard
+        title="Provider inventory"
+        description="Toggle providers on/off, rotate keys, and review exposed endpoints."
+      >
+        <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
+          {providers.map((provider) => (
+            <article key={provider.id} className="rounded-2xl border border-slate-200/80 bg-white">
+              <div className="flex items-center justify-between p-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900/90">{provider.name}</h3>
+                  <p className="text-xs text-slate-500">{provider.endpoints.length} endpoints</p>
                 </div>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/80 px-3 py-1 text-xs font-medium text-emerald-700">
                   <ShieldCheck className="size-3.5" /> {provider.status}
                 </span>
-            </div>
-
-            <div className="border-b border-slate-200/80 px-4">
-                <nav className="-mb-px flex space-x-6" aria-label="Tabs">
-                    <button onClick={() => setActiveTab('endpoints')} className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium ${activeTab === 'endpoints' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}>
-                        Endpoints
-                    </button>
-                    <button onClick={() => setActiveTab('settings')} className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium ${activeTab === 'settings' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}>
-                        Settings
-                    </button>
-                </nav>
-            </div>
-
-            <div className="p-4">
-                {activeTab === 'endpoints' && (
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-end">
-                            <button className={button.muted}><Plus className="size-3" /> Add endpoint</button>
-                        </div>
-                        <div className="space-y-2">
-                            {provider.endpoints.map((endpoint: any) => (
-                                <EndpointEditor 
-                                    key={endpoint.id} 
-                                    endpoint={endpoint} 
-                                    isEditing={editingEndpointId === endpoint.id}
-                                    onEditClick={() => handleEditClick(endpoint.id)}
-                                />
-                            ))}
-                        </div>
+              </div>
+              <div className="border-t border-slate-200/80 p-4 space-y-3">
+                <dl className="space-y-3 text-sm text-slate-600">
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><KeyRound className="size-4" /> Env fallback</dt>
+                    <dd className="font-medium text-slate-900/90 pl-6">{provider.fallback}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-slate-400">Backend</dt>
+                    <dd className="font-medium text-slate-900/90">{provider.backend}</dd>
+                  </div>
+                </dl>
+                <div className="border-t border-slate-200/80 pt-4 space-y-2">
+                  {provider.endpoints.length === 0 && <p className="text-sm text-slate-500">No endpoints linked.</p>}
+                  {provider.endpoints.map((endpoint) => (
+                    <div key={endpoint.id} className="rounded-lg border border-slate-200 px-3 py-2 text-sm flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-slate-900/90">{endpoint.name}</p>
+                        <p className="text-xs text-slate-500">{endpoint.type}</p>
+                      </div>
+                      <span className={`text-xs font-semibold ${endpoint.enabled ? 'text-emerald-600' : 'text-slate-500'}`}>
+                        {endpoint.enabled ? 'Enabled' : 'Disabled'}
+                      </span>
                     </div>
-                )}
-                {activeTab === 'settings' && (
-                    <div className="space-y-4">
-                        <dl className="space-y-3 text-sm text-slate-600">
-                            <div>
-                                <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><KeyRound className="size-4" /> Env fallback</dt>
-                                <dd className="font-medium text-slate-900/90 pl-6">{provider.fallback}</dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs uppercase tracking-wide text-slate-400 flex items-center gap-2"><Server className="size-4" /> Browser backend</dt>
-                                <dd className="font-medium text-slate-900/90 pl-6">{provider.backend}</dd>
-                            </div>
-                        </dl>
-                        <div className="border-t border-slate-200/80 my-4" />
-                        <div className="flex flex-wrap gap-2 text-sm">
-                            <button className={button.muted} type="button">
-                              <KeyRound className="size-3.5" /> Rotate key
-                            </button>
-                            <button className={button.danger} type="button">
-                              <ToggleRight className="size-3.5" /> Disable
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
-        </article>
-    )
-}
-
-function EndpointEditor({ endpoint, isEditing, onEditClick }: { endpoint: any, isEditing: boolean, onEditClick: () => void }) {
-    const [testStatus, setTestStatus] = useState('idle');
-    const [temperature, setTemperature] = useState(endpoint.temperature);
-
-    const handleTest = () => {
-        setTestStatus('testing');
-        setTimeout(() => {
-            const success = Math.random() > 0.3;
-            setTestStatus(success ? 'success' : 'failed');
-            setTimeout(() => setTestStatus('idle'), 2000);
-        }, 1500);
-    }
-
-    const TestButton = () => {
-        if (testStatus === 'testing') {
-            return <button className={button.muted} disabled><LoaderCircle className="size-4 animate-spin" /> Testing...</button>
-        }
-        if (testStatus === 'success') {
-            return <button className={`${button.muted} bg-emerald-50 text-emerald-700`} disabled><Check className="size-4" /> Success</button>
-        }
-        if (testStatus === 'failed') {
-            return <button className={`${button.muted} bg-rose-50 text-rose-700`} disabled><X className="size-4" /> Failed</button>
-        }
-        return <button className={button.muted} onClick={handleTest}><Beaker className="size-4" /> Test</button>
-    }
-
-    return (
-        <div className="rounded-lg bg-white shadow-sm border border-slate-200">
-            <div className="flex items-center justify-between p-2">
-                <span className="text-sm font-mono text-slate-700">{endpoint.name}</span>
-                <div className="flex items-center gap-1">
-                    <TestButton />
-                    <button className={button.icon} onClick={onEditClick}><Pencil className="size-4" /></button>
-                    <button className={button.iconDanger}><Trash2 className="size-4" /></button>
+                  ))}
                 </div>
-            </div>
-            {isEditing && (
-                <div className="p-4 space-y-4 border-t border-slate-200/80">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-xs text-slate-500">Temperature</label>
-                            <div className="flex items-center gap-2 mt-1">
-                                <input 
-                                    type="range" 
-                                    min="0" max="2" step="0.1" 
-                                    value={temperature} 
-                                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" 
-                                />
-                                <input 
-                                    type="number" 
-                                    min="0" max="2" step="0.1" 
-                                    value={temperature} 
-                                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                                    className="block w-20 rounded-lg border-slate-300 text-right shadow-sm sm:text-sm"
-                                />
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-xs text-slate-500">API Base URL</label>
-                            <input type="text" defaultValue={endpoint.api_base} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-                        </div>
-                    </div>
-                    <div className="flex items-center space-x-6">
-                        <label className="flex items-center gap-2 text-sm text-slate-700">
-                            <input type="checkbox" defaultChecked={endpoint.supports_vision} className="rounded border-slate-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" />
-                            <Eye className="size-4" /> Supports Vision
-                        </label>
-                         <label className="flex items-center gap-2 text-sm text-slate-700">
-                            <input type="checkbox" defaultChecked={endpoint.supports_tool_choice} className="rounded border-slate-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" />
-                            <Zap className="size-4" /> Tool Choice
-                        </label>
-                         <label className="flex items-center gap-2 text-sm text-slate-700">
-                            <input type="checkbox" defaultChecked={endpoint.use_parallel_tool_calls} className="rounded border-slate-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" />
-                            <ZapOff className="size-4" /> Parallel Calls
-                        </label>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                        <button className={button.secondary} onClick={onEditClick}>Cancel</button>
-                        <button className={button.primary}>Save Changes</button>
-                    </div>
-                </div>
-            )}
-        </div>
-    )
-}
-
-export function LlmConfigScreen() {
-  const [tiers, setTiers] = useState<Tier[]>(initialTiers)
-  const [browserTiers, setBrowserTiers] = useState<Tier[]>(initialBrowserTiers)
-  const [embeddingTiers, setEmbeddingTiers] = useState<Tier[]>(initialEmbeddingTiers)
-  const [ranges, setRanges] = useState<TokenRange[]>(initialRanges)
-  const [providers, setProviders] = useState(placeholderProviders)
-  const [addingEndpointTier, setAddingEndpointTier] = useState<Tier | null>(null)
-
-  const getTierStateSetter = (tierId: string): React.Dispatch<React.SetStateAction<Tier[]>> | null => {
-    if (tiers.some(t => t.id === tierId)) return setTiers;
-    if (browserTiers.some(t => t.id === tierId)) return setBrowserTiers;
-    if (embeddingTiers.some(t => t.id === tierId)) return setEmbeddingTiers;
-    return null;
-  }
-
-  const addTier = (isPremium: boolean, rangeId: string) => {
-    let targetStateSetter: React.Dispatch<React.SetStateAction<Tier[]>>;
-    if (rangeId === 'browser') {
-        targetStateSetter = setBrowserTiers;
-    } else if (rangeId === 'embedding') {
-        targetStateSetter = setEmbeddingTiers;
-    } else {
-        targetStateSetter = setTiers;
-    }
-
-    targetStateSetter(currentTiers => {
-        const relevantTiers = currentTiers.filter(t => t.premium === isPremium && t.rangeId === rangeId);
-        const newOrder = relevantTiers.length > 0 ? Math.max(...relevantTiers.map(t => t.order)) + 1 : 1
-        const newTier: Tier = {
-          id: `new-tier-${Date.now()}`,
-          name: `Tier ${newOrder}`,
-          rangeId: rangeId,
-          order: newOrder,
-          premium: isPremium,
-          endpoints: [],
-        }
-        return [...currentTiers, newTier];
-    });
-  }
-
-  const removeTier = (tierId: string) => {
-    const targetStateSetter = getTierStateSetter(tierId);
-    if (!targetStateSetter) return;
-    targetStateSetter(currentTiers => currentTiers.filter(t => t.id !== tierId));
-  }
-
-  const moveTier = (tierId: string, direction: 'up' | 'down') => {
-    const targetStateSetter = getTierStateSetter(tierId);
-    if (!targetStateSetter) return;
-
-    targetStateSetter(currentTiers => {
-        const tierToMove = currentTiers.find(t => t.id === tierId);
-        if (!tierToMove) return currentTiers;
-
-        const siblings = currentTiers.filter(t => t.premium === tierToMove.premium && t.rangeId === tierToMove.rangeId).sort((a, b) => a.order - b.order);
-        const currentIndex = siblings.findIndex(t => t.id === tierId);
-
-        if (direction === 'up' && currentIndex > 0) {
-          const otherTier = siblings[currentIndex - 1];
-          [tierToMove.order, otherTier.order] = [otherTier.order, tierToMove.order];
-        } else if (direction === 'down' && currentIndex < siblings.length - 1) {
-          const otherTier = siblings[currentIndex + 1];
-          [tierToMove.order, otherTier.order] = [otherTier.order, tierToMove.order];
-        }
-        return [...currentTiers];
-    });
-  };
-
-  const addEndpoint = (tierId: string, endpointLabel: string) => {
-    if (!endpointLabel) return;
-    const targetStateSetter = getTierStateSetter(tierId);
-    if (!targetStateSetter) return;
-
-    targetStateSetter(currentTiers => {
-      return currentTiers.map(t => {
-        if (t.id === tierId) {
-          const newEndpoints = [...t.endpoints, { id: `ep-${Date.now()}`, label: endpointLabel, weight: 0 }];
-          const numEndpoints = newEndpoints.length;
-          if (numEndpoints > 0) {
-              const evenWeight = Math.floor(100 / numEndpoints);
-              const remainder = 100 % numEndpoints;
-              const finalEndpoints = newEndpoints.map((ep, index) => ({
-                ...ep,
-                weight: index < remainder ? evenWeight + 1 : evenWeight,
-              }));
-              return { ...t, endpoints: finalEndpoints };
-          }
-          return { ...t, endpoints: newEndpoints };
-        }
-        return t;
-      });
-    });
-  }
-
-  const updateEndpointWeight = (tierId: string, endpointId: string, newWeight: number) => {
-    const targetStateSetter = getTierStateSetter(tierId);
-    if (!targetStateSetter) return;
-
-    targetStateSetter(currentTiers => currentTiers.map(tier => {
-      if (tier.id !== tierId) return tier;
-
-      newWeight = Math.max(0, Math.min(100, newWeight));
-      const activeEndpoint = tier.endpoints.find(e => e.id === endpointId);
-      if (!activeEndpoint) return tier;
-
-      const otherEndpoints = tier.endpoints.filter(e => e.id !== endpointId);
-      const remainder = 100 - newWeight;
-      
-      let finalEndpoints: Endpoint[] = [];
-
-      if (otherEndpoints.length > 0) {
-        const totalOtherWeight = otherEndpoints.reduce((sum, e) => sum + e.weight, 0);
-        if (totalOtherWeight > 0) {
-          otherEndpoints.forEach(ep => {
-            ep.weight = (ep.weight / totalOtherWeight) * remainder;
-          });
-        } else {
-          const equalShare = remainder / otherEndpoints.length;
-          otherEndpoints.forEach(ep => {
-            ep.weight = equalShare;
-          });
-        }
-        finalEndpoints = [...otherEndpoints, { ...activeEndpoint, weight: newWeight }];
-      } else {
-        finalEndpoints = [{ ...activeEndpoint, weight: 100 }];
-      }
-
-      let roundedTotal = 0;
-      finalEndpoints.forEach(ep => {
-        ep.weight = Math.round(ep.weight);
-        roundedTotal += ep.weight;
-      });
-
-      const roundingError = 100 - roundedTotal;
-      if (roundingError !== 0 && finalEndpoints.length > 0) {
-          const endpointToAdjust = finalEndpoints.find(e => e.id === endpointId) || finalEndpoints[0];
-          endpointToAdjust.weight += roundingError;
-      }
-
-      return { ...tier, endpoints: finalEndpoints };
-    }));
-  };
-
-  const removeEndpoint = (tierId: string, endpointId: string) => {
-    const targetStateSetter = getTierStateSetter(tierId);
-    if (!targetStateSetter) return;
-
-    targetStateSetter(currentTiers => currentTiers.map(t => {
-      if (t.id === tierId) {
-        const newEndpoints = t.endpoints.filter(e => e.id !== endpointId);
-        const totalWeight = newEndpoints.reduce((sum, ep) => sum + ep.weight, 0);
-        if (totalWeight > 0 && newEndpoints.length > 0) {
-            const scale = 100 / totalWeight;
-            let redistributedTotal = 0;
-            newEndpoints.forEach((ep, index) => {
-                const newW = Math.round(ep.weight * scale);
-                ep.weight = newW;
-                redistributedTotal += newW;
-            });
-            const error = 100 - redistributedTotal;
-            if (error !== 0 && newEndpoints.length > 0) newEndpoints[0].weight += error;
-        } else if (newEndpoints.length > 0) {
-            const evenWeight = Math.floor(100 / newEndpoints.length);
-            const remainder = 100 % newEndpoints.length;
-            newEndpoints.forEach((ep, index) => {
-                ep.weight = index < remainder ? evenWeight + 1 : evenWeight;
-            });
-        }
-        return { ...t, endpoints: newEndpoints };
-      }
-      return t;
-    }));
-  }
-
-  const handleRangeUpdate = (id: string, field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => {
-    setRanges(ranges.map(r => r.id === id ? { ...r, [field]: value } : r))
-  }
-
-  const handleAddRange = () => {
-    const lastRange = ranges.sort((a, b) => (a.max_tokens ?? Infinity) - (b.max_tokens ?? Infinity)).slice(-1)[0];
-    const newMinTokens = lastRange && lastRange.max_tokens !== null ? lastRange.max_tokens : 0;
-
-    const newRange: TokenRange = {
-        id: `range-${Date.now()}`,
-        name: 'New Range',
-        min_tokens: newMinTokens,
-        max_tokens: newMinTokens + 10000,
-    }
-    setRanges([...ranges, newRange])
-  }
-
-  const handleRemoveRange = (id: string) => {
-    setTiers(tiers.filter(t => t.rangeId !== id))
-    setRanges(ranges.filter(r => r.id !== id))
-  }
-
-  return (
-    <div className="space-y-8">
-      {addingEndpointTier && <AddEndpointModal tier={addingEndpointTier} onClose={() => setAddingEndpointTier(null)} onAdd={addEndpoint} />}
-
-      <div className="gobii-card-base space-y-2 px-6 py-6">
-        <h1 className="text-2xl font-semibold text-slate-900/90">LLM configuration</h1>
-        <p className="text-sm text-slate-600">
-          Review the providers, endpoints, and token tiers powering orchestrator, browser-use, and summarization flows.
-        </p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Active providers" value="4" icon={<PlugZap className="size-5" />} hint="OpenAI, Anthropic, Google, OpenRouter" />
-        <StatCard label="Persistent endpoints" value="11" icon={<Atom className="size-5" />} hint="Across all token ranges" />
-        <StatCard label="Browser models" value="2 configured" icon={<Globe className="size-5" />} hint="Primary + fallback" />
-        <StatCard label="Premium failover tiers" value="Enabled" icon={<Shield className="size-5" />} hint="Routing first loop traffic" />
-      </div>
-
-      <SectionCard
-        title="Provider inventory"
-        description="Toggle providers on/off, rotate keys, and understand which endpoints they expose."
-        actions={
-          <button
-            type="button"
-            className={button.primary}
-          >
-            <Plus className="size-4" /> Add provider
-          </button>
-        }
-      >
-        <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
-          {providers.map((provider) => (
-            <ProviderCard
-              key={provider.id}
-              provider={provider}
-            />
+              </div>
+            </article>
           ))}
+          {providers.length === 0 && (
+            <div className="col-span-2">
+              <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-500">
+                {overviewQuery.isPending ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <LoaderCircle className="size-5 animate-spin" /> Loading providers...
+                  </div>
+                ) : (
+                  'No providers found.'
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </SectionCard>
-
       <SectionCard
         title="Token-based failover tiers"
         description="Manage token ranges, tier ordering, and weighted endpoints."
         actions={
-            <button type="button" className={button.primary} onClick={handleAddRange}>
-              <Plus className="size-4" /> Add Range
-            </button>
+          <button type="button" className={button.primary} onClick={handleAddRange}>
+            <Plus className="size-4" /> Add range
+          </button>
         }
       >
         <div className="space-y-6">
-            {ranges.sort((a, b) => a.min_tokens - b.min_tokens).map(range => (
-                <RangeSection
-                    key={range.id}
-                    range={range}
-                    tiers={tiers}
-                    onAddTier={addTier}
-                    onUpdate={handleRangeUpdate}
-                    onRemove={handleRemoveRange}
-                    // Pass down other actions
-                    moveTier={moveTier}
-                    removeTier={removeTier}
-                    setAddingEndpointTier={setAddingEndpointTier}
-                    updateEndpointWeight={updateEndpointWeight}
-                    removeEndpoint={removeEndpoint}
-                />
-            ))}
+          {persistentStructures.ranges.map((range) => (
+            <RangeSection
+              key={range.id}
+              range={range}
+              tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
+              onAddTier={(isPremium) => handleTierAdd(range.id, isPremium)}
+              onUpdate={(field, value) => handleRangeUpdate(range.id, field, value)}
+              onRemove={() => runMutation(() => llmApi.deleteTokenRange(range.id), 'Range removed')}
+              onMoveTier={(tierId, direction) => handleTierMove(tierId, direction)}
+              onRemoveTier={handleTierRemove}
+              onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
+              onUpdateEndpointWeight={(tier, tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'persistent')}
+              onRemoveEndpoint={(tier, tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'persistent')}
+            />
+          ))}
+          {persistentStructures.ranges.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-500">
+              {overviewQuery.isPending ? (
+                <div className="flex items-center justify-center gap-2">
+                  <LoaderCircle className="size-5 animate-spin" /> Loading ranges...
+                </div>
+              ) : (
+                'No token ranges configured yet.'
+              )}
+            </div>
+          )}
         </div>
       </SectionCard>
-
       <SectionCard
         title="Browser-use models"
-        description="The browser agent can share the orchestrator model or run a dedicated stack."
+        description="Dedicated tiers for browser automations."
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
-                <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold text-slate-700">Standard Tiers</h4>
-                    <button type="button" className={button.secondary} onClick={() => addTier(false, 'browser')}>
-                        <Plus className="size-4" /> Add
-                    </button>
-                </div>
-                {browserTiers.filter(t => !t.premium).map((tier, index) => (
-                    <TierCard
-                        key={tier.id}
-                        tier={tier}
-                        onMove={(direction) => moveTier(tier.id, direction)}
-                        onRemove={() => removeTier(tier.id)}
-                        onAddEndpoint={() => setAddingEndpointTier(tier)}
-                        onUpdateEndpointWeight={(endpointId: string, weight: number) => updateEndpointWeight(tier.id, endpointId, weight)}
-                        onRemoveEndpoint={(endpointId: string) => removeEndpoint(tier.id, endpointId)}
-                    />
-                ))}
+          <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-slate-700">Standard tiers</h4>
+              <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(false)}>
+                <Plus className="size-4" /> Add
+              </button>
             </div>
-            <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
-                <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold text-emerald-800">Premium Tiers</h4>
-                    <button type="button" className={button.secondary} onClick={() => addTier(true, 'browser')}>
-                        <Plus className="size-4" /> Add
-                    </button>
-                </div>
-                 {browserTiers.filter(t => t.premium).length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers for this range.</p>}
-                 {browserTiers.filter(t => t.premium).map((tier, index) => (
-                    <TierCard
-                        key={tier.id}
-                        tier={tier}
-                        onMove={(direction) => moveTier(tier.id, direction)}
-                        onRemove={() => removeTier(tier.id)}
-                        onAddEndpoint={() => setAddingEndpointTier(tier)}
-                        onUpdateEndpointWeight={(endpointId: string, weight: number) => updateEndpointWeight(tier.id, endpointId, weight)}
-                        onRemoveEndpoint={(endpointId: string) => removeEndpoint(tier.id, endpointId)}
-                    />
-                ))}
+            {browserTiers.filter((tier) => !tier.premium).map((tier) => (
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                scope="browser"
+                onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
+                onRemove={() => handleBrowserTierRemove(tier.id)}
+                onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
+                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'browser')}
+                onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
+              />
+            ))}
+          </div>
+          <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-emerald-800">Premium tiers</h4>
+              <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(true)}>
+                <Plus className="size-4" /> Add
+              </button>
             </div>
+            {browserTiers.filter((tier) => tier.premium).map((tier) => (
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                scope="browser"
+                onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
+                onRemove={() => handleBrowserTierRemove(tier.id)}
+                onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
+                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'browser')}
+                onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
+              />
+            ))}
+          </div>
         </div>
       </SectionCard>
-
       <SectionCard
         title="Other model consumers"
         description="Surface-level overview of summarization, embeddings, and tooling hints."
       >
         <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-xl border border-slate-200/80 bg-white p-4">
-                    <div className="flex items-start gap-3">
-                        <BookText className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                        <div>
-                            <h4 className="font-semibold text-slate-900/90">Summaries</h4>
-                            <p className="text-sm text-slate-600">Uses the primary model from the <span className="font-semibold">Small</span> token range, with temperature forced to 0.</p>
-                        </div>
-                    </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-slate-200/80 bg-white p-4">
+              <div className="flex items-start gap-3">
+                <BookText className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-slate-900/90">Summaries</h4>
+                  <p className="text-sm text-slate-600">Uses the primary model from the smallest token range, temperature forced to 0.</p>
                 </div>
-                <div className="rounded-xl border border-slate-200/80 bg-white p-4">
-                    <div className="flex items-start gap-3">
-                        <Search className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                        <div>
-                            <h4 className="font-semibold text-slate-900/90">Search Tools</h4>
-                            <p className="text-sm text-slate-600">The decision to use search is made by the main agent, using the fully-configurable Token-based failover tiers.</p>
-                        </div>
-                    </div>
-                </div>
+              </div>
             </div>
-            <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-start gap-3">
-                        <Palette className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                        <div>
-                            <h4 className="font-semibold text-slate-900/90">Embeddings Tiers</h4>
-                            <p className="text-sm text-slate-600">A dedicated failover list for generating text embeddings.</p>
-                        </div>
-                    </div>
-                    <button type="button" className={button.secondary} onClick={() => addTier(false, 'embedding')}>
-                        <Plus className="size-4" /> Add Tier
-                    </button>
+            <div className="rounded-xl border border-slate-200/80 bg-white p-4">
+              <div className="flex items-start gap-3">
+                <Search className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-slate-900/90">Search tools</h4>
+                  <p className="text-sm text-slate-600">Decisions are delegated to the main agent tiers.</p>
                 </div>
-                {embeddingTiers.map((tier, index) => (
-                    <TierCard
-                        key={tier.id}
-                        tier={tier}
-                        onMove={(direction) => moveTier(tier.id, direction)}
-                        onRemove={() => removeTier(tier.id)}
-                        onAddEndpoint={() => setAddingEndpointTier(tier)}
-                        onUpdateEndpointWeight={(endpointId: string, weight: number) => updateEndpointWeight(tier.id, endpointId, weight)}
-                        onRemoveEndpoint={(endpointId: string) => removeEndpoint(tier.id, endpointId)}
-                    />
-                ))}
+              </div>
             </div>
+          </div>
+          <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-start gap-3">
+                <PlugZap className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-slate-900/90">Embedding tiers</h4>
+                  <p className="text-sm text-slate-600">Fallback order for generating embeddings.</p>
+                </div>
+              </div>
+              <button type="button" className={button.secondary} onClick={handleEmbeddingTierAdd}>
+                <Plus className="size-4" /> Add tier
+              </button>
+            </div>
+            {embeddingTiers.map((tier) => (
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                scope="embedding"
+                onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
+                onRemove={() => handleEmbeddingTierRemove(tier.id)}
+                onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
+                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'embedding')}
+                onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'embedding')}
+              />
+            ))}
+            {embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
+          </div>
         </div>
       </SectionCard>
+      {endpointModal && (
+        <AddEndpointModal
+          tier={endpointModal.tier}
+          scope={endpointModal.scope}
+          choices={endpointChoices}
+          onAdd={(endpointId) => submitTierEndpoint(endpointId)}
+          onClose={() => setEndpointModal(null)}
+        />
+      )}
     </div>
   )
 }

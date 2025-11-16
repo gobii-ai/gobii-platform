@@ -22,15 +22,28 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.models import (
+    BrowserLLMPolicy,
+    BrowserLLMTier,
+    BrowserModelEndpoint,
+    BrowserTierEndpoint,
     CommsChannel,
+    EmbeddingsLLMTier,
+    EmbeddingsModelEndpoint,
+    EmbeddingsTierEndpoint,
+    LLMProvider,
     MCPServerConfig,
     MCPServerOAuthCredential,
     MCPServerOAuthSession,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentLLMTier,
+    PersistentModelEndpoint,
+    PersistentTierEndpoint,
+    PersistentTokenRange,
     build_web_agent_address,
     build_web_user_address,
 )
+from api.encryption import SecretsEncryption
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
     end_web_session,
@@ -54,6 +67,8 @@ from console.agent_chat.timeline import (
 from console.context_helpers import build_console_context
 from console.forms import MCPServerConfigForm
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
+from console.llm_serializers import build_llm_overview
+from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
 from api.services import mcp_servers as mcp_server_service
 
 
@@ -252,6 +267,77 @@ def _parse_json_body(request: HttpRequest) -> dict:
     return payload
 
 
+def _json_ok(**extra):
+    payload = {"ok": True}
+    payload.update(extra)
+    return JsonResponse(payload)
+
+
+def _coerce_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _next_order_for_range(token_range: PersistentTokenRange, *, is_premium: bool) -> int:
+    last = (
+        PersistentLLMTier.objects.filter(token_range=token_range, is_premium=is_premium)
+        .order_by("-order")
+        .first()
+    )
+    return (last.order if last else 0) + 1
+
+
+def _next_order_for_browser(policy: BrowserLLMPolicy, *, is_premium: bool) -> int:
+    last = (
+        BrowserLLMTier.objects.filter(policy=policy, is_premium=is_premium)
+        .order_by("-order")
+        .first()
+    )
+    return (last.order if last else 0) + 1
+
+
+def _next_embedding_order() -> int:
+    last = EmbeddingsLLMTier.objects.order_by("-order").first()
+    return (last.order if last else 0) + 1
+
+
+def _swap_orders(queryset, item, direction: str) -> bool:
+    siblings = list(queryset.order_by("order"))
+    try:
+        index = siblings.index(item)
+    except ValueError:
+        return False
+    if direction == "up" and index == 0:
+        return False
+    if direction == "down" and index == len(siblings) - 1:
+        return False
+    target_index = index - 1 if direction == "up" else index + 1
+    other = siblings[target_index]
+    item.order, other.order = other.order, item.order
+    item.save(update_fields=["order"])
+    other.save(update_fields=["order"])
+    return True
+
+
+def _get_active_browser_policy() -> BrowserLLMPolicy:
+    policy = BrowserLLMPolicy.objects.filter(is_active=True).first()
+    if policy is None:
+        policy = BrowserLLMPolicy.objects.create(name="Default", is_active=True)
+    return policy
+
+
+class SystemAdminAPIView(LoginRequiredMixin, View):
+    """JSON API view that only system administrators can access."""
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        if not request.user.is_superuser:
+            return JsonResponse({"error": "forbidden"}, status=403)
+        return super().dispatch(request, *args, **kwargs)
+
+
 def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return analytics properties annotated with agent + organization context."""
 
@@ -360,6 +446,712 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
 
         return JsonResponse({"event": event}, status=201)
+
+
+class ConsoleLLMOverviewAPIView(SystemAdminAPIView):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        payload = build_llm_overview()
+        return JsonResponse(payload)
+
+
+class LLMProviderListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        display_name = (payload.get("display_name") or "").strip()
+        key = (payload.get("key") or "").strip()
+        if not display_name or not key:
+            return HttpResponseBadRequest("display_name and key are required")
+
+        if LLMProvider.objects.filter(key=key).exists():
+            return HttpResponseBadRequest("Provider key already exists")
+
+        provider = LLMProvider(
+            display_name=display_name,
+            key=key,
+            enabled=_coerce_bool(payload.get("enabled", True)),
+            env_var_name=(payload.get("env_var_name") or "").strip(),
+            browser_backend=payload.get("browser_backend") or LLMProvider.BrowserBackend.OPENAI,
+            supports_safety_identifier=_coerce_bool(payload.get("supports_safety_identifier", False)),
+            vertex_project=(payload.get("vertex_project") or "").strip(),
+            vertex_location=(payload.get("vertex_location") or "").strip(),
+        )
+        api_key_value = payload.get("api_key")
+        if api_key_value:
+            provider.api_key_encrypted = SecretsEncryption.encrypt_value(api_key_value)
+        provider.save()
+        return _json_ok(provider_id=str(provider.id))
+
+
+class LLMProviderDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, provider_id: str, *args: Any, **kwargs: Any):
+        provider = get_object_or_404(LLMProvider, pk=provider_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        updatable_fields = {
+            "display_name": "display_name",
+            "env_var_name": "env_var_name",
+            "browser_backend": "browser_backend",
+            "supports_safety_identifier": "supports_safety_identifier",
+            "vertex_project": "vertex_project",
+            "vertex_location": "vertex_location",
+        }
+        for field, model_field in updatable_fields.items():
+            if field in payload:
+                value = payload.get(field)
+                if isinstance(value, str):
+                    value = value.strip()
+                if model_field == "supports_safety_identifier":
+                    value = _coerce_bool(value)
+                setattr(provider, model_field, value)
+
+        if "enabled" in payload:
+            provider.enabled = _coerce_bool(payload.get("enabled"))
+
+        api_key_value = payload.get("api_key")
+        if api_key_value:
+            provider.api_key_encrypted = SecretsEncryption.encrypt_value(api_key_value)
+        if payload.get("clear_api_key"):
+            provider.api_key_encrypted = None
+
+        provider.save()
+        return _json_ok(provider_id=str(provider.id))
+
+    def delete(self, request: HttpRequest, provider_id: str, *args: Any, **kwargs: Any):
+        provider = get_object_or_404(LLMProvider, pk=provider_id)
+        has_dependents = (
+            provider.persistent_endpoints.exists()
+            or provider.browser_endpoints.exists()
+            or provider.embedding_endpoints.exists()
+        )
+        if has_dependents:
+            return HttpResponseBadRequest("Provider cannot be deleted while endpoints exist")
+        provider.delete()
+        return _json_ok()
+
+
+class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        provider_id = payload.get("provider_id")
+        provider = get_object_or_404(LLMProvider, pk=provider_id)
+        key = (payload.get("key") or "").strip()
+        model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+        if not key or not model:
+            return HttpResponseBadRequest("key and model are required")
+        if PersistentModelEndpoint.objects.filter(key=key).exists():
+            return HttpResponseBadRequest("Endpoint key already exists")
+
+        temp_value = payload.get("temperature_override")
+        temperature_override = None
+        if temp_value not in (None, ""):
+            temperature_override = float(temp_value)
+
+        endpoint = PersistentModelEndpoint.objects.create(
+            key=key,
+            provider=provider,
+            litellm_model=model,
+            temperature_override=temperature_override,
+            supports_tool_choice=_coerce_bool(payload.get("supports_tool_choice", True)),
+            use_parallel_tool_calls=_coerce_bool(payload.get("use_parallel_tool_calls", True)),
+            supports_vision=_coerce_bool(payload.get("supports_vision", False)),
+            api_base=(payload.get("api_base") or "").strip(),
+            enabled=_coerce_bool(payload.get("enabled", True)),
+        )
+        invalidate_llm_bootstrap_cache()
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+
+class PersistentEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(PersistentModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "model" in payload or "litellm_model" in payload:
+            model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+            if model:
+                endpoint.litellm_model = model
+        if "temperature_override" in payload:
+            temp = payload.get("temperature_override")
+            if temp in (None, ""):
+                endpoint.temperature_override = None
+            else:
+                endpoint.temperature_override = float(temp)
+        if "supports_tool_choice" in payload:
+            endpoint.supports_tool_choice = _coerce_bool(payload.get("supports_tool_choice"))
+        if "use_parallel_tool_calls" in payload:
+            endpoint.use_parallel_tool_calls = _coerce_bool(payload.get("use_parallel_tool_calls"))
+        if "supports_vision" in payload:
+            endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
+        if "api_base" in payload:
+            endpoint.api_base = (payload.get("api_base") or "").strip()
+        if "enabled" in payload:
+            endpoint.enabled = _coerce_bool(payload.get("enabled"))
+        endpoint.save()
+        invalidate_llm_bootstrap_cache()
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(PersistentModelEndpoint, pk=endpoint_id)
+        if endpoint.in_tiers.exists():
+            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
+        endpoint.delete()
+        invalidate_llm_bootstrap_cache()
+        return _json_ok()
+
+
+class PersistentTokenRangeListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        name = (payload.get("name") or "").strip()
+        if not name:
+            return HttpResponseBadRequest("name is required")
+        min_tokens = payload.get("min_tokens")
+        max_tokens = payload.get("max_tokens")
+        try:
+            min_tokens_int = int(min_tokens)
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("min_tokens must be an integer")
+        max_tokens_int = None
+        if max_tokens not in (None, ""):
+            try:
+                max_tokens_int = int(max_tokens)
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("max_tokens must be an integer or null")
+            if max_tokens_int <= min_tokens_int:
+                return HttpResponseBadRequest("max_tokens must be greater than min_tokens")
+
+        token_range = PersistentTokenRange.objects.create(
+            name=name,
+            min_tokens=min_tokens_int,
+            max_tokens=max_tokens_int,
+        )
+        invalidate_llm_bootstrap_cache()
+        return _json_ok(token_range_id=str(token_range.id))
+
+
+class PersistentTokenRangeDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
+        token_range = get_object_or_404(PersistentTokenRange, pk=range_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "name" in payload:
+            name = (payload.get("name") or "").strip()
+            if name:
+                token_range.name = name
+        if "min_tokens" in payload:
+            try:
+                token_range.min_tokens = int(payload.get("min_tokens"))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("min_tokens must be an integer")
+        if "max_tokens" in payload:
+            max_tokens = payload.get("max_tokens")
+            if max_tokens in (None, ""):
+                token_range.max_tokens = None
+            else:
+                try:
+                    token_range.max_tokens = int(max_tokens)
+                except (TypeError, ValueError):
+                    return HttpResponseBadRequest("max_tokens must be an integer")
+        if token_range.max_tokens is not None and token_range.max_tokens <= token_range.min_tokens:
+            return HttpResponseBadRequest("max_tokens must be greater than min_tokens")
+
+        token_range.save()
+        invalidate_llm_bootstrap_cache()
+        return _json_ok(token_range_id=str(token_range.id))
+
+    def delete(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
+        token_range = get_object_or_404(PersistentTokenRange, pk=range_id)
+        token_range.delete()
+        invalidate_llm_bootstrap_cache()
+        return _json_ok()
+
+
+class PersistentTierListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
+        token_range = get_object_or_404(PersistentTokenRange, pk=range_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        is_premium = _coerce_bool(payload.get("is_premium", False))
+        description = (payload.get("description") or "").strip()
+        order = _next_order_for_range(token_range, is_premium=is_premium)
+
+        tier = PersistentLLMTier.objects.create(
+            token_range=token_range,
+            order=order,
+            description=description,
+            is_premium=is_premium,
+        )
+        invalidate_llm_bootstrap_cache()
+        return _json_ok(tier_id=str(tier.id))
+
+
+class PersistentTierDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(PersistentLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "description" in payload:
+            tier.description = (payload.get("description") or "").strip()
+        if "move" in payload:
+            direction = (payload.get("move") or "").lower()
+            if direction not in {"up", "down"}:
+                return HttpResponseBadRequest("direction must be 'up' or 'down'")
+            sibling_qs = PersistentLLMTier.objects.filter(
+                token_range=tier.token_range,
+                is_premium=tier.is_premium,
+            )
+            changed = _swap_orders(sibling_qs, tier, direction)
+            if not changed:
+                return HttpResponseBadRequest("Unable to move tier in that direction")
+        tier.save()
+        invalidate_llm_bootstrap_cache()
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(PersistentLLMTier, pk=tier_id)
+        tier.delete()
+        invalidate_llm_bootstrap_cache()
+        return _json_ok()
+
+
+class PersistentTierEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(PersistentLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        endpoint_id = payload.get("endpoint_id")
+        endpoint = get_object_or_404(PersistentModelEndpoint, pk=endpoint_id)
+        if tier.tier_endpoints.filter(endpoint=endpoint).exists():
+            return HttpResponseBadRequest("Endpoint already exists in tier")
+
+        try:
+            weight = float(payload.get("weight", 1))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("weight must be numeric")
+        if weight <= 0:
+            return HttpResponseBadRequest("weight must be greater than zero")
+
+        te = PersistentTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            weight=weight,
+        )
+        invalidate_llm_bootstrap_cache()
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class PersistentTierEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(PersistentTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "weight" in payload:
+            try:
+                weight = float(payload.get("weight"))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("weight must be numeric")
+            if weight <= 0:
+                return HttpResponseBadRequest("weight must be greater than zero")
+            tier_endpoint.weight = weight
+        tier_endpoint.save()
+        invalidate_llm_bootstrap_cache()
+        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(PersistentTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint.delete()
+        invalidate_llm_bootstrap_cache()
+        return _json_ok()
+
+
+class BrowserEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        provider = get_object_or_404(LLMProvider, pk=payload.get("provider_id"))
+        key = (payload.get("key") or "").strip()
+        model = (payload.get("model") or payload.get("browser_model") or "").strip()
+        if not key or not model:
+            return HttpResponseBadRequest("key and model are required")
+        if BrowserModelEndpoint.objects.filter(key=key).exists():
+            return HttpResponseBadRequest("Endpoint key already exists")
+
+        max_tokens_val = payload.get("max_output_tokens")
+        max_output_tokens = None
+        if max_tokens_val not in (None, ""):
+            try:
+                max_output_tokens = int(max_tokens_val)
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("max_output_tokens must be an integer")
+
+        endpoint = BrowserModelEndpoint.objects.create(
+            key=key,
+            provider=provider,
+            browser_model=model,
+            browser_base_url=(payload.get("browser_base_url") or payload.get("api_base") or "").strip(),
+            max_output_tokens=max_output_tokens,
+            supports_vision=_coerce_bool(payload.get("supports_vision", False)),
+            enabled=_coerce_bool(payload.get("enabled", True)),
+        )
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+
+class BrowserEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(BrowserModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "model" in payload or "browser_model" in payload:
+            model = (payload.get("model") or payload.get("browser_model") or "").strip()
+            if model:
+                endpoint.browser_model = model
+        if "browser_base_url" in payload or "api_base" in payload:
+            endpoint.browser_base_url = (payload.get("browser_base_url") or payload.get("api_base") or "").strip()
+        if "max_output_tokens" in payload:
+            value = payload.get("max_output_tokens")
+            if value in (None, ""):
+                endpoint.max_output_tokens = None
+            else:
+                try:
+                    endpoint.max_output_tokens = int(value)
+                except (TypeError, ValueError):
+                    return HttpResponseBadRequest("max_output_tokens must be an integer")
+        if "supports_vision" in payload:
+            endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
+        if "enabled" in payload:
+            endpoint.enabled = _coerce_bool(payload.get("enabled"))
+        endpoint.save()
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(BrowserModelEndpoint, pk=endpoint_id)
+        if endpoint.in_tiers.exists():
+            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
+        endpoint.delete()
+        return _json_ok()
+
+
+class EmbeddingEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        key = (payload.get("key") or "").strip()
+        model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+        if not key or not model:
+            return HttpResponseBadRequest("key and model are required")
+        if EmbeddingsModelEndpoint.objects.filter(key=key).exists():
+            return HttpResponseBadRequest("Endpoint key already exists")
+
+        provider_id = payload.get("provider_id")
+        provider = None
+        if provider_id:
+            provider = get_object_or_404(LLMProvider, pk=provider_id)
+
+        endpoint = EmbeddingsModelEndpoint.objects.create(
+            key=key,
+            provider=provider,
+            litellm_model=model,
+            api_base=(payload.get("api_base") or "").strip(),
+            enabled=_coerce_bool(payload.get("enabled", True)),
+        )
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+
+class EmbeddingEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "model" in payload or "litellm_model" in payload:
+            model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+            if model:
+                endpoint.litellm_model = model
+        if "api_base" in payload:
+            endpoint.api_base = (payload.get("api_base") or "").strip()
+        if "enabled" in payload:
+            endpoint.enabled = _coerce_bool(payload.get("enabled"))
+        if "provider_id" in payload:
+            provider_id = payload.get("provider_id")
+            if provider_id:
+                endpoint.provider = get_object_or_404(LLMProvider, pk=provider_id)
+            else:
+                endpoint.provider = None
+        endpoint.save()
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
+        if endpoint.in_tiers.exists():
+            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
+        endpoint.delete()
+        return _json_ok()
+
+
+class BrowserTierListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        policy = _get_active_browser_policy()
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        is_premium = _coerce_bool(payload.get("is_premium", False))
+        description = (payload.get("description") or "").strip()
+        order = _next_order_for_browser(policy, is_premium=is_premium)
+        tier = BrowserLLMTier.objects.create(
+            policy=policy,
+            order=order,
+            description=description,
+            is_premium=is_premium,
+        )
+        return _json_ok(tier_id=str(tier.id))
+
+
+class BrowserTierDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(BrowserLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "description" in payload:
+            tier.description = (payload.get("description") or "").strip()
+        if "move" in payload:
+            direction = (payload.get("move") or "").lower()
+            if direction not in {"up", "down"}:
+                return HttpResponseBadRequest("direction must be 'up' or 'down'")
+            sibling_qs = BrowserLLMTier.objects.filter(policy=tier.policy, is_premium=tier.is_premium)
+            changed = _swap_orders(sibling_qs, tier, direction)
+            if not changed:
+                return HttpResponseBadRequest("Unable to move tier in that direction")
+        tier.save()
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(BrowserLLMTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class BrowserTierEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(BrowserLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        endpoint = get_object_or_404(BrowserModelEndpoint, pk=payload.get("endpoint_id"))
+        if tier.tier_endpoints.filter(endpoint=endpoint).exists():
+            return HttpResponseBadRequest("Endpoint already exists in tier")
+        try:
+            weight = float(payload.get("weight", 1))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("weight must be numeric")
+        if weight <= 0:
+            return HttpResponseBadRequest("weight must be greater than zero")
+        te = BrowserTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class BrowserTierEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(BrowserTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        if "weight" in payload:
+            try:
+                weight = float(payload.get("weight"))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("weight must be numeric")
+            if weight <= 0:
+                return HttpResponseBadRequest("weight must be greater than zero")
+            tier_endpoint.weight = weight
+        tier_endpoint.save()
+        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(BrowserTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint.delete()
+        return _json_ok()
+
+
+class EmbeddingTierListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        description = (payload.get("description") or "").strip()
+        order = _next_embedding_order()
+        tier = EmbeddingsLLMTier.objects.create(order=order, description=description)
+        return _json_ok(tier_id=str(tier.id))
+
+
+class EmbeddingTierDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(EmbeddingsLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "description" in payload:
+            tier.description = (payload.get("description") or "").strip()
+        if "move" in payload:
+            direction = (payload.get("move") or "").lower()
+            if direction not in {"up", "down"}:
+                return HttpResponseBadRequest("direction must be 'up' or 'down'")
+            changed = _swap_orders(EmbeddingsLLMTier.objects.all(), tier, direction)
+            if not changed:
+                return HttpResponseBadRequest("Unable to move tier in that direction")
+        tier.save()
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(EmbeddingsLLMTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class EmbeddingTierEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(EmbeddingsLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=payload.get("endpoint_id"))
+        if tier.tier_endpoints.filter(endpoint=endpoint).exists():
+            return HttpResponseBadRequest("Endpoint already exists in tier")
+        try:
+            weight = float(payload.get("weight", 1))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("weight must be numeric")
+        if weight <= 0:
+            return HttpResponseBadRequest("weight must be greater than zero")
+        te = EmbeddingsTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class EmbeddingTierEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(EmbeddingsTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        if "weight" in payload:
+            try:
+                weight = float(payload.get("weight"))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("weight must be numeric")
+            if weight <= 0:
+                return HttpResponseBadRequest("weight must be greater than zero")
+            tier_endpoint.weight = weight
+        tier_endpoint.save()
+        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(EmbeddingsTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint.delete()
+        return _json_ok()
 
 
 @method_decorator(csrf_exempt, name="dispatch")
