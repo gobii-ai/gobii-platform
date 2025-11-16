@@ -825,6 +825,13 @@ TIKTOK_PIXEL_ID = env(
     default=_proprietary_default("analytics", "TIKTOK_PIXEL_ID"),
 )
 
+TIKTOK_ACCESS_TOKEN = env(
+    "TIKTOK_ACCESS_TOKEN",
+    default=_proprietary_default("analytics", "TIKTOK_ACCESS_TOKEN"),
+)
+TIKTOK_TEST_EVENT_CODE = env("TIKTOK_TEST_EVENT_CODE", default="")
+TIKTOK_CAPI_TEST_MODE = env.bool("TIKTOK_CAPI_TEST_MODE", default=False)
+
 FACEBOOK_PIXEL_ID = env(
     "FACEBOOK_PIXEL_ID",
     default=META_PIXEL_ID,

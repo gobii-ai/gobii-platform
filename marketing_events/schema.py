@@ -67,6 +67,7 @@ def normalize_event(payload: dict) -> dict:
             "fbc": click.get("fbc"),
             "fbclid": click.get("fbclid"),
             "rdt_cid": click.get("rdt_cid"),
+            "ttclid": click.get("ttclid"),
         },
         "utm": ctx.get("utm") or {},
         "consent": ctx.get("consent", True),

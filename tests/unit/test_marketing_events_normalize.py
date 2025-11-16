@@ -35,3 +35,13 @@ class NormalizeEventTests(SimpleTestCase):
         }
         out = normalize_event(payload)
         self.assertIsNone(out["network"]["client_ip"])
+
+    def test_normalize_event_captures_tiktok_click_id(self):
+        payload = {
+            "event_name": "CompleteRegistration",
+            "properties": {},
+            "user": {"id": "789"},
+            "context": {"click_ids": {"ttclid": "tt-123"}},
+        }
+        out = normalize_event(payload)
+        self.assertEqual(out["network"]["ttclid"], "tt-123")
