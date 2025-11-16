@@ -942,10 +942,14 @@ function TierCard({
     onCommitEndpointWeights(tier, scope)
   }
   const rangeMoveBusy = scope === 'persistent' ? isActionBusy(actionKey('persistent-range', tier.rangeId, 'move')) : false
-  const moveBusy = rangeMoveBusy || isActionBusy(actionKey(scope, tier.id, 'move'))
+  const moveBusy = isActionBusy(actionKey(scope, tier.id, 'move'))
+  const moveUpBusy = isActionBusy(actionKey(scope, tier.id, 'move', 'up'))
+  const moveDownBusy = isActionBusy(actionKey(scope, tier.id, 'move', 'down'))
   const removeBusy = isActionBusy(actionKey(scope, tier.id, 'remove'))
   const addBusy = isActionBusy(actionKey(scope, tier.id, 'attach-endpoint'))
   const removingEndpoint = tier.endpoints.some((endpoint) => isActionBusy(actionKey('tier-endpoint', endpoint.id, 'remove')))
+  const upDisabled = moveBusy || rangeMoveBusy || !canMoveUp
+  const downDisabled = moveBusy || rangeMoveBusy || !canMoveDown
 
   const inlineStatus = (() => {
     if (isSaving) {
@@ -967,11 +971,11 @@ function TierCard({
       <div className="flex items-center justify-between p-4 text-xs uppercase tracking-wide text-slate-500">
         <span className="flex items-center gap-2">{headerIcon} {tier.name}</span>
         <div className="flex items-center gap-1 text-xs">
-          <button className={button.icon} type="button" onClick={() => onMove('up')} disabled={moveBusy || !canMoveUp}>
-            {moveBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronUp className={`size-4 ${!canMoveUp ? 'text-slate-300' : ''}`} />}
+          <button className={button.icon} type="button" onClick={() => onMove('up')} disabled={upDisabled}>
+            {moveUpBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronUp className={`size-4 ${upDisabled ? 'text-slate-300' : ''}`} />}
           </button>
-          <button className={button.icon} type="button" onClick={() => onMove('down')} disabled={moveBusy || !canMoveDown}>
-            {moveBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronDown className={`size-4 ${!canMoveDown ? 'text-slate-300' : ''}`} />}
+          <button className={button.icon} type="button" onClick={() => onMove('down')} disabled={downDisabled}>
+            {moveDownBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronDown className={`size-4 ${downDisabled ? 'text-slate-300' : ''}`} />}
           </button>
           <button className={button.iconDanger} type="button" onClick={onRemove} disabled={removeBusy}>
             {removeBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
@@ -1517,8 +1521,8 @@ export function LlmConfigScreen() {
   const handleTierMove = (rangeId: string, tierId: string, direction: 'up' | 'down') =>
     runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }), {
       label: direction === 'up' ? 'Moving tier up…' : 'Moving tier down…',
-      busyKey: actionKey('persistent', tierId, 'move'),
-      busyKeys: [actionKey('persistent-range', rangeId, 'move')],
+      busyKey: actionKey('persistent', tierId, 'move', direction),
+      busyKeys: [actionKey('persistent', tierId, 'move'), actionKey('persistent-range', rangeId, 'move')],
       context: 'Persistent tier',
     })
   const handleTierRemove = (tierId: string) =>
@@ -1623,7 +1627,8 @@ export function LlmConfigScreen() {
   const handleBrowserTierMove = (tierId: string, direction: 'up' | 'down') =>
     runMutation(() => llmApi.updateBrowserTier(tierId, { move: direction }), {
       label: direction === 'up' ? 'Moving browser tier up…' : 'Moving browser tier down…',
-      busyKey: actionKey('browser', tierId, 'move'),
+      busyKey: actionKey('browser', tierId, 'move', direction),
+      busyKeys: [actionKey('browser', tierId, 'move')],
       context: 'Browser tiers',
     })
   const handleBrowserTierRemove = (tierId: string) =>
@@ -1643,7 +1648,8 @@ export function LlmConfigScreen() {
   const handleEmbeddingTierMove = (tierId: string, direction: 'up' | 'down') =>
     runMutation(() => llmApi.updateEmbeddingTier(tierId, { move: direction }), {
       label: direction === 'up' ? 'Moving embedding tier up…' : 'Moving embedding tier down…',
-      busyKey: actionKey('embedding', tierId, 'move'),
+      busyKey: actionKey('embedding', tierId, 'move', direction),
+      busyKeys: [actionKey('embedding', tierId, 'move')],
       context: 'Embedding tiers',
     })
   const handleEmbeddingTierRemove = (tierId: string) =>
