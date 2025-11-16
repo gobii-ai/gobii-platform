@@ -878,6 +878,8 @@ function TierCard({
   tier,
   pendingWeights,
   scope,
+  canMoveUp,
+  canMoveDown,
   isDirty,
   isSaving,
   onMove,
@@ -891,6 +893,8 @@ function TierCard({
   tier: Tier
   pendingWeights: Record<string, number>
   scope: TierScope
+  canMoveUp: boolean
+  canMoveDown: boolean
   isDirty: boolean
   isSaving: boolean
   onMove: (direction: 'up' | 'down') => void
@@ -934,11 +938,11 @@ function TierCard({
       <div className="flex items-center justify-between p-4 text-xs uppercase tracking-wide text-slate-500">
         <span className="flex items-center gap-2">{headerIcon} {tier.name}</span>
         <div className="flex items-center gap-1 text-xs">
-          <button className={button.icon} type="button" onClick={() => onMove('up')} disabled={moveBusy}>
-            {moveBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronUp className="size-4" />}
+          <button className={button.icon} type="button" onClick={() => onMove('up')} disabled={moveBusy || !canMoveUp}>
+            {moveBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronUp className={`size-4 ${!canMoveUp ? 'text-slate-300' : ''}`} />}
           </button>
-          <button className={button.icon} type="button" onClick={() => onMove('down')} disabled={moveBusy}>
-            {moveBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronDown className="size-4" />}
+          <button className={button.icon} type="button" onClick={() => onMove('down')} disabled={moveBusy || !canMoveDown}>
+            {moveBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronDown className={`size-4 ${!canMoveDown ? 'text-slate-300' : ''}`} />}
           </button>
           <button className={button.iconDanger} type="button" onClick={onRemove} disabled={removeBusy}>
             {removeBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
@@ -1141,23 +1145,28 @@ function RangeSection({
             </button>
           </div>
           {standardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard tiers.</p>}
-          {standardTiers.map((tier) => (
-            <TierCard
-              key={tier.id}
-              tier={tier}
-              pendingWeights={pendingWeights}
-              isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
-              isSaving={savingTierIds.has(`persistent:${tier.id}`)}
-              scope="persistent"
-              onMove={(direction) => onMoveTier(tier.id, direction)}
-              onRemove={() => onRemoveTier(tier.id)}
-              onAddEndpoint={() => onAddEndpoint(tier)}
-              onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
-              onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
-              onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
-              isActionBusy={isActionBusy}
-            />
-          ))}
+          {standardTiers.map((tier, index) => {
+            const lastIndex = standardTiers.length - 1
+            return (
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                pendingWeights={pendingWeights}
+                isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
+                isSaving={savingTierIds.has(`persistent:${tier.id}`)}
+                scope="persistent"
+                canMoveUp={index > 0}
+                canMoveDown={index < lastIndex}
+                onMove={(direction) => onMoveTier(tier.id, direction)}
+                onRemove={() => onRemoveTier(tier.id)}
+                onAddEndpoint={() => onAddEndpoint(tier)}
+                onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
+                onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
+                onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+                isActionBusy={isActionBusy}
+              />
+            )
+          })}
         </div>
         <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
           <div className="flex items-center justify-between">
@@ -1167,23 +1176,28 @@ function RangeSection({
             </button>
           </div>
           {premiumTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers.</p>}
-          {premiumTiers.map((tier) => (
-            <TierCard
-              key={tier.id}
-              tier={tier}
-              pendingWeights={pendingWeights}
-              isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
-              isSaving={savingTierIds.has(`persistent:${tier.id}`)}
-              scope="persistent"
-              onMove={(direction) => onMoveTier(tier.id, direction)}
-              onRemove={() => onRemoveTier(tier.id)}
-              onAddEndpoint={() => onAddEndpoint(tier)}
-              onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
-              onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
-              onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
-              isActionBusy={isActionBusy}
-            />
-          ))}
+          {premiumTiers.map((tier, index) => {
+            const lastIndex = premiumTiers.length - 1
+            return (
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                pendingWeights={pendingWeights}
+                isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
+                isSaving={savingTierIds.has(`persistent:${tier.id}`)}
+                scope="persistent"
+                canMoveUp={index > 0}
+                canMoveDown={index < lastIndex}
+                onMove={(direction) => onMoveTier(tier.id, direction)}
+                onRemove={() => onRemoveTier(tier.id)}
+                onAddEndpoint={() => onAddEndpoint(tier)}
+                onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
+                onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
+                onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+                isActionBusy={isActionBusy}
+              />
+            )
+          })}
         </div>
       </div>
     </div>
@@ -1211,6 +1225,8 @@ export function LlmConfigScreen() {
   const persistentStructures = useMemo(() => mapPersistentData(overviewQuery.data?.persistent.ranges), [overviewQuery.data?.persistent.ranges])
   const browserTiers = useMemo(() => mapBrowserTiers(overviewQuery.data?.browser ?? null), [overviewQuery.data?.browser])
   const embeddingTiers = useMemo(() => mapEmbeddingTiers(overviewQuery.data?.embeddings.tiers), [overviewQuery.data?.embeddings.tiers])
+  const browserStandardTiers = useMemo(() => browserTiers.filter((tier) => !tier.premium), [browserTiers])
+  const browserPremiumTiers = useMemo(() => browserTiers.filter((tier) => tier.premium), [browserTiers])
   const endpointChoices = overviewQuery.data?.choices ?? { persistent_endpoints: [], browser_endpoints: [], embedding_endpoints: [] }
 
   useEffect(() => {
@@ -1800,12 +1816,17 @@ export function LlmConfigScreen() {
                   <PlusCircle className="size-4" /> Add
                 </button>
               </div>
-              {browserTiers.filter((tier) => !tier.premium).map((tier) => (
+              {browserStandardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard browser tiers.</p>}
+              {browserStandardTiers.map((tier, index) => {
+                const lastIndex = browserStandardTiers.length - 1
+                return (
                 <TierCard
                   key={tier.id}
                   tier={tier}
                   pendingWeights={pendingWeights}
                   scope="browser"
+                  canMoveUp={index > 0}
+                  canMoveDown={index < lastIndex}
                   isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
                   isSaving={savingTierIds.has(`browser:${tier.id}`)}
                   onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
@@ -1816,7 +1837,8 @@ export function LlmConfigScreen() {
                   onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
                   isActionBusy={isBusy}
                 />
-              ))}
+                )
+              })}
             </div>
             <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
               <div className="flex items-center justify-between">
@@ -1825,12 +1847,17 @@ export function LlmConfigScreen() {
                   <PlusCircle className="size-4" /> Add
                 </button>
               </div>
-              {browserTiers.filter((tier) => tier.premium).map((tier) => (
+              {browserPremiumTiers.length === 0 && <p className="text-center text-xs text-emerald-500 py-4">No premium browser tiers.</p>}
+              {browserPremiumTiers.map((tier, index) => {
+                const lastIndex = browserPremiumTiers.length - 1
+                return (
                 <TierCard
                   key={tier.id}
                   tier={tier}
                   pendingWeights={pendingWeights}
                   scope="browser"
+                  canMoveUp={index > 0}
+                  canMoveDown={index < lastIndex}
                   isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
                   isSaving={savingTierIds.has(`browser:${tier.id}`)}
                   onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
@@ -1841,7 +1868,8 @@ export function LlmConfigScreen() {
                   onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
                   isActionBusy={isBusy}
                 />
-              ))}
+                )
+              })}
             </div>
           </div>
         </SectionCard>
@@ -1883,12 +1911,16 @@ export function LlmConfigScreen() {
                   <PlusCircle className="size-4" /> Add tier
                 </button>
               </div>
-              {embeddingTiers.map((tier) => (
+              {embeddingTiers.map((tier, index) => {
+                const lastIndex = embeddingTiers.length - 1
+                return (
                 <TierCard
                   key={tier.id}
                   tier={tier}
                   pendingWeights={pendingWeights}
                   scope="embedding"
+                  canMoveUp={index > 0}
+                  canMoveDown={index < lastIndex}
                   isDirty={dirtyTierIds.has(`embedding:${tier.id}`)}
                   isSaving={savingTierIds.has(`embedding:${tier.id}`)}
                   onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
@@ -1899,7 +1931,8 @@ export function LlmConfigScreen() {
                   onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'embedding')}
                   isActionBusy={isBusy}
                 />
-              ))}
+                )
+              })}
               {embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
             </div>
           </div>
