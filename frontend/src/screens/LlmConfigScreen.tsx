@@ -6,6 +6,8 @@ import {
   Shield,
   X,
   Plus,
+  PlusCircle,
+  Trash,
   Trash2,
   ChevronUp,
   ChevronDown,
@@ -752,7 +754,9 @@ function TierCard({
                 onBlur={handleCommit}
                 className="block w-20 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
               />
-                <button onClick={() => onRemoveEndpoint(endpoint.id)} className={button.iconDanger}><X className="size-4" /></button>
+                <button onClick={() => onRemoveEndpoint(endpoint.id)} className={button.iconDanger} aria-label="Remove endpoint">
+                  <Trash className="size-4" />
+                </button>
               </div>
             </div>
             )
@@ -763,7 +767,7 @@ function TierCard({
         </div>
         <div className="pt-2">
           <button type="button" className={button.muted} onClick={onAddEndpoint}>
-            <Plus className="size-3" /> Add endpoint
+            <PlusCircle className="size-3" /> Add endpoint
           </button>
         </div>
       </div>
@@ -830,7 +834,7 @@ function RangeSection({
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-semibold text-slate-700">Standard tiers</h4>
             <button type="button" className={button.secondary} onClick={() => onAddTier(false)}>
-              <Plus className="size-4" /> Add
+              <PlusCircle className="size-4" /> Add
             </button>
           </div>
           {standardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard tiers.</p>}
@@ -855,7 +859,7 @@ function RangeSection({
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-semibold text-emerald-800">Premium tiers</h4>
             <button type="button" className={button.secondary} onClick={() => onAddTier(true)}>
-              <Plus className="size-4" /> Add
+              <PlusCircle className="size-4" /> Add
             </button>
           </div>
           {premiumTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers.</p>}
@@ -889,6 +893,7 @@ export function LlmConfigScreen() {
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
   const [savingTierIds, setSavingTierIds] = useState<Set<string>>(new Set())
   const [dirtyTierIds, setDirtyTierIds] = useState<Set<string>>(new Set())
+  const [globalActionLabel, setGlobalActionLabel] = useState<string | null>(null)
   const fixingSinglesRef = useRef(false)
   const stagedWeightsRef = useRef<Record<string, { scope: TierScope; updates: { id: string; weight: number }[] }>>({})
 
@@ -974,8 +979,9 @@ export function LlmConfigScreen() {
 
   const invalidateOverview = () => queryClient.invalidateQueries({ queryKey: ['llm-overview'] })
 
-  const runMutation = async (action: () => Promise<unknown>, success?: string) => {
+  const runMutation = async (action: () => Promise<unknown>, success?: string, label?: string) => {
     try {
+      if (label) setGlobalActionLabel(label)
       await action()
       await invalidateOverview()
       if (success) {
@@ -986,6 +992,11 @@ export function LlmConfigScreen() {
       const message = error instanceof Error ? error.message : 'Request failed'
       setErrorBanner(message)
       setBanner(null)
+    }
+    finally {
+      if (label) {
+        setGlobalActionLabel((current) => (current === label ? null : current))
+      }
     }
   }
 
@@ -998,15 +1009,19 @@ export function LlmConfigScreen() {
   const handleProviderRotateKey = (providerId: string) => {
     const next = promptForKey('Enter the new admin API key')
     if (!next) return
-    runMutation(() => llmApi.updateProvider(providerId, { api_key: next }), 'API key updated')
+    runMutation(() => llmApi.updateProvider(providerId, { api_key: next }), 'API key updated', 'Rotating API key…')
   }
 
   const handleProviderClearKey = (providerId: string) => {
-    runMutation(() => llmApi.updateProvider(providerId, { clear_api_key: true }), 'Stored API key cleared')
+    runMutation(() => llmApi.updateProvider(providerId, { clear_api_key: true }), 'Stored API key cleared', 'Clearing API key…')
   }
 
   const handleProviderToggle = (providerId: string, enabled: boolean) => {
-    runMutation(() => llmApi.updateProvider(providerId, { enabled }), enabled ? 'Provider enabled' : 'Provider disabled')
+    runMutation(
+      () => llmApi.updateProvider(providerId, { enabled }),
+      enabled ? 'Provider enabled' : 'Provider disabled',
+      enabled ? 'Enabling provider…' : 'Disabling provider…',
+    )
   }
 
 const parseNumber = (value?: string) => {
@@ -1051,7 +1066,7 @@ const parseNumber = (value?: string) => {
       payload.supports_vision = values.supportsVision ?? false
       payload.enabled = true
     }
-    runMutation(() => llmApi.createEndpoint(kind, payload), 'Endpoint added')
+    runMutation(() => llmApi.createEndpoint(kind, payload), 'Endpoint added', 'Creating endpoint…')
   }
 
   const handleProviderSaveEndpoint = (endpoint: ProviderEndpointCard, values: EndpointFormValues) => {
@@ -1099,12 +1114,18 @@ const parseNumber = (value?: string) => {
     const last = sorted.at(-1)
     const baseMin = last?.max_tokens ?? 0
     const name = `Range ${sorted.length + 1}`
-    runMutation(() => llmApi.createTokenRange({ name, min_tokens: baseMin, max_tokens: baseMin + 10000 }), 'Range added')
+    runMutation(
+      () => llmApi.createTokenRange({ name, min_tokens: baseMin, max_tokens: baseMin + 10000 }),
+      'Range added',
+      'Creating range…',
+    )
   }
 
-  const handleTierAdd = (rangeId: string, isPremium: boolean) => runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium }), 'Tier added')
+  const handleTierAdd = (rangeId: string, isPremium: boolean) =>
+    runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium }), 'Tier added', 'Creating tier…')
   const handleTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }))
-  const handleTierRemove = (tierId: string) => runMutation(() => llmApi.deletePersistentTier(tierId), 'Tier removed')
+  const handleTierRemove = (tierId: string) =>
+    runMutation(() => llmApi.deletePersistentTier(tierId), 'Tier removed', 'Removing tier…')
 
   const stageTierEndpointWeight = (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => {
     const updates = rebalanceTierWeights(tier, tierEndpointId, weight)
@@ -1163,21 +1184,24 @@ const parseNumber = (value?: string) => {
 
   const handleTierEndpointRemove = (tierEndpointId: string, scope: TierScope) => {
     if (scope === 'browser') {
-      return runMutation(() => llmApi.deleteBrowserTierEndpoint(tierEndpointId), 'Endpoint removed')
+      return runMutation(() => llmApi.deleteBrowserTierEndpoint(tierEndpointId), 'Endpoint removed', 'Removing endpoint…')
     }
     if (scope === 'embedding') {
-      return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId), 'Endpoint removed')
+      return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId), 'Endpoint removed', 'Removing endpoint…')
     }
-    return runMutation(() => llmApi.deletePersistentTierEndpoint(tierEndpointId), 'Endpoint removed')
+    return runMutation(() => llmApi.deletePersistentTierEndpoint(tierEndpointId), 'Endpoint removed', 'Removing endpoint…')
   }
 
-  const handleBrowserTierAdd = (isPremium: boolean) => runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), 'Browser tier added')
+  const handleBrowserTierAdd = (isPremium: boolean) =>
+    runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), 'Browser tier added', 'Creating browser tier…')
   const handleBrowserTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updateBrowserTier(tierId, { move: direction }))
-  const handleBrowserTierRemove = (tierId: string) => runMutation(() => llmApi.deleteBrowserTier(tierId), 'Browser tier removed')
+  const handleBrowserTierRemove = (tierId: string) =>
+    runMutation(() => llmApi.deleteBrowserTier(tierId), 'Browser tier removed', 'Removing browser tier…')
 
-  const handleEmbeddingTierAdd = () => runMutation(() => llmApi.createEmbeddingTier({}), 'Embedding tier added')
+  const handleEmbeddingTierAdd = () => runMutation(() => llmApi.createEmbeddingTier({}), 'Embedding tier added', 'Creating embedding tier…')
   const handleEmbeddingTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updateEmbeddingTier(tierId, { move: direction }))
-  const handleEmbeddingTierRemove = (tierId: string) => runMutation(() => llmApi.deleteEmbeddingTier(tierId), 'Embedding tier removed')
+  const handleEmbeddingTierRemove = (tierId: string) =>
+    runMutation(() => llmApi.deleteEmbeddingTier(tierId), 'Embedding tier removed', 'Removing embedding tier…')
 
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => setEndpointModal({ tier, scope })
 
@@ -1222,7 +1246,7 @@ const parseNumber = (value?: string) => {
       await Promise.all(updates)
     }
 
-    runMutation(mutation, 'Endpoint added')
+    runMutation(mutation, 'Endpoint added', 'Adding endpoint…')
   }
 
   const statsCards = [
@@ -1258,6 +1282,12 @@ const parseNumber = (value?: string) => {
           <StatCard key={card.label} label={card.label} value={card.value} hint={card.hint} icon={card.icon} />
         ))}
       </div>
+      {globalActionLabel && (
+        <div className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          <span>{globalActionLabel}</span>
+        </div>
+      )}
       <SectionCard
         title="Provider inventory"
         description="Toggle providers on/off, rotate keys, and review exposed endpoints."
@@ -1297,7 +1327,7 @@ const parseNumber = (value?: string) => {
         description="Manage token ranges, tier ordering, and weighted endpoints."
         actions={
           <button type="button" className={button.primary} onClick={handleAddRange}>
-            <Plus className="size-4" /> Add range
+            <PlusCircle className="size-4" /> Add range
           </button>
         }
       >
@@ -1309,7 +1339,7 @@ const parseNumber = (value?: string) => {
               tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
               onAddTier={(isPremium) => handleTierAdd(range.id, isPremium)}
               onUpdate={(field, value) => handleRangeUpdate(range.id, field, value)}
-              onRemove={() => runMutation(() => llmApi.deleteTokenRange(range.id), 'Range removed')}
+              onRemove={() => runMutation(() => llmApi.deleteTokenRange(range.id), 'Range removed', 'Removing range…')}
               onMoveTier={(tierId, direction) => handleTierMove(tierId, direction)}
               onRemoveTier={handleTierRemove}
               onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
@@ -1343,7 +1373,7 @@ const parseNumber = (value?: string) => {
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-semibold text-slate-700">Standard tiers</h4>
               <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(false)}>
-                <Plus className="size-4" /> Add
+                <PlusCircle className="size-4" /> Add
               </button>
             </div>
             {browserTiers.filter((tier) => !tier.premium).map((tier) => (
@@ -1367,7 +1397,7 @@ const parseNumber = (value?: string) => {
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-semibold text-emerald-800">Premium tiers</h4>
               <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(true)}>
-                <Plus className="size-4" /> Add
+                <PlusCircle className="size-4" /> Add
               </button>
             </div>
             {browserTiers.filter((tier) => tier.premium).map((tier) => (
@@ -1424,7 +1454,7 @@ const parseNumber = (value?: string) => {
                 </div>
               </div>
               <button type="button" className={button.secondary} onClick={handleEmbeddingTierAdd}>
-                <Plus className="size-4" /> Add tier
+                <PlusCircle className="size-4" /> Add tier
               </button>
             </div>
             {embeddingTiers.map((tier) => (
