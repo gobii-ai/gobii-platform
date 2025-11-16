@@ -12,6 +12,8 @@ import {
   KeyRound,
   ShieldCheck,
   LoaderCircle,
+  Loader2,
+  Clock3,
   BookText,
   Search,
   Layers,
@@ -708,9 +710,13 @@ function TierCard({
         <div className="flex items-center justify-between text-[13px] text-slate-500">
           <span>Weighted endpoints</span>
           {isSaving ? (
-            <span className="text-xs text-blue-500">Saving…</span>
+            <span className="flex items-center gap-1 text-xs text-blue-500" aria-live="polite">
+              <Loader2 className="size-3 animate-spin" aria-hidden /> Saving…
+            </span>
           ) : isDirty ? (
-            <span className="text-xs text-amber-500">Pending…</span>
+            <span className="flex items-center gap-1 text-xs text-amber-500" aria-live="polite">
+              <Clock3 className="size-3 animate-pulse" aria-hidden /> Pending…
+            </span>
           ) : null}
         </div>
         <div className="space-y-3">
