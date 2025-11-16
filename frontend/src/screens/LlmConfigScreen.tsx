@@ -122,6 +122,24 @@ type MutationOptions = {
   rethrow?: boolean
 }
 
+type ConfirmDialogConfig = {
+  title: string
+  message: string
+  confirmLabel?: string
+  cancelLabel?: string
+  intent?: 'danger' | 'primary'
+  onConfirm: () => Promise<void> | void
+}
+
+type ActiveConfirmDialog = {
+  title: string
+  message: string
+  confirmLabel: string
+  cancelLabel: string
+  intent: 'danger' | 'primary'
+  onConfirm: () => Promise<void> | void
+}
+
 type AsyncFeedback = {
   runWithFeedback: <T>(operation: () => Promise<T>, options?: MutationOptions) => Promise<T>
   isBusy: (key: string) => boolean
@@ -487,6 +505,57 @@ function AddEndpointModal({
               disabled={!selected || isSubmitting}
             >
               {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add endpoint
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  )
+}
+
+function ConfirmActionModal({
+  title,
+  message,
+  confirmLabel,
+  cancelLabel,
+  intent,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  title: string
+  message: string
+  confirmLabel: string
+  cancelLabel: string
+  intent: 'danger' | 'primary'
+  busy: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const accentClasses =
+    intent === 'danger'
+      ? { iconBg: 'bg-rose-100 text-rose-600', button: 'inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500/40 disabled:opacity-50' }
+      : { iconBg: 'bg-blue-100 text-blue-600', button: button.primary }
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[210] flex items-center justify-center bg-slate-900/60">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl space-y-4">
+          <div className="flex items-start gap-3">
+            <div className={`rounded-full p-2 ${accentClasses.iconBg}`}>
+              <AlertCircle className="size-5" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+              <p className="text-sm text-slate-600">{message}</p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" className={button.secondary} onClick={onCancel} disabled={busy}>
+              {cancelLabel}
+            </button>
+            <button type="button" className={accentClasses.button} onClick={onConfirm} disabled={busy}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+              <span>{confirmLabel}</span>
             </button>
           </div>
         </div>
@@ -927,11 +996,11 @@ function TierCard({
   isDirty: boolean
   isSaving: boolean
   onMove: (direction: 'up' | 'down') => void
-  onRemove: () => void
+  onRemove: (tier: Tier) => void
   onAddEndpoint: () => void
   onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
   onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
-  onRemoveEndpoint: (tierEndpointId: string) => void
+  onRemoveEndpoint: (tier: Tier, endpoint: TierEndpoint) => void
   isActionBusy: (key: string) => boolean
 }) {
   const headerIcon = tier.premium ? <ShieldCheck className="size-4 text-emerald-700" /> : <Layers className="size-4 text-slate-500" />
@@ -977,7 +1046,7 @@ function TierCard({
           <button className={button.icon} type="button" onClick={() => onMove('down')} disabled={downDisabled}>
             {moveDownBusy ? <Loader2 className="size-4 animate-spin" /> : <ChevronDown className={`size-4 ${downDisabled ? 'text-slate-300' : ''}`} />}
           </button>
-          <button className={button.iconDanger} type="button" onClick={onRemove} disabled={removeBusy}>
+          <button className={button.iconDanger} type="button" onClick={() => onRemove(tier)} disabled={removeBusy}>
             {removeBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
           </button>
         </div>
@@ -1024,7 +1093,7 @@ function TierCard({
                 onBlur={handleCommit}
                 className="block w-20 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
               />
-                <button onClick={() => onRemoveEndpoint(endpoint.id)} className={button.iconDanger} aria-label="Remove endpoint">
+                <button onClick={() => onRemoveEndpoint(tier, endpoint)} className={button.iconDanger} aria-label="Remove endpoint">
                   <Trash className="size-4" />
                 </button>
               </div>
@@ -1068,11 +1137,11 @@ function RangeSection({
   onRemove: () => void
   onAddTier: (isPremium: boolean) => void
   onMoveTier: (tierId: string, direction: 'up' | 'down') => void
-  onRemoveTier: (tierId: string) => void
+  onRemoveTier: (tier: Tier) => void
   onAddEndpoint: (tier: Tier) => void
   onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
   onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
-  onRemoveEndpoint: (tierEndpointId: string) => void
+  onRemoveEndpoint: (tier: Tier, endpoint: TierEndpoint) => void
   pendingWeights: Record<string, number>
   savingTierIds: Set<string>
   dirtyTierIds: Set<string>
@@ -1191,11 +1260,11 @@ function RangeSection({
                 canMoveUp={index > 0}
                 canMoveDown={index < lastIndex}
                 onMove={(direction) => onMoveTier(tier.id, direction)}
-                onRemove={() => onRemoveTier(tier.id)}
+                onRemove={onRemoveTier}
                 onAddEndpoint={() => onAddEndpoint(tier)}
                 onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
                 onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
-                onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+                onRemoveEndpoint={onRemoveEndpoint}
                 isActionBusy={isActionBusy}
               />
             )
@@ -1222,11 +1291,11 @@ function RangeSection({
                 canMoveUp={index > 0}
                 canMoveDown={index < lastIndex}
                 onMove={(direction) => onMoveTier(tier.id, direction)}
-                onRemove={() => onRemoveTier(tier.id)}
+                onRemove={onRemoveTier}
                 onAddEndpoint={() => onAddEndpoint(tier)}
                 onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
                 onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
-                onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+                onRemoveEndpoint={onRemoveEndpoint}
                 isActionBusy={isActionBusy}
               />
             )
@@ -1361,6 +1430,47 @@ export function LlmConfigScreen() {
     if (!value) return null
     return value.trim()
   }
+  const [confirmDialog, setConfirmDialog] = useState<ActiveConfirmDialog | null>(null)
+  const [confirmBusy, setConfirmBusy] = useState(false)
+  const confirmDeferredRef = useRef<{ resolve: () => void; reject: (reason?: unknown) => void } | null>(null)
+  const requestConfirmation = (options: ConfirmDialogConfig) => new Promise<void>((resolve, reject) => {
+    const dialog: ActiveConfirmDialog = {
+      title: options.title,
+      message: options.message,
+      confirmLabel: options.confirmLabel ?? 'Confirm',
+      cancelLabel: options.cancelLabel ?? 'Cancel',
+      intent: options.intent ?? 'danger',
+      onConfirm: options.onConfirm,
+    }
+    setConfirmDialog(dialog)
+    confirmDeferredRef.current = { resolve, reject }
+  })
+  const handleConfirmDialogConfirm = async () => {
+    if (!confirmDialog) return
+    setConfirmBusy(true)
+    try {
+      await confirmDialog.onConfirm()
+      confirmDeferredRef.current?.resolve()
+    } catch (error) {
+      confirmDeferredRef.current?.reject(error)
+    } finally {
+      setConfirmBusy(false)
+      setConfirmDialog(null)
+      confirmDeferredRef.current = null
+    }
+  }
+  const handleConfirmDialogCancel = () => {
+    confirmDeferredRef.current?.resolve()
+    confirmDeferredRef.current = null
+    setConfirmDialog(null)
+  }
+  const confirmDestructiveAction = (options: ConfirmDialogConfig) =>
+    requestConfirmation({
+      ...options,
+      confirmLabel: options.confirmLabel ?? 'Delete',
+      cancelLabel: options.cancelLabel ?? 'Cancel',
+      intent: options.intent ?? 'danger',
+    })
 
   const handleProviderRotateKey = (provider: ProviderCardData) => {
     const next = promptForKey('Enter the new admin API key')
@@ -1476,11 +1586,17 @@ export function LlmConfigScreen() {
 
   const handleProviderDeleteEndpoint = (endpoint: ProviderEndpointCard) => {
     const kind: 'persistent' | 'browser' | 'embedding' = endpoint.type === 'browser' ? 'browser' : endpoint.type === 'embedding' ? 'embedding' : 'persistent'
-    return runMutation(() => llmApi.deleteEndpoint(kind, endpoint.id), {
-      successMessage: 'Endpoint removed',
-      label: 'Removing endpoint…',
-      busyKey: actionKey('endpoint', endpoint.id, 'delete'),
-      context: endpoint.name,
+    const displayName = endpoint.name || endpoint.api_base || endpoint.browser_base_url || endpoint.id
+    return confirmDestructiveAction({
+      title: `Delete endpoint "${displayName}"?`,
+      message: 'This removes the endpoint from the provider and detaches it from any tiers.',
+      confirmLabel: 'Delete endpoint',
+      onConfirm: () => runMutation(() => llmApi.deleteEndpoint(kind, endpoint.id), {
+        successMessage: 'Endpoint removed',
+        label: 'Removing endpoint…',
+        busyKey: actionKey('endpoint', endpoint.id, 'delete'),
+        context: endpoint.name,
+      }),
     })
   }
 
@@ -1511,6 +1627,20 @@ export function LlmConfigScreen() {
     )
   }
 
+  const handleRangeRemove = (range: TokenRange) =>
+    confirmDestructiveAction({
+      title: `Delete range "${range.name}"?`,
+      message: 'All tiers in this token range will also be deleted. Provider endpoints remain available for reuse.',
+      confirmLabel: 'Delete range',
+      onConfirm: () =>
+        runMutation(() => llmApi.deleteTokenRange(range.id), {
+          successMessage: 'Range removed',
+          label: 'Removing range…',
+          busyKey: actionKey('range', range.id, 'remove'),
+          context: range.name,
+        }),
+    })
+
   const handleTierAdd = (rangeId: string, isPremium: boolean) =>
     runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium }), {
       successMessage: 'Tier added',
@@ -1525,12 +1655,17 @@ export function LlmConfigScreen() {
       busyKeys: [actionKey('persistent', tierId, 'move'), actionKey('persistent-range', rangeId, 'move')],
       context: 'Persistent tier',
     })
-  const handleTierRemove = (tierId: string) =>
-    runMutation(() => llmApi.deletePersistentTier(tierId), {
-      successMessage: 'Tier removed',
-      label: 'Removing tier…',
-      busyKey: actionKey('persistent', tierId, 'remove'),
-      context: 'Persistent tier',
+  const handleTierRemove = (tier: Tier) =>
+    confirmDestructiveAction({
+      title: `Delete tier "${tier.name}"?`,
+      message: 'Endpoints will be detached from this persistent tier.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () => runMutation(() => llmApi.deletePersistentTier(tier.id), {
+        successMessage: 'Tier removed',
+        label: 'Removing tier…',
+        busyKey: actionKey('persistent', tier.id, 'remove'),
+        context: tier.name,
+      }),
     })
 
   const stageTierEndpointWeight = (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => {
@@ -1592,30 +1727,36 @@ export function LlmConfigScreen() {
     })
   }
 
-  const handleTierEndpointRemove = (tierEndpointId: string, scope: TierScope) => {
-    if (scope === 'browser') {
-      return runMutation(() => llmApi.deleteBrowserTierEndpoint(tierEndpointId), {
-        successMessage: 'Endpoint removed',
-        label: 'Removing endpoint…',
-        busyKey: actionKey('tier-endpoint', tierEndpointId, 'remove'),
-        context: 'Browser tier',
-      })
-    }
-    if (scope === 'embedding') {
-      return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId), {
-        successMessage: 'Endpoint removed',
-        label: 'Removing endpoint…',
-        busyKey: actionKey('tier-endpoint', tierEndpointId, 'remove'),
-        context: 'Embedding tier',
-      })
-    }
-    return runMutation(() => llmApi.deletePersistentTierEndpoint(tierEndpointId), {
-      successMessage: 'Endpoint removed',
-      label: 'Removing endpoint…',
-      busyKey: actionKey('tier-endpoint', tierEndpointId, 'remove'),
-      context: 'Persistent tier',
+  const handleTierEndpointRemove = (tier: Tier, endpoint: TierEndpoint, scope: TierScope) =>
+    confirmDestructiveAction({
+      title: `Remove "${endpoint.label}" from ${tier.name}?`,
+      message: 'This tier will lose access to the endpoint until it is added again.',
+      confirmLabel: 'Remove endpoint',
+      onConfirm: () => {
+        if (scope === 'browser') {
+          return runMutation(() => llmApi.deleteBrowserTierEndpoint(endpoint.id), {
+            successMessage: 'Endpoint removed',
+            label: 'Removing endpoint…',
+            busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
+            context: tier.name,
+          })
+        }
+        if (scope === 'embedding') {
+          return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(endpoint.id), {
+            successMessage: 'Endpoint removed',
+            label: 'Removing endpoint…',
+            busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
+            context: tier.name,
+          })
+        }
+        return runMutation(() => llmApi.deletePersistentTierEndpoint(endpoint.id), {
+          successMessage: 'Endpoint removed',
+          label: 'Removing endpoint…',
+          busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
+          context: tier.name,
+        })
+      },
     })
-  }
 
   const handleBrowserTierAdd = (isPremium: boolean) =>
     runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), {
@@ -1631,12 +1772,17 @@ export function LlmConfigScreen() {
       busyKeys: [actionKey('browser', tierId, 'move')],
       context: 'Browser tiers',
     })
-  const handleBrowserTierRemove = (tierId: string) =>
-    runMutation(() => llmApi.deleteBrowserTier(tierId), {
-      successMessage: 'Browser tier removed',
-      label: 'Removing browser tier…',
-      busyKey: actionKey('browser', tierId, 'remove'),
-      context: 'Browser tiers',
+  const handleBrowserTierRemove = (tier: Tier) =>
+    confirmDestructiveAction({
+      title: `Delete browser tier "${tier.name}"?`,
+      message: 'Endpoints assigned to this tier will stop serving browser workloads.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () => runMutation(() => llmApi.deleteBrowserTier(tier.id), {
+        successMessage: 'Browser tier removed',
+        label: 'Removing browser tier…',
+        busyKey: actionKey('browser', tier.id, 'remove'),
+        context: tier.name,
+      }),
     })
 
   const handleEmbeddingTierAdd = () => runMutation(() => llmApi.createEmbeddingTier({}), {
@@ -1652,12 +1798,17 @@ export function LlmConfigScreen() {
       busyKeys: [actionKey('embedding', tierId, 'move')],
       context: 'Embedding tiers',
     })
-  const handleEmbeddingTierRemove = (tierId: string) =>
-    runMutation(() => llmApi.deleteEmbeddingTier(tierId), {
-      successMessage: 'Embedding tier removed',
-      label: 'Removing embedding tier…',
-      busyKey: actionKey('embedding', tierId, 'remove'),
-      context: 'Embedding tiers',
+  const handleEmbeddingTierRemove = (tier: Tier) =>
+    confirmDestructiveAction({
+      title: `Delete embedding tier "${tier.name}"?`,
+      message: 'Any weighting rules tied to this tier will be lost.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () => runMutation(() => llmApi.deleteEmbeddingTier(tier.id), {
+        successMessage: 'Embedding tier removed',
+        label: 'Removing embedding tier…',
+        busyKey: actionKey('embedding', tier.id, 'remove'),
+        context: tier.name,
+      }),
     })
 
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => setEndpointModal({ tier, scope })
@@ -1806,20 +1957,13 @@ export function LlmConfigScreen() {
                 tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
                 onAddTier={(isPremium) => handleTierAdd(range.id, isPremium)}
                 onUpdate={(field, value) => handleRangeUpdate(range.id, field, value)}
-                onRemove={() =>
-                  runMutation(() => llmApi.deleteTokenRange(range.id), {
-                    successMessage: 'Range removed',
-                    label: 'Removing range…',
-                    busyKey: actionKey('range', range.id, 'remove'),
-                    context: range.name,
-                  })
-                }
-              onMoveTier={(tierId, direction) => handleTierMove(range.id, tierId, direction)}
+                onRemove={() => handleRangeRemove(range)}
+                onMoveTier={(tierId, direction) => handleTierMove(range.id, tierId, direction)}
                 onRemoveTier={handleTierRemove}
                 onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
                 onStageEndpointWeight={stageTierEndpointWeight}
                 onCommitEndpointWeights={commitTierEndpointWeights}
-                onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'persistent')}
+                onRemoveEndpoint={(tier, endpoint) => handleTierEndpointRemove(tier, endpoint, 'persistent')}
                 pendingWeights={pendingWeights}
                 savingTierIds={savingTierIds}
                 dirtyTierIds={dirtyTierIds}
@@ -1865,11 +2009,11 @@ export function LlmConfigScreen() {
                   isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
                   isSaving={savingTierIds.has(`browser:${tier.id}`)}
                   onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
-                  onRemove={() => handleBrowserTierRemove(tier.id)}
+                  onRemove={handleBrowserTierRemove}
                   onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
                   onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
                   onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
-                  onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
+                  onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'browser')}
                   isActionBusy={isBusy}
                 />
                 )
@@ -1896,11 +2040,11 @@ export function LlmConfigScreen() {
                   isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
                   isSaving={savingTierIds.has(`browser:${tier.id}`)}
                   onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
-                  onRemove={() => handleBrowserTierRemove(tier.id)}
+                  onRemove={handleBrowserTierRemove}
                   onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
                   onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
                   onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
-                  onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
+                  onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'browser')}
                   isActionBusy={isBusy}
                 />
                 )
@@ -1959,11 +2103,11 @@ export function LlmConfigScreen() {
                   isDirty={dirtyTierIds.has(`embedding:${tier.id}`)}
                   isSaving={savingTierIds.has(`embedding:${tier.id}`)}
                   onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
-                  onRemove={() => handleEmbeddingTierRemove(tier.id)}
+                  onRemove={handleEmbeddingTierRemove}
                   onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
                   onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
                   onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'embedding')}
-                  onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'embedding')}
+                  onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'embedding')}
                   isActionBusy={isBusy}
                 />
                 )
@@ -1980,6 +2124,18 @@ export function LlmConfigScreen() {
             busy={isBusy(actionKey(endpointModal.scope, endpointModal.tier.id, 'attach-endpoint'))}
             onAdd={(endpointId) => submitTierEndpoint(endpointId)}
             onClose={() => setEndpointModal(null)}
+          />
+        )}
+        {confirmDialog && (
+          <ConfirmActionModal
+            title={confirmDialog.title}
+            message={confirmDialog.message}
+            confirmLabel={confirmDialog.confirmLabel}
+            cancelLabel={confirmDialog.cancelLabel}
+            intent={confirmDialog.intent}
+            busy={confirmBusy}
+            onConfirm={handleConfirmDialogConfirm}
+            onCancel={handleConfirmDialogCancel}
           />
         )}
       </div>
