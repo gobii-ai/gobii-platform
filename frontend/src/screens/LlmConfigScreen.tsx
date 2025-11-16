@@ -16,7 +16,7 @@ import {
   Search,
   Layers,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
@@ -97,6 +97,45 @@ type EndpointFormValues = {
   supportsToolChoice?: boolean
   useParallelToolCalls?: boolean
   supportsVision?: boolean
+}
+
+const clampWeight = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
+
+function rebalanceTierWeights(tier: Tier, tierEndpointId: string, desiredWeight: number) {
+  const clamped = clampWeight(desiredWeight)
+  const endpoints = tier.endpoints
+  if (endpoints.length <= 1) {
+    const only = endpoints[0]
+    return only ? [{ id: only.id, weight: 100 }] : []
+  }
+
+  const target = endpoints.find((endpoint) => endpoint.id === tierEndpointId)
+  if (!target) return []
+
+  const others = endpoints.filter((endpoint) => endpoint.id !== tierEndpointId)
+  const remainder = 100 - clamped
+  const totalOtherWeight = others.reduce((sum, endpoint) => sum + endpoint.weight, 0)
+
+  let redistributed = others.map((endpoint) => {
+    if (totalOtherWeight > 0) {
+      return { id: endpoint.id, weight: (endpoint.weight / totalOtherWeight) * remainder }
+    }
+    return { id: endpoint.id, weight: remainder / others.length }
+  })
+
+  let runningTotal = clamped
+  redistributed = redistributed.map((entry) => {
+    const rounded = clampWeight(entry.weight)
+    runningTotal += rounded
+    return { ...entry, weight: rounded }
+  })
+
+  const roundingError = 100 - runningTotal
+  if (roundingError !== 0 && redistributed.length > 0) {
+    redistributed[0].weight = clampWeight(redistributed[0].weight + roundingError)
+  }
+
+  return [{ id: target.id, weight: clamped }, ...redistributed]
 }
 
 function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
@@ -586,6 +625,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose }: Add
 
 function TierCard({
   tier,
+  pendingWeights,
   onMove,
   onRemove,
   onAddEndpoint,
@@ -593,13 +633,16 @@ function TierCard({
   onRemoveEndpoint,
 }: {
   tier: Tier
+  pendingWeights: Record<string, number>
   onMove: (direction: 'up' | 'down') => void
   onRemove: () => void
   onAddEndpoint: () => void
-  onUpdateEndpointWeight: (tierEndpointId: string, weight: number) => void
+  onUpdateEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number) => void
   onRemoveEndpoint: (tierEndpointId: string) => void
 }) {
   const headerIcon = tier.premium ? <ShieldCheck className="size-4 text-emerald-700" /> : <Layers className="size-4 text-slate-500" />
+  const canAdjustWeights = tier.endpoints.length > 1
+  const disabledHint = canAdjustWeights ? '' : 'At least two endpoints are required to rebalance weights.'
   return (
     <div className={`rounded-xl border ${tier.premium ? 'border-emerald-200' : 'border-slate-200'} bg-white`}>
       <div className="flex items-center justify-between p-4 text-xs uppercase tracking-wide text-slate-500">
@@ -615,28 +658,42 @@ function TierCard({
           <span>Weighted endpoints</span>
         </div>
         <div className="space-y-3">
-          {tier.endpoints.map((endpoint) => (
-            <div key={endpoint.id} className="grid grid-cols-12 items-center gap-3 text-sm font-medium text-slate-900/90">
-              <span className="col-span-6 flex items-center gap-2 truncate"><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
-              <div className="col-span-6 flex items-center gap-2">
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={endpoint.weight}
-                  onChange={(event) => onUpdateEndpointWeight(endpoint.id, parseInt(event.target.value, 10))}
+          {tier.endpoints.map((endpoint) => {
+            const weightValue = pendingWeights[endpoint.id] ?? endpoint.weight
+            return (
+              <div key={endpoint.id} className="grid grid-cols-12 items-center gap-3 text-sm font-medium text-slate-900/90">
+                <span className="col-span-6 flex items-center gap-2 truncate"><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
+                <div className="col-span-6 flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={weightValue}
+                    onChange={(event) => {
+                      if (!canAdjustWeights) return
+                      onUpdateEndpointWeight(tier, endpoint.id, parseInt(event.target.value, 10))
+                    }}
+                    disabled={!canAdjustWeights}
                   className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
                 />
                 <input
                   type="number"
-                  value={endpoint.weight}
-                  onChange={(event) => onUpdateEndpointWeight(endpoint.id, parseInt(event.target.value, 10) || 0)}
+                  value={weightValue}
+                  onChange={(event) => {
+                    if (!canAdjustWeights) return
+                    onUpdateEndpointWeight(tier, endpoint.id, parseInt(event.target.value, 10) || 0)
+                  }}
+                  disabled={!canAdjustWeights}
                   className="block w-20 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
                 />
                 <button onClick={() => onRemoveEndpoint(endpoint.id)} className={button.iconDanger}><X className="size-4" /></button>
               </div>
             </div>
-          ))}
+            )
+          })}
+          {!canAdjustWeights && tier.endpoints.length > 0 && (
+            <p className="text-xs text-slate-400 text-right">{disabledHint}</p>
+          )}
         </div>
         <div className="pt-2">
           <button type="button" className={button.muted} onClick={onAddEndpoint}>
@@ -659,6 +716,7 @@ function RangeSection({
   onAddEndpoint,
   onUpdateEndpointWeight,
   onRemoveEndpoint,
+  pendingWeights,
 }: {
   range: TokenRange
   tiers: Tier[]
@@ -668,8 +726,9 @@ function RangeSection({
   onMoveTier: (tierId: string, direction: 'up' | 'down') => void
   onRemoveTier: (tierId: string) => void
   onAddEndpoint: (tier: Tier) => void
-  onUpdateEndpointWeight: (tierEndpointId: string, weight: number) => void
+  onUpdateEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number) => void
   onRemoveEndpoint: (tierEndpointId: string) => void
+  pendingWeights: Record<string, number>
 }) {
   const standardTiers = tiers.filter((tier) => !tier.premium).sort((a, b) => a.order - b.order)
   const premiumTiers = tiers.filter((tier) => tier.premium).sort((a, b) => a.order - b.order)
@@ -703,17 +762,18 @@ function RangeSection({
             </button>
           </div>
           {standardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard tiers.</p>}
-          {standardTiers.map((tier) => (
-              <TierCard
-                key={tier.id}
-                tier={tier}
-                onMove={(direction) => onMoveTier(tier.id, direction)}
-                onRemove={() => onRemoveTier(tier.id)}
-                onAddEndpoint={() => onAddEndpoint(tier)}
-                onUpdateEndpointWeight={(tierEndpointId, weight) => onUpdateEndpointWeight(tierEndpointId, weight)}
-                onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
-              />
-          ))}
+        {standardTiers.map((tier) => (
+            <TierCard
+              key={tier.id}
+              tier={tier}
+              pendingWeights={pendingWeights}
+              onMove={(direction) => onMoveTier(tier.id, direction)}
+              onRemove={() => onRemoveTier(tier.id)}
+              onAddEndpoint={() => onAddEndpoint(tier)}
+              onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => onUpdateEndpointWeight(currentTier, tierEndpointId, weight)}
+              onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+            />
+        ))}
         </div>
         <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
           <div className="flex items-center justify-between">
@@ -723,17 +783,18 @@ function RangeSection({
             </button>
           </div>
           {premiumTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers.</p>}
-          {premiumTiers.map((tier) => (
-              <TierCard
-                key={tier.id}
-                tier={tier}
-                onMove={(direction) => onMoveTier(tier.id, direction)}
-                onRemove={() => onRemoveTier(tier.id)}
-                onAddEndpoint={() => onAddEndpoint(tier)}
-                onUpdateEndpointWeight={(tierEndpointId, weight) => onUpdateEndpointWeight(tierEndpointId, weight)}
-                onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
-              />
-          ))}
+        {premiumTiers.map((tier) => (
+            <TierCard
+              key={tier.id}
+              tier={tier}
+              pendingWeights={pendingWeights}
+              onMove={(direction) => onMoveTier(tier.id, direction)}
+              onRemove={() => onRemoveTier(tier.id)}
+              onAddEndpoint={() => onAddEndpoint(tier)}
+              onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => onUpdateEndpointWeight(currentTier, tierEndpointId, weight)}
+              onRemoveEndpoint={(tierEndpointId) => onRemoveEndpoint(tierEndpointId)}
+            />
+        ))}
         </div>
       </div>
     </div>
@@ -745,6 +806,8 @@ export function LlmConfigScreen() {
   const [banner, setBanner] = useState<string | null>(null)
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
   const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
+  const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
+  const fixingSinglesRef = useRef(false)
 
   const overviewQuery = useQuery({
     queryKey: ['llm-overview'],
@@ -758,6 +821,72 @@ export function LlmConfigScreen() {
   const browserTiers = useMemo(() => mapBrowserTiers(overviewQuery.data?.browser ?? null), [overviewQuery.data?.browser])
   const embeddingTiers = useMemo(() => mapEmbeddingTiers(overviewQuery.data?.embeddings.tiers), [overviewQuery.data?.embeddings.tiers])
   const endpointChoices = overviewQuery.data?.choices ?? { persistent_endpoints: [], browser_endpoints: [], embedding_endpoints: [] }
+
+  useEffect(() => {
+    setPendingWeights({})
+  }, [overviewQuery.data])
+
+  useEffect(() => {
+    const data = overviewQuery.data
+    if (!data || fixingSinglesRef.current) return
+
+    const pending: Record<string, number> = {}
+    const operations: Promise<unknown>[] = []
+
+    const enqueueFix = (endpointId: string, scope: TierScope) => {
+      pending[endpointId] = 100
+      if (scope === 'browser') {
+        operations.push(llmApi.updateBrowserTierEndpoint(endpointId, { weight: 100 }))
+      } else if (scope === 'embedding') {
+        operations.push(llmApi.updateEmbeddingTierEndpoint(endpointId, { weight: 100 }))
+      } else {
+        operations.push(llmApi.updatePersistentTierEndpoint(endpointId, { weight: 100 }))
+      }
+    }
+
+    data.persistent.ranges.forEach((range) => {
+      range.tiers.forEach((tier) => {
+        if (tier.endpoints.length === 1) {
+          const endpoint = tier.endpoints[0]
+          if (Math.round(endpoint.weight) !== 100) {
+            enqueueFix(endpoint.id, 'persistent')
+          }
+        }
+      })
+    })
+
+    if (data.browser) {
+      data.browser.tiers.forEach((tier) => {
+        if (tier.endpoints.length === 1) {
+          const endpoint = tier.endpoints[0]
+          if (Math.round(endpoint.weight) !== 100) {
+            enqueueFix(endpoint.id, 'browser')
+          }
+        }
+      })
+    }
+
+    data.embeddings.tiers.forEach((tier) => {
+      if (tier.endpoints.length === 1) {
+        const endpoint = tier.endpoints[0]
+        if (Math.round(endpoint.weight) !== 100) {
+          enqueueFix(endpoint.id, 'embedding')
+        }
+      }
+    })
+
+    if (!operations.length) {
+      return
+    }
+
+    fixingSinglesRef.current = true
+    setPendingWeights((prev) => ({ ...prev, ...pending }))
+    Promise.all(operations)
+      .then(() => invalidateOverview())
+      .finally(() => {
+        fixingSinglesRef.current = false
+      })
+  }, [overviewQuery.data])
 
   const invalidateOverview = () => queryClient.invalidateQueries({ queryKey: ['llm-overview'] })
 
@@ -796,13 +925,13 @@ export function LlmConfigScreen() {
     runMutation(() => llmApi.updateProvider(providerId, { enabled }), enabled ? 'Provider enabled' : 'Provider disabled')
   }
 
-  const parseNumber = (value?: string) => {
-    if (value === undefined) return undefined
-    const trimmed = value.trim()
-    if (!trimmed) return undefined
-    const parsed = Number(trimmed)
-    return Number.isNaN(parsed) ? undefined : parsed
-  }
+const parseNumber = (value?: string) => {
+  if (value === undefined) return undefined
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const parsed = Number(trimmed)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
 
   const handleProviderAddEndpoint = (
     providerId: string,
@@ -893,14 +1022,26 @@ export function LlmConfigScreen() {
   const handleTierMove = (tierId: string, direction: 'up' | 'down') => runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }))
   const handleTierRemove = (tierId: string) => runMutation(() => llmApi.deletePersistentTier(tierId), 'Tier removed')
 
-  const handleTierEndpointWeight = (tierEndpointId: string, weight: number, scope: TierScope) => {
-    if (scope === 'browser') {
-      return runMutation(() => llmApi.updateBrowserTierEndpoint(tierEndpointId, { weight }))
+  const handleTierEndpointWeight = (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => {
+    const updates = rebalanceTierWeights(tier, tierEndpointId, weight)
+    if (!updates.length) return
+    setPendingWeights((prev) => {
+      const next = { ...prev }
+      updates.forEach((entry) => {
+        next[entry.id] = entry.weight
+      })
+      return next
+    })
+    const mutation = () => {
+      if (scope === 'browser') {
+        return Promise.all(updates.map((entry) => llmApi.updateBrowserTierEndpoint(entry.id, { weight: entry.weight })))
+      }
+      if (scope === 'embedding') {
+        return Promise.all(updates.map((entry) => llmApi.updateEmbeddingTierEndpoint(entry.id, { weight: entry.weight })))
+      }
+      return Promise.all(updates.map((entry) => llmApi.updatePersistentTierEndpoint(entry.id, { weight: entry.weight })))
     }
-    if (scope === 'embedding') {
-      return runMutation(() => llmApi.updateEmbeddingTierEndpoint(tierEndpointId, { weight }))
-    }
-    return runMutation(() => llmApi.updatePersistentTierEndpoint(tierEndpointId, { weight }))
+    return runMutation(mutation)
   }
 
   const handleTierEndpointRemove = (tierEndpointId: string, scope: TierScope) => {
@@ -926,13 +1067,18 @@ export function LlmConfigScreen() {
   const submitTierEndpoint = (endpointId: string) => {
     if (!endpointModal) return
     const { tier, scope } = endpointModal
-    if (scope === 'browser') {
-      runMutation(() => llmApi.addBrowserTierEndpoint(tier.id, { endpoint_id: endpointId, weight: 100 }), 'Endpoint added')
-    } else if (scope === 'embedding') {
-      runMutation(() => llmApi.addEmbeddingTierEndpoint(tier.id, { endpoint_id: endpointId, weight: 100 }), 'Endpoint added')
-    } else {
-      runMutation(() => llmApi.addPersistentTierEndpoint(tier.id, { endpoint_id: endpointId, weight: 100 }), 'Endpoint added')
+    const update = (weight: number) => ({ endpoint_id: endpointId, weight })
+    const targetWeight = tier.endpoints.length === 0 ? 100 : Math.floor(100 / (tier.endpoints.length + 1))
+    const mutation = () => {
+      if (scope === 'browser') {
+        return llmApi.addBrowserTierEndpoint(tier.id, update(targetWeight))
+      }
+      if (scope === 'embedding') {
+        return llmApi.addEmbeddingTierEndpoint(tier.id, update(targetWeight))
+      }
+      return llmApi.addPersistentTierEndpoint(tier.id, update(targetWeight))
     }
+    runMutation(mutation, 'Endpoint added')
   }
 
   const statsCards = [
@@ -1023,8 +1169,9 @@ export function LlmConfigScreen() {
               onMoveTier={(tierId, direction) => handleTierMove(tierId, direction)}
               onRemoveTier={handleTierRemove}
               onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
-              onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tierEndpointId, weight, 'persistent')}
+              onUpdateEndpointWeight={(tier, tierEndpointId, weight) => handleTierEndpointWeight(tier, tierEndpointId, weight, 'persistent')}
               onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'persistent')}
+              pendingWeights={pendingWeights}
             />
           ))}
           {persistentStructures.ranges.length === 0 && (
@@ -1056,10 +1203,11 @@ export function LlmConfigScreen() {
               <TierCard
                 key={tier.id}
                 tier={tier}
+                pendingWeights={pendingWeights}
                 onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
                 onRemove={() => handleBrowserTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tierEndpointId, weight, 'browser')}
+                onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => handleTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
               />
             ))}
@@ -1075,10 +1223,11 @@ export function LlmConfigScreen() {
               <TierCard
                 key={tier.id}
                 tier={tier}
+                pendingWeights={pendingWeights}
                 onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
                 onRemove={() => handleBrowserTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tierEndpointId, weight, 'browser')}
+                onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => handleTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'browser')}
               />
             ))}
@@ -1127,10 +1276,11 @@ export function LlmConfigScreen() {
               <TierCard
                 key={tier.id}
                 tier={tier}
+                pendingWeights={pendingWeights}
                 onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
                 onRemove={() => handleEmbeddingTierRemove(tier.id)}
                 onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
-                onUpdateEndpointWeight={(tierEndpointId, weight) => handleTierEndpointWeight(tierEndpointId, weight, 'embedding')}
+                onUpdateEndpointWeight={(currentTier, tierEndpointId, weight) => handleTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
                 onRemoveEndpoint={(tierEndpointId) => handleTierEndpointRemove(tierEndpointId, 'embedding')}
               />
             ))}
