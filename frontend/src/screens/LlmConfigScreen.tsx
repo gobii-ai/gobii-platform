@@ -106,7 +106,7 @@ type EndpointFormValues = {
 
 const actionKey = (...parts: Array<string | number | null | undefined>) => parts.filter(Boolean).join(':')
 
-type ActionToast = {
+type ActivityNotice = {
   id: string
   intent: 'success' | 'error'
   message: string
@@ -125,15 +125,15 @@ type AsyncFeedback = {
   runWithFeedback: <T>(operation: () => Promise<T>, options?: MutationOptions) => Promise<T>
   isBusy: (key: string) => boolean
   activeLabels: string[]
-  toasts: ActionToast[]
-  dismissToast: (id: string) => void
+  notices: ActivityNotice[]
+  dismissNotice: (id: string) => void
 }
 
 function useAsyncFeedback(): AsyncFeedback {
   const [busyCounts, setBusyCounts] = useState<Record<string, number>>({})
   const [labelCounts, setLabelCounts] = useState<Record<string, number>>({})
-  const [toasts, setToasts] = useState<ActionToast[]>([])
-  const toastSeqRef = useRef(0)
+  const [notices, setNotices] = useState<ActivityNotice[]>([])
+  const noticeSeqRef = useRef(0)
 
   const adjustCounter = (setter: Dispatch<SetStateAction<Record<string, number>>>, key: string, delta: number) => {
     if (!key) return
@@ -147,11 +147,11 @@ function useAsyncFeedback(): AsyncFeedback {
     })
   }
 
-  const pushToast = (toast: ActionToast) => {
-    setToasts((prev) => [...prev, toast])
-    if (toast.intent === 'success' && typeof window !== 'undefined') {
+  const pushNotice = (notice: ActivityNotice) => {
+    setNotices((prev) => [...prev, notice])
+    if (notice.intent === 'success' && typeof window !== 'undefined') {
       window.setTimeout(() => {
-        setToasts((current) => current.filter((entry) => entry.id !== toast.id))
+        setNotices((current) => current.filter((entry) => entry.id !== notice.id))
       }, 4000)
     }
   }
@@ -163,24 +163,24 @@ function useAsyncFeedback(): AsyncFeedback {
     try {
       const result = await operation()
       if (successMessage) {
-        const toast: ActionToast = {
-          id: `toast-${toastSeqRef.current += 1}`,
+        const notice: ActivityNotice = {
+          id: `notice-${noticeSeqRef.current += 1}`,
           intent: 'success',
           message: successMessage,
           context,
         }
-        pushToast(toast)
+        pushNotice(notice)
       }
       return result
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Request failed'
-      const toast: ActionToast = {
-        id: `toast-${toastSeqRef.current += 1}`,
+      const notice: ActivityNotice = {
+        id: `notice-${noticeSeqRef.current += 1}`,
         intent: 'error',
         message,
         context,
       }
-      pushToast(toast)
+      pushNotice(notice)
       throw error
     } finally {
       if (label) adjustCounter(setLabelCounts, label, -1)
@@ -192,8 +192,8 @@ function useAsyncFeedback(): AsyncFeedback {
     runWithFeedback,
     isBusy: (key: string) => Boolean(key && busyCounts[key]),
     activeLabels: Object.keys(labelCounts),
-    toasts,
-    dismissToast: (id: string) => setToasts((prev) => prev.filter((toast) => toast.id !== id)),
+    notices,
+    dismissNotice: (id: string) => setNotices((prev) => prev.filter((notice) => notice.id !== id)),
   }
 }
 
@@ -410,7 +410,7 @@ function AddEndpointModal({
       await onAdd(selected)
       onClose()
     } catch {
-      // toast already shown
+      // feedback already shown
     } finally {
       setSubmitting(false)
     }
@@ -552,7 +552,7 @@ function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardDa
                             await handlers.onSaveEndpoint(endpoint, values)
                             setEditingEndpointId(null)
                           } catch {
-                            // toast already shown
+                            // feedback already shown
                           }
                         }}
                       />
@@ -612,7 +612,7 @@ function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardDa
               await handlers.onAddEndpoint(provider, addingType!, values)
               setAddingType(null)
             } catch {
-              // toast already shown
+              // feedback already shown
             }
           }}
         />
@@ -820,27 +820,52 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   )
 }
 
-function ToastStack({ toasts, onDismiss }: { toasts: ActionToast[]; onDismiss: (id: string) => void }) {
-  if (toasts.length === 0) return null
+function ActivityDock({
+  notices,
+  activeLabels,
+  onDismiss,
+}: {
+  notices: ActivityNotice[]
+  activeLabels: string[]
+  onDismiss: (id: string) => void
+}) {
+  if (notices.length === 0 && activeLabels.length === 0) return null
   return (
-    <div className="space-y-2">
-      {toasts.map((toast) => (
+    <div className="pointer-events-none fixed bottom-6 right-6 z-30 flex w-full max-w-sm flex-col gap-3">
+      {activeLabels.length > 0 && (
+        <div className="pointer-events-auto rounded-2xl border border-blue-100 bg-white/95 p-4 text-sm text-blue-800 shadow-2xl shadow-blue-100/80 backdrop-blur transition" aria-live="polite">
+          <div className="flex items-start gap-3">
+            <Loader2 className="size-5 animate-spin text-blue-500" aria-hidden />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-500">Working on</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {activeLabels.map((label) => (
+                  <span key={label} className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {notices.map((notice) => (
         <div
-          key={toast.id}
-          className={`flex items-start justify-between gap-3 rounded-lg border px-4 py-2 text-sm ${toast.intent === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-800'}`}
+          key={notice.id}
+          className={`pointer-events-auto rounded-2xl border px-4 py-3 text-sm shadow-2xl transition ${notice.intent === 'success' ? 'border-emerald-100 bg-white/95 text-emerald-900 shadow-emerald-100/70' : 'border-rose-200 bg-white text-rose-900 shadow-rose-100/70'}`}
           role="status"
           aria-live="polite"
         >
-          <div className="flex items-start gap-2">
-            {toast.intent === 'success' ? <ShieldCheck className="size-4" /> : <AlertCircle className="size-4" />}
-            <div>
-              {toast.context ? <p className="font-semibold">{toast.context}</p> : null}
-              <p>{toast.message}</p>
+          <div className="flex items-start gap-3">
+            {notice.intent === 'success' ? <ShieldCheck className="mt-0.5 size-4 text-emerald-500" /> : <AlertCircle className="mt-0.5 size-4 text-rose-500" />}
+            <div className="flex-1 space-y-0.5">
+              {notice.context ? <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{notice.context}</p> : null}
+              <p>{notice.message}</p>
             </div>
+            <button className={button.icon} onClick={() => onDismiss(notice.id)} aria-label="Dismiss notification">
+              <X className="size-4" />
+            </button>
           </div>
-          <button className={button.icon} onClick={() => onDismiss(toast.id)} aria-label="Dismiss notification">
-            <X className="size-4" />
-          </button>
         </div>
       ))}
     </div>
@@ -1164,7 +1189,7 @@ function RangeSection({
 
 export function LlmConfigScreen() {
   const queryClient = useQueryClient()
-  const { runWithFeedback, isBusy, activeLabels, toasts, dismissToast } = useAsyncFeedback()
+  const { runWithFeedback, isBusy, activeLabels, notices, dismissNotice } = useAsyncFeedback()
   const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
   const [savingTierIds, setSavingTierIds] = useState<Set<string>>(new Set())
@@ -1656,21 +1681,9 @@ export function LlmConfigScreen() {
   ]
 
   return (
-    <div className="space-y-8">
-      <ToastStack toasts={toasts} onDismiss={dismissToast} />
-      {activeLabels.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700" aria-live="polite">
-          <Loader2 className="size-4 animate-spin" aria-hidden />
-          <span className="font-semibold">Working</span>
-          <div className="flex flex-wrap gap-2">
-            {activeLabels.map((label) => (
-              <span key={label} className="rounded-full bg-white/80 px-2 py-0.5 text-xs text-blue-700">
-                {label}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+    <>
+      <ActivityDock notices={notices} activeLabels={activeLabels} onDismiss={dismissNotice} />
+      <div className="space-y-8">
       <div className="gobii-card-base space-y-2 px-6 py-6">
         <h1 className="text-2xl font-semibold text-slate-900/90">LLM configuration</h1>
         <p className="text-sm text-slate-600">Review providers, endpoints, and token tiers powering orchestrator, browser-use, and embedding flows.</p>
@@ -1897,6 +1910,7 @@ export function LlmConfigScreen() {
           onClose={() => setEndpointModal(null)}
         />
       )}
-    </div>
+      </div>
+    </>
   )
 }
