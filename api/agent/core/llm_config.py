@@ -467,6 +467,26 @@ def get_llm_config_with_failover(
             .order_by('min_tokens')
             .last()
         )
+
+        if token_range is None:
+            smallest_range = PersistentTokenRange.objects.order_by('min_tokens').first()
+            largest_range = PersistentTokenRange.objects.order_by('-min_tokens').first()
+            if smallest_range and token_count < smallest_range.min_tokens:
+                token_range = smallest_range
+                logger.info(
+                    "Token count %s below configured minimum (%s); using range '%s' as fallback",
+                    token_count,
+                    smallest_range.min_tokens,
+                    smallest_range.name,
+                )
+            elif largest_range:
+                token_range = largest_range
+                logger.info(
+                    "Token count %s exceeds configured ranges; using highest range '%s' (min=%s) as fallback",
+                    token_count,
+                    largest_range.name,
+                    largest_range.min_tokens,
+                )
     except Exception:
         token_range = None
 
