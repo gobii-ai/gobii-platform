@@ -469,7 +469,7 @@
         if (window.ttq && typeof window.ttq.track === 'function') {
           ttq.track('CompleteRegistration', {
             event_id: "{{ signup_event_id|default_if_none:'' }}",
-            external_id : signupUserId || "{{ user.id|default_if_none:'' }}",
+            external_id : "{{ analytics.data.id_hash|default_if_none:'' }}",
             email: signupEmailHash
           });
         }
