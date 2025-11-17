@@ -7,9 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
   "pottery==3.0.1",
   "boto3~=1.38.39",
-  "browser-use @ git+https://github.com/gobii-ai/browser-use.git@24f5f5cee237fb4c86e746750b6b1e05711f3016",
+  "browser-use==0.9.6",
   "bleach~=6.2.0",
-  "openai==1.106.1",
+  "openai==2.8.0",
   "pypandoc-binary==1.15",
   "inscriptis==2.6.0",
   "celery~=5.5.2",
