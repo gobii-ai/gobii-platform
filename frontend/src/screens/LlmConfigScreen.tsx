@@ -26,6 +26,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
 import * as llmApi from '../api/llmConfig'
+import { HttpError } from '../api/http'
 
 const button = {
   primary:
@@ -92,6 +93,17 @@ type ProviderCardData = {
 }
 
 type TierScope = 'persistent' | 'browser' | 'embedding'
+
+type EndpointTestStatus = {
+  state: 'pending' | 'success' | 'error'
+  message: string
+  preview?: string
+  latencyMs?: number | null
+  totalTokens?: number | null
+  promptTokens?: number | null
+  completionTokens?: number | null
+  updatedAt: number
+}
 
 type EndpointFormValues = {
   model: string
@@ -671,9 +683,10 @@ type ProviderCardHandlers = {
   onSaveEndpoint: (endpoint: ProviderEndpointCard, values: EndpointFormValues) => Promise<void>
   onDeleteEndpoint: (endpoint: ProviderEndpointCard) => Promise<void>
   onClearKey: (provider: ProviderCardData) => Promise<void>
+  onTestEndpoint: (endpoint: ProviderEndpointCard) => Promise<void>
 }
 
-function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean }) {
+function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean; testStatuses: Record<string, EndpointTestStatus | undefined> }) {
   const [activeTab, setActiveTab] = useState<'endpoints' | 'settings'>('endpoints')
   const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null)
   const [addingType, setAddingType] = useState<llmApi.ProviderEndpoint['type'] | null>(null)
@@ -726,6 +739,19 @@ function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardDa
                 const isEditing = editingEndpointId === endpoint.id
                 const deleteBusy = isBusy(actionKey('endpoint', endpoint.id, 'delete'))
                 const endpointSaving = isBusy(actionKey('endpoint', endpoint.id, 'update'))
+                const testBusy = isBusy(actionKey('endpoint', endpoint.id, 'test'))
+                const status = testStatuses[endpoint.id]
+                const tone = status?.state === 'success'
+                  ? 'text-emerald-600'
+                  : status?.state === 'error'
+                    ? 'text-rose-600'
+                    : 'text-slate-500'
+                const isPendingStatus = status?.state === 'pending'
+                const headline = status?.state === 'success'
+                  ? 'Success:'
+                  : status?.state === 'error'
+                    ? 'Error:'
+                    : 'Testing…'
                 return (
                   <div key={endpoint.id} className="rounded-lg border border-slate-200 p-3">
                     <div className="flex items-center justify-between">
@@ -734,6 +760,9 @@ function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardDa
                         <p className="text-xs text-slate-500 uppercase">{endpoint.type}</p>
                       </div>
                       <div className="flex items-center gap-2">
+                        <button type="button" className={button.secondary} onClick={() => handlers.onTestEndpoint(endpoint).catch(() => {})} disabled={testBusy}>
+                          {testBusy ? <Loader2 className="size-4 animate-spin" /> : 'Test'}
+                        </button>
                         <button className={button.muted} onClick={() => setEditingEndpointId(isEditing ? null : endpoint.id)}>
                           {isEditing ? 'Close' : 'Edit'}
                         </button>
@@ -756,6 +785,33 @@ function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardDa
                           }
                         }}
                       />
+                    )}
+                    {status && (
+                      <div className={`mt-3 text-xs ${tone}`}>
+                        <p className="font-medium">
+                          {isPendingStatus
+                            ? status.message
+                            : (
+                              <>
+                                <span>{headline}</span>
+                                {status.message ? ` ${status.message}` : ''}
+                              </>
+                            )}
+                        </p>
+                        {status.state === 'success' && (
+                          <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-slate-500">
+                            {status.latencyMs != null && <span>Latency: {status.latencyMs} ms</span>}
+                            {status.totalTokens != null && <span>Total tokens: {status.totalTokens}</span>}
+                            {status.promptTokens != null && <span>Prompt: {status.promptTokens}</span>}
+                            {status.completionTokens != null && <span>Completion: {status.completionTokens}</span>}
+                          </div>
+                        )}
+                        {status.preview ? (
+                          <p className="mt-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600">
+                            Preview: <span className="font-mono">{status.preview}</span>
+                          </p>
+                        ) : null}
+                      </div>
                     )}
                   </div>
                 )
@@ -1419,6 +1475,8 @@ export function LlmConfigScreen() {
   const { runWithFeedback, isBusy, activeLabels, notices, dismissNotice } = useAsyncFeedback()
   const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
+  const [endpointTestStatuses, setEndpointTestStatuses] = useState<Record<string, EndpointTestStatus>>({})
+  const resetEndpointTestStatuses = () => setEndpointTestStatuses({})
   const [savingTierIds, setSavingTierIds] = useState<Set<string>>(new Set())
   const [dirtyTierIds, setDirtyTierIds] = useState<Set<string>>(new Set())
   const stagedWeightsRef = useRef<Record<string, { scope: TierScope; updates: { id: string; weight: number }[] }>>({})
@@ -1442,6 +1500,21 @@ export function LlmConfigScreen() {
     setPendingWeights({})
     setDirtyTierIds(new Set())
   }, [overviewQuery.data])
+
+  useEffect(() => {
+    if (!providers.length) {
+      setEndpointTestStatuses({})
+      return
+    }
+    const valid = new Set(providers.flatMap((provider) => provider.endpoints.map((endpoint) => endpoint.id)))
+    setEndpointTestStatuses((prev) => {
+      const next: Record<string, EndpointTestStatus> = {}
+      valid.forEach((id) => {
+        if (prev[id]) next[id] = prev[id]
+      })
+      return next
+    })
+  }, [providers])
 
   const invalidateOverview = () => queryClient.invalidateQueries({ queryKey: ['llm-overview'] })
 
@@ -1527,6 +1600,56 @@ export function LlmConfigScreen() {
     })
   }
 
+  const handleProviderTestEndpoint = async (endpoint: ProviderEndpointCard) => {
+    setEndpointTestStatuses((prev) => ({
+      ...prev,
+      [endpoint.id]: {
+        state: 'pending',
+        message: 'Testing…',
+        updatedAt: Date.now(),
+      },
+    }))
+    try {
+      const result = await runWithFeedback(
+        () => llmApi.testEndpoint({ endpoint_id: endpoint.id, kind: endpoint.type }),
+        {
+          label: 'Testing endpoint…',
+          busyKey: actionKey('endpoint', endpoint.id, 'test'),
+          context: endpoint.name,
+        },
+      )
+      if (!result.ok) {
+        throw new Error(result.message || 'Endpoint test failed')
+      }
+      setEndpointTestStatuses((prev) => ({
+        ...prev,
+        [endpoint.id]: {
+          state: 'success',
+          message: result.message || 'Endpoint responded successfully.',
+          preview: result.preview?.trim() || '',
+          latencyMs: result.latency_ms ?? null,
+          totalTokens: result.total_tokens ?? null,
+          promptTokens: result.prompt_tokens ?? null,
+          completionTokens: result.completion_tokens ?? null,
+          updatedAt: Date.now(),
+        },
+      }))
+    } catch (error) {
+      const message = error instanceof HttpError
+        ? (typeof error.body === 'object' && error.body && 'message' in error.body ? String((error.body as { message?: unknown }).message || error.message) : error.message)
+        : (error as Error).message
+      setEndpointTestStatuses((prev) => ({
+        ...prev,
+        [endpoint.id]: {
+          state: 'error',
+          message,
+          updatedAt: Date.now(),
+        },
+      }))
+      throw error
+    }
+  }
+
   const handleProviderToggle = (provider: ProviderCardData, enabled: boolean) => {
     return runMutation(
       () => llmApi.updateProvider(provider.id, { enabled }),
@@ -1579,6 +1702,8 @@ export function LlmConfigScreen() {
       busyKey: actionKey('provider', provider.id, 'create-endpoint'),
       context: provider.name,
       rethrow: true,
+    }).then(() => {
+      resetEndpointTestStatuses()
     })
   }
 
@@ -1614,6 +1739,8 @@ export function LlmConfigScreen() {
       busyKey: actionKey('endpoint', endpoint.id, 'update'),
       context: endpoint.name,
       rethrow: true,
+    }).then(() => {
+      resetEndpointTestStatuses()
     })
   }
 
@@ -1629,6 +1756,8 @@ export function LlmConfigScreen() {
         label: 'Removing endpoint…',
         busyKey: actionKey('endpoint', endpoint.id, 'delete'),
         context: endpoint.name,
+      }).then(() => {
+        resetEndpointTestStatuses()
       }),
     })
   }
@@ -1956,6 +2085,7 @@ export function LlmConfigScreen() {
                 key={provider.id}
                 provider={provider}
                 isBusy={isBusy}
+                testStatuses={endpointTestStatuses}
                 handlers={{
                   onRotateKey: handleProviderRotateKey,
                   onToggleEnabled: handleProviderToggle,
@@ -1963,6 +2093,7 @@ export function LlmConfigScreen() {
                   onSaveEndpoint: handleProviderSaveEndpoint,
                   onDeleteEndpoint: handleProviderDeleteEndpoint,
                   onClearKey: handleProviderClearKey,
+                  onTestEndpoint: handleProviderTestEndpoint,
                 }}
               />
             ))}

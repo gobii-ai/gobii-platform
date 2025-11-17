@@ -7,6 +7,7 @@ from drf_spectacular.views import (
     SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 )
 from console.api_views import (
+    LLMEndpointTestAPIView,
     AgentMessageCreateAPIView,
     AgentProcessingStatusAPIView,
     AgentTimelineAPIView,
@@ -160,6 +161,7 @@ urlpatterns = [
     path("console/api/llm/overview/", ConsoleLLMOverviewAPIView.as_view(), name="console_llm_overview"),
     path("console/api/llm/providers/", LLMProviderListCreateAPIView.as_view(), name="console_llm_providers"),
     path("console/api/llm/providers/<uuid:provider_id>/", LLMProviderDetailAPIView.as_view(), name="console_llm_provider_detail"),
+    path("console/api/llm/test-endpoint/", LLMEndpointTestAPIView.as_view(), name="console_llm_test_endpoint"),
     path("console/api/llm/persistent/endpoints/", PersistentEndpointListCreateAPIView.as_view(), name="console_llm_persistent_endpoints"),
     path("console/api/llm/persistent/endpoints/<uuid:endpoint_id>/", PersistentEndpointDetailAPIView.as_view(), name="console_llm_persistent_endpoint_detail"),
     path("console/api/llm/persistent/ranges/", PersistentTokenRangeListCreateAPIView.as_view(), name="console_llm_ranges"),

@@ -1403,6 +1403,12 @@ class LLMProvider(models.Model):
     api_key_encrypted = models.BinaryField(null=True, blank=True, help_text="AES-256-GCM encrypted API key (optional)")
     env_var_name = models.CharField(max_length=128, blank=True, help_text="Environment variable fallback for API key")
 
+    model_prefix = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Optional prefix automatically added to model identifiers (e.g., 'openrouter/').",
+    )
+
     # Provider-wide options
     supports_safety_identifier = models.BooleanField(default=False)
     browser_backend = models.CharField(

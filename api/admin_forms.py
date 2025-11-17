@@ -313,6 +313,7 @@ class LLMProviderForm(ModelForm):
             "key",
             "enabled",
             "env_var_name",
+            "model_prefix",
             "browser_backend",
             "supports_safety_identifier",
             "vertex_project",

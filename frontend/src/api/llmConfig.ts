@@ -232,3 +232,18 @@ export function updateEmbeddingTierEndpoint(tierEndpointId: string, payload: Rec
 export function deleteEmbeddingTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${base}/embeddings/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
+
+export type EndpointTestResponse = {
+  ok: boolean
+  message: string
+  preview?: string
+  latency_ms?: number
+  total_tokens?: number | null
+  prompt_tokens?: number | null
+  completion_tokens?: number | null
+  dimensions?: number | null
+}
+
+export function testEndpoint(payload: { endpoint_id: string; kind: ProviderEndpoint['type'] }) {
+  return jsonRequest<EndpointTestResponse>(`${base}/test-endpoint/`, withCsrf(payload))
+}

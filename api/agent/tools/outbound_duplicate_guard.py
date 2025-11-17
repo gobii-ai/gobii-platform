@@ -15,6 +15,7 @@ from uuid import UUID
 from django.db.models import Prefetch
 
 from ...encryption import SecretsEncryption
+from ...llm.utils import normalize_model_name
 from ...models import (
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
@@ -163,7 +164,8 @@ def _score_embeddings_for_endpoint(
     if litellm is None:
         return None
 
-    model_name = getattr(endpoint, "litellm_model", "").strip()
+    raw_model = getattr(endpoint, "litellm_model", "").strip()
+    model_name = normalize_model_name(provider, raw_model, api_base=getattr(endpoint, "api_base", None))
     if not model_name:
         return None
 

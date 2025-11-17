@@ -335,6 +335,7 @@ class SetupWizardView(View):
             if api_key:
                 provider.api_key_encrypted = SecretsEncryption.encrypt_value(api_key)
             provider.enabled = True
+            self._apply_provider_prefix(provider, provider_choice)
             provider.save()
 
             endpoint_key = ORCHESTRATOR_ENDPOINT_KEYS[provider_choice]
@@ -380,6 +381,8 @@ class SetupWizardView(View):
             api_base = data.get("browser_api_base", "").strip()
             if not api_base:
                 api_base = orchestrator_endpoint.api_base or DEFAULT_BROWSER_BASE_URLS.get(provider_choice, "")
+            if provider_choice:
+                model = _normalize_model_identifier(provider_choice, model)
             endpoint_key_hint = BROWSER_ENDPOINT_KEYS.get(provider_choice)
             endpoint = self._ensure_browser_endpoint(
                 provider=provider,
@@ -414,9 +417,12 @@ class SetupWizardView(View):
                 if api_key:
                     provider.api_key_encrypted = SecretsEncryption.encrypt_value(api_key)
                 provider.enabled = True
+                self._apply_provider_prefix(provider, provider_choice)
                 provider.save()
 
                 endpoint_key = BROWSER_ENDPOINT_KEYS[provider_choice]
+                if provider_choice:
+                    model = _normalize_model_identifier(provider_choice, model)
                 endpoint = self._ensure_browser_endpoint(
                     provider=provider,
                     key_hint=endpoint_key,
@@ -437,6 +443,7 @@ class SetupWizardView(View):
         base_slug: str,
         api_key: str,
         browser_backend: str,
+        model_prefix: str = "",
     ) -> LLMProvider:
         slug = slugify(display_name) or slugify(base_slug) or f"custom-{secrets.token_hex(2)}"
         original_slug = slug
@@ -456,10 +463,19 @@ class SetupWizardView(View):
         provider.display_name = display_name
         provider.browser_backend = browser_backend
         provider.enabled = True
+        provider.model_prefix = (model_prefix or "").strip()
         if api_key:
             provider.api_key_encrypted = SecretsEncryption.encrypt_value(api_key)
         provider.save()
         return provider
+
+    def _apply_provider_prefix(self, provider: LLMProvider, provider_choice: str | None) -> None:
+        if not provider_choice:
+            return
+        prefix = (MODEL_PREFIXES.get(provider_choice) or "").strip()
+        if prefix and provider.model_prefix != prefix:
+            provider.model_prefix = prefix
+            provider.save(update_fields=["model_prefix"])
 
     def _create_or_update_persistent_endpoint(
         self,
