@@ -481,9 +481,10 @@ def _with_gemini_cached_system_prompt(messages: List[dict], provider: str | None
     """
     Return a copy of ``messages`` where the system prompt is marked for Gemini caching.
 
-    Gemini's context caching requires message content to be structured as a list of parts with
-    ``cache_control`` metadata. We wrap the existing system prompt in that format while leaving
-    the rest of the message list untouched for compatibility with other providers.
+    Gemini's context caching is enabled by adding a ``cache_control`` object
+    to the system instruction, which must be the first message in the request.
+    This function adds that metadata while leaving the rest of the message list
+    untouched for compatibility with other providers.
     """
     if not messages or not _should_use_gemini_cache(provider, model):
         return messages
