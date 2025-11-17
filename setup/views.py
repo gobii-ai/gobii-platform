@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import json
 import logging
+import os
 import secrets
 from typing import Optional, Tuple
 
 from django.contrib import messages
 from django.contrib.auth import authenticate, get_user_model, login
 from django.db import OperationalError, connections, transaction
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.text import slugify
 from django.views import View
+from django.views.decorators.http import require_POST
+
+from api.agent.core.llm_utils import run_completion
+from api.openrouter import get_attribution_headers
 
 from api.agent.core.llm_config import (
     invalidate_llm_bootstrap_cache,
@@ -35,15 +42,15 @@ from .middleware import is_initial_setup_complete
 logger = logging.getLogger(__name__)
 
 DEFAULT_ORCHESTRATOR_MODELS = {
-    LLMConfigForm.PROVIDER_OPENAI: "openai/gpt-4.1",
-    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter/z-ai/glm-4.5",
-    LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic/claude-sonnet-4-20250514",
-    LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
+    LLMConfigForm.PROVIDER_OPENAI: "gpt-4.1",
+    LLMConfigForm.PROVIDER_OPENROUTER: "z-ai/glm-4.6:exacto",
+    LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
+    LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/gpt-oss-120b",
 }
 
 DEFAULT_BROWSER_MODELS = {
     LLMConfigForm.PROVIDER_OPENAI: "gpt-4o-mini",
-    LLMConfigForm.PROVIDER_OPENROUTER: "z-ai/glm-4.5",
+    LLMConfigForm.PROVIDER_OPENROUTER: "z-ai/glm-4.6:exacto",
     LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
     LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507",
 }
@@ -51,6 +58,11 @@ DEFAULT_BROWSER_MODELS = {
 DEFAULT_BROWSER_BASE_URLS = {
     LLMConfigForm.PROVIDER_OPENROUTER: "https://openrouter.ai/api/v1",
     LLMConfigForm.PROVIDER_FIREWORKS: "https://api.fireworks.ai/inference/v1",
+}
+DEFAULT_PROVIDER_API_BASES = {
+    LLMConfigForm.PROVIDER_OPENAI: "https://api.openai.com/v1",
+    LLMConfigForm.PROVIDER_OPENROUTER: DEFAULT_BROWSER_BASE_URLS.get(LLMConfigForm.PROVIDER_OPENROUTER, ""),
+    LLMConfigForm.PROVIDER_FIREWORKS: DEFAULT_BROWSER_BASE_URLS.get(LLMConfigForm.PROVIDER_FIREWORKS, ""),
 }
 
 ORCHESTRATOR_ENDPOINT_KEYS = {
@@ -73,6 +85,74 @@ PROVIDER_KEY_MAP = {
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks",
 }
+
+MODEL_PREFIXES = {
+    LLMConfigForm.PROVIDER_OPENAI: "openai/",
+    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter/",
+    LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic/",
+    LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_ai/",
+}
+
+
+def _normalize_model_identifier(provider_choice: str | None, model: str) -> str:
+    model = (model or "").strip()
+    if not model or not provider_choice:
+        return model
+    prefix = MODEL_PREFIXES.get(provider_choice)
+    if not prefix or model.startswith(prefix):
+        return model
+    return f"{prefix}{model}"
+
+
+def _resolve_provider_api_key(provider_choice: str, provided_key: str | None) -> Optional[str]:
+    if provided_key:
+        return provided_key
+    provider_key = PROVIDER_KEY_MAP.get(provider_choice)
+    if not provider_key:
+        return provided_key
+    provider = LLMProvider.objects.filter(key=provider_key).first()
+    if not provider:
+        return provided_key
+    if provider.api_key_encrypted:
+        try:
+            return SecretsEncryption.decrypt_value(provider.api_key_encrypted)
+        except Exception:
+            logger.debug("Unable to decrypt provider key for %s", provider_key, exc_info=True)
+    if provider.env_var_name:
+        return os.getenv(provider.env_var_name)
+    return provided_key
+
+
+def _build_test_params(provider_choice: str, model: str, api_key: str | None, api_base: str | None) -> dict:
+    if provider_choice == LLMConfigForm.PROVIDER_CUSTOM and not api_key:
+        raise ValueError("Enter an API key for the custom provider before testing.")
+    resolved_key = _resolve_provider_api_key(provider_choice, api_key)
+    if not resolved_key:
+        raise ValueError("Provide an API key or configure environment variables for this provider.")
+
+    params: dict = {
+        "temperature": 0.1,
+        "api_key": resolved_key,
+        "max_tokens": 64,
+        "timeout": 15,
+    }
+    if provider_choice == LLMConfigForm.PROVIDER_CUSTOM:
+        if not api_base:
+            raise ValueError("Custom providers require an API base URL.")
+        params["api_base"] = api_base.strip()
+    else:
+        default_base = DEFAULT_PROVIDER_API_BASES.get(provider_choice)
+        if api_base or default_base:
+            params["api_base"] = (api_base or default_base or "").strip()
+    if provider_choice == LLMConfigForm.PROVIDER_OPENROUTER:
+        headers = get_attribution_headers()
+        if headers:
+            params["extra_headers"] = headers
+
+    required_temp = get_required_temperature_for_model(model)
+    if required_temp is not None:
+        params["temperature"] = required_temp
+    return params
 
 
 class SetupWizardView(View):
@@ -152,13 +232,15 @@ class SetupWizardView(View):
     # form defaults
     # ------------------------------------------------------------------
     def _default_llm_initial(self):
+        default_provider = LLMConfigForm.PROVIDER_OPENROUTER
         return {
-            "orchestrator_provider": LLMConfigForm.PROVIDER_OPENAI,
-            "orchestrator_model": DEFAULT_ORCHESTRATOR_MODELS.get(LLMConfigForm.PROVIDER_OPENAI, ""),
-            "orchestrator_supports_vision": True,
+            "orchestrator_provider": default_provider,
+            "orchestrator_model": DEFAULT_ORCHESTRATOR_MODELS.get(default_provider, ""),
+            "orchestrator_supports_vision": False,
             "browser_same_as_orchestrator": True,
-            "browser_model": DEFAULT_BROWSER_MODELS.get(LLMConfigForm.PROVIDER_OPENAI, ""),
-            "browser_supports_vision": True,
+            "browser_model": DEFAULT_BROWSER_MODELS.get(default_provider, ""),
+            "browser_supports_vision": False,
+            "browser_provider": default_provider,
         }
 
     def _ensure_database_ready(self) -> None:
@@ -228,6 +310,8 @@ class SetupWizardView(View):
         supports_tool_choice: bool = bool(data.get("orchestrator_supports_tool_choice"))
         use_parallel_tools: bool = bool(data.get("orchestrator_use_parallel_tools"))
         supports_vision: bool = bool(data.get("orchestrator_supports_vision"))
+        if provider_choice != LLMConfigForm.PROVIDER_CUSTOM:
+            model = _normalize_model_identifier(provider_choice, model)
 
         if provider_choice == LLMConfigForm.PROVIDER_CUSTOM:
             provider = self._create_custom_provider(
@@ -464,3 +548,67 @@ def setup_complete_view(request):
     if not is_initial_setup_complete(force_refresh=True):
         return redirect(reverse("setup:wizard"))
     return redirect("/")
+
+
+@require_POST
+def test_llm_connection(request):
+    """Ad-hoc LiteLLM connectivity test for the setup wizard."""
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"ok": False, "message": "Invalid payload."}, status=400)
+
+    target = payload.get("target") or "orchestrator"
+    provider_choice = payload.get("provider")
+    model = (payload.get("model") or "").strip()
+    api_key = payload.get("api_key")
+    api_base = (payload.get("api_base") or "").strip() or None
+
+    if not provider_choice or not model:
+        return JsonResponse({"ok": False, "message": "Select a provider and enter a model name before testing."}, status=400)
+
+    if provider_choice != LLMConfigForm.PROVIDER_CUSTOM:
+        model = _normalize_model_identifier(provider_choice, model)
+
+    try:
+        params = _build_test_params(provider_choice, model, api_key, api_base)
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "message": str(exc)}, status=400)
+
+    messages = [
+        {"role": "system", "content": "You are a connectivity probe. Reply briefly."},
+        {"role": "user", "content": "Say READY."},
+    ]
+
+    try:
+        response = run_completion(model=model, messages=messages, params=params, drop_params=True)
+    except Exception as exc:
+        logger.warning("LLM test failed for %s provider %s: %s", target, provider_choice, exc, exc_info=True)
+        return JsonResponse(
+            {
+                "ok": False,
+                "message": f"{type(exc).__name__}: {exc}",
+            },
+            status=400,
+        )
+
+    preview = ""
+    if getattr(response, "choices", None):
+        preview = getattr(response.choices[0].message, "content", "") or ""
+    usage = getattr(response, "model_extra", {}).get("usage") if hasattr(response, "model_extra") else None
+    total_tokens = getattr(usage, "total_tokens", None)
+    prompt_tokens = getattr(usage, "prompt_tokens", None)
+    completion_tokens = getattr(usage, "completion_tokens", None)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "message": "LLM responded successfully.",
+            "model": model,
+            "provider": provider_choice,
+            "preview": (preview or "").strip()[:200],
+            "total_tokens": total_tokens,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+        }
+    )

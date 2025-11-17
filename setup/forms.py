@@ -87,6 +87,7 @@ class LLMConfigForm(forms.Form):
     orchestrator_provider = forms.ChoiceField(
         label=_("Primary agents LLM"),
         choices=PROVIDER_CHOICES,
+        initial=PROVIDER_OPENROUTER,
         widget=forms.Select(attrs={"class": SELECT_CLASSES}),
     )
     orchestrator_api_key = forms.CharField(
@@ -105,11 +106,11 @@ class LLMConfigForm(forms.Form):
     orchestrator_model = forms.CharField(
         label=_("Model Identifier"),
         required=False,
-        help_text=_("LiteLLM model string, e.g. openai/gpt-4.1 or openai/gpt-4o."),
+        help_text=_("Enter the model name, e.g. gpt-4.1."),
         widget=forms.TextInput(
             attrs={
                 "class": INPUT_CLASSES,
-                "placeholder": "openai/gpt-4.1",
+                "placeholder": "gpt-4.1",
             }
         ),
     )
@@ -164,6 +165,7 @@ class LLMConfigForm(forms.Form):
         label=_("Browser automations LLM"),
         choices=PROVIDER_CHOICES,
         required=False,
+        initial=PROVIDER_OPENROUTER,
         widget=forms.Select(attrs={"class": SELECT_CLASSES}),
     )
     browser_api_key = forms.CharField(
@@ -181,7 +183,7 @@ class LLMConfigForm(forms.Form):
     browser_model = forms.CharField(
         label=_("Browser model identifier"),
         required=False,
-        help_text=_("e.g. gpt-4o-mini or anthropic/claude-sonnet-4-20250514"),
+        help_text=_("e.g. gpt-4o-mini"),
         widget=forms.TextInput(
             attrs={
                 "class": INPUT_CLASSES,

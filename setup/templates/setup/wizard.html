@@ -207,6 +207,18 @@
                   </div>
                 </div>
               </div>
+              <div class="rounded-3xl border border-slate-200/70 bg-white/70 px-5 py-4">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-slate-700/90">Connection test</p>
+                    <p class="text-xs text-slate-500">Verify this configuration by running a quick completion.</p>
+                  </div>
+                  <button type="button" data-llm-test="orchestrator" class="inline-flex items-center rounded-2xl bg-brand-500/90 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-200/70 disabled:opacity-60">
+                    Test primary model
+                  </button>
+                </div>
+                <p class="mt-2 text-sm text-slate-500" data-test-status="orchestrator">Not tested yet.</p>
+              </div>
             </section>
 
             <section class="space-y-6">
@@ -281,6 +293,18 @@
                     {% endif %}
                   </div>
                 </div>
+                <div id="browser-test-block" class="rounded-3xl border border-slate-200/70 bg-white/70 px-5 py-4">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p class="text-sm font-medium text-slate-700/90">Browser test</p>
+                      <p class="text-xs text-slate-500">Verify the dedicated browser model responds.</p>
+                    </div>
+                    <button type="button" data-llm-test="browser" class="inline-flex items-center rounded-2xl bg-brand-500/90 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-200/70 disabled:opacity-60">
+                      Test browser model
+                    </button>
+                  </div>
+                  <p class="mt-2 text-sm text-slate-500" data-test-status="browser">Not tested yet.</p>
+                </div>
               </div>
               <div class="space-y-4 rounded-3xl border border-slate-200/70 p-6">
                 <p class="text-sm font-medium text-slate-700/90">Browser advanced options</p>
@@ -333,18 +357,153 @@
   </div>
 
   <script>
+    const llmTestUrl = "{% url 'setup:test_llm' %}";
     const browserToggle = document.getElementById('id_browser_same_as_orchestrator');
     const browserExtra = document.getElementById('browser-extra');
     const orchestratorProvider = document.getElementById('id_orchestrator_provider');
     const orchestratorVision = document.getElementById('id_orchestrator_supports_vision');
     const browserProvider = document.getElementById('id_browser_provider');
     const browserVision = document.getElementById('id_browser_supports_vision');
+    const testButtons = document.querySelectorAll('[data-llm-test]');
 
     const VISION_DEFAULT_PROVIDERS = ['openai', 'anthropic', 'google'];
+    const STATUS_TONES = {
+      idle: 'text-slate-500',
+      pending: 'text-slate-500',
+      success: 'text-emerald-600',
+      error: 'text-rose-600',
+    };
+
+    function setTestStatus(target, tone, message) {
+      const el = document.querySelector(`[data-test-status="${target}"]`);
+      if (!el) return;
+      Object.values(STATUS_TONES).forEach((cls) => el.classList.remove(cls));
+      el.classList.add(STATUS_TONES[tone] || STATUS_TONES.idle);
+      el.textContent = message;
+    }
+
+    function resetStatus(target) {
+      setTestStatus(target, 'idle', 'Not tested yet.');
+    }
+
+    function getCsrfToken() {
+      const match = document.cookie.match(/csrftoken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+
+    function buildTestPayload(target) {
+      const form = document.getElementById('setup-form');
+      if (!form) {
+        return { ok: false, error: 'Form not ready yet.' };
+      }
+      const formData = new FormData(form);
+      if (target === 'browser') {
+        if (browserToggle && browserToggle.checked) {
+          return { ok: false, error: 'Browser automations reuse the primary LLM.' };
+        }
+        const provider = formData.get('browser_provider');
+        const model = (formData.get('browser_model') || '').trim();
+        if (!provider || !model) {
+          return { ok: false, error: 'Fill in the browser provider and model first.' };
+        }
+        return {
+          ok: true,
+          payload: {
+            target: 'browser',
+            provider,
+            model,
+            api_key: formData.get('browser_api_key') || '',
+            api_base: (formData.get('browser_api_base') || '').trim(),
+          },
+        };
+      }
+      const provider = formData.get('orchestrator_provider');
+      const model = (formData.get('orchestrator_model') || '').trim();
+      if (!provider || !model) {
+        return { ok: false, error: 'Select a primary provider and model first.' };
+      }
+      return {
+        ok: true,
+        payload: {
+          target: 'orchestrator',
+          provider,
+          model,
+          api_key: formData.get('orchestrator_api_key') || '',
+          api_base: (formData.get('orchestrator_api_base') || '').trim(),
+        },
+      };
+    }
+
+    async function handleTestClick(target) {
+      const buildResult = buildTestPayload(target);
+      if (!buildResult.ok) {
+        setTestStatus(target, 'error', buildResult.error);
+        return;
+      }
+      const button = document.querySelector(`[data-llm-test="${target}"]`);
+      if (button) button.disabled = true;
+      setTestStatus(target, 'pending', 'Testing…');
+      try {
+        const response = await fetch(llmTestUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken(),
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify(buildResult.payload),
+        });
+        const data = await response.json();
+        if (response.ok && data.ok) {
+          const pieces = [];
+          if (data.model) pieces.push(data.model);
+          if (data.total_tokens) pieces.push(`${data.total_tokens} tokens`);
+          const summary = pieces.length ? `Success (${pieces.join(' · ')})` : 'Success';
+          const preview = data.preview ? ` – ${data.preview}` : '';
+          setTestStatus(target, 'success', `${summary}${preview}`);
+        } else {
+          setTestStatus(target, 'error', data.message || 'Test failed.');
+        }
+      } catch (error) {
+        setTestStatus(target, 'error', 'Network error while testing.');
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+
+    if (testButtons && testButtons.length) {
+      testButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (btn.dataset.llmTest) {
+            handleTestClick(btn.dataset.llmTest);
+          }
+        });
+      });
+    }
+
+    function attachStatusReset(inputs, target) {
+      inputs.forEach((element) => {
+        if (!element) return;
+        const eventName = element.tagName === 'SELECT' ? 'change' : 'input';
+        element.addEventListener(eventName, () => resetStatus(target));
+      });
+    }
+
+    attachStatusReset(
+      [document.getElementById('id_orchestrator_provider'), document.getElementById('id_orchestrator_model')],
+      'orchestrator',
+    );
+    attachStatusReset(
+      [document.getElementById('id_browser_provider'), document.getElementById('id_browser_model')],
+      'browser',
+    );
 
     function updateBrowserVisibility() {
       if (!browserToggle || !browserExtra) return;
       browserExtra.classList.toggle('hidden', browserToggle.checked);
+      if (browserToggle.checked) {
+        resetStatus('browser');
+      }
     }
 
     function maybeSyncBrowserVision() {

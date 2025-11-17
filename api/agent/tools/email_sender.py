@@ -24,6 +24,15 @@ from util.text_sanitizer import strip_control_chars
 
 logger = logging.getLogger(__name__)
 
+
+def _should_continue_work(params: Dict[str, Any]) -> bool:
+    """Return True if the caller indicated ongoing work after this send."""
+    raw = params.get("will_continue_work")
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        return normalized in {"1", "true", "yes"}
+    return bool(raw)
+
 def get_send_email_tool() -> Dict[str, Any]:
     """Return the send_email tool definition for the LLM."""
     return {
@@ -48,6 +57,10 @@ def get_send_email_tool() -> Dict[str, Any]:
                     },
                     "subject": {"type": "string", "description": "Email subject."},
                     "mobile_first_html": {"type": "string", "description": "Email content as lightweight HTML, excluding <html>, <head>, and <body> tags. Use single quotes for attributes, e.g. <a href='https://news.ycombinator.com'>News</a>"},
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": "Set true if you are sending an update but will continue working immediately afterward.",
+                    },
                 },
                 "required": ["to_address", "subject", "mobile_first_html"],
             },
@@ -61,6 +74,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     subject = params.get("subject")
     mobile_first_html = strip_control_chars(params.get("mobile_first_html"))
     cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
+    will_continue = _should_continue_work(params)
 
     if not all([to_address, subject, mobile_first_html]):
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
@@ -205,7 +219,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         return {
             "status": "ok",
             "message": f"Email sent to {to_address}.",
-            "auto_sleep_ok": True,
+            "auto_sleep_ok": not will_continue,
         }
 
     except Exception as e:

@@ -95,6 +95,25 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
             "mobile_first_html": "<p>hi</p>",
         })
         self.assertEqual(blocked.get("status"), "error")
+
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    @tag("batch_outbound_email")
+    def test_email_continue_flag_disables_auto_sleep(self, mock_deliver_email, mock_close_old_connections):
+        ok = execute_send_email(self.agent, {
+            "to_address": self.user.email,
+            "subject": "Continuing",
+            "mobile_first_html": "<p>Still working</p>",
+            "will_continue_work": True,
+        })
+        self.assertEqual(ok.get("status"), "ok")
+        self.assertFalse(ok.get("auto_sleep_ok"))
+
+        followup = execute_send_email(self.agent, {
+            "to_address": self.user.email,
+            "subject": "Done",
+            "mobile_first_html": "<p>All set</p>",
+        })
+        self.assertTrue(followup.get("auto_sleep_ok"))
     # NOTE: Temporarily disabling SMS tests until SMS sending is re-enabled in multi-player mode
     @patch("api.agent.tools.sms_sender.deliver_agent_sms")  # Mock where it's imported in sms_sender
     def test_sms_execute_respects_default_and_manual(self, mock_deliver_sms, mock_close_old_connections):

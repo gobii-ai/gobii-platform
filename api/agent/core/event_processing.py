@@ -92,6 +92,7 @@ from ..tools.tool_manager import (
     ensure_default_tools_enabled,
     execute_enabled_tool,
     get_enabled_tool_definitions,
+    SQLITE_TOOL_NAME,
 )
 from ..tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
 from ..tools.peer_dm import execute_send_agent_message, get_send_agent_message_tool
@@ -116,6 +117,7 @@ from ...models import (
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
     PersistentAgentSystemMessage,
+    PersistentAgentEnabledTool,
 )
 from .schedule_parser import ScheduleParser
 from config import settings
@@ -1916,8 +1918,6 @@ def _run_agent_loop(
                 logger.debug("Tool call summary logging failed", exc_info=True)
 
             all_calls_sleep = True
-            sleep_requested = False  # set only when all calls are sleep
-            sleep_tool_requested = False
             executed_calls = 0
             followup_required = False
             try:
@@ -1928,14 +1928,12 @@ def _run_agent_loop(
                     )
                     for c in (tool_calls or [])
                 ]
-                sleep_tool_requested = any(name == "sleep_until_next_trigger" for name in tool_names)
                 has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
                 actionable_calls_total = sum(
                     1 for name in tool_names if name != "sleep_until_next_trigger"
                 )
             except Exception:
                 # Defensive fallback: assume we have actionable work so the agent keeps processing
-                sleep_tool_requested = False
                 has_non_sleep_calls = True
                 actionable_calls_total = len(tool_calls or []) if tool_calls else 0
 
@@ -1973,7 +1971,6 @@ def _run_agent_loop(
                         _attach_completion(step_kwargs)
                         step = PersistentAgentStep.objects.create(**step_kwargs)
                         _attach_prompt_archive(step)
-                        sleep_requested = True
                         logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
                         continue
 
@@ -2163,7 +2160,6 @@ def _run_agent_loop(
                 not followup_required
                 and executed_calls > 0
                 and executed_calls >= actionable_calls_total
-                and sleep_tool_requested
             ):
                 logger.info(
                     "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",
@@ -3268,14 +3264,10 @@ def _get_system_instruction(
         "Use search_tools to search for additional tools; it will automatically enable all relevant tools in one step. "
         "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
-        "When multiple actions are independent, RETURN THEM AS MULTIPLE TOOL CALLS IN A SINGLE REPLY. Prefer batching related actions together to reduce latency. "
-        "If there is nothing else to do after your actions, include a final sleep_until_next_trigger tool call in the SAME reply. "
-        "Example: send_email(...), update_charter(...), sqlite_batch(...), sleep_until_next_trigger(). "
-        "If a later action depends on the output of an earlier tool call (true dependency), it is acceptable to wait for the next iteration before proceeding."
-        "Sometimes your schedule will need to run more frequently than you need to contact the user. That is OK. You can, for example, set yourself to run every 1 hour, but only call send_email when you actually need to contact the user. This is your expected behavior. "
-        
-        "When you are finished work for this cycle, or if there is no needed work, use sleep_until_next_trigger (ideally in the same reply after your other tool calls)."
-        "EVERY REPLY MUST INCLUDE AT LEAST ONE TOOL CALL. IF YOU TRULY HAVE NOTHING TO DO, CALL sleep_until_next_trigger AS YOUR TOOL CALL. NEVER RESPOND WITHOUT A TOOL CALL. "
+        "Batch independent actions into one reply; if nothing else remains, include sleep_until_next_trigger right after them (example: send_email(...), update_charter(...), sleep_until_next_trigger()). "
+        "If a later action truly depends on earlier tool output, wait for the next iteration, but whenever you send the user a message and have no dependencies pending you MUST add sleep_until_next_trigger in that reply so the cycle ends cleanly. "
+        "EVERY REPLY MUST INCLUDE AT LEAST ONE TOOL CALL. If there is nothing to do, call sleep_until_next_trigger by itself and never respond twice to the same message. "
+        "If you send a status update but still have outstanding work, set 'will_continue_work': true on your send_* tool call so this cycle keeps running until you finish. "
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
@@ -3283,8 +3275,7 @@ def _get_system_instruction(
         "DO NOT CONTACT THE USER REDUNDANTLY OR PERFORM REPEATED, REDUNDANT WORK. PAY ATTENTION TO EVENT AND TOOL CALL HISTORY TO AVOID REPETITION. "
         "DO NOT SPAM THE USER. "
         "DO NOT RESPOND TO THE SAME MESSAGE MULTIPLE TIMES. "
-
-        "ONLY CALL SLEEP_UNTIL_NEXT_TRIGGER IF YOU ARE TRULY FINISHED WORKING FOR THIS CYCLE. "
+ 
         "DO NOT FORGET TO CALL update_schedule TO UPDATE YOUR SCHEDULE IF YOU HAVE A SCHEDULE OR NEED TO CONTINUE DOING MORE WORK LATER. "
         "BE EAGER TO CALL update_charter TO UPDATE YOUR CHARTER IF THE USER GIVES YOU ANY FEEDBACK OR CORRECTIONS. YOUR CHARTER SHOULD GROW MORE DETAILED AND EVOLVE OVER TIME TO MEET THE USER's REQUIREMENTS. BE THOROUGH, DILIGENT, AND PERSISTENT. "
 
@@ -3651,11 +3642,19 @@ def _get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_update_schedule_tool(),
         get_update_charter_tool(),
         get_secure_credentials_request_tool(),
-        get_enable_database_tool(),
         # MCP management tools
         get_search_tools_tool(),
         get_request_contact_permission_tool(),
     ]
+
+    include_enable_db_tool = True
+    if agent:
+        include_enable_db_tool = not PersistentAgentEnabledTool.objects.filter(
+            agent=agent, tool_full_name=SQLITE_TOOL_NAME
+        ).exists()
+
+    if include_enable_db_tool:
+        static_tools.append(get_enable_database_tool())
 
     if agent and agent.webhooks.exists():
         static_tools.append(get_send_webhook_tool())

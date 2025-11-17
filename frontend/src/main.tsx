@@ -13,6 +13,7 @@ const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/
 const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
 const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageScreen')).UsageScreen }))
 const PersistentAgentsScreen = lazy(async () => ({ default: (await import('./screens/PersistentAgentsScreen')).PersistentAgentsScreen }))
+const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/LlmConfigScreen')).LlmConfigScreen }))
 
 const LoadingFallback = () => (
   <div className="app-loading" role="status" aria-live="polite" aria-label="Loading">
@@ -98,6 +99,9 @@ switch (appName) {
     )
     break
   }
+  case 'llm-config':
+    screen = <LlmConfigScreen />
+    break
   default:
     throw new Error(`Unsupported console React app: ${appName}`)
 }

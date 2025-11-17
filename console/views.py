@@ -60,7 +60,7 @@ from api.models import (
     OrganizationInvite,
     TaskCredit,
 )
-from console.mixins import ConsoleViewMixin, StripeFeatureRequiredMixin
+from console.mixins import ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
 from observability import traced
 from pages.mixins import PhoneNumberMixin
 
@@ -3647,6 +3647,13 @@ class ConsoleUsageView(ConsoleViewMixin, TemplateView):
         return self.render_to_response(context)
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
+        return HttpResponseNotAllowed(['GET'])
+
+
+class ConsoleLLMConfigView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "console/llm_config.html"
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - read-only shell
         return HttpResponseNotAllowed(['GET'])
 
 

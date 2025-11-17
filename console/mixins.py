@@ -42,6 +42,15 @@ class ConsoleViewMixin(LoginRequiredMixin, ConsoleContextMixin):
     pass
 
 
+class SystemAdminRequiredMixin(ConsoleViewMixin):
+    """Restrict access to console surfaces that only staff/system admins should see."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if not (request.user.is_staff or request.user.is_superuser):
+            raise PermissionDenied("You do not have permission to access this console area.")
+        return super().dispatch(request, *args, **kwargs)
+
+
 class StripeFeatureRequiredMixin:
     """Mixin to gate views when Stripe billing is disabled."""
 
