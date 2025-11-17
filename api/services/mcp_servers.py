@@ -10,6 +10,7 @@ from api.models import (
     PersistentAgentMCPServer,
     PersistentAgentEnabledTool,
 )
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 
 def platform_server_configs() -> Iterable[MCPServerConfig]:
@@ -230,7 +231,13 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
     return overview
 
 
-def update_agent_personal_servers(agent: PersistentAgent, desired_ids: List[str]) -> None:
+def update_agent_personal_servers(
+    agent: PersistentAgent,
+    desired_ids: List[str],
+    *,
+    actor_user_id: int | str | None = None,
+    source: AnalyticsSource | None = None,
+) -> None:
     """Set the personal (user-scoped) servers enabled for an agent."""
 
     desired_set = {str(pk) for pk in desired_ids}
@@ -288,6 +295,63 @@ def update_agent_personal_servers(agent: PersistentAgent, desired_ids: List[str]
     ).exclude(
         server_config_id__in=accessible_configs
     ).delete()
+
+    _emit_personal_server_events(
+        agent,
+        added_ids=to_add,
+        removed_ids=to_remove,
+        actor_user_id=actor_user_id,
+        source=source,
+    )
+
+
+def _emit_personal_server_events(
+    agent: PersistentAgent,
+    *,
+    added_ids: Set[str],
+    removed_ids: Set[str],
+    actor_user_id: int | str | None,
+    source: AnalyticsSource | None,
+) -> None:
+    """Emit analytics for personal MCP server link/unlink actions."""
+
+    if not actor_user_id or not source:
+        return
+
+    if not added_ids and not removed_ids:
+        return
+
+    target_ids = added_ids | removed_ids
+    server_map = {
+        str(cfg.id): cfg
+        for cfg in MCPServerConfig.objects.filter(id__in=list(target_ids)).only('id', 'name', 'display_name', 'scope')
+    }
+
+    def _track(event_type: AnalyticsEvent, server_id: str) -> None:
+        cfg = server_map.get(server_id)
+        props = {
+            'agent_id': str(agent.id),
+            'agent_name': agent.name,
+            'mcp_server_id': server_id,
+        }
+        if cfg:
+            props['mcp_server_name'] = cfg.name
+            props['mcp_server_display_name'] = cfg.display_name
+            props['mcp_server_scope'] = cfg.scope
+
+        props = Analytics.with_org_properties(props, organization=agent.organization)
+        Analytics.track_event(
+            user_id=actor_user_id,
+            event=event_type,
+            source=source,
+            properties=props.copy(),
+        )
+
+    for server_id in sorted(added_ids):
+        _track(AnalyticsEvent.PERSISTENT_AGENT_MCP_LINKED, server_id)
+
+    for server_id in sorted(removed_ids):
+        _track(AnalyticsEvent.PERSISTENT_AGENT_MCP_UNLINKED, server_id)
 
 
 def _serialize_config(cfg: MCPServerConfig, *, inherited: bool, assigned: bool) -> Dict[str, Any]:

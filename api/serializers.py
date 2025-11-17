@@ -15,6 +15,7 @@ from .models import (
     PersistentAgentCommsEndpoint,
 )
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
+from util.analytics import AnalyticsSource
 
 # Serializer for Listing Agents (id, name, created_at)
 class BrowserUseAgentListSerializer(serializers.ModelSerializer):
@@ -461,8 +462,20 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
     def _apply_personal_servers(self, agent: PersistentAgent, server_ids):
         from .services import mcp_servers as server_service
 
+        request = self.context.get('request')
+        actor_user_id = None
+        if request and getattr(request, 'user', None):
+            actor_user_id = request.user.id
+
+        source = AnalyticsSource.API if actor_user_id else None
+
         try:
-            server_service.update_agent_personal_servers(agent, [str(s) for s in server_ids])
+            server_service.update_agent_personal_servers(
+                agent,
+                [str(s) for s in server_ids],
+                actor_user_id=actor_user_id,
+                source=source,
+            )
         except ValueError as exc:
             raise serializers.ValidationError({'enabled_personal_server_ids': [str(exc)]})
 
