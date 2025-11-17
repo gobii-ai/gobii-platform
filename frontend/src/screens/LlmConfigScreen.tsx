@@ -333,8 +333,8 @@ const rebalanceTierWeights = (
   return normalized.map((entry) => ({ id: entry.id, weight: entry.unit }))
 }
 
-const ensureServerUnits = (entries: WeightEntry[]) => {
-  if (!entries.length) return []
+const ensureServerUnits = (entries: WeightEntry[]): Record<string, number> => {
+  if (!entries.length) return {}
   const ints = entries.map((entry) => ({ id: entry.id, value: Math.round(entry.unit * UNIT_SCALE) }))
   let total = ints.reduce((sum, entry) => sum + entry.value, 0)
 
@@ -1731,7 +1731,9 @@ export function LlmConfigScreen() {
       return next
     })
     const mutation = () => {
-      const normalized = ensureServerUnits(staged.updates.map((entry) => ({ id: entry.id, unit: entry.weight })))
+      const normalized: Record<string, number> = ensureServerUnits(
+        staged.updates.map((entry) => ({ id: entry.id, unit: entry.weight })),
+      )
       const ops = staged.updates.map((entry) => {
         const payload = { weight: encodeServerWeight(normalized[entry.id] ?? entry.weight) }
         if (scope === 'browser') {
@@ -1878,7 +1880,7 @@ export function LlmConfigScreen() {
         })
         return next
       })
-      const normalized = ensureServerUnits(
+      const normalized: Record<string, number> = ensureServerUnits(
         Object.entries(evenWeights).map(([id, unit]) => ({ id, unit })),
       )
       const updates = Object.entries(evenWeights).map(([tierEndpointId, weight]) => {
