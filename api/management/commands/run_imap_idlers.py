@@ -13,6 +13,7 @@ import signal
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+from django.db import close_old_connections
 
 from imapclient import IMAPClient
 
@@ -143,6 +144,8 @@ class Command(BaseCommand):
 
         try:
             while not stop_main.is_set():
+                # Drop stale ORM connections; this loop lives for the process lifetime
+                close_old_connections()
                 # Clear immediate rescan trigger at loop start
                 rescan_now.clear()
                 # 1) Reap dead watchers and release leases
@@ -253,6 +256,7 @@ class Command(BaseCommand):
         except KeyboardInterrupt:
             logger.info("Shutting down IMAP IDLE runner…")
         finally:
+            close_old_connections()
             for w in watchers.values():
                 w.stop.set()
             for w in watchers.values():
@@ -284,6 +288,7 @@ def _watch_account(
     max_backoff = 300
 
     while not stop.is_set():
+        close_old_connections()
         acct: Optional[AgentEmailAccount] = None
         try:
             acct = AgentEmailAccount.objects.select_related("endpoint").get(pk=account_id)
@@ -412,6 +417,7 @@ def _watch_account(
             _sleep_until(stop, backoff)
             backoff = min(max_backoff, backoff * 2)
         finally:
+            close_old_connections()
             try:
                 client  # type: ignore[name-defined]
             except NameError:
