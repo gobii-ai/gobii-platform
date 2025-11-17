@@ -927,18 +927,20 @@ async def _run_agent(
                     total_cost = getattr(usage_summary, "total_cost", None)
 
                     if prompt_cost is not None:
-                        token_usage["input_cost_total"] = prompt_cost
-                        uncached_cost = prompt_cost
+                        prompt_cost_dec = Decimal(str(prompt_cost))
+                        token_usage["input_cost_total"] = prompt_cost_dec
+                        uncached_cost = prompt_cost_dec
                         if cached_prompt_cost is not None:
-                            token_usage["input_cost_cached"] = cached_prompt_cost
-                            uncached_cost = prompt_cost - cached_prompt_cost
-                        token_usage["input_cost_uncached"] = max(uncached_cost, 0.0)
+                            cached_prompt_cost_dec = Decimal(str(cached_prompt_cost))
+                            token_usage["input_cost_cached"] = cached_prompt_cost_dec
+                            uncached_cost = prompt_cost_dec - cached_prompt_cost_dec
+                        token_usage["input_cost_uncached"] = max(uncached_cost, Decimal("0.0"))
 
                     if completion_cost is not None:
-                        token_usage["output_cost"] = completion_cost
+                        token_usage["output_cost"] = Decimal(str(completion_cost))
 
                     if total_cost is not None:
-                        token_usage["total_cost"] = total_cost
+                        token_usage["total_cost"] = Decimal(str(total_cost))
 
                     # Add to span for observability
                     cost_attrs = {}
