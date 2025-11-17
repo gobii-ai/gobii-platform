@@ -115,7 +115,7 @@
             <i data-lucide="chart-bar" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'usage' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
             Usage
           </a>
-          {% if request.user.is_superuser %}
+          {% if request.user.is_staff %}
           <a href="{% url 'console-llm-config' %}"
              class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'console-llm-config' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
             <i data-lucide="settings-2" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'console-llm-config' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>

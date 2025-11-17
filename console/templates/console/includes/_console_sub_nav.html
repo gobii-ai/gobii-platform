@@ -58,7 +58,7 @@
       <i aria-hidden="true" data-lucide="chart-bar" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'usage' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
       Usage
     </a>
-    {% if request.user.is_superuser %}
+    {% if request.user.is_staff %}
     <a href="{% url 'console-llm-config' %}"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'console-llm-config' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
       <i aria-hidden="true" data-lucide="settings-2" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-llm-config' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>

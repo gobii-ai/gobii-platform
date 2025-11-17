@@ -362,10 +362,10 @@ def _get_active_browser_policy() -> BrowserLLMPolicy:
 
 
 class SystemAdminAPIView(LoginRequiredMixin, View):
-    """JSON API view that only system administrators can access."""
+    """JSON API view restricted to staff/system administrators."""
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        if not request.user.is_superuser:
+        if not (request.user.is_staff or request.user.is_superuser):
             return JsonResponse({"error": "forbidden"}, status=403)
         return super().dispatch(request, *args, **kwargs)
 
