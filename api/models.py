@@ -888,6 +888,41 @@ class BrowserUseAgentTask(models.Model):
         blank=True,
         help_text="Number of cached tokens used (if provider supports caching)",
     )
+    input_cost_total = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Total USD cost for prompt tokens (cached + uncached).",
+    )
+    input_cost_uncached = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="USD cost for uncached prompt tokens.",
+    )
+    input_cost_cached = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="USD cost for cached prompt tokens.",
+    )
+    output_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="USD cost for completion tokens.",
+    )
+    total_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Total USD cost (input + output).",
+    )
     llm_model = models.CharField(
         max_length=256,
         null=True,

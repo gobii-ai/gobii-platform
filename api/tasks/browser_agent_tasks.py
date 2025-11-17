@@ -8,6 +8,7 @@ import shutil
 import random
 import stat
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, Callable, List, Dict, Tuple, Optional
 import tarfile
 import zstandard as zstd
@@ -38,6 +39,19 @@ from ..openrouter import DEFAULT_API_BASE, get_attribution_headers
 from util import EphemeralXvfb, should_use_ephemeral_xvfb
 
 tracer = trace.get_tracer('gobii.utils')
+
+_COST_PRECISION = Decimal("0.000001")
+
+
+def _quantize_cost_value(value: Any) -> Optional[Decimal]:
+    """Convert floats/decimals/strings to a quantized Decimal or None."""
+    if value is None:
+        return None
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return decimal_value.quantize(_COST_PRECISION)
 
 # Providers that should default to vision support when DB metadata is unavailable
 DEFAULT_PROVIDER_VISION_SUPPORT: dict[str, bool] = {
@@ -899,13 +913,44 @@ async def _run_agent(
                 }
 
                 if getattr(history, "usage", None):
+                    usage_summary = history.usage
                     token_usage.update({
-                        "prompt_tokens": getattr(history.usage, "total_prompt_tokens", None),
-                        "completion_tokens": getattr(history.usage, "total_completion_tokens", None),
-                        "total_tokens": getattr(history.usage, "total_tokens", None),
-                        "cached_tokens": getattr(history.usage, "total_prompt_cached_tokens", None),
+                        "prompt_tokens": getattr(usage_summary, "total_prompt_tokens", None),
+                        "completion_tokens": getattr(usage_summary, "total_completion_tokens", None),
+                        "total_tokens": getattr(usage_summary, "total_tokens", None),
+                        "cached_tokens": getattr(usage_summary, "total_prompt_cached_tokens", None),
                     })
+
+                    prompt_cost = getattr(usage_summary, "total_prompt_cost", None)
+                    cached_prompt_cost = getattr(usage_summary, "total_prompt_cached_cost", None)
+                    completion_cost = getattr(usage_summary, "total_completion_cost", None)
+                    total_cost = getattr(usage_summary, "total_cost", None)
+
+                    if prompt_cost is not None:
+                        prompt_cost_dec = Decimal(str(prompt_cost))
+                        token_usage["input_cost_total"] = prompt_cost_dec
+                        uncached_cost = prompt_cost_dec
+                        if cached_prompt_cost is not None:
+                            cached_prompt_cost_dec = Decimal(str(cached_prompt_cost))
+                            token_usage["input_cost_cached"] = cached_prompt_cost_dec
+                            uncached_cost = prompt_cost_dec - cached_prompt_cost_dec
+                        token_usage["input_cost_uncached"] = max(uncached_cost, Decimal("0.0"))
+
+                    if completion_cost is not None:
+                        token_usage["output_cost"] = Decimal(str(completion_cost))
+
+                    if total_cost is not None:
+                        token_usage["total_cost"] = Decimal(str(total_cost))
+
                     # Add to span for observability
+                    cost_attrs = {}
+                    if token_usage.get("total_cost") is not None:
+                        cost_attrs["llm.cost.total_usd"] = token_usage["total_cost"]
+                    if token_usage.get("input_cost_total") is not None:
+                        cost_attrs["llm.cost.input_usd"] = token_usage["input_cost_total"]
+                    if token_usage.get("output_cost") is not None:
+                        cost_attrs["llm.cost.output_usd"] = token_usage["output_cost"]
+
                     agent_span.set_attributes({
                         "llm.model": token_usage["model"],
                         "llm.provider": token_usage["provider"],
@@ -913,6 +958,7 @@ async def _run_agent(
                         "llm.usage.completion_tokens": token_usage["completion_tokens"],
                         "llm.usage.total_tokens": token_usage["total_tokens"],
                         "llm.usage.cached_tokens": token_usage["cached_tokens"],
+                        **cost_attrs,
                     })
             except Exception as e:
                 logger.warning("Usage logging failed with exception", exc_info=e)
@@ -1526,6 +1572,11 @@ def _process_browser_use_task_core(
                         task_obj.cached_tokens = token_usage.get("cached_tokens")
                         task_obj.llm_model = token_usage.get("model")
                         task_obj.llm_provider = token_usage.get("provider")
+                        task_obj.input_cost_total = _quantize_cost_value(token_usage.get("input_cost_total"))
+                        task_obj.input_cost_uncached = _quantize_cost_value(token_usage.get("input_cost_uncached"))
+                        task_obj.input_cost_cached = _quantize_cost_value(token_usage.get("input_cost_cached"))
+                        task_obj.output_cost = _quantize_cost_value(token_usage.get("output_cost"))
+                        task_obj.total_cost = _quantize_cost_value(token_usage.get("total_cost"))
                     except Exception:
                         logger.warning("Failed to assign usage metadata to task %s", task_obj.id, exc_info=True)
 
@@ -1602,6 +1653,11 @@ def _process_browser_use_task_core(
                     "cached_tokens",
                     "llm_model",
                     "llm_provider",
+                    "input_cost_total",
+                    "input_cost_uncached",
+                    "input_cost_cached",
+                    "output_cost",
+                    "total_cost",
                 ])
             except OperationalError:
                 close_old_connections()
@@ -1615,6 +1671,11 @@ def _process_browser_use_task_core(
                     "cached_tokens",
                     "llm_model",
                     "llm_provider",
+                    "input_cost_total",
+                    "input_cost_uncached",
+                    "input_cost_cached",
+                    "output_cost",
+                    "total_cost",
                 ])
 
             # Trigger agent event processing if this task belongs to a persistent agent
