@@ -37,6 +37,7 @@ def extract_click_context(request):
         fbc = f"fb.1.{int(time.time())}.{fbclid}"
 
     rdt_cid = q.get("rdt_cid") or q.get("rdt_click_id")
+    ttclid = q.get("ttclid") or q.get("tt_click_id")
 
     utm = {k: v for k, v in q.items() if k.startswith("utm_")}
 
@@ -44,7 +45,13 @@ def extract_click_context(request):
         "user_agent": ua,
         "client_ip": ip,
         "utm": utm,
-        "click_ids": {"fbp": fbp, "fbc": fbc, "fbclid": fbclid, "rdt_cid": rdt_cid},
+        "click_ids": {
+            "fbp": fbp,
+            "fbc": fbc,
+            "fbclid": fbclid,
+            "rdt_cid": rdt_cid,
+            "ttclid": ttclid,
+        },
         "page": {"url": request.build_absolute_uri()},
         # optional feature flag you can pass from caller: context={"consent": True/False}
     }

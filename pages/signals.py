@@ -1038,6 +1038,13 @@ def handle_subscription_event(event, **kwargs):
                 elif billing_reason == 'subscription_cycle':
                     analytics_event = AnalyticsEvent.SUBSCRIPTION_RENEWED
 
+                suppress_marketing_event = False
+                if (
+                    analytics_event == AnalyticsEvent.SUBSCRIPTION_CREATED
+                    and event_type != "customer.subscription.created"
+                ):
+                    suppress_marketing_event = True
+
                 if analytics_event:
                     Analytics.track_event(
                         user_id=owner.id,
@@ -1064,19 +1071,20 @@ def handle_subscription_event(event, **kwargs):
 
                     marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
 
-                    try:
-                        capi(
-                            user=owner,
-                            event_name="Subscribe",
-                            properties=marketing_properties,
-                            request=None,
-                            context=marketing_context,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to enqueue marketing subscription event for user %s",
-                            getattr(owner, "id", None),
-                        )
+                    if not suppress_marketing_event:
+                        try:
+                            capi(
+                                user=owner,
+                                event_name="Subscribe",
+                                properties=marketing_properties,
+                                request=None,
+                                context=marketing_context,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Failed to enqueue marketing subscription event for user %s",
+                                getattr(owner, "id", None),
+                            )
             else:
                 seats = 0
                 try:

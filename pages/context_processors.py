@@ -1,6 +1,6 @@
 import hashlib
 from hashlib import sha256
-
+from datetime import datetime
 from agents.services import AgentService
 from django.conf import settings as django_settings
 from django.http import HttpRequest
@@ -9,7 +9,7 @@ from config import settings
 from config.plans import AGENTS_UNLIMITED
 from constants.plans import PlanNames
 from tasks.services import TaskCreditService
-from util.analytics import AnalyticsEvent, AnalyticsCTAs
+from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics
 from util.constants.task_constants import TASKS_UNLIMITED
 from util.subscription_helper import (
     get_user_plan,
@@ -144,7 +144,9 @@ def analytics(request):
                     sha256_hex(str(request.user.id))
                     if request.user.is_authenticated
                     else ""
-                )
+                ),
+                "ip": Analytics.get_client_ip(request),
+                "timestamp": datetime.utcnow().isoformat() + "Z",
             }
         }
     }

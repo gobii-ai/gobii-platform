@@ -239,7 +239,7 @@ class SubscriptionSignalTests(TestCase):
     def test_subscription_anchor_updates_from_stripe(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_create")
-        event = _build_djstripe_event(payload)
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
 
         fresh_user = User.objects.get(pk=self.user.pk)
         sub = self._mock_subscription(current_period_day=17, subscriber=fresh_user)
@@ -294,7 +294,7 @@ class SubscriptionSignalTests(TestCase):
     def test_subscription_event_includes_client_ip_from_attribution(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_create")
-        event = _build_djstripe_event(payload)
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
 
         UserAttribution.objects.update_or_create(
             user=self.user,
@@ -319,6 +319,30 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_called_once()
         context = self.mock_capi.call_args.kwargs["context"]
         self.assertEqual(context.get("client_ip"), "203.0.113.5")
+
+    @tag("batch_pages")
+    def test_subscription_create_update_event_does_not_emit_duplicate_marketing(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(billing_reason="subscription_create")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=12, subscriber=fresh_user)
+        sub.stripe_data['billing_reason'] = "subscription_create"
+        sub.billing_reason = "subscription_create"
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event") as mock_track_event:
+
+            handle_subscription_event(event)
+
+        mock_track_event.assert_called_once()
+        self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
     def test_subscription_cycle_emits_renewed_event(self):

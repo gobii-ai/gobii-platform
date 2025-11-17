@@ -1,5 +1,5 @@
 # Marketing Events (CAPI fan-out)
-`marketing_events` provides a single helper, `capi(user, event_name, properties=None, request=None, context=None)`, that normalizes marketing signals and pushes them through an async Celery task to the configured Conversions APIs (Meta/Facebook & Reddit). Calls are non-blocking; hashing, consent checks, retries, and tracing happen in the background worker.
+`marketing_events` provides a single helper, `capi(user, event_name, properties=None, request=None, context=None)`, that normalizes marketing signals and pushes them through an async Celery task to the configured Conversions APIs (Meta/Facebook, Reddit, TikTok). Calls are non-blocking; hashing, consent checks, retries, and tracing happen in the background worker.
 
 ## Required settings
 
@@ -9,6 +9,8 @@ Set these environment variables (usually via Django settings) to enable each pro
 - `META_CAPI_TOKEN`
 - `REDDIT_PIXEL_ID`
 - `REDDIT_CONVERSIONS_TOKEN`
+- `TIKTOK_PIXEL_ID`
+- `TIKTOK_ACCESS_TOKEN`
 
 If a provider’s credentials are missing the task will skip it automatically.
 
