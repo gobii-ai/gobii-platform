@@ -10,6 +10,7 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentToolCall,
     BrowserUseAgent,
+    BrowserUseAgentTask,
 )
 from api.agent.core.event_processing import _completion_with_failover
 
@@ -218,6 +219,45 @@ class TokenUsageTrackingTest(TestCase):
 
         self.assertIsNotNone(response)
         self.assertEqual(token_usage.get("total_cost"), Decimal("0.000000"))
+
+    def test_browser_task_cost_fields_persist(self):
+        """Browser-use tasks should store the cost breakdown returned by the agent run."""
+        from api.tasks.browser_agent_tasks import _process_browser_use_task_core
+
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="Track costs",
+        )
+
+        token_usage = {
+            "prompt_tokens": 120,
+            "completion_tokens": 30,
+            "total_tokens": 150,
+            "cached_tokens": 20,
+            "model": "openai/gpt-4o",
+            "provider": "openai",
+            "input_cost_total": 0.001234,
+            "input_cost_uncached": 0.001000,
+            "input_cost_cached": 0.000234,
+            "output_cost": 0.000800,
+            "total_cost": 0.002034,
+        }
+
+        with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
+             patch("api.tasks.browser_agent_tasks.Controller"), \
+             patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
+             patch("api.tasks.browser_agent_tasks.close_old_connections"), \
+             patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value=({"done": True}, token_usage)):
+
+            _process_browser_use_task_core(str(task.id))
+
+        task.refresh_from_db()
+        self.assertEqual(task.input_cost_total, Decimal("0.001234"))
+        self.assertEqual(task.input_cost_uncached, Decimal("0.001000"))
+        self.assertEqual(task.input_cost_cached, Decimal("0.000234"))
+        self.assertEqual(task.output_cost, Decimal("0.000800"))
+        self.assertEqual(task.total_cost, Decimal("0.002034"))
 
     def test_aggregate_token_usage_for_agent(self):
         """Test aggregating token usage across all completions for an agent."""
