@@ -119,6 +119,21 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENT_EMAIL_RECEIVED = 'Persistent Agent Message Received'
     PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS = 'Persistent Agent Out of Credits Email'
 
+    # PA Peer Links
+    PERSISTENT_AGENT_PEER_LINKED = 'Persistent Agent Linked'
+    PERSISTENT_AGENT_PEER_UNLINKED = 'Persistent Agent Unlinked'
+
+    # PA MCP
+    PERSISTENT_AGENT_MCP_LINKED = 'Persistent Agent MCP Linked'
+    PERSISTENT_AGENT_MCP_UNLINKED = 'Persistent Agent MCP Unlinked'
+
+    # PA Webhooks
+    PERSISTENT_AGENT_WEBHOOK_ADDED = 'Persistent Agent Webhook Added'
+    PERSISTENT_AGENT_WEBHOOK_UPDATED = 'Persistent Agent Webhook Updated'
+    PERSISTENT_AGENT_WEBHOOK_DELETED = 'Persistent Agent Webhook Deleted'
+    PERSISTENT_AGENT_WEBHOOK_TESTED = 'Persistent Agent Webhook Tested'
+    PERSISTENT_AGENT_WEBHOOK_TRIGGERED = 'Persistent Agent Webhook Triggered'
+
     # SMS Events
     PERSISTENT_AGENT_SMS_SENT = 'Persistent Agent SMS Sent'
     PERSISTENT_AGENT_SMS_RECEIVED = 'Persistent Agent SMS Received'

@@ -6,13 +6,14 @@ pre-configured outbound webhooks with structured JSON payloads.
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 import requests
 from requests import RequestException
 from django.core.exceptions import ValidationError
 
 from ...models import PersistentAgent, PersistentAgentWebhook
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,49 @@ def _coerce_headers(raw_headers: Any) -> Dict[str, str]:
     return safe_headers
 
 
+def _track_webhook_attempt(
+    agent: PersistentAgent,
+    webhook: PersistentAgentWebhook,
+    *,
+    result: str,
+    status_code: int | None,
+    error_message: str | None,
+    payload_keys: Iterable[str],
+    custom_header_count: int,
+) -> None:
+    """Emit analytics for webhook tool executions."""
+
+    if not agent.user_id:
+        return
+
+    payload_key_list = list(payload_keys or [])
+    props = {
+        'agent_id': str(agent.id),
+        'agent_name': agent.name,
+        'webhook_id': str(webhook.id),
+        'webhook_name': webhook.name,
+        'webhook_url': webhook.url,
+        'result': result,
+        'response_status_code': status_code,
+        'payload_key_count': len(payload_key_list),
+        'custom_header_count': custom_header_count,
+        'timeout_seconds': DEFAULT_TIMEOUT_SECONDS,
+    }
+
+    if payload_key_list:
+        props['payload_keys'] = payload_key_list
+    if error_message:
+        props['error_message'] = (error_message or '')[:200]
+
+    props = Analytics.with_org_properties(props, organization=agent.organization)
+    Analytics.track_event(
+        user_id=agent.user_id,
+        event=AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_TRIGGERED,
+        source=AnalyticsSource.AGENT,
+        properties=props.copy(),
+    )
+
+
 def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_webhook_event tool."""
     webhook_id = params.get("webhook_id")
@@ -83,6 +127,8 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
 
     if not isinstance(payload, dict):
         return {"status": "error", "message": "Payload must be a JSON object."}
+    payload_keys = [str(key) for key in payload.keys()]
+    custom_header_count = len(headers)
 
     try:
         webhook = agent.webhooks.get(id=webhook_id)
@@ -109,7 +155,7 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
         agent.id,
         webhook.name,
         webhook.id,
-        list(payload.keys()),
+        payload_keys,
     )
 
     try:
@@ -131,6 +177,15 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
             error_message,
         )
         webhook.record_delivery(status_code=None, error_message=error_message)
+        _track_webhook_attempt(
+            agent,
+            webhook,
+            result="request_error",
+            status_code=None,
+            error_message=error_message,
+            payload_keys=payload_keys,
+            custom_header_count=custom_header_count,
+        )
         return {
             "status": "error",
             "message": f"Webhook request failed: {error_message}",
@@ -140,6 +195,15 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
 
     if 200 <= status_code < 300:
         webhook.record_delivery(status_code=status_code, error_message="")
+        _track_webhook_attempt(
+            agent,
+            webhook,
+            result="success",
+            status_code=status_code,
+            error_message=None,
+            payload_keys=payload_keys,
+            custom_header_count=custom_header_count,
+        )
         return {
             "status": "success",
             "message": f"Delivered payload to webhook '{webhook.name}' (status {status_code}).",
@@ -150,6 +214,15 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
         }
 
     webhook.record_delivery(status_code=status_code, error_message=response_preview)
+    _track_webhook_attempt(
+        agent,
+        webhook,
+        result="http_error",
+        status_code=status_code,
+        error_message=response_preview,
+        payload_keys=payload_keys,
+        custom_header_count=custom_header_count,
+    )
     return {
         "status": "error",
         "message": f"Webhook responded with status {status_code}.",
