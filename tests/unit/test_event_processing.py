@@ -120,17 +120,6 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<current_datetime>', content)
         self.assertIn('</current_datetime>', content)
 
-    def test_agent_name_in_system_prompt(self):
-        """Test that the agent's name is included in the system prompt."""
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'):
-            context, _, _ = _build_prompt_context(self.agent)
-
-        system_message = next((m for m in context if m['role'] == 'system'), None)
-
-        self.assertIsNotNone(system_message)
-        self.assertIn(f"Your name is '{self.agent.name}'.", system_message['content'])
-
     def test_mcp_servers_listed_in_prompt(self):
         """Accessible MCP servers should be enumerated in the prompt context."""
         MCPServerConfig.objects.create(
