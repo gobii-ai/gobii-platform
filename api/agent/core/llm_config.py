@@ -342,7 +342,9 @@ def _collect_failover_configs(
             has_admin_key = bool(provider.api_key_encrypted)
             has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
             raw_model = endpoint.litellm_model or ""
-            effective_model = normalize_model_name(provider, raw_model, api_base=getattr(endpoint, "api_base", None))
+            api_base_value = getattr(endpoint, "api_base", None)
+            has_api_base = bool(api_base_value)
+            effective_model = normalize_model_name(provider, raw_model, api_base=api_base_value)
 
             is_openai_compat = effective_model.startswith("openai/") and has_api_base
             if not (has_admin_key or has_env_key or is_openai_compat):
