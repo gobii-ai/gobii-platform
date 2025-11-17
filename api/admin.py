@@ -3344,7 +3344,7 @@ class LLMProviderAdmin(admin.ModelAdmin):
         base = [
             (None, {"fields": ("display_name", "key", "enabled")}),
             ("Credentials", {"fields": ("api_key", "clear_api_key", "env_var_name")}),
-            ("Provider Options", {"fields": ("browser_backend", "supports_safety_identifier")}),
+            ("Provider Options", {"fields": ("browser_backend", "model_prefix", "supports_safety_identifier")}),
             ("Vertex (Google)", {"fields": ("vertex_project", "vertex_location")}),
         ]
         if obj is not None:

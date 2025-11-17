@@ -1,6 +1,8 @@
 import json
 import logging
+import os
 import secrets
+import time
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -69,7 +71,12 @@ from console.context_helpers import build_console_context
 from console.forms import MCPServerConfigForm
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from console.llm_serializers import build_llm_overview
+import litellm
+
 from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
+from api.agent.core.llm_utils import run_completion
+from api.llm.utils import normalize_model_name
+from api.openrouter import get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
 
 
@@ -109,6 +116,213 @@ def _ensure_console_endpoints(agent: PersistentAgent, user) -> tuple[str, str]:
         defaults={"owner_agent": None, "is_primary": False},
     )
     return sender_address, recipient_address
+
+
+_TEST_COMPLETION_MESSAGES = [
+    {"role": "system", "content": "You are a connectivity probe. Reply briefly."},
+    {"role": "user", "content": "Respond with the word READY."},
+]
+
+_TEST_EMBEDDING_INPUT = "Connectivity test for embeddings."
+
+
+def _resolve_provider_api_key(provider: LLMProvider | None) -> str | None:
+    if provider is None or not provider.enabled:
+        return None
+    if provider.api_key_encrypted:
+        try:
+            return SecretsEncryption.decrypt_value(provider.api_key_encrypted)
+        except Exception:
+            logger.warning("Failed to decrypt API key for provider %s", provider.key, exc_info=True)
+    if provider.env_var_name:
+        env_value = os.getenv(provider.env_var_name)
+        if env_value:
+            return env_value
+    return None
+
+
+def _apply_provider_overrides(provider: LLMProvider | None, params: dict[str, Any]) -> None:
+    if provider is None:
+        return
+    if provider.key == "google":
+        project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
+        location = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
+        params["vertex_project"] = project
+        params["vertex_location"] = location
+    if provider.key == "openrouter":
+        headers = get_attribution_headers()
+        if headers:
+            params["extra_headers"] = headers
+
+
+def _build_completion_params(
+    endpoint,
+    provider: LLMProvider | None,
+    *,
+    model_attr: str,
+    base_attr: str,
+    default_temperature: float = 0.1,
+    default_max_tokens: int = 96,
+) -> tuple[str, dict[str, Any]]:
+    if not getattr(endpoint, "enabled", False):
+        raise ValueError("Endpoint is disabled")
+    if provider is None:
+        raise ValueError("Endpoint is missing a linked provider")
+    if not provider.enabled:
+        raise ValueError("Provider is disabled")
+
+    raw_model = (getattr(endpoint, model_attr, "") or "").strip()
+    if not raw_model:
+        raise ValueError("Endpoint does not specify a model identifier")
+    api_base = (getattr(endpoint, base_attr, "") or "").strip() or None
+    model = normalize_model_name(provider, raw_model, api_base=api_base)
+
+    temp_override = getattr(endpoint, "temperature_override", None)
+    temperature = float(temp_override if temp_override not in (None, "") else default_temperature)
+    max_tokens_value = getattr(endpoint, "max_output_tokens", None)
+    max_tokens = default_max_tokens
+    if isinstance(max_tokens_value, (int, float)) and max_tokens_value > 0:
+        max_tokens = min(int(max_tokens_value), 512)
+
+    params: dict[str, Any] = {
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout": 20,
+    }
+    if hasattr(endpoint, "supports_tool_choice"):
+        params["supports_tool_choice"] = bool(getattr(endpoint, "supports_tool_choice", True))
+    if hasattr(endpoint, "use_parallel_tool_calls"):
+        params["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
+    if hasattr(endpoint, "supports_vision"):
+        params["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
+
+    if api_base:
+        params["api_base"] = api_base
+
+    api_key = _resolve_provider_api_key(provider)
+    is_openai_compat = model.startswith("openai/") and api_base
+    if not api_key and is_openai_compat:
+        api_key = "sk-noauth"
+    if not api_key:
+        raise ValueError("Configure an API key or environment variable for this provider before testing")
+    params["api_key"] = api_key
+
+    _apply_provider_overrides(provider, params)
+    return model, params
+
+
+def _extract_completion_usage(response: Any) -> dict[str, Any]:
+    model_extra = getattr(response, "model_extra", None)
+    if isinstance(model_extra, dict):
+        usage = model_extra.get("usage")
+    else:
+        usage = getattr(model_extra, "usage", None)
+    if usage is None:
+        usage = getattr(response, "usage", None)
+    if usage is None and isinstance(response, dict):
+        usage = response.get("usage")
+    if usage is None:
+        return {}
+    if isinstance(usage, dict):
+        return usage
+    return {
+        "total_tokens": getattr(usage, "total_tokens", None),
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+    }
+
+
+def _extract_completion_preview(response: Any) -> str:
+    choices = getattr(response, "choices", None)
+    if choices is None and isinstance(response, dict):
+        choices = response.get("choices")
+    if not choices:
+        return ""
+    first = choices[0]
+    message = getattr(first, "message", None)
+    if message is None and isinstance(first, dict):
+        message = first.get("message")
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    return (content or "").strip()
+
+
+def _run_completion_test(endpoint, provider: LLMProvider, *, model_attr: str, base_attr: str, default_max_tokens: int) -> dict[str, Any]:
+    model, params = _build_completion_params(
+        endpoint,
+        provider,
+        model_attr=model_attr,
+        base_attr=base_attr,
+        default_max_tokens=default_max_tokens,
+    )
+    started = time.monotonic()
+    response = run_completion(model=model, messages=_TEST_COMPLETION_MESSAGES, params=params, drop_params=True)
+    latency_ms = int((time.monotonic() - started) * 1000)
+    preview = _extract_completion_preview(response)
+    usage = _extract_completion_usage(response)
+    return {
+        "message": "Endpoint responded successfully.",
+        "model": model,
+        "provider": provider.display_name,
+        "preview": preview,
+        "latency_ms": latency_ms,
+        "total_tokens": usage.get("total_tokens"),
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+    }
+
+
+def _extract_embedding_dimension(response: Any) -> int | None:
+    data = getattr(response, "data", None)
+    if data is None and isinstance(response, dict):
+        data = response.get("data")
+    if not data:
+        return None
+    first = data[0]
+    embedding = getattr(first, "embedding", None)
+    if embedding is None and isinstance(first, dict):
+        embedding = first.get("embedding")
+    if embedding is None:
+        return None
+    try:
+        return len(list(embedding))
+    except TypeError:
+        return None
+
+
+def _run_embedding_test(endpoint: EmbeddingsModelEndpoint) -> dict[str, Any]:
+    if not endpoint.enabled:
+        raise ValueError("Endpoint is disabled")
+    provider = endpoint.provider
+    if provider and not provider.enabled:
+        raise ValueError("Provider is disabled")
+    raw_model = (endpoint.litellm_model or "").strip()
+    model = normalize_model_name(provider, raw_model, api_base=api_base)
+    if not model:
+        raise ValueError("Endpoint does not specify a model identifier")
+    api_base = (endpoint.api_base or "").strip() or None
+    api_key = _resolve_provider_api_key(provider)
+    if not api_key and api_base:
+        api_key = "sk-noauth"
+    if not api_key:
+        raise ValueError("Configure an API key or environment variable for this provider before testing")
+    params: dict[str, Any] = {"api_key": api_key}
+    if api_base:
+        params["api_base"] = api_base
+    _apply_provider_overrides(provider, params)
+
+    started = time.monotonic()
+    response = litellm.embedding(model=model, input=[_TEST_EMBEDDING_INPUT], **params)
+    latency_ms = int((time.monotonic() - started) * 1000)
+    dimension = _extract_embedding_dimension(response)
+    return {
+        "message": "Embedding generated successfully.",
+        "model": model,
+        "provider": provider.display_name if provider else "Unlinked",
+        "dimensions": dimension,
+        "latency_ms": latency_ms,
+    }
 
 
 def _resolve_mcp_server_config(request: HttpRequest, config_id: str) -> MCPServerConfig:
@@ -510,6 +724,7 @@ class LLMProviderListCreateAPIView(SystemAdminAPIView):
             key=key,
             enabled=_coerce_bool(payload.get("enabled", True)),
             env_var_name=(payload.get("env_var_name") or "").strip(),
+            model_prefix=(payload.get("model_prefix") or "").strip(),
             browser_backend=payload.get("browser_backend") or LLMProvider.BrowserBackend.OPENAI,
             supports_safety_identifier=_coerce_bool(payload.get("supports_safety_identifier", False)),
             vertex_project=(payload.get("vertex_project") or "").strip(),
@@ -535,6 +750,7 @@ class LLMProviderDetailAPIView(SystemAdminAPIView):
         updatable_fields = {
             "display_name": "display_name",
             "env_var_name": "env_var_name",
+            "model_prefix": "model_prefix",
             "browser_backend": "browser_backend",
             "supports_safety_identifier": "supports_safety_identifier",
             "vertex_project": "vertex_project",
@@ -572,6 +788,56 @@ class LLMProviderDetailAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("Provider cannot be deleted while endpoints exist")
         provider.delete()
         return _json_ok()
+
+
+class LLMEndpointTestAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        endpoint_id = payload.get("endpoint_id")
+        kind = (payload.get("kind") or "persistent").strip().lower()
+        if not endpoint_id:
+            return HttpResponseBadRequest("endpoint_id is required")
+
+        try:
+            if kind == "persistent":
+                endpoint = get_object_or_404(PersistentModelEndpoint, pk=endpoint_id)
+                result = _run_completion_test(
+                    endpoint,
+                    endpoint.provider,
+                    model_attr="litellm_model",
+                    base_attr="api_base",
+                    default_max_tokens=128,
+                )
+            elif kind == "browser":
+                endpoint = get_object_or_404(BrowserModelEndpoint, pk=endpoint_id)
+                result = _run_completion_test(
+                    endpoint,
+                    endpoint.provider,
+                    model_attr="browser_model",
+                    base_attr="browser_base_url",
+                    default_max_tokens=endpoint.max_output_tokens or 128,
+                )
+            elif kind == "embedding":
+                endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
+                result = _run_embedding_test(endpoint)
+            else:
+                return HttpResponseBadRequest("Invalid endpoint kind")
+        except ValueError as exc:
+            return JsonResponse({"ok": False, "message": str(exc)}, status=400)
+        except Exception as exc:
+            logger.warning(
+                "LLM endpoint test failed",
+                exc_info=True,
+            )
+            return JsonResponse({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, status=400)
+
+        return JsonResponse({"ok": True, **result})
 
 
 class PersistentEndpointListCreateAPIView(SystemAdminAPIView):

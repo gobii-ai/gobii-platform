@@ -21,6 +21,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from api.openrouter import get_attribution_headers
+from api.llm.utils import normalize_model_name
 from util.subscription_helper import get_owner_plan
 from constants.plans import PlanNames
 
@@ -341,29 +342,9 @@ def _collect_failover_configs(
             has_admin_key = bool(provider.api_key_encrypted)
             has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
             raw_model = endpoint.litellm_model or ""
-            has_api_base = bool(getattr(endpoint, "api_base", None))
-            provider_backend = getattr(provider, "browser_backend", "")
-            is_openai_backend = provider_backend in ("OPENAI", "OPENAI_COMPAT")
-            should_auto_prefix = (
-                is_openai_backend
-                and has_api_base
-                and raw_model
-                and "/" not in raw_model
-            )
-            if should_auto_prefix:
-                effective_model = f"openai/{raw_model}"
-                logger.info(
-                    "Auto-prefixed OpenAI-compatible model: endpoint=%s provider=%s "
-                    "original_model=%s prefixed_model=%s api_base=%s tier_type=%s",
-                    endpoint.key,
-                    provider.key,
-                    raw_model,
-                    effective_model,
-                    endpoint.api_base,
-                    tier_label,
-                )
-            else:
-                effective_model = raw_model
+            api_base_value = getattr(endpoint, "api_base", None)
+            has_api_base = bool(api_base_value)
+            effective_model = normalize_model_name(provider, raw_model, api_base=api_base_value)
 
             is_openai_compat = effective_model.startswith("openai/") and has_api_base
             if not (has_admin_key or has_env_key or is_openai_compat):
@@ -486,6 +467,26 @@ def get_llm_config_with_failover(
             .order_by('min_tokens')
             .last()
         )
+
+        if token_range is None:
+            smallest_range = PersistentTokenRange.objects.order_by('min_tokens').first()
+            largest_range = PersistentTokenRange.objects.order_by('-min_tokens').first()
+            if smallest_range and token_count < smallest_range.min_tokens:
+                token_range = smallest_range
+                logger.info(
+                    "Token count %s below configured minimum (%s); using range '%s' as fallback",
+                    token_count,
+                    smallest_range.min_tokens,
+                    smallest_range.name,
+                )
+            elif largest_range:
+                token_range = largest_range
+                logger.info(
+                    "Token count %s exceeds configured ranges; using highest range '%s' (min=%s) as fallback",
+                    token_count,
+                    largest_range.name,
+                    largest_range.min_tokens,
+                )
     except Exception:
         token_range = None
 

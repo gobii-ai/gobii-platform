@@ -26,6 +26,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
 import * as llmApi from '../api/llmConfig'
+import { HttpError } from '../api/http'
 
 const button = {
   primary:
@@ -92,6 +93,17 @@ type ProviderCardData = {
 }
 
 type TierScope = 'persistent' | 'browser' | 'embedding'
+
+type EndpointTestStatus = {
+  state: 'pending' | 'success' | 'error'
+  message: string
+  preview?: string
+  latencyMs?: number | null
+  totalTokens?: number | null
+  promptTokens?: number | null
+  completionTokens?: number | null
+  updatedAt: number
+}
 
 type EndpointFormValues = {
   model: string
@@ -224,82 +236,175 @@ function ModalPortal({ children }: { children: ReactNode }) {
   return createPortal(children, modalRoot)
 }
 
-const clampWeight = (value: number, min: number = 0, max: number = 100) => Math.max(min, Math.min(max, Math.round(value)))
+const UNIT_SCALE = 10000
+const MIN_SERVER_UNIT = 1 / UNIT_SCALE
+const clampUnit = (value: number) => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+const roundToDisplayUnit = (value: number) => Math.round(clampUnit(value) * 100) / 100
+const parseUnitInput = (value: number) => clampUnit(Number.isFinite(value) ? value : 0)
 
-function rebalanceTierWeights(tier: Tier, tierEndpointId: string, desiredWeight: number) {
-  const minWeight = tier.endpoints.length > 1 ? 1 : 100
-  const clamped = clampWeight(desiredWeight, minWeight)
-  const endpoints = tier.endpoints
-  if (endpoints.length <= 1) {
-    const only = endpoints[0]
-    return only ? [{ id: only.id, weight: 100 }] : []
-  }
+type WeightEntry = { id: string; unit: number }
 
-  const target = endpoints.find((endpoint) => endpoint.id === tierEndpointId)
-  if (!target) return []
-
-  const others = endpoints.filter((endpoint) => endpoint.id !== tierEndpointId)
-  const remainder = 100 - clamped
-  const totalOtherWeight = others.reduce((sum, endpoint) => sum + endpoint.weight, 0)
-
-  let redistributed = others.map((endpoint) => {
-    if (totalOtherWeight > 0) {
-      return { id: endpoint.id, weight: (endpoint.weight / totalOtherWeight) * remainder }
-    }
-    return { id: endpoint.id, weight: remainder / others.length }
-  })
-
-  let runningTotal = clamped
-  redistributed = redistributed.map((entry) => {
-    const rounded = clampWeight(entry.weight, 1)
-    runningTotal += rounded
-    return { ...entry, weight: rounded }
-  })
-
-  const roundingError = 100 - runningTotal
-  if (roundingError !== 0 && redistributed.length > 0) {
-    redistributed[0].weight = clampWeight(redistributed[0].weight + roundingError, 1)
-  }
-
-  return [{ id: target.id, weight: clamped }, ...redistributed]
+const normalizeServerWeight = (weight?: number | null) => {
+  if (typeof weight !== 'number' || Number.isNaN(weight)) return 0
+  if (!Number.isFinite(weight)) return 0
+  if (weight > 1 + 1e-6) return clampUnit(weight / 100)
+  if (weight < 0) return 0
+  return clampUnit(weight)
 }
 
-function distributeEvenWeights(endpointIds: string[]): Record<string, number> {
-  if (endpointIds.length === 0) {
-    return {}
-  }
-  if (endpointIds.length === 1) {
-    return { [endpointIds[0]]: 100 }
+const normalizeWeightEntries = (entries: WeightEntry[]): WeightEntry[] => {
+  if (!entries.length) return []
+  const sanitized = entries.map((entry) => ({ id: entry.id, unit: clampUnit(entry.unit) }))
+  const total = sanitized.reduce((sum, entry) => sum + entry.unit, 0)
+  let normalized = sanitized
+  if (total <= 0) {
+    const evenShare = 1 / sanitized.length
+    normalized = sanitized.map((entry) => ({ id: entry.id, unit: evenShare }))
+  } else {
+    normalized = sanitized.map((entry) => ({ id: entry.id, unit: entry.unit / total }))
   }
 
-  const count = endpointIds.length
-  const base = Math.floor(100 / count)
-  const remainder = 100 % count
-  let weights = endpointIds.map((_, index) => base + (index < remainder ? 1 : 0)).map((weight) => Math.max(1, weight))
-
-  let total = weights.reduce((sum, weight) => sum + weight, 0)
-  if (total > 100) {
-    let excess = total - 100
-    for (let i = weights.length - 1; i >= 0 && excess > 0; i -= 1) {
-      const reducible = Math.min(weights[i] - 1, excess)
-      if (reducible > 0) {
-        weights[i] -= reducible
-        excess -= reducible
-      }
+  const scaled = normalized.map((entry, index) => {
+    const scaledValue = entry.unit * UNIT_SCALE
+    const base = Math.floor(scaledValue)
+    return {
+      id: entry.id,
+      order: index,
+      base,
+      fraction: scaledValue - base,
     }
-  } else if (total < 100) {
-    let deficit = 100 - total
-    for (let i = 0; i < weights.length && deficit > 0; i += 1) {
-      weights[i] += 1
-      deficit -= 1
-    }
-  }
-
-  const result: Record<string, number> = {}
-  endpointIds.forEach((id, index) => {
-    result[id] = weights[index]
   })
-  return result
+  let remainder = UNIT_SCALE - scaled.reduce((sum, entry) => sum + entry.base, 0)
+  const allocationOrder = [...scaled].sort((a, b) => b.fraction - a.fraction)
+  let idx = 0
+  while (remainder > 0 && idx < allocationOrder.length) {
+    allocationOrder[idx].base += 1
+    remainder -= 1
+    idx += 1
+  }
+  allocationOrder.sort((a, b) => a.order - b.order)
+  return allocationOrder.map((entry) => ({ id: entry.id, unit: entry.base / UNIT_SCALE }))
+}
+
+const entriesToMap = (entries: WeightEntry[]) => {
+  const map: Record<string, number> = {}
+  entries.forEach((entry) => {
+    map[entry.id] = entry.unit
+  })
+  return map
+}
+
+const normalizeTierEndpointWeights = (endpoints: llmApi.TierEndpoint[]) =>
+  entriesToMap(
+    normalizeWeightEntries(
+      endpoints.map((endpoint) => ({ id: endpoint.id, unit: normalizeServerWeight(endpoint.weight) })),
+    ),
+  )
+
+const evenWeightMap = (endpointIds: string[]) => {
+  if (!endpointIds.length) return {}
+  const baseEntries = endpointIds.map((id) => ({ id, unit: 1 / endpointIds.length }))
+  return entriesToMap(normalizeWeightEntries(baseEntries))
+}
+
+const resolveTierUnits = (tier: Tier, pendingWeights: Record<string, number>) =>
+  tier.endpoints.map((endpoint) => ({
+    id: endpoint.id,
+    unit: clampUnit(pendingWeights[endpoint.id] ?? endpoint.weight ?? 0),
+  }))
+
+const rebalanceTierWeights = (
+  tier: Tier,
+  tierEndpointId: string,
+  desiredUnit: number,
+  pendingWeights: Record<string, number>,
+) => {
+  const entries = resolveTierUnits(tier, pendingWeights)
+  if (!entries.length) return []
+  const targetIndex = entries.findIndex((entry) => entry.id === tierEndpointId)
+  if (targetIndex === -1) return []
+
+  const targetUnit = clampUnit(desiredUnit)
+  const others = entries.filter((entry) => entry.id !== tierEndpointId)
+  const remainder = clampUnit(1 - targetUnit)
+
+  let redistributed: WeightEntry[] = []
+  if (others.length) {
+    const otherTotal = others.reduce((sum, entry) => sum + entry.unit, 0)
+    if (remainder <= 0) {
+      redistributed = others.map((entry) => ({ id: entry.id, unit: 0 }))
+    } else if (otherTotal > 0) {
+      redistributed = others.map((entry) => ({ id: entry.id, unit: (entry.unit / otherTotal) * remainder }))
+    } else {
+      const share = remainder / others.length
+      redistributed = others.map((entry) => ({ id: entry.id, unit: share }))
+    }
+  }
+
+  const normalized = normalizeWeightEntries([{ id: tierEndpointId, unit: targetUnit }, ...redistributed])
+  return normalized.map((entry) => ({ id: entry.id, weight: entry.unit }))
+}
+
+const ensureServerUnits = (entries: WeightEntry[]): Record<string, number> => {
+  if (!entries.length) return {}
+  const ints = entries.map((entry) => ({ id: entry.id, value: Math.round(entry.unit * UNIT_SCALE) }))
+  let total = ints.reduce((sum, entry) => sum + entry.value, 0)
+
+  if (total !== UNIT_SCALE) {
+    const diff = UNIT_SCALE - total
+    if (diff > 0) {
+      // allocate missing units
+      const allocationOrder = [...ints].sort((a, b) => a.value - b.value)
+      let remaining = diff
+      allocationOrder.forEach((entry) => {
+        if (remaining <= 0) return
+        entry.value += 1
+        remaining -= 1
+      })
+    } else {
+      let remaining = Math.abs(diff)
+      const reducibleOrder = [...ints].sort((a, b) => b.value - a.value)
+      reducibleOrder.forEach((entry) => {
+        if (remaining <= 0) return
+        const reducible = entry.value
+        if (reducible <= 0) return
+        const delta = Math.min(reducible, remaining)
+        entry.value -= delta
+        remaining -= delta
+      })
+    }
+    total = ints.reduce((sum, entry) => sum + entry.value, 0)
+  }
+
+  const minUnits = Math.round(MIN_SERVER_UNIT * UNIT_SCALE) || 1
+  ints.forEach((entry) => {
+    if (entry.value < minUnits) entry.value = minUnits
+  })
+
+  let surplus = ints.reduce((sum, entry) => sum + entry.value, 0) - UNIT_SCALE
+  if (surplus > 0) {
+    const donors = [...ints].sort((a, b) => b.value - a.value)
+    donors.forEach((entry) => {
+      if (surplus <= 0) return
+      const reducible = entry.value - minUnits
+      if (reducible <= 0) return
+      const delta = Math.min(reducible, surplus)
+      entry.value -= delta
+      surplus -= delta
+    })
+  }
+
+  const map: Record<string, number> = {}
+  ints.forEach((entry) => {
+    map[entry.id] = entry.value / UNIT_SCALE
+  })
+  return map
+}
+
+const encodeServerWeight = (unit: number) => Number(clampUnit(unit).toFixed(4))
+
+function distributeEvenWeights(endpointIds: string[]): Record<string, number> {
+  return evenWeightMap(endpointIds)
 }
 
 const parseNumber = (value?: string) => {
@@ -372,6 +477,7 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
   const mappedTiers: Tier[] = []
   ranges.forEach((range) => {
     range.tiers.forEach((tier) => {
+      const normalized = normalizeTierEndpointWeights(tier.endpoints)
       mappedTiers.push({
         id: tier.id,
         name: (tier.description || '').trim(),
@@ -382,7 +488,7 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
           id: endpoint.id,
           endpointId: endpoint.endpoint_id,
           label: endpoint.label,
-          weight: Math.round(endpoint.weight),
+          weight: normalized[endpoint.id] ?? 0,
         })),
       })
     })
@@ -393,37 +499,43 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
 
 function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
   if (!policy) return []
-  const tiers = policy.tiers.map((tier) => ({
-    id: tier.id,
-    name: (tier.description || '').trim(),
-    order: tier.order,
-    rangeId: 'browser',
-    premium: tier.is_premium,
-    endpoints: tier.endpoints.map((endpoint) => ({
-      id: endpoint.id,
-      endpointId: endpoint.endpoint_id,
-      label: endpoint.label,
-      weight: Math.round(endpoint.weight),
-    })),
-  }))
+  const tiers = policy.tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'browser',
+      premium: tier.is_premium,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
   applySequentialFallbackNames(tiers, (tier) => `${tier.rangeId}:${tier.premium ? 'premium' : 'standard'}`)
   return tiers
 }
 
 function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
-  const mapped = tiers.map((tier) => ({
-    id: tier.id,
-    name: (tier.description || '').trim(),
-    order: tier.order,
-    rangeId: 'embedding',
-    premium: false,
-    endpoints: tier.endpoints.map((endpoint) => ({
-      id: endpoint.id,
-      endpointId: endpoint.endpoint_id,
-      label: endpoint.label,
-      weight: Math.round(endpoint.weight),
-    })),
-  }))
+  const mapped = tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'embedding',
+      premium: false,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
   applySequentialFallbackNames(mapped, () => 'embedding')
   return mapped
 }
@@ -571,9 +683,10 @@ type ProviderCardHandlers = {
   onSaveEndpoint: (endpoint: ProviderEndpointCard, values: EndpointFormValues) => Promise<void>
   onDeleteEndpoint: (endpoint: ProviderEndpointCard) => Promise<void>
   onClearKey: (provider: ProviderCardData) => Promise<void>
+  onTestEndpoint: (endpoint: ProviderEndpointCard) => Promise<void>
 }
 
-function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean }) {
+function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean; testStatuses: Record<string, EndpointTestStatus | undefined> }) {
   const [activeTab, setActiveTab] = useState<'endpoints' | 'settings'>('endpoints')
   const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null)
   const [addingType, setAddingType] = useState<llmApi.ProviderEndpoint['type'] | null>(null)
@@ -626,6 +739,19 @@ function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardDa
                 const isEditing = editingEndpointId === endpoint.id
                 const deleteBusy = isBusy(actionKey('endpoint', endpoint.id, 'delete'))
                 const endpointSaving = isBusy(actionKey('endpoint', endpoint.id, 'update'))
+                const testBusy = isBusy(actionKey('endpoint', endpoint.id, 'test'))
+                const status = testStatuses[endpoint.id]
+                const tone = status?.state === 'success'
+                  ? 'text-emerald-600'
+                  : status?.state === 'error'
+                    ? 'text-rose-600'
+                    : 'text-slate-500'
+                const isPendingStatus = status?.state === 'pending'
+                const headline = status?.state === 'success'
+                  ? 'Success:'
+                  : status?.state === 'error'
+                    ? 'Error:'
+                    : 'Testing…'
                 return (
                   <div key={endpoint.id} className="rounded-lg border border-slate-200 p-3">
                     <div className="flex items-center justify-between">
@@ -634,6 +760,9 @@ function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardDa
                         <p className="text-xs text-slate-500 uppercase">{endpoint.type}</p>
                       </div>
                       <div className="flex items-center gap-2">
+                        <button type="button" className={button.secondary} onClick={() => handlers.onTestEndpoint(endpoint).catch(() => {})} disabled={testBusy}>
+                          {testBusy ? <Loader2 className="size-4 animate-spin" /> : 'Test'}
+                        </button>
                         <button className={button.muted} onClick={() => setEditingEndpointId(isEditing ? null : endpoint.id)}>
                           {isEditing ? 'Close' : 'Edit'}
                         </button>
@@ -656,6 +785,33 @@ function ProviderCard({ provider, handlers, isBusy }: { provider: ProviderCardDa
                           }
                         }}
                       />
+                    )}
+                    {status && (
+                      <div className={`mt-3 text-xs ${tone}`}>
+                        <p className="font-medium">
+                          {isPendingStatus
+                            ? status.message
+                            : (
+                              <>
+                                <span>{headline}</span>
+                                {status.message ? ` ${status.message}` : ''}
+                              </>
+                            )}
+                        </p>
+                        {status.state === 'success' && (
+                          <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-slate-500">
+                            {status.latencyMs != null && <span>Latency: {status.latencyMs} ms</span>}
+                            {status.totalTokens != null && <span>Total tokens: {status.totalTokens}</span>}
+                            {status.promptTokens != null && <span>Prompt: {status.promptTokens}</span>}
+                            {status.completionTokens != null && <span>Completion: {status.completionTokens}</span>}
+                          </div>
+                        )}
+                        {status.preview ? (
+                          <p className="mt-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600">
+                            Preview: <span className="font-mono">{status.preview}</span>
+                          </p>
+                        ) : null}
+                      </div>
                     )}
                   </div>
                 )
@@ -1062,7 +1218,8 @@ function TierCard({
         </div>
         <div className="space-y-3">
           {tier.endpoints.map((endpoint) => {
-            const weightValue = pendingWeights[endpoint.id] ?? endpoint.weight
+            const unitWeight = pendingWeights[endpoint.id] ?? endpoint.weight
+            const displayWeight = roundToDisplayUnit(unitWeight)
             return (
               <div key={endpoint.id} className="grid grid-cols-12 items-center gap-3 text-sm font-medium text-slate-900/90">
                 <span className="col-span-6 flex items-center gap-2 truncate" title={endpoint.label}><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
@@ -1070,34 +1227,41 @@ function TierCard({
                   <input
                     type="range"
                     min="0"
-                    max="100"
-                  value={weightValue}
-                  onChange={(event) => {
-                    if (!canAdjustWeights) return
-                    onStageEndpointWeight(tier, endpoint.id, parseInt(event.target.value, 10), scope)
-                  }}
-                  disabled={!canAdjustWeights}
-                  onMouseUp={handleCommit}
-                  onTouchEnd={handleCommit}
-                  onPointerUp={handleCommit}
-                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-              />
-              <input
-                type="number"
-                value={weightValue}
-                onChange={(event) => {
-                  if (!canAdjustWeights) return
-                  onStageEndpointWeight(tier, endpoint.id, parseInt(event.target.value, 10) || 0, scope)
-                }}
-                disabled={!canAdjustWeights}
-                onBlur={handleCommit}
-                className="block w-20 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-              />
-                <button onClick={() => onRemoveEndpoint(tier, endpoint)} className={button.iconDanger} aria-label="Remove endpoint">
-                  <Trash className="size-4" />
-                </button>
+                    max="1"
+                    step="0.01"
+                    value={displayWeight}
+                    onChange={(event) => {
+                      if (!canAdjustWeights) return
+                      const decimal = parseUnitInput(event.target.valueAsNumber)
+                      onStageEndpointWeight(tier, endpoint.id, decimal, scope)
+                    }}
+                    disabled={!canAdjustWeights}
+                    onMouseUp={handleCommit}
+                    onTouchEnd={handleCommit}
+                    onPointerUp={handleCommit}
+                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={displayWeight.toFixed(2)}
+                    onChange={(event) => {
+                      if (!canAdjustWeights) return
+                      const decimal = parseUnitInput(event.target.valueAsNumber)
+                      onStageEndpointWeight(tier, endpoint.id, decimal, scope)
+                    }}
+                    disabled={!canAdjustWeights}
+                    onBlur={handleCommit}
+                    inputMode="decimal"
+                    className="block w-24 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  />
+                  <button onClick={() => onRemoveEndpoint(tier, endpoint)} className={button.iconDanger} aria-label="Remove endpoint">
+                    <Trash className="size-4" />
+                  </button>
+                </div>
               </div>
-            </div>
             )
           })}
           {!canAdjustWeights && tier.endpoints.length > 0 && (
@@ -1311,9 +1475,10 @@ export function LlmConfigScreen() {
   const { runWithFeedback, isBusy, activeLabels, notices, dismissNotice } = useAsyncFeedback()
   const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
+  const [endpointTestStatuses, setEndpointTestStatuses] = useState<Record<string, EndpointTestStatus>>({})
+  const resetEndpointTestStatuses = () => setEndpointTestStatuses({})
   const [savingTierIds, setSavingTierIds] = useState<Set<string>>(new Set())
   const [dirtyTierIds, setDirtyTierIds] = useState<Set<string>>(new Set())
-  const fixingSinglesRef = useRef(false)
   const stagedWeightsRef = useRef<Record<string, { scope: TierScope; updates: { id: string; weight: number }[] }>>({})
 
   const overviewQuery = useQuery({
@@ -1337,78 +1502,19 @@ export function LlmConfigScreen() {
   }, [overviewQuery.data])
 
   useEffect(() => {
-    const data = overviewQuery.data
-    if (!data || fixingSinglesRef.current) return
-
-    const pending: Record<string, number> = {}
-    const operations: Promise<unknown>[] = []
-
-    const enqueueFix = (endpointId: string, scope: TierScope) => {
-      pending[endpointId] = 100
-      if (scope === 'browser') {
-        operations.push(llmApi.updateBrowserTierEndpoint(endpointId, { weight: 100 }))
-      } else if (scope === 'embedding') {
-        operations.push(llmApi.updateEmbeddingTierEndpoint(endpointId, { weight: 100 }))
-      } else {
-        operations.push(llmApi.updatePersistentTierEndpoint(endpointId, { weight: 100 }))
-      }
-    }
-
-    data.persistent.ranges.forEach((range) => {
-      range.tiers.forEach((tier) => {
-        if (tier.endpoints.length === 1) {
-          const endpoint = tier.endpoints[0]
-          if (Math.round(endpoint.weight) !== 100) {
-            enqueueFix(endpoint.id, 'persistent')
-          }
-        }
-      })
-    })
-
-    if (data.browser) {
-      data.browser.tiers.forEach((tier) => {
-        if (tier.endpoints.length === 1) {
-          const endpoint = tier.endpoints[0]
-          if (Math.round(endpoint.weight) !== 100) {
-            enqueueFix(endpoint.id, 'browser')
-          }
-        }
-      })
-    }
-
-    data.embeddings.tiers.forEach((tier) => {
-      if (tier.endpoints.length === 1) {
-        const endpoint = tier.endpoints[0]
-        if (Math.round(endpoint.weight) !== 100) {
-          enqueueFix(endpoint.id, 'embedding')
-        }
-      }
-    })
-
-    if (!operations.length) {
+    if (!providers.length) {
+      setEndpointTestStatuses({})
       return
     }
-
-    fixingSinglesRef.current = true
-    const affectedIds = Object.keys(pending)
-    setPendingWeights((prev) => ({ ...prev, ...pending }))
-    runMutation(() => Promise.all(operations), {
-      label: 'Auto-fixing weights…',
-      busyKey: actionKey('auto-fix'),
-      context: 'LLM configuration',
-      rethrow: true,
+    const valid = new Set(providers.flatMap((provider) => provider.endpoints.map((endpoint) => endpoint.id)))
+    setEndpointTestStatuses((prev) => {
+      const next: Record<string, EndpointTestStatus> = {}
+      valid.forEach((id) => {
+        if (prev[id]) next[id] = prev[id]
+      })
+      return next
     })
-      .catch(() => {
-        setPendingWeights((prev) => {
-          const next = { ...prev }
-          affectedIds.forEach((id) => delete next[id])
-          return next
-        })
-      })
-      .finally(() => {
-        fixingSinglesRef.current = false
-      })
-  }, [overviewQuery.data])
+  }, [providers])
 
   const invalidateOverview = () => queryClient.invalidateQueries({ queryKey: ['llm-overview'] })
 
@@ -1494,6 +1600,56 @@ export function LlmConfigScreen() {
     })
   }
 
+  const handleProviderTestEndpoint = async (endpoint: ProviderEndpointCard) => {
+    setEndpointTestStatuses((prev) => ({
+      ...prev,
+      [endpoint.id]: {
+        state: 'pending',
+        message: 'Testing…',
+        updatedAt: Date.now(),
+      },
+    }))
+    try {
+      const result = await runWithFeedback(
+        () => llmApi.testEndpoint({ endpoint_id: endpoint.id, kind: endpoint.type }),
+        {
+          label: 'Testing endpoint…',
+          busyKey: actionKey('endpoint', endpoint.id, 'test'),
+          context: endpoint.name,
+        },
+      )
+      if (!result.ok) {
+        throw new Error(result.message || 'Endpoint test failed')
+      }
+      setEndpointTestStatuses((prev) => ({
+        ...prev,
+        [endpoint.id]: {
+          state: 'success',
+          message: result.message || 'Endpoint responded successfully.',
+          preview: result.preview?.trim() || '',
+          latencyMs: result.latency_ms ?? null,
+          totalTokens: result.total_tokens ?? null,
+          promptTokens: result.prompt_tokens ?? null,
+          completionTokens: result.completion_tokens ?? null,
+          updatedAt: Date.now(),
+        },
+      }))
+    } catch (error) {
+      const message = error instanceof HttpError
+        ? (typeof error.body === 'object' && error.body && 'message' in error.body ? String((error.body as { message?: unknown }).message || error.message) : error.message)
+        : (error as Error).message
+      setEndpointTestStatuses((prev) => ({
+        ...prev,
+        [endpoint.id]: {
+          state: 'error',
+          message,
+          updatedAt: Date.now(),
+        },
+      }))
+      throw error
+    }
+  }
+
   const handleProviderToggle = (provider: ProviderCardData, enabled: boolean) => {
     return runMutation(
       () => llmApi.updateProvider(provider.id, { enabled }),
@@ -1546,6 +1702,8 @@ export function LlmConfigScreen() {
       busyKey: actionKey('provider', provider.id, 'create-endpoint'),
       context: provider.name,
       rethrow: true,
+    }).then(() => {
+      resetEndpointTestStatuses()
     })
   }
 
@@ -1581,6 +1739,8 @@ export function LlmConfigScreen() {
       busyKey: actionKey('endpoint', endpoint.id, 'update'),
       context: endpoint.name,
       rethrow: true,
+    }).then(() => {
+      resetEndpointTestStatuses()
     })
   }
 
@@ -1596,6 +1756,8 @@ export function LlmConfigScreen() {
         label: 'Removing endpoint…',
         busyKey: actionKey('endpoint', endpoint.id, 'delete'),
         context: endpoint.name,
+      }).then(() => {
+        resetEndpointTestStatuses()
       }),
     })
   }
@@ -1669,7 +1831,7 @@ export function LlmConfigScreen() {
     })
 
   const stageTierEndpointWeight = (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => {
-    const updates = rebalanceTierWeights(tier, tierEndpointId, weight)
+    const updates = rebalanceTierWeights(tier, tierEndpointId, weight, pendingWeights)
     if (!updates.length) return
     setPendingWeights((prev) => {
       const next = { ...prev }
@@ -1698,14 +1860,18 @@ export function LlmConfigScreen() {
       return next
     })
     const mutation = () => {
+      const normalized: Record<string, number> = ensureServerUnits(
+        staged.updates.map((entry) => ({ id: entry.id, unit: entry.weight })),
+      )
       const ops = staged.updates.map((entry) => {
+        const payload = { weight: encodeServerWeight(normalized[entry.id] ?? entry.weight) }
         if (scope === 'browser') {
-          return llmApi.updateBrowserTierEndpoint(entry.id, { weight: entry.weight })
+          return llmApi.updateBrowserTierEndpoint(entry.id, payload)
         }
         if (scope === 'embedding') {
-          return llmApi.updateEmbeddingTierEndpoint(entry.id, { weight: entry.weight })
+          return llmApi.updateEmbeddingTierEndpoint(entry.id, payload)
         }
-        return llmApi.updatePersistentTierEndpoint(entry.id, { weight: entry.weight })
+        return llmApi.updatePersistentTierEndpoint(entry.id, payload)
       })
       return Promise.all(ops)
     }
@@ -1819,14 +1985,15 @@ export function LlmConfigScreen() {
 
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
-      const payload = { endpoint_id: endpointId, weight: tier.endpoints.length === 0 ? 100 : 50 }
+      const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
+      const requestPayload = { endpoint_id: endpointId, weight: encodeServerWeight(initialUnit) }
       let response: { tier_endpoint_id?: string } = {}
       if (scope === 'browser') {
-        response = await llmApi.addBrowserTierEndpoint(tier.id, payload) as { tier_endpoint_id?: string }
+        response = await llmApi.addBrowserTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
       } else if (scope === 'embedding') {
-        response = await llmApi.addEmbeddingTierEndpoint(tier.id, payload) as { tier_endpoint_id?: string }
+        response = await llmApi.addEmbeddingTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
       } else {
-        response = await llmApi.addPersistentTierEndpoint(tier.id, payload) as { tier_endpoint_id?: string }
+        response = await llmApi.addPersistentTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
       }
       const newTierEndpointId = response?.tier_endpoint_id
       if (!newTierEndpointId) {
@@ -1842,15 +2009,18 @@ export function LlmConfigScreen() {
         })
         return next
       })
-
+      const normalized: Record<string, number> = ensureServerUnits(
+        Object.entries(evenWeights).map(([id, unit]) => ({ id, unit })),
+      )
       const updates = Object.entries(evenWeights).map(([tierEndpointId, weight]) => {
+        const payload = { weight: encodeServerWeight(normalized[tierEndpointId] ?? weight) }
         if (scope === 'browser') {
-          return llmApi.updateBrowserTierEndpoint(tierEndpointId, { weight })
+          return llmApi.updateBrowserTierEndpoint(tierEndpointId, payload)
         }
         if (scope === 'embedding') {
-          return llmApi.updateEmbeddingTierEndpoint(tierEndpointId, { weight })
+          return llmApi.updateEmbeddingTierEndpoint(tierEndpointId, payload)
         }
-        return llmApi.updatePersistentTierEndpoint(tierEndpointId, { weight })
+        return llmApi.updatePersistentTierEndpoint(tierEndpointId, payload)
       })
 
       await Promise.all(updates)
@@ -1915,6 +2085,7 @@ export function LlmConfigScreen() {
                 key={provider.id}
                 provider={provider}
                 isBusy={isBusy}
+                testStatuses={endpointTestStatuses}
                 handlers={{
                   onRotateKey: handleProviderRotateKey,
                   onToggleEnabled: handleProviderToggle,
@@ -1922,6 +2093,7 @@ export function LlmConfigScreen() {
                   onSaveEndpoint: handleProviderSaveEndpoint,
                   onDeleteEndpoint: handleProviderDeleteEndpoint,
                   onClearKey: handleProviderClearKey,
+                  onTestEndpoint: handleProviderTestEndpoint,
                 }}
               />
             ))}
