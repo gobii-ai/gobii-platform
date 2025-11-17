@@ -470,6 +470,39 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     return max(min(estimated_tokens, 50000), 1000)  # Between 1k and 50k tokens
 
 
+def _should_use_gemini_cache(provider: str | None, model: str | None) -> bool:
+    """Return True when the current provider/model should use Gemini context caching."""
+    provider_key = (provider or "").lower()
+    model_key = (model or "").lower()
+    return "gemini" in provider_key or "gemini" in model_key
+
+
+def _with_gemini_cached_system_prompt(messages: List[dict], provider: str | None, model: str | None) -> List[dict]:
+    """
+    Return a copy of ``messages`` where the system prompt is marked for Gemini caching.
+
+    Gemini's context caching is enabled by adding a ``cache_control`` object
+    to the system instruction, which must be the first message in the request.
+    This function adds that metadata while leaving the rest of the message list
+    untouched for compatibility with other providers.
+    """
+    if not messages or not _should_use_gemini_cache(provider, model):
+        return messages
+
+    system_message = dict(messages[0])
+    content = system_message.get("content") or ""
+
+    system_message["content"] = [
+        {
+            "type": "text",
+            "text": content if isinstance(content, str) else str(content),
+            "cache_control": {"type": "ephemeral", "ttl": "3600s"},
+        }
+    ]
+
+    return [system_message, *messages[1:]]
+
+
 def _completion_with_failover(
     messages: List[dict], 
     tools: List[dict], 
@@ -566,6 +599,8 @@ def _completion_with_failover(
                 # If OpenAI family, add safety_identifier hint when available
                 if (provider.startswith("openai") or provider == "openai") and safety_identifier:
                     params["safety_identifier"] = str(safety_identifier)
+
+                messages = _with_gemini_cached_system_prompt(messages, provider, model)
 
                 response = run_completion(
                     model=model,
