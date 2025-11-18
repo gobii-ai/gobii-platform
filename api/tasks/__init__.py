@@ -52,5 +52,8 @@ from .proactive_agents import schedule_proactive_agents_task  # noqa: F401
 # unless some other code imports them first (e.g., console views).
 import api.agent.tasks  # noqa: F401
 
+# Ensure eval tasks are registered
+import api.evals.tasks  # noqa: F401
+
 # Agent lifecycle cleanup task (one-stop shutdown cleanup)
 from .agent_lifecycle import agent_shutdown_cleanup_task  # noqa: F401

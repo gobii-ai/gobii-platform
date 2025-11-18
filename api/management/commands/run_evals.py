@@ -1,10 +1,10 @@
-
 from django.core.management.base import BaseCommand, CommandError
-from api.models import PersistentAgent, EvalRun, BrowserUseAgent
+from api.models import PersistentAgent, EvalRun, BrowserUseAgent, EvalRunTask
 from api.evals.registry import ScenarioRegistry
 from api.evals.tasks import run_eval_task
 from django.contrib.auth import get_user_model
 import uuid
+import time
 
 class Command(BaseCommand):
     help = 'Runs the evaluation suite or specific scenarios.'
@@ -93,27 +93,68 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"Dispatched {len(run_ids)} eval runs."))
         
-        if sync_mode:
-            self.stdout.write("\n--- Results ---\n")
-            total_tasks = 0
-            passed_tasks = 0
-            
-            for run in run_ids:
-                run.refresh_from_db()
-                self.stdout.write(f"Run {run.id} ({run.scenario_slug}): {run.status}")
-                for task in run.tasks.all():
-                    total_tasks += 1
-                    status_color = self.style.SUCCESS if task.status == "passed" else self.style.ERROR
-                    if task.status == "passed":
-                        passed_tasks += 1
-                    
-                    self.stdout.write(f"  - {task.name}: " + status_color(f"{task.status}"))
-                    if task.status == "failed":
-                        self.stdout.write(f"    Reason: {task.observed_summary}")
-            
-            if total_tasks > 0:
-                pass_rate = (passed_tasks / total_tasks) * 100
-                color = self.style.SUCCESS if pass_rate == 100 else (self.style.WARNING if pass_rate > 50 else self.style.ERROR)
-                self.stdout.write(color(f"\nTotal Pass Rate: {pass_rate:.1f}% ({passed_tasks}/{total_tasks} tasks)"))
-            else:
-                self.stdout.write("No tasks executed.")
+        # 4. Wait and Report (Realtime)
+        self.stdout.write("\n--- Waiting for Results ---\n")
+        
+        pending_ids = {run.id for run in run_ids}
+        printed_tasks = {run.id: set() for run in run_ids}
+        completed_runs = []
+        
+        total_tasks_all = 0
+        passed_tasks_all = 0
+
+        try:
+            while pending_ids:
+                # Fetch fresh state for all pending runs
+                current_runs = EvalRun.objects.filter(id__in=pending_ids)
+                
+                for run in current_runs:
+                    # Check and print new task completions
+                    for task in run.tasks.all().order_by('sequence'):
+                        task_key = f"{task.sequence}-{task.status}"
+                        
+                        # We print terminal states (PASSED/FAILED/ERRORED/SKIPPED)
+                        # We generally skip PENDING/RUNNING unless we want very verbose output
+                        terminal_states = [
+                            EvalRunTask.Status.PASSED, 
+                            EvalRunTask.Status.FAILED, 
+                            EvalRunTask.Status.ERRORED, 
+                            EvalRunTask.Status.SKIPPED
+                        ]
+                        
+                        if task.status in terminal_states and task_key not in printed_tasks[run.id]:
+                            status_color = self.style.SUCCESS if task.status == EvalRunTask.Status.PASSED else self.style.ERROR
+                            self.stdout.write(f"[{run.scenario_slug}] Task {task.name}: " + status_color(f"{task.status}"))
+                            if task.status == EvalRunTask.Status.FAILED:
+                                self.stdout.write(f"    Reason: {task.observed_summary}")
+                            
+                            printed_tasks[run.id].add(task_key)
+
+                    # Check if run is finished
+                    if run.status in (EvalRun.Status.COMPLETED, EvalRun.Status.ERRORED):
+                        self.stdout.write(f"Run {run.id} ({run.scenario_slug}) finished: {run.status}")
+                        completed_runs.append(run)
+                        pending_ids.remove(run.id)
+                
+                if pending_ids:
+                    time.sleep(0.5)
+        except KeyboardInterrupt:
+            self.stdout.write(self.style.WARNING("\nPolling interrupted. Runs may still be processing in background."))
+            return
+
+        # 5. Final Summary
+        self.stdout.write("\n--- Final Summary ---")
+        for run in run_ids: # Iterate original list to keep order
+            # Refresh one last time to be sure
+            run.refresh_from_db()
+            for task in run.tasks.all():
+                total_tasks_all += 1
+                if task.status == EvalRunTask.Status.PASSED:
+                    passed_tasks_all += 1
+        
+        if total_tasks_all > 0:
+            pass_rate = (passed_tasks_all / total_tasks_all) * 100
+            color = self.style.SUCCESS if pass_rate == 100 else (self.style.WARNING if pass_rate > 50 else self.style.ERROR)
+            self.stdout.write(color(f"\nTotal Pass Rate: {pass_rate:.1f}% ({passed_tasks_all}/{total_tasks_all} tasks)"))
+        else:
+            self.stdout.write("No tasks executed.")
