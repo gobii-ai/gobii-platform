@@ -31,6 +31,14 @@ from constants.plans import (
     UserPlanNamesChoices,
     OrganizationPlanNamesChoices,
 )
+from api.services.prompt_settings import (
+    DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT,
+    DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET,
+    DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
+    DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT,
+    DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET,
+    DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
+)
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
 from email.utils import parseaddr
@@ -602,6 +610,66 @@ class DailyCreditConfig(models.Model):
 
     def __str__(self):
         return "Daily credit pacing configuration"
+
+
+class PromptConfig(models.Model):
+    """Singleton configuration controlling prompt and history limits."""
+
+    singleton_id = models.PositiveSmallIntegerField(
+        primary_key=True,
+        default=1,
+        editable=False,
+    )
+    standard_prompt_token_budget = models.PositiveIntegerField(
+        default=DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET,
+        validators=[MinValueValidator(1)],
+        help_text="Token budget applied when rendering prompts for standard tier agents.",
+    )
+    premium_prompt_token_budget = models.PositiveIntegerField(
+        default=DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET,
+        validators=[MinValueValidator(1)],
+        help_text="Token budget applied when rendering prompts for premium tier agents.",
+    )
+    standard_message_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent messages included for standard tier agents.",
+    )
+    premium_message_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent messages included for premium tier agents.",
+    )
+    standard_tool_call_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent tool calls included for standard tier agents.",
+    )
+    premium_tool_call_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent tool calls included for premium tier agents.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Prompt configuration"
+        verbose_name_plural = "Prompt configuration"
+
+    def save(self, *args, **kwargs):
+        self.singleton_id = 1
+        result = super().save(*args, **kwargs)
+        from api.services.prompt_settings import invalidate_prompt_settings_cache
+
+        invalidate_prompt_settings_cache()
+        return result
+
+    def delete(self, using=None, keep_parents=False):
+        raise ValidationError("PromptConfig cannot be deleted.")
+
+    def __str__(self):
+        return "Prompt configuration"
 
 
 class ToolCreditCost(models.Model):

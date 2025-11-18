@@ -29,7 +29,7 @@ from .models import (
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
-    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, ToolCreditCost,
+    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, PromptConfig, ToolCreditCost,
     StripeConfig,
     MeteringBatch,
     UsageThresholdSent,
@@ -666,6 +666,43 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         if DailyCreditConfig.objects.exists():
+            return False
+        return super().has_add_permission(request)
+
+    def has_delete_permission(self, request, obj=None):  # pragma: no cover
+        return False
+
+
+@admin.register(PromptConfig)
+class PromptConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "standard_prompt_token_budget",
+        "premium_prompt_token_budget",
+        "standard_message_history_limit",
+        "premium_message_history_limit",
+        "standard_tool_call_history_limit",
+        "premium_tool_call_history_limit",
+        "updated_at",
+    )
+    readonly_fields = ("singleton_id", "created_at", "updated_at")
+    fieldsets = (
+        (
+            "Prompt token budgets",
+            {"fields": ("standard_prompt_token_budget", "premium_prompt_token_budget")},
+        ),
+        (
+            "Message history limits",
+            {"fields": ("standard_message_history_limit", "premium_message_history_limit")},
+        ),
+        (
+            "Tool call history limits",
+            {"fields": ("standard_tool_call_history_limit", "premium_tool_call_history_limit")},
+        ),
+        ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
+    )
+
+    def has_add_permission(self, request):
+        if PromptConfig.objects.exists():
             return False
         return super().has_add_permission(request)
 

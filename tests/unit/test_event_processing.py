@@ -15,7 +15,9 @@ from api.agent.core.event_processing import (
     _build_prompt_context,
     _get_completed_process_run_count,
     _run_agent_loop,
-    PROMPT_TOKEN_BUDGET,
+    message_history_limit,
+    tool_call_history_limit,
+    get_prompt_token_budget,
 )
 from api.admin import PersistentAgentPromptArchiveAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
@@ -35,9 +37,11 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
+    PromptConfig,
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
+from api.services.prompt_settings import invalidate_prompt_settings_cache
 
 User = get_user_model()
 
@@ -201,7 +205,7 @@ class PromptContextBuilderTests(TestCase):
         payload = json.loads(decompressed.decode("utf-8"))
 
         self.assertEqual(payload["agent_id"], str(self.agent.id))
-        self.assertEqual(payload["token_budget"], PROMPT_TOKEN_BUDGET)
+        self.assertEqual(payload["token_budget"], get_prompt_token_budget(self.agent))
         self.assertIn("system_prompt", payload)
         self.assertIn("user_prompt", payload)
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -1366,3 +1370,41 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("No proxy server available", result["message"])
         mock_request.assert_not_called()
+
+
+class PromptConfigFunctionTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="prompt_limit_user@example.com",
+            email="prompt_limit_user@example.com",
+            password="secret",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="PromptConfigAgent",
+            charter="",
+        )
+
+    def _configure_limits(self):
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.standard_prompt_token_budget = 500
+        config.premium_prompt_token_budget = 1000
+        config.standard_message_history_limit = 3
+        config.premium_message_history_limit = 7
+        config.standard_tool_call_history_limit = 4
+        config.premium_tool_call_history_limit = 8
+        config.save()
+        invalidate_prompt_settings_cache()
+        return config
+
+    def test_limits_follow_configuration(self):
+        config = self._configure_limits()
+
+        self.assertEqual(get_prompt_token_budget(self.agent), config.standard_prompt_token_budget)
+        self.assertEqual(message_history_limit(self.agent), config.standard_message_history_limit)
+        self.assertEqual(tool_call_history_limit(self.agent), config.standard_tool_call_history_limit)
+
+        with patch("api.agent.core.event_processing.should_prioritize_premium", return_value=True):
+            self.assertEqual(get_prompt_token_budget(self.agent), config.premium_prompt_token_budget)
+            self.assertEqual(message_history_limit(self.agent), config.premium_message_history_limit)
+            self.assertEqual(tool_call_history_limit(self.agent), config.premium_tool_call_history_limit)
