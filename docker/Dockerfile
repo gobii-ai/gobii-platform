@@ -43,6 +43,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Preinstall Bright Data MCP globally so containers do not fetch it on-the-fly.
 # Local dev (outside Docker) still uses npx to install on demand.
 RUN npm install -g @brightdata/mcp@2.5.0 && \
+    npm install -g exa-mcp-server && \
     npm cache clean --force
 
 # ────────────────────────────────────────────────
