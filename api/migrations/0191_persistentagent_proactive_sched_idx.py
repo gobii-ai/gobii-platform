@@ -8,6 +8,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RemoveIndex(
+            model_name="persistentagent",
+            name="pa_proactive_opt_idx",
+        ),
         migrations.AddIndex(
             model_name="persistentagent",
             index=models.Index(
