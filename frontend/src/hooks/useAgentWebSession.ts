@@ -56,6 +56,14 @@ function shouldRetry(error: unknown): boolean {
   return false
 }
 
+function requireValidTtlSeconds(snapshot: AgentWebSessionSnapshot): number {
+  const ttl = snapshot.ttl_seconds
+  if (typeof ttl !== 'number' || !Number.isFinite(ttl) || ttl <= 0) {
+    throw new Error('Web session expired. Please refresh the page.')
+  }
+  return ttl
+}
+
 export function useAgentWebSession(agentId: string | null) {
   const [session, setSession] = useState<AgentWebSessionSnapshot | null>(null)
   const [status, setStatus] = useState<WebSessionStatus>('idle')
@@ -135,10 +143,11 @@ export function useAgentWebSession(agentId: string | null) {
       startRetryAttemptsRef.current = 0
       clearStartRetry()
 
+      const ttlSeconds = requireValidTtlSeconds(created)
       setSession(created)
       setStatus('active')
       setError(null)
-      scheduleNextHeartbeat(created.ttl_seconds)
+      scheduleNextHeartbeat(ttlSeconds)
     } catch (startError) {
       if (unmountedRef.current) {
         return
@@ -180,8 +189,9 @@ export function useAgentWebSession(agentId: string | null) {
       startRetryAttemptsRef.current = 0
       setStatus('active')
       setError(null)
+      const ttlSeconds = requireValidTtlSeconds(next)
       setSession(next)
-      scheduleNextHeartbeat(next.ttl_seconds)
+      scheduleNextHeartbeat(ttlSeconds)
     } catch (heartbeatError) {
       if (unmountedRef.current) {
         return
