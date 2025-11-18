@@ -1371,7 +1371,7 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         self.assertIn("No proxy server available", result["message"])
         mock_request.assert_not_called()
 
-
+@tag("batch_event_processing")
 class PromptConfigFunctionTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
