@@ -1379,10 +1379,12 @@ class PromptConfigFunctionTests(TestCase):
             email="prompt_limit_user@example.com",
             password="secret",
         )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="PromptConfigBA")
         self.agent = PersistentAgent.objects.create(
             user=self.user,
             name="PromptConfigAgent",
             charter="",
+            browser_use_agent=self.browser_agent,
         )
 
     def _configure_limits(self):
