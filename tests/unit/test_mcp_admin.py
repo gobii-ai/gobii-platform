@@ -48,14 +48,14 @@ class MCPServerConfigAdminTests(TestCase):
         )
         org = Organization.objects.create(name="Org", slug="org", created_by=owner)
 
-        MCPServerConfig.objects.create(
+        org_config = MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.ORGANIZATION,
             organization=org,
             name="org_scope",
             **self._base_defaults(),
         )
 
-        MCPServerConfig.objects.create(
+        user_config = MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.USER,
             user=owner,
             name="user_scope",
@@ -67,13 +67,44 @@ class MCPServerConfigAdminTests(TestCase):
 
         admin_view = MCPServerConfigAdmin(MCPServerConfig, self.site)
         queryset = admin_view.get_queryset(request)
+        queryset_ids = set(queryset.values_list("id", flat=True))
 
-        self.assertEqual(list(queryset), [platform_config])
+        self.assertIn(platform_config.id, queryset_ids)
+        self.assertNotIn(org_config.id, queryset_ids)
+        self.assertNotIn(user_config.id, queryset_ids)
+        self.assertTrue(all(config.scope == MCPServerConfig.Scope.PLATFORM for config in queryset))
+
+    def test_admin_form_can_create_platform_scoped_server(self):
+        form_data = {
+            "name": "platform_scraper",
+            "display_name": "Platform Scraper",
+            "description": "Runs a managed integration.",
+            "command": "python",
+            "command_args": '["-m", "scraper"]',
+            "url": "",
+            "auth_method": MCPServerConfig.AuthMethod.NONE,
+            "prefetch_apps": "[]",
+            "metadata": "{}",
+            "is_active": "on",
+            "environment": '{"API_TOKEN": "secret"}',
+            "headers": '{"X-Auth": "1"}',
+        }
+
+        form = MCPServerConfigAdminForm(data=form_data)
+        self.assertTrue(form.is_valid(), form.errors)
+
+        config = form.save()
+        self.assertEqual(config.scope, MCPServerConfig.Scope.PLATFORM)
+        self.assertIsNone(config.organization)
+        self.assertIsNone(config.user)
+        self.assertEqual(config.command_args, ["-m", "scraper"])
+        self.assertEqual(config.environment, {"API_TOKEN": "secret"})
+        self.assertEqual(config.headers, {"X-Auth": "1"})
 
     def test_admin_form_updates_environment_and_headers(self):
         config = MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.PLATFORM,
-            name="brightdata",
+            name="managed_scraper",
             **self._base_defaults(),
         )
         config.environment = {"API_TOKEN": "old"}
@@ -81,7 +112,7 @@ class MCPServerConfigAdminTests(TestCase):
         config.save()
 
         form_data = {
-            "name": "brightdata",
+            "name": "managed_scraper",
             "display_name": "Bright Data",
             "description": "Updated description",
             "command": "npx",
