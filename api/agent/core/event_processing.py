@@ -71,6 +71,7 @@ from .llm_config import (
 from .promptree import Prompt
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
 from api.services.daily_credit_settings import get_daily_credit_settings
+from api.services.prompt_settings import get_prompt_settings
 from api.services import mcp_servers as mcp_server_service
 
 from ..tools.email_sender import execute_send_email, get_send_email_tool
@@ -261,10 +262,6 @@ def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
-MESSAGE_HISTORY_LIMIT_PREMIUM = 20
-MESSAGE_HISTORY_LIMIT_DEFAULT = 15
-TOOL_CALL_HISTORY_LIMIT_PREMIUM = 20
-TOOL_CALL_HISTORY_LIMIT_DEFAULT = 15
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
@@ -275,17 +272,29 @@ def tool_call_history_limit(agent: PersistentAgent) -> int:
     """
     Gets tool call history limit for the agent, based on whether premium should be used.
     """
-    if should_prioritize_premium(agent):
-        return TOOL_CALL_HISTORY_LIMIT_PREMIUM
-    return TOOL_CALL_HISTORY_LIMIT_DEFAULT
+    settings = get_prompt_settings()
+    if agent and should_prioritize_premium(agent):
+        return settings.premium_tool_call_history_limit
+    return settings.standard_tool_call_history_limit
 
 def message_history_limit(agent: PersistentAgent) -> int:
     """
     Gets message history limit for the agent, based on whether premium should be used.
     """
-    if should_prioritize_premium(agent):
-        return MESSAGE_HISTORY_LIMIT_PREMIUM
-    return MESSAGE_HISTORY_LIMIT_DEFAULT
+    settings = get_prompt_settings()
+    if agent and should_prioritize_premium(agent):
+        return settings.premium_message_history_limit
+    return settings.standard_message_history_limit
+
+
+def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
+    """
+    Return the configured prompt token budget for the agent's tier.
+    """
+    settings = get_prompt_settings()
+    if agent and should_prioritize_premium(agent):
+        return settings.premium_prompt_token_budget
+    return settings.standard_prompt_token_budget
 
 def _archive_rendered_prompt(
     agent: PersistentAgent,
@@ -294,6 +303,7 @@ def _archive_rendered_prompt(
     tokens_before: int,
     tokens_after: int,
     tokens_saved: int,
+    token_budget: int,
 ) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[UUID]]:
     """Compress and persist the rendered prompt to object storage."""
 
@@ -303,7 +313,7 @@ def _archive_rendered_prompt(
         "rendered_at": timestamp.isoformat(),
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
-        "token_budget": PROMPT_TOKEN_BUDGET,
+        "token_budget": token_budget,
         "tokens_before": tokens_before,
         "tokens_after": tokens_after,
         "tokens_saved": tokens_saved,
@@ -381,10 +391,6 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
         )
     except Exception:
         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
-
-# Token budget for prompts using promptree
-PROMPT_TOKEN_BUDGET = 120000
-# PROMPT_TOKEN_BUDGET = 20000
 
 # Default reference model for token estimation and rare fallbacks
 _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
@@ -2569,7 +2575,8 @@ def _build_prompt_context(
             prompt.section_text("sms_guidelines", _get_sms_prompt_addendum(agent), weight=2, non_shrinkable=True)
     
     # Render the prompt within the token budget
-    user_content = prompt.render(PROMPT_TOKEN_BUDGET)
+    token_budget = get_prompt_token_budget(agent)
+    user_content = prompt.render(token_budget)
 
     # Get token counts before and after fitting
     tokens_before = prompt.get_tokens_before_fitting()
@@ -2580,7 +2587,7 @@ def _build_prompt_context(
     logger.info(
         f"Prompt rendered for agent {agent.id}: {tokens_before} tokens before fitting, "
         f"{tokens_after} tokens after fitting (saved {tokens_saved} tokens, "
-        f"budget was {PROMPT_TOKEN_BUDGET} tokens)"
+        f"budget was {token_budget} tokens)"
     )
 
     archive_key, archive_raw_bytes, archive_compressed_bytes, archive_id = _archive_rendered_prompt(
@@ -2590,6 +2597,7 @@ def _build_prompt_context(
         tokens_before=tokens_before,
         tokens_after=tokens_after,
         tokens_saved=tokens_saved,
+        token_budget=token_budget,
     )
     if archive_key:
         span.set_attribute("prompt.archive_key", archive_key)
@@ -2611,7 +2619,7 @@ def _build_prompt_context(
     print(f"__BEGIN_RENDERED_PROMPT_FOR_AGENT_{agent.id}__")
     print(user_content)
     print(f"__END_RENDERED_PROMPT_FOR_AGENT_{agent.id}__")
-    span.set_attribute("prompt.token_budget", PROMPT_TOKEN_BUDGET)
+    span.set_attribute("prompt.token_budget", token_budget)
     span.set_attribute("prompt.tokens_before_fitting", tokens_before)
     span.set_attribute("prompt.tokens_after_fitting", tokens_after)
     span.set_attribute("prompt.tokens_saved", tokens_saved)
@@ -2676,7 +2684,7 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
             weight=2  # Higher weight since preferred contact is important
         )
 
-    # Recent conversation parties (unique endpoints from last MESSAGE_HISTORY_LIMIT messages)
+    # Recent conversation parties (unique endpoints from the configured message history window)
     recent_messages = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint")
