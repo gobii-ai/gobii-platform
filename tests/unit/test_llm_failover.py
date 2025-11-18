@@ -225,6 +225,7 @@ class TestLLMFailover(TestCase):
         self.assertEqual(model, 'openai/gpt-5')
         self.assertEqual(params.get("temperature"), 1.0)
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_max_tier_configs_take_priority(self):
         clear_llm_db()
         LLMProvider = apps.get_model('api', 'LLMProvider')
