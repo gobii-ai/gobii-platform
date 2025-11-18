@@ -147,7 +147,7 @@ def build_llm_overview() -> dict[str, Any]:
         .prefetch_related(
             Prefetch(
                 "tiers",
-                queryset=PersistentLLMTier.objects.order_by("is_premium", "order").prefetch_related(
+                queryset=PersistentLLMTier.objects.order_by("is_premium", "is_max", "order").prefetch_related(
                     Prefetch(
                         "tier_endpoints",
                         queryset=PersistentTierEndpoint.objects.select_related("endpoint__provider").order_by("endpoint__litellm_model"),
@@ -179,6 +179,7 @@ def build_llm_overview() -> dict[str, Any]:
                     "order": tier.order,
                     "description": tier.description,
                     "is_premium": tier.is_premium,
+                    "is_max": tier.is_max,
                     "endpoints": tier_endpoints,
                 }
             )

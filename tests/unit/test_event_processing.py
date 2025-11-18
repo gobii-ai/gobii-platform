@@ -41,6 +41,7 @@ from api.models import (
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
+from api.agent.core.llm_config import AgentLLMTier
 from api.services.prompt_settings import invalidate_prompt_settings_cache
 
 User = get_user_model()
@@ -1391,10 +1392,13 @@ class PromptConfigFunctionTests(TestCase):
         config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
         config.standard_prompt_token_budget = 500
         config.premium_prompt_token_budget = 1000
+        config.max_prompt_token_budget = 1500
         config.standard_message_history_limit = 3
         config.premium_message_history_limit = 7
+        config.max_message_history_limit = 9
         config.standard_tool_call_history_limit = 4
         config.premium_tool_call_history_limit = 8
+        config.max_tool_call_history_limit = 10
         config.save()
         invalidate_prompt_settings_cache()
         return config
@@ -1406,7 +1410,12 @@ class PromptConfigFunctionTests(TestCase):
         self.assertEqual(message_history_limit(self.agent), config.standard_message_history_limit)
         self.assertEqual(tool_call_history_limit(self.agent), config.standard_tool_call_history_limit)
 
-        with patch("api.agent.core.event_processing.should_prioritize_premium", return_value=True):
+        with patch("api.agent.core.event_processing.get_agent_llm_tier", return_value=AgentLLMTier.PREMIUM):
             self.assertEqual(get_prompt_token_budget(self.agent), config.premium_prompt_token_budget)
             self.assertEqual(message_history_limit(self.agent), config.premium_message_history_limit)
             self.assertEqual(tool_call_history_limit(self.agent), config.premium_tool_call_history_limit)
+
+        with patch("api.agent.core.event_processing.get_agent_llm_tier", return_value=AgentLLMTier.MAX):
+            self.assertEqual(get_prompt_token_budget(self.agent), config.max_prompt_token_budget)
+            self.assertEqual(message_history_limit(self.agent), config.max_message_history_limit)
+            self.assertEqual(tool_call_history_limit(self.agent), config.max_tool_call_history_limit)

@@ -678,25 +678,28 @@ class PromptConfigAdmin(admin.ModelAdmin):
     list_display = (
         "standard_prompt_token_budget",
         "premium_prompt_token_budget",
+        "max_prompt_token_budget",
         "standard_message_history_limit",
         "premium_message_history_limit",
+        "max_message_history_limit",
         "standard_tool_call_history_limit",
         "premium_tool_call_history_limit",
+        "max_tool_call_history_limit",
         "updated_at",
     )
     readonly_fields = ("singleton_id", "created_at", "updated_at")
     fieldsets = (
         (
             "Prompt token budgets",
-            {"fields": ("standard_prompt_token_budget", "premium_prompt_token_budget")},
+            {"fields": ("standard_prompt_token_budget", "premium_prompt_token_budget", "max_prompt_token_budget")},
         ),
         (
             "Message history limits",
-            {"fields": ("standard_message_history_limit", "premium_message_history_limit")},
+            {"fields": ("standard_message_history_limit", "premium_message_history_limit", "max_message_history_limit")},
         ),
         (
             "Tool call history limits",
-            {"fields": ("standard_tool_call_history_limit", "premium_tool_call_history_limit")},
+            {"fields": ("standard_tool_call_history_limit", "premium_tool_call_history_limit", "max_tool_call_history_limit")},
         ),
         ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
     )
@@ -3457,13 +3460,13 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
 class PersistentTierEndpointInline(admin.TabularInline):
     model = PersistentTierEndpoint
     extra = 0
-    readonly_fields = ("is_premium",)
+    readonly_fields = ("is_premium", "is_max")
 
 
 @admin.register(PersistentLLMTier)
 class PersistentLLMTierAdmin(admin.ModelAdmin):
-    list_display = ("token_range", "order", "description", "is_premium")
-    list_filter = ("token_range", "is_premium")
+    list_display = ("token_range", "order", "description", "is_premium", "is_max")
+    list_filter = ("token_range", "is_premium", "is_max")
     inlines = [PersistentTierEndpointInline]
 
 

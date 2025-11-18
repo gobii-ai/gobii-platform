@@ -62,11 +62,13 @@ from util.tool_costs import (
 from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps, RAW_STEP_LIMIT
 from .llm_config import (
+    AgentLLMTier,
+    get_agent_llm_tier,
     get_llm_config,
     get_llm_config_with_failover,
     REFERENCE_TOKENIZER_MODEL,
     LLMNotConfiguredError,
-    is_llm_bootstrap_required, should_prioritize_premium,
+    is_llm_bootstrap_required,
 )
 from .promptree import Prompt
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
@@ -269,30 +271,36 @@ PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
 
 
 def tool_call_history_limit(agent: PersistentAgent) -> int:
-    """
-    Gets tool call history limit for the agent, based on whether premium should be used.
-    """
+    """Return the configured tool call history limit for the agent's LLM tier."""
+
     settings = get_prompt_settings()
-    if agent and should_prioritize_premium(agent):
+    tier = get_agent_llm_tier(agent)
+    if tier is AgentLLMTier.MAX:
+        return settings.max_tool_call_history_limit
+    if tier is AgentLLMTier.PREMIUM:
         return settings.premium_tool_call_history_limit
     return settings.standard_tool_call_history_limit
 
 def message_history_limit(agent: PersistentAgent) -> int:
-    """
-    Gets message history limit for the agent, based on whether premium should be used.
-    """
+    """Return the configured message history limit for the agent's LLM tier."""
+
     settings = get_prompt_settings()
-    if agent and should_prioritize_premium(agent):
+    tier = get_agent_llm_tier(agent)
+    if tier is AgentLLMTier.MAX:
+        return settings.max_message_history_limit
+    if tier is AgentLLMTier.PREMIUM:
         return settings.premium_message_history_limit
     return settings.standard_message_history_limit
 
 
 def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
-    """
-    Return the configured prompt token budget for the agent's tier.
-    """
+    """Return the configured prompt token budget for the agent's LLM tier."""
+
     settings = get_prompt_settings()
-    if agent and should_prioritize_premium(agent):
+    tier = get_agent_llm_tier(agent)
+    if tier is AgentLLMTier.MAX:
+        return settings.max_prompt_token_budget
+    if tier is AgentLLMTier.PREMIUM:
         return settings.premium_prompt_token_budget
     return settings.standard_prompt_token_budget
 
