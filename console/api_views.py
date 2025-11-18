@@ -2058,8 +2058,17 @@ def _session_response(result) -> JsonResponse:
     return JsonResponse(payload)
 
 
+class ApiLoginRequiredMixin(LoginRequiredMixin):
+    """Return JSON 401 instead of redirecting to the login page."""
+
+    def handle_no_permission(self):
+        if not self.request.user.is_authenticated:
+            return JsonResponse({"error": "Authentication required"}, status=401)
+        return super().handle_no_permission()
+
+
 @method_decorator(csrf_exempt, name="dispatch")
-class AgentWebSessionStartAPIView(LoginRequiredMixin, View):
+class AgentWebSessionStartAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
@@ -2092,7 +2101,7 @@ class AgentWebSessionStartAPIView(LoginRequiredMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AgentWebSessionHeartbeatAPIView(LoginRequiredMixin, View):
+class AgentWebSessionHeartbeatAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
@@ -2118,7 +2127,7 @@ class AgentWebSessionHeartbeatAPIView(LoginRequiredMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AgentWebSessionEndAPIView(LoginRequiredMixin, View):
+class AgentWebSessionEndAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):

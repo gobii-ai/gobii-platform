@@ -11,6 +11,43 @@ export class HttpError extends Error {
   }
 }
 
+let loginRedirectScheduled = false
+
+function buildLoginUrl(): string {
+  if (typeof window === 'undefined') {
+    return '/accounts/login/'
+  }
+  const next = `${window.location.pathname}${window.location.search}${window.location.hash}` || '/'
+  return `/accounts/login/?next=${encodeURIComponent(next)}`
+}
+
+function isLoginPath(url: string): boolean {
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : undefined)
+    return parsed.pathname.startsWith('/accounts/login')
+  } catch {
+    return false
+  }
+}
+
+function maybeRedirectToLogin(response: Response): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  if (loginRedirectScheduled) {
+    return
+  }
+  const needsRedirect = response.status === 401 || (response.redirected && isLoginPath(response.url))
+  if (!needsRedirect) {
+    return
+  }
+  if (window.location.pathname.startsWith('/accounts/login')) {
+    return
+  }
+  loginRedirectScheduled = true
+  window.location.assign(buildLoginUrl())
+}
+
 export async function jsonFetch<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
   const { headers: initHeaders, ...restInit } = init
   const headers = new Headers(initHeaders ?? undefined)
@@ -24,6 +61,8 @@ export async function jsonFetch<T>(input: RequestInfo | URL, init: RequestInit =
     ...restInit,
     headers,
   })
+
+  maybeRedirectToLogin(response)
 
   const contentType = response.headers.get('content-type') ?? ''
   const isJson = contentType.includes('application/json')
