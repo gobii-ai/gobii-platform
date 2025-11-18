@@ -275,22 +275,23 @@ def tool_call_history_limit(agent: PersistentAgent) -> int:
 
     settings = get_prompt_settings()
     tier = get_agent_llm_tier(agent)
-    if tier is AgentLLMTier.MAX:
-        return settings.max_tool_call_history_limit
-    if tier is AgentLLMTier.PREMIUM:
-        return settings.premium_tool_call_history_limit
-    return settings.standard_tool_call_history_limit
+    limit_map = {
+        AgentLLMTier.MAX: settings.max_tool_call_history_limit,
+        AgentLLMTier.PREMIUM: settings.premium_tool_call_history_limit,
+    }
+    return limit_map.get(tier, settings.standard_tool_call_history_limit)
+
 
 def message_history_limit(agent: PersistentAgent) -> int:
     """Return the configured message history limit for the agent's LLM tier."""
 
     settings = get_prompt_settings()
     tier = get_agent_llm_tier(agent)
-    if tier is AgentLLMTier.MAX:
-        return settings.max_message_history_limit
-    if tier is AgentLLMTier.PREMIUM:
-        return settings.premium_message_history_limit
-    return settings.standard_message_history_limit
+    limit_map = {
+        AgentLLMTier.MAX: settings.max_message_history_limit,
+        AgentLLMTier.PREMIUM: settings.premium_message_history_limit,
+    }
+    return limit_map.get(tier, settings.standard_message_history_limit)
 
 
 def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
@@ -298,11 +299,12 @@ def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
 
     settings = get_prompt_settings()
     tier = get_agent_llm_tier(agent)
-    if tier is AgentLLMTier.MAX:
-        return settings.max_prompt_token_budget
-    if tier is AgentLLMTier.PREMIUM:
-        return settings.premium_prompt_token_budget
-    return settings.standard_prompt_token_budget
+    limit_map = {
+        AgentLLMTier.MAX: settings.max_prompt_token_budget,
+        AgentLLMTier.PREMIUM: settings.premium_prompt_token_budget,
+    }
+    return limit_map.get(tier, settings.standard_prompt_token_budget)
+
 
 def _archive_rendered_prompt(
     agent: PersistentAgent,
