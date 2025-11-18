@@ -9,7 +9,7 @@ from django.test import TestCase, tag
 from django.utils import timezone
 from unittest.mock import patch
 
-from api.agent.core.event_processing import _archive_rendered_prompt
+from api.agent.core.event_processing import _archive_rendered_prompt, get_prompt_token_budget
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentPromptArchive
 from api.maintenance.prompt_archives import prune_prompt_archives_for_cutoff
 
@@ -49,6 +49,7 @@ class PromptArchivePruningTests(TestCase):
             tokens_before=100,
             tokens_after=80,
             tokens_saved=20,
+            token_budget=get_prompt_token_budget(self.agent),
         )
         self.assertIsNotNone(archive_id)
         archive = PersistentAgentPromptArchive.objects.get(id=archive_id)
