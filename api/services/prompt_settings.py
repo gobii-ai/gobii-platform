@@ -25,36 +25,14 @@ class PromptSettings:
     premium_tool_call_history_limit: int
 
 
-def _coalesce(value: Optional[int], fallback: int) -> int:
-    return fallback if value is None else value
-
-
 def _serialise(config) -> dict:
     return {
-        "standard_prompt_token_budget": _coalesce(
-            config.standard_prompt_token_budget,
-            DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET,
-        ),
-        "premium_prompt_token_budget": _coalesce(
-            config.premium_prompt_token_budget,
-            DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET,
-        ),
-        "standard_message_history_limit": _coalesce(
-            config.standard_message_history_limit,
-            DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT,
-        ),
-        "premium_message_history_limit": _coalesce(
-            config.premium_message_history_limit,
-            DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT,
-        ),
-        "standard_tool_call_history_limit": _coalesce(
-            config.standard_tool_call_history_limit,
-            DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
-        ),
-        "premium_tool_call_history_limit": _coalesce(
-            config.premium_tool_call_history_limit,
-            DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
-        ),
+        "standard_prompt_token_budget": config.standard_prompt_token_budget,
+        "premium_prompt_token_budget": config.premium_prompt_token_budget,
+        "standard_message_history_limit": config.standard_message_history_limit,
+        "premium_message_history_limit": config.premium_message_history_limit,
+        "standard_tool_call_history_limit": config.standard_tool_call_history_limit,
+        "premium_tool_call_history_limit": config.premium_tool_call_history_limit,
     }
 
 
