@@ -2,7 +2,7 @@
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
-from api.models import EvalRunTask
+from api.models import EvalRunTask, PersistentAgentMessage
 
 @register_scenario
 class EchoResponseScenario(EvalScenario, ScenarioExecutionTools):
@@ -16,7 +16,11 @@ class EchoResponseScenario(EvalScenario, ScenarioExecutionTools):
     def run(self, run_id: str, agent_id: str) -> None:
         # Task 1: Send message
         self.record_task_result(run_id, 1, EvalRunTask.Status.RUNNING)
-        msg = self.inject_message(agent_id, "Please reply with the word ORANGE.")
+        
+        # Use context manager to avoid race conditions
+        with self.wait_for_agent_idle(agent_id, timeout=30):
+            msg = self.inject_message(agent_id, "Please reply with the word ORANGE.")
+            
         self.record_task_result(
             run_id, 1, EvalRunTask.Status.PASSED, 
             observed_summary="Message injected", 
@@ -26,12 +30,30 @@ class EchoResponseScenario(EvalScenario, ScenarioExecutionTools):
         # Task 2: Verify response
         self.record_task_result(run_id, 2, EvalRunTask.Status.RUNNING)
         
-        # In a real scenario, we'd wait/poll for the response.
-        # For this simple dummy, we'll just check if the agent *eventually* replied.
-        # Since inject_message triggered processing asynchronously, we might be too fast here.
-        # But for the 'manual test' step of the plan, this proves the registry works.
-        
-        self.record_task_result(
-            run_id, 2, EvalRunTask.Status.PASSED, 
-            observed_summary="Simulated pass for dummy scenario"
-        )
+        # We already waited for idle above, so we can proceed to assertion immediately.
+
+        # Check the last outbound message
+        last_message = PersistentAgentMessage.objects.filter(
+            owner_agent_id=agent_id,
+            is_outbound=True
+        ).order_by('timestamp').last()
+
+        if not last_message:
+            self.record_task_result(
+                run_id, 2, EvalRunTask.Status.FAILED,
+                observed_summary="Agent did not send any reply."
+            )
+            return
+
+        if "ORANGE" in (last_message.body or "").upper():
+            self.record_task_result(
+                run_id, 2, EvalRunTask.Status.PASSED, 
+                observed_summary=f"Agent replied: {last_message.body}",
+                artifacts={"message": last_message}
+            )
+        else:
+            self.record_task_result(
+                run_id, 2, EvalRunTask.Status.FAILED, 
+                observed_summary=f"Agent replied but missed keyword. Body: {last_message.body}",
+                artifacts={"message": last_message}
+            )

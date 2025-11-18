@@ -1,3 +1,4 @@
+from __future__ import annotations
 import logging
 from typing import Any, Iterable, Optional, Tuple, Dict
 from uuid import UUID
@@ -235,3 +236,76 @@ class ScenarioExecutionTools:
         
         pubsub.unsubscribe()
         return False
+
+    def wait_for_agent_idle(self, agent_id: str, timeout: int = 60):
+        """
+        Return a context manager that waits for the agent to become idle after the block executes.
+        Usage:
+            with self.wait_for_agent_idle(agent_id):
+                self.inject_message(...)
+        """
+        return WaitForIdleContext(agent_id, timeout)
+
+class WaitForIdleContext:
+    """
+    Context manager that subscribes to agent events BEFORE the action,
+    then waits for the agent to go idle AFTER the action.
+    Eliminates race conditions in eager/fast execution environments.
+    """
+    def __init__(self, agent_id: str, timeout: int = 60):
+        self.agent_id = agent_id
+        self.timeout = timeout
+        self.pubsub = None
+        self.redis = None
+
+    def __enter__(self):
+        from api.agent.events import get_agent_event_channel
+        from config.redis_client import get_redis_client
+        
+        self.redis = get_redis_client()
+        self.pubsub = self.redis.pubsub()
+        channel = get_agent_event_channel(self.agent_id)
+        self.pubsub.subscribe(channel)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type:
+            if self.pubsub:
+                self.pubsub.unsubscribe()
+            return False  # Propagate exception
+
+        from api.agent.events import AgentEventType
+        import json
+        import time
+
+        start_time = time.time()
+        try:
+            while (time.time() - start_time) < self.timeout:
+                # Check for any buffered messages
+                message = self.pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message:
+                    try:
+                        data = json.loads(message['data'])
+                        if data.get('type') == AgentEventType.PROCESSING_COMPLETE.value:
+                            payload = data.get('payload', {})
+                            outstanding = payload.get('outstanding_tasks', 0)
+                            if outstanding == 0:
+                                return True # Success
+                    except Exception:
+                        pass
+        finally:
+            if self.pubsub:
+                self.pubsub.unsubscribe()
+        
+        # Timeout occurred
+        logger.warning(f"Timeout waiting for agent {self.agent_id} to go idle.")
+        return False # Do not suppress exceptions, but flow continues if no exception
+
+    def wait_for_agent_idle(self, agent_id: str, timeout: int = 60) -> WaitForIdleContext:
+        """
+        Return a context manager that waits for the agent to become idle after the block executes.
+        Usage:
+            with self.wait_for_agent_idle(agent_id):
+                self.inject_message(...)
+        """
+        return WaitForIdleContext(agent_id, timeout)

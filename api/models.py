@@ -168,7 +168,7 @@ class AgentColor(models.Model):
 #  Web chat addressing helpers
 # ---------------------------------------------------------------------------
 
-WEB_USER_ADDRESS_RE = re.compile(r"^web://user/(?P<user_id>\d+)/agent/(?P<agent_id>[0-9a-fA-F-]+)$")
+WEB_USER_ADDRESS_RE = re.compile(r"^web://user/(?P<user_id>-?\d+)/agent/(?P<agent_id>[0-9a-fA-F-]+)$")
 WEB_AGENT_ADDRESS_RE = re.compile(r"^web://agent/(?P<agent_id>[0-9a-fA-F-]+)$")
 
 
