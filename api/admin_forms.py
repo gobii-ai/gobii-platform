@@ -137,6 +137,7 @@ class MCPServerConfigAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._force_platform_scope()
         instance = self.instance
         if instance and instance.pk:
             self.fields["environment"].initial = instance.environment
@@ -147,6 +148,21 @@ class MCPServerConfigAdminForm(forms.ModelForm):
             self.fields["headers"].initial = {}
             self.fields["auth_method"].initial = MCPServerConfig.AuthMethod.NONE
 
+    def _force_platform_scope(self) -> None:
+        """Ensure new instances pass model validation before save."""
+        instance = self.instance
+        if instance is None:
+            return
+        instance.scope = MCPServerConfig.Scope.PLATFORM
+        instance.organization = None
+        instance.organization_id = None
+        instance.user = None
+        instance.user_id = None
+
+    def _post_clean(self):
+        self._force_platform_scope()
+        super()._post_clean()
+
     def clean_name(self):
         name = self.cleaned_data["name"]
         if name and name.strip().lower() != name:
@@ -155,9 +171,7 @@ class MCPServerConfigAdminForm(forms.ModelForm):
 
     def save(self, commit=True):
         obj = super().save(commit=False)
-        obj.scope = MCPServerConfig.Scope.PLATFORM
-        obj.organization = None
-        obj.user = None
+        self._force_platform_scope()
         environment = self.cleaned_data.get("environment") or {}
         headers = self.cleaned_data.get("headers") or {}
         obj.environment = environment
