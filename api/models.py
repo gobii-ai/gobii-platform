@@ -2945,6 +2945,17 @@ class PersistentAgent(models.Model):
             models.Index(fields=['last_interaction_at'], name='pa_last_interact_idx'),
             models.Index(fields=['proactive_opt_in', 'is_active'], name='pa_proactive_opt_idx'),
             models.Index(fields=['proactive_last_trigger_at'], name='pa_proactive_last_idx'),
+            models.Index(
+                fields=[
+                    'proactive_opt_in',
+                    'is_active',
+                    'life_state',
+                    'proactive_last_trigger_at',
+                    'last_interaction_at',
+                    'created_at',
+                ],
+                name='pa_proactive_sched_idx',
+            ),
         ]
         constraints = [
             # Unique per user when no organization is set

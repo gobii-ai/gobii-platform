@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import List, Sequence
 
 from django.db import transaction
-from django.db.models import Count, F, Q
+from django.db.models import F
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
@@ -122,8 +122,6 @@ class ProactiveActivationService:
         exclude_ids: set[int] | None = None,
     ) -> Sequence[PersistentAgent]:
         """Return a ranked list of potentially eligible agents."""
-        day_start = now.astimezone(timezone.get_current_timezone()).replace(hour=0, minute=0, second=0, microsecond=0)
-
         qs = (
             PersistentAgent.objects.filter(
                 proactive_opt_in=True,
@@ -131,16 +129,6 @@ class ProactiveActivationService:
                 life_state=PersistentAgent.LifeState.ACTIVE,
             )
             .select_related("user", "browser_use_agent")
-            .annotate(
-                proactive_today=Count(
-                    "steps__system_step",
-                    filter=Q(
-                        steps__system_step__code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
-                        steps__created_at__gte=day_start,
-                    ),
-                    distinct=True,
-                )
-            )
             .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")
         )
 
