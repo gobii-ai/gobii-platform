@@ -9,7 +9,8 @@ from api.models import (
     PersistentAgentMessage,
     EvalRunTask,
     EvalRun,
-    BrowserUseAgentTask
+    BrowserUseAgentTask,
+    CommsAllowlistEntry
 )
 from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.core.llm_utils import run_completion
@@ -38,6 +39,7 @@ class ScenarioExecutionTools:
     ) -> PersistentAgentMessage:
         """
         Send a message to the agent as a web user.
+        Automatically whitelists the sender to ensure the agent can reply.
         """
         msg, _ = inject_internal_web_message(
             agent_id=agent_id,
@@ -46,6 +48,22 @@ class ScenarioExecutionTools:
             attachments=attachments,
             trigger_processing=trigger_processing
         )
+        
+        # Auto-whitelist the sender so the agent trusts this contact
+        CommsAllowlistEntry.objects.get_or_create(
+            agent_id=agent_id,
+            channel=msg.from_endpoint.channel,
+            address=msg.from_endpoint.address,
+            defaults={
+                "is_active": True,
+            }
+        )
+        
+        # Update agent's preferred contact to this new user so "Welcome" prompts target them
+        agent = PersistentAgent.objects.get(id=agent_id)
+        agent.preferred_contact_endpoint = msg.from_endpoint
+        agent.save(update_fields=["preferred_contact_endpoint"])
+        
         return msg
 
     def trigger_processing(self, agent_id: str) -> None:
