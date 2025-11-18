@@ -1,4 +1,3 @@
-
 import logging
 from typing import Any, Iterable, Optional, Tuple, Dict
 from uuid import UUID
@@ -166,3 +165,73 @@ class ScenarioExecutionTools:
         except Exception as e:
             logger.error(f"LLM judge failed: {e}")
             return "Error", f"Exception during judgment: {str(e)}"
+
+    def wait_for_event(
+        self,
+        agent_id: str,
+        event_type: str,
+        timeout: int = 30
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Block until a specific event type is received for the agent using Redis Pub/Sub.
+        Returns the event payload if received, None if timeout.
+        """
+        from api.agent.events import get_agent_event_channel
+        from config.redis_client import get_redis_client
+        import json
+        import time
+
+        redis = get_redis_client()
+        pubsub = redis.pubsub()
+        channel = get_agent_event_channel(agent_id)
+        pubsub.subscribe(channel)
+
+        start_time = time.time()
+        while (time.time() - start_time) < timeout:
+            message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message:
+                try:
+                    data = json.loads(message['data'])
+                    if data.get('type') == event_type:
+                        pubsub.unsubscribe()
+                        return data
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            # Small sleep to prevent tight loop if timeout is ignored by get_message
+            # (though redis-py get_message with timeout usually blocks efficiently)
+            
+        pubsub.unsubscribe()
+        return None
+
+    def wait_for_idle(self, agent_id: str, timeout: int = 60) -> bool:
+        """
+        Wait until the agent emits PROCESSING_COMPLETE with 0 outstanding tasks.
+        Returns True if idle state reached, False if timeout.
+        """
+        from api.agent.events import get_agent_event_channel, AgentEventType
+        from config.redis_client import get_redis_client
+        import json
+        import time
+
+        redis = get_redis_client()
+        pubsub = redis.pubsub()
+        channel = get_agent_event_channel(agent_id)
+        pubsub.subscribe(channel)
+
+        start_time = time.time()
+        while (time.time() - start_time) < timeout:
+            message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message:
+                try:
+                    data = json.loads(message['data'])
+                    if data.get('type') == AgentEventType.PROCESSING_COMPLETE.value:
+                        payload = data.get('payload', {})
+                        outstanding = payload.get('outstanding_tasks', 0)
+                        if outstanding == 0:
+                            pubsub.unsubscribe()
+                            return True
+                except Exception:
+                    pass
+        
+        pubsub.unsubscribe()
+        return False

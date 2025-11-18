@@ -313,6 +313,34 @@ class AgentBudgetManager:
             return 0
 
     @staticmethod
+    def get_total_outstanding_work(*, agent_id: str) -> int:
+        """
+        Return the total number of active branches (outstanding background tasks).
+        Sums the depth/refcounts of all active branches in the branches hash.
+        """
+        redis = get_redis_client()
+        branches_key = _key_branches(agent_id)
+        try:
+            data = redis.hgetall(branches_key)
+            if not data:
+                return 0
+            
+            total = 0
+            for val in data.values():
+                try:
+                    # Handle both string and bytes from redis
+                    count = AgentBudgetManager._to_int(val, 0)
+                    # Only count positive depths as outstanding work
+                    if count > 0:
+                        total += count
+                except Exception:
+                    pass
+            return total
+        except Exception:
+            logger.warning("Failed to get total outstanding work for agent %s", agent_id, exc_info=True)
+            return 0
+
+    @staticmethod
     def get_limits(*, agent_id: str) -> Tuple[int, int]:
         """Return (max_steps, max_depth) for the agent's current cycle.
 
