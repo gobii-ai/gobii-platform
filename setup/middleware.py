@@ -17,6 +17,7 @@ _ALLOWED_PREFIXES = (
     "/setup/",
     "/static/",
     "/favicon.ico",
+    "/eval/",  # Allow eval paths to bypass first-run setup
 )
 _ALLOWED_EXACT = {
     "/healthz/",

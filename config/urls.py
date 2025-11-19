@@ -273,6 +273,9 @@ urlpatterns = [
     # Legacy API docs URL (keeping for backward compatibility)
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="api_docs"),
 
+    # Evals & Simulations
+    path("eval/", include("api.evals.urls", namespace="evals")),
+
     # API
     path("api/v1/", include("api.urls")),
 
