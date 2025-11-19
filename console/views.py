@@ -2632,7 +2632,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         max_contacts_override = None
         if agent.organization_id is None:
-            billing = getattr(agent.user, 'billing', None)
+            try:
+                billing = agent.user.billing
+            except UserBilling.DoesNotExist:
+                billing = None
+
             if (
                 billing is not None
                 and billing.max_contacts_per_agent is not None
