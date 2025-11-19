@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useCallback, useMemo, useState } from 'react'
 import {
   AlertTriangle,
@@ -19,11 +20,13 @@ import {
   ServerCog,
   ShieldAlert,
   Trash2,
-  X,
   XCircle,
 } from 'lucide-react'
+import { Checkbox as AriaCheckbox, Slider as AriaSlider, SliderThumb, SliderTrack, Switch as AriaSwitch } from 'react-aria-components'
 import { updateAgent } from '../api/agents'
 import { HttpError } from '../api/http'
+import { Modal } from '../components/common/Modal'
+import { useModal } from '../hooks/useModal'
 
 type IntelligenceTierKey = 'standard' | 'premium' | 'max'
 
@@ -193,6 +196,15 @@ type AgentWebhook = {
   url: string
 }
 
+type ConfirmActionConfig = {
+  title: string
+  body: ReactNode
+  confirmLabel?: string
+  cancelLabel?: string
+  tone?: 'primary' | 'danger'
+  onConfirm?: () => Promise<void> | void
+}
+
 type ReassignmentInfo = {
   enabled: boolean
   canReassign: boolean
@@ -249,13 +261,6 @@ type AllowlistInput = {
   allowOutbound: boolean
 }
 
-type WebhookModalState = {
-  mode: 'create' | 'edit'
-  webhook: AgentWebhook | null
-  name: string
-  url: string
-}
-
 export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const sliderEmptyValue = initialData.dailyCredits.sliderEmptyValue ?? initialData.dailyCredits.sliderMin
 
@@ -287,10 +292,16 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [allowlistState, setAllowlistState] = useState(initialData.allowlist)
   const [allowlistError, setAllowlistError] = useState<string | null>(null)
   const [allowlistBusy, setAllowlistBusy] = useState(false)
-  const [webhookModal, setWebhookModal] = useState<WebhookModalState | null>(null)
   const [selectedOrgId, setSelectedOrgId] = useState(initialData.reassignment.assignedOrg?.id ?? '')
   const [reassignError, setReassignError] = useState<string | null>(null)
   const [reassigning, setReassigning] = useState(false)
+  const [modal, showModal] = useModal()
+  const openConfirmAction = useCallback(
+    (config: ConfirmActionConfig) => {
+      showModal((onClose) => <ConfirmActionDialog {...config} onClose={onClose} />)
+    },
+    [showModal],
+  )
 
   const hasChanges = useMemo(() => {
     return (
@@ -468,19 +479,18 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
 
   const openWebhookModal = useCallback(
     (mode: 'create' | 'edit', webhook: AgentWebhook | null = null) => {
-      setWebhookModal({
-        mode,
-        webhook,
-        name: webhook?.name ?? '',
-        url: webhook?.url ?? '',
-      })
+      showModal((onClose) => (
+        <WebhookModal
+          csrfToken={initialData.csrfToken}
+          detailUrl={initialData.urls.detail}
+          mode={mode}
+          webhook={webhook}
+          onClose={onClose}
+        />
+      ))
     },
-    [],
+    [initialData.csrfToken, initialData.urls.detail, showModal],
   )
-
-  const closeWebhookModal = useCallback(() => {
-    setWebhookModal(null)
-  }, [])
 
   return (
     <div className="space-y-6 pb-6">
@@ -595,16 +605,30 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
                       </p>
                     </div>
                   </div>
-                  <label className="relative inline-flex shrink-0 items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      name="is_active"
-                      checked={formState.isActive}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, isActive: event.target.checked }))}
-                      className="sr-only"
-                    />
-                    <span className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:bg-white after:border-gray-300 after:border after:rounded-full after:transition-all" />
-                  </label>
+                  <AriaSwitch
+                    name="is_active"
+                    value="true"
+                    aria-label="Toggle agent status"
+                    isSelected={formState.isActive}
+                    onChange={(isSelected) => setFormState((prev) => ({ ...prev, isActive: isSelected }))}
+                    className="relative inline-flex h-6 w-11 cursor-pointer items-center focus:outline-none"
+                  >
+                    {({ isSelected, isFocusVisible }) => (
+                      <>
+                        <span
+                          aria-hidden="true"
+                          className={`h-6 w-11 rounded-full transition ${isSelected ? 'bg-blue-600' : 'bg-gray-200'}`}
+                        />
+                        <span
+                          aria-hidden="true"
+                          className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                            isSelected ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                        {isFocusVisible && <span className="absolute -inset-1 rounded-full ring-2 ring-blue-300" aria-hidden="true" />}
+                      </>
+                    )}
+                  </AriaSwitch>
                 </div>
                 <p className="mt-2 text-xs text-gray-500">Toggle the switch and click "Save Changes" to activate or pause the agent.</p>
               </div>
@@ -639,21 +663,44 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
                     <label htmlFor="daily-credit-limit-slider" className="inline-block text-sm font-medium text-gray-700">
                       Soft target (credits/day)
                     </label>
-                    <input
+                    <input type="hidden" name="daily_credit_limit_slider" value={formState.sliderValue} />
+                    <AriaSlider
+                      aria-label="Soft target slider"
                       id="daily-credit-limit-slider"
-                      name="daily_credit_limit_slider"
-                      type="range"
-                      min={initialData.dailyCredits.sliderMin}
-                      max={initialData.dailyCredits.sliderMax}
+                      className="mt-2 space-y-3"
+                      minValue={initialData.dailyCredits.sliderMin}
+                      maxValue={initialData.dailyCredits.sliderMax}
                       step={initialData.dailyCredits.sliderStep}
                       value={formState.sliderValue}
-                      onChange={(event) => updateSliderValue(Number(event.target.value))}
-                      className="mt-2 w-full"
-                      aria-label="Soft target slider"
-                    />
-                    <div className="mt-1 flex items-center justify-between text-xs text-gray-500" aria-hidden="true">
-                      <span>Unlimited</span>
-                      <span>{Math.round(initialData.dailyCredits.sliderMax).toLocaleString()} credits/day</span>
+                      onChange={(value: number | number[]) => {
+                        const numeric = Array.isArray(value) ? value[0] : value
+                        if (typeof numeric === 'number') {
+                          updateSliderValue(numeric)
+                        }
+                      }}
+                    >
+                      <SliderTrack className="relative h-2 rounded-full bg-gray-200">
+                        {({ state }) => {
+                          const percent = Math.min(Math.max(state.getThumbPercent(0) * 100, 0), 100)
+                          return (
+                            <>
+                              <div className="absolute inset-y-0 left-0 rounded-full bg-indigo-500" style={{ width: `${percent}%` }} />
+                              <SliderThumb
+                                index={0}
+                                className="absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full border-2 border-white bg-indigo-600 shadow transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 data-[dragging]:scale-105"
+                              />
+                            </>
+                          )
+                        }}
+                      </SliderTrack>
+                    </AriaSlider>
+                    <div className="flex items-center justify-between text-xs font-medium text-gray-600">
+                      <span>
+                        {formState.sliderValue === sliderEmptyValue
+                          ? 'Unlimited'
+                          : `${Math.round(formState.sliderValue).toLocaleString()} credits/day`}
+                      </span>
+                      <span>{Math.round(initialData.dailyCredits.sliderMax).toLocaleString()} credits/day max</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -744,6 +791,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
               onRemove={handleAllowlistRemove}
               onCancelInvite={handleCancelInvite}
               contactRequestsUrl={initialData.urls.contactRequests}
+              onConfirmAction={openConfirmAction}
             />
           )}
         </div>
@@ -753,9 +801,15 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
         csrfToken={initialData.csrfToken}
         mcpServers={initialData.mcpServers}
         peerLinks={initialData.peerLinks}
+        onConfirmAction={openConfirmAction}
       />
 
-      <WebhooksSection webhooks={initialData.webhooks} csrfToken={initialData.csrfToken} onEdit={openWebhookModal} />
+      <WebhooksSection
+        webhooks={initialData.webhooks}
+        csrfToken={initialData.csrfToken}
+        onEdit={openWebhookModal}
+        onConfirmAction={openConfirmAction}
+      />
 
       <ActionsSection
         csrfToken={initialData.csrfToken}
@@ -770,15 +824,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
         reassigning={reassigning}
       />
 
-      {webhookModal && (
-        <WebhookModal
-          csrfToken={initialData.csrfToken}
-          detailUrl={initialData.urls.detail}
-          state={webhookModal}
-          onClose={closeWebhookModal}
-          onChange={(next) => setWebhookModal((prev) => (prev ? { ...prev, ...next } : prev))}
-        />
-      )}
+      {modal}
     </div>
   )
 }
@@ -1102,9 +1148,10 @@ type AllowlistManagerProps = {
   onRemove: (entryId: string) => Promise<void>
   onCancelInvite: (inviteId: string) => Promise<void>
   contactRequestsUrl: string
+  onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
-function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite, contactRequestsUrl }: AllowlistManagerProps) {
+function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite, contactRequestsUrl, onConfirmAction }: AllowlistManagerProps) {
   const [channel, setChannel] = useState('email')
   const [address, setAddress] = useState('')
   const [allowInbound, setAllowInbound] = useState(true)
@@ -1155,26 +1202,50 @@ function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite,
             />
           </div>
           <div className="flex gap-4 items-center">
-            <label className="flex items-center gap-1 text-sm">
-              <input
-                type="checkbox"
-                checked={allowInbound}
-                onChange={(event) => setAllowInbound(event.target.checked)}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span>Allow Inbound</span>
-              <span className="text-xs text-gray-500">(can send to agent)</span>
-            </label>
-            <label className="flex items-center gap-1 text-sm">
-              <input
-                type="checkbox"
-                checked={allowOutbound}
-                onChange={(event) => setAllowOutbound(event.target.checked)}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span>Allow Outbound</span>
-              <span className="text-xs text-gray-500">(agent can send to)</span>
-            </label>
+            <AriaCheckbox
+              isSelected={allowInbound}
+              onChange={setAllowInbound}
+              className="group inline-flex items-center gap-2 text-sm text-gray-700"
+            >
+              {({ isSelected }) => (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className={`flex h-4 w-4 items-center justify-center rounded border transition ${
+                      isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-transparent'
+                    }`}
+                  >
+                    <Check className="h-3 w-3" aria-hidden="true" />
+                  </span>
+                  <span className="flex flex-col leading-tight">
+                    <span>Allow Inbound</span>
+                    <span className="text-xs text-gray-500">(can send to agent)</span>
+                  </span>
+                </>
+              )}
+            </AriaCheckbox>
+            <AriaCheckbox
+              isSelected={allowOutbound}
+              onChange={setAllowOutbound}
+              className="group inline-flex items-center gap-2 text-sm text-gray-700"
+            >
+              {({ isSelected }) => (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className={`flex h-4 w-4 items-center justify-center rounded border transition ${
+                      isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-transparent'
+                    }`}
+                  >
+                    <Check className="h-3 w-3" aria-hidden="true" />
+                  </span>
+                  <span className="flex flex-col leading-tight">
+                    <span>Allow Outbound</span>
+                    <span className="text-xs text-gray-500">(agent can send to)</span>
+                  </span>
+                </>
+              )}
+            </AriaCheckbox>
           </div>
           <div className="flex gap-2">
             <button
@@ -1223,7 +1294,7 @@ function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite,
               {state.activeCount} / {state.maxContacts ?? 'Unlimited'} contacts
             </span>
           </div>
-          <AllowlistEntries state={state} onRemove={onRemove} onCancelInvite={onCancelInvite} />
+          <AllowlistEntries state={state} onRemove={onRemove} onCancelInvite={onCancelInvite} onConfirmAction={onConfirmAction} />
         </div>
       </div>
     </div>
@@ -1234,9 +1305,10 @@ type AllowlistEntriesProps = {
   state: AllowlistState
   onRemove: (entryId: string) => Promise<void>
   onCancelInvite: (inviteId: string) => Promise<void>
+  onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
-function AllowlistEntries({ state, onRemove, onCancelInvite }: AllowlistEntriesProps) {
+function AllowlistEntries({ state, onRemove, onCancelInvite, onConfirmAction }: AllowlistEntriesProps) {
   const hasContacts = state.entries.length > 0 || state.pendingInvites.length > 0
   const renderChannelIcon = (channel: string, className = 'w-4 h-4 text-gray-400') =>
     channel?.toLowerCase() === 'sms' ? (
@@ -1284,12 +1356,15 @@ function AllowlistEntries({ state, onRemove, onCancelInvite }: AllowlistEntriesP
                   <span className="text-xs text-yellow-700 font-medium">Pending</span>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!confirm('Cancel this invitation?')) {
-                        return
-                      }
-                      void onCancelInvite(invite.id)
-                    }}
+                    onClick={() =>
+                      onConfirmAction({
+                        title: 'Cancel invitation',
+                        body: `Cancel the allowlist invitation for ${invite.address}?`,
+                        confirmLabel: 'Cancel invitation',
+                        tone: 'danger',
+                        onConfirm: () => onCancelInvite(invite.id),
+                      })
+                    }
                     className="text-red-600 hover:text-red-800 text-xs font-medium"
                   >
                     Cancel
@@ -1316,12 +1391,15 @@ function AllowlistEntries({ state, onRemove, onCancelInvite }: AllowlistEntriesP
                   </span>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!confirm('Remove this contact from the allowlist?')) {
-                        return
-                      }
-                      void onRemove(entry.id)
-                    }}
+                    onClick={() =>
+                      onConfirmAction({
+                        title: 'Remove contact',
+                        body: `Remove ${entry.address} from the allowlist?`,
+                        confirmLabel: 'Remove contact',
+                        tone: 'danger',
+                        onConfirm: () => onRemove(entry.id),
+                      })
+                    }
                     className="text-xs text-red-600 hover:text-red-800 opacity-0 group-hover:opacity-100 transition-opacity ml-2"
                   >
                     Remove
@@ -1368,9 +1446,10 @@ type IntegrationsSectionProps = {
   csrfToken: string
   mcpServers: McpServersInfo
   peerLinks: PeerLinksInfo
+  onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
-function IntegrationsSection({ csrfToken, mcpServers, peerLinks }: IntegrationsSectionProps) {
+function IntegrationsSection({ csrfToken, mcpServers, peerLinks, onConfirmAction }: IntegrationsSectionProps) {
   return (
     <details className="gobii-card-base group" id="agent-integrations">
       <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
@@ -1586,14 +1665,22 @@ function IntegrationsSection({ csrfToken, mcpServers, peerLinks }: IntegrationsS
                               Update
                             </button>
                             <button
-                              type="submit"
+                              type="button"
                               name="peer_link_action"
                               value="delete"
                               className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50"
                               onClick={(event) => {
-                                if (!confirm('Remove this link? This cannot be undone.')) {
-                                  event.preventDefault()
-                                }
+                                const button = event.currentTarget
+                                const form = button.form
+                                onConfirmAction({
+                                  title: 'Remove peer link',
+                                  body: 'Remove this link? This cannot be undone.',
+                                  confirmLabel: 'Remove link',
+                                  tone: 'danger',
+                                  onConfirm: () => {
+                                    form?.requestSubmit(button)
+                                  },
+                                })
                               }}
                             >
                               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
@@ -1622,9 +1709,10 @@ type WebhooksSectionProps = {
   webhooks: AgentWebhook[]
   csrfToken: string
   onEdit: (mode: 'create' | 'edit', webhook?: AgentWebhook | null) => void
+  onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
-function WebhooksSection({ webhooks, csrfToken, onEdit }: WebhooksSectionProps) {
+function WebhooksSection({ webhooks, csrfToken, onEdit, onConfirmAction }: WebhooksSectionProps) {
   return (
     <details className="gobii-card-base group" id="agent-webhooks">
       <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
@@ -1676,12 +1764,20 @@ function WebhooksSection({ webhooks, csrfToken, onEdit }: WebhooksSectionProps) 
                           <input type="hidden" name="webhook_action" value="delete" />
                           <input type="hidden" name="webhook_id" value={webhook.id} />
                           <button
-                            type="submit"
+                            type="button"
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50"
                             onClick={(event) => {
-                              if (!confirm('Remove this webhook? This cannot be undone.')) {
-                                event.preventDefault()
-                              }
+                              const button = event.currentTarget
+                              const form = button.form
+                              onConfirmAction({
+                                title: 'Delete webhook',
+                                body: `Remove the webhook "${webhook.name}"? This cannot be undone.`,
+                                confirmLabel: 'Delete webhook',
+                                tone: 'danger',
+                                onConfirm: () => {
+                                  form?.requestSubmit(button)
+                                },
+                              })
                             }}
                           >
                             <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
@@ -1708,84 +1804,70 @@ function WebhooksSection({ webhooks, csrfToken, onEdit }: WebhooksSectionProps) 
 type WebhookModalProps = {
   csrfToken: string
   detailUrl: string
-  state: WebhookModalState
+  mode: 'create' | 'edit'
+  webhook: AgentWebhook | null
   onClose: () => void
-  onChange: (state: Partial<WebhookModalState>) => void
 }
 
-function WebhookModal({ csrfToken, detailUrl, state, onClose, onChange }: WebhookModalProps) {
+function WebhookModal({ csrfToken, detailUrl, mode, webhook, onClose }: WebhookModalProps) {
+  const [name, setName] = useState(webhook?.name ?? '')
+  const [url, setUrl] = useState(webhook?.url ?? '')
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="fixed inset-0 bg-gray-500/70 backdrop-blur-sm" aria-hidden="true" onClick={onClose} />
-        <span className="hidden sm:inline-block sm:h-screen sm:align-middle" aria-hidden="true">
-          &#8203;
-        </span>
-        <div className="inline-block w-full transform overflow-hidden rounded-2xl bg-white text-left align-middle shadow-2xl transition-all sm:my-8 sm:max-w-lg">
-          <div className="px-6 py-5 border-b border-gray-200/70 flex items-start justify-between gap-4">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">{state.mode === 'create' ? 'Add Webhook' : 'Edit Webhook'}</h3>
-              <p className="mt-1 text-sm text-gray-500">Provide a human-friendly name and the destination URL. The agent will send JSON payloads to this URL.</p>
-            </div>
-            <button
-              type="button"
-              className="inline-flex items-center justify-center rounded-full p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-              onClick={onClose}
-            >
-              <span className="sr-only">Close</span>
-              <X className="w-5 h-5" aria-hidden="true" />
-            </button>
-          </div>
-          <form method="post" action={detailUrl} className="px-6 py-5 space-y-5">
-            <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
-            <input type="hidden" name="webhook_action" value={state.mode === 'create' ? 'create' : 'update'} />
-            {state.mode === 'edit' && state.webhook && <input type="hidden" name="webhook_id" value={state.webhook.id} />}
-            <div>
-              <label htmlFor="webhook-name-field" className="block text-sm font-medium text-gray-700">
-                Webhook Name
-              </label>
-              <input
-                type="text"
-                id="webhook-name-field"
-                name="webhook_name"
-                required
-                value={state.name}
-                onChange={(event) => onChange({ name: event.target.value })}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                placeholder="A descriptive name for this webhook"
-              />
-            </div>
-            <div>
-              <label htmlFor="webhook-url-field" className="block text-sm font-medium text-gray-700">
-                Destination URL
-              </label>
-              <input
-                type="url"
-                id="webhook-url-field"
-                name="webhook_url"
-                required
-                value={state.url}
-                onChange={(event) => onChange({ url: event.target.value })}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                placeholder="https://example.com/webhooks/gobii"
-              />
-              <p className="mt-2 text-xs text-gray-500">
-                We send a POST request with JSON payload including <code className="bg-gray-100 px-1 py-0.5 rounded">agent_id</code>,{' '}
-                <code className="bg-gray-100 px-1 py-0.5 rounded">webhook_name</code>, and your provided <code className="bg-gray-100 px-1 py-0.5 rounded">payload</code>.
-              </p>
-            </div>
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button type="button" className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50" onClick={onClose}>
-                Cancel
-              </button>
-              <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-                Save Webhook
-              </button>
-            </div>
-          </form>
+    <Modal
+      title={mode === 'create' ? 'Add Webhook' : 'Edit Webhook'}
+      subtitle="Provide a human-friendly name and destination URL."
+      onClose={onClose}
+      widthClass="sm:max-w-lg"
+    >
+      <form method="post" action={detailUrl} className="space-y-5">
+        <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
+        <input type="hidden" name="webhook_action" value={mode === 'create' ? 'create' : 'update'} />
+        {mode === 'edit' && webhook && <input type="hidden" name="webhook_id" value={webhook.id} />}
+        <div>
+          <label htmlFor="webhook-name-field" className="block text-sm font-medium text-gray-700">
+            Webhook Name
+          </label>
+          <input
+            type="text"
+            id="webhook-name-field"
+            name="webhook_name"
+            required
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            placeholder="A descriptive name for this webhook"
+          />
         </div>
-      </div>
-    </div>
+        <div>
+          <label htmlFor="webhook-url-field" className="block text-sm font-medium text-gray-700">
+            Destination URL
+          </label>
+          <input
+            type="url"
+            id="webhook-url-field"
+            name="webhook_url"
+            required
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            placeholder="https://example.com/webhooks/gobii"
+          />
+          <p className="mt-2 text-xs text-gray-500">
+            We send a POST request with JSON payload including <code className="bg-gray-100 px-1 py-0.5 rounded">agent_id</code> and your provided{' '}
+            <code className="bg-gray-100 px-1 py-0.5 rounded">payload</code>.
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <button type="button" className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+            Save Webhook
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -1967,5 +2049,72 @@ function ActionsSection({
         </section>
       </div>
     </details>
+  )
+}
+
+type ConfirmActionDialogProps = ConfirmActionConfig & {
+  onClose: () => void
+}
+
+function ConfirmActionDialog({
+  title,
+  body,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  tone = 'primary',
+  onConfirm,
+  onClose,
+}: ConfirmActionDialogProps) {
+  const [busy, setBusy] = useState(false)
+  const confirmClasses =
+    tone === 'danger'
+      ? 'inline-flex w-full justify-center rounded-md border border-transparent bg-red-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 sm:w-auto sm:text-sm disabled:opacity-60'
+      : 'inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:w-auto sm:text-sm disabled:opacity-60'
+  const cancelClasses =
+    'inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto sm:text-sm disabled:opacity-60'
+
+  const handleConfirm = async () => {
+    if (!onConfirm) {
+      onClose()
+      return
+    }
+    setBusy(true)
+    try {
+      await onConfirm()
+      onClose()
+    } catch (error) {
+      console.error(error)
+      setBusy(false)
+    }
+  }
+
+  const footer = (
+    <>
+      <button type="button" className={confirmClasses} onClick={handleConfirm} disabled={busy}>
+        {busy ? 'Working…' : confirmLabel}
+      </button>
+      <button type="button" className={cancelClasses} onClick={onClose} disabled={busy}>
+        {cancelLabel}
+      </button>
+    </>
+  )
+
+  return (
+    <Modal
+      title={title}
+      onClose={() => {
+        if (!busy) {
+          onClose()
+        }
+      }}
+      subtitle={typeof body === 'string' ? body : undefined}
+      icon={tone === 'danger' ? Trash2 : Info}
+      iconBgClass={tone === 'danger' ? 'bg-red-100' : 'bg-blue-100'}
+      iconColorClass={tone === 'danger' ? 'text-red-600' : 'text-blue-600'}
+      widthClass="sm:max-w-md"
+      footer={footer}
+    >
+      {typeof body === 'string' ? null : <div className="text-sm text-gray-600">{body}</div>}
+    </Modal>
   )
 }
