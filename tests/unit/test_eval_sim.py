@@ -1,6 +1,7 @@
-from django.test import TestCase, Client
+from django.test import TestCase, Client, tag
 from django.urls import reverse
 
+@tag('eval_sim')
 class WeatherSimViewTest(TestCase):
     def setUp(self):
         self.client = Client()
