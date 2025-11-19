@@ -37,6 +37,8 @@ from .models import (
     PersistentAgentWebhook,
     MCPServerConfig,
     AgentColor,
+    EvalRun,
+    EvalRunTask,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -3808,3 +3810,31 @@ class ToolFriendlyNameAdmin(admin.ModelAdmin):
     search_fields = ('tool_name', 'display_name')
     ordering = ('tool_name',)
     readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(EvalRunTask)
+class EvalRunTaskAdmin(admin.ModelAdmin):
+    list_display = ('run', 'sequence', 'name', 'status', 'assertion_type', 'started_at', 'finished_at')
+    list_filter = ('status', 'assertion_type', 'run__scenario_slug')
+    search_fields = ('name', 'run__scenario_slug', 'run__id')
+    raw_id_fields = ('run', 'first_step', 'first_message', 'first_browser_task')
+    readonly_fields = ('created_at', 'updated_at')
+
+
+class EvalRunTaskInline(admin.TabularInline):
+    model = EvalRunTask
+    extra = 0
+    fields = ('sequence', 'name', 'status', 'assertion_type', 'started_at', 'finished_at')
+    readonly_fields = ('sequence', 'name', 'status', 'assertion_type', 'started_at', 'finished_at')
+    can_delete = False
+    show_change_link = True
+
+
+@admin.register(EvalRun)
+class EvalRunAdmin(admin.ModelAdmin):
+    list_display = ('scenario_slug', 'scenario_version', 'agent', 'status', 'started_at', 'finished_at', 'step_count')
+    list_filter = ('status', 'scenario_slug', 'started_at')
+    search_fields = ('scenario_slug', 'agent__name', 'id', 'budget_id')
+    raw_id_fields = ('agent', 'initiated_by')
+    readonly_fields = ('created_at', 'updated_at', 'tokens_used', 'credits_cost', 'completion_count', 'step_count')
+    inlines = [EvalRunTaskInline]

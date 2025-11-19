@@ -9,7 +9,7 @@ from util.tool_costs import get_tool_credit_cost_for_channel
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Iterable, Any
+from typing import Iterable, Any, Tuple
 
 import logging
 import requests
@@ -33,6 +33,7 @@ from ...models import (
     CommsChannel,
     DeliveryStatus,
     build_web_agent_address,
+    build_web_user_address,
 )
 
 from .adapters import ParsedMessage
@@ -516,3 +517,66 @@ def get_agent_id_from_address(channel: CommsChannel | str, address: str) -> UUID
         return endpoint.owner_agent_id
     except PersistentAgentCommsEndpoint.DoesNotExist:
         return None
+
+
+@tracer.start_as_current_span("inject_internal_web_message")
+def inject_internal_web_message(
+    agent_id: str | UUID,
+    body: str,
+    sender_user_id: int = -1,
+    attachments: Iterable[Any] = (),
+    trigger_processing: bool = True,
+) -> Tuple[PersistentAgentMessage, PersistentAgentConversation]:
+    """
+    Inject a web message for testing/evals without going through the API adapters.
+
+    Args:
+        agent_id: Target agent UUID.
+        body: Message text.
+        sender_user_id: Simulated user ID (default -1).
+        attachments: Optional list of file-like objects or URLs.
+        trigger_processing: If True, queue the processing task.
+    """
+    agent = PersistentAgent.objects.get(id=agent_id)
+    
+    sender_address = build_web_user_address(user_id=sender_user_id, agent_id=agent_id)
+    agent_address = build_web_agent_address(agent.id)
+
+    # Get/Create Endpoints
+    from_ep = _get_or_create_endpoint(CommsChannel.WEB.value, sender_address)
+    to_ep = _get_or_create_endpoint(CommsChannel.WEB.value, agent_address)
+    
+    # Ensure agent owns the target endpoint
+    if to_ep.owner_agent_id != agent.id:
+        to_ep.owner_agent = agent
+        to_ep.save(update_fields=["owner_agent"])
+
+    # Get/Create Conversation
+    conv = _get_or_create_conversation(CommsChannel.WEB.value, sender_address, owner_agent=agent)
+
+    # Ensure Participants
+    _ensure_participant(conv, from_ep, PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER)
+    _ensure_participant(conv, to_ep, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
+
+    # Create Message
+    message = PersistentAgentMessage.objects.create(
+        is_outbound=False,
+        from_endpoint=from_ep,
+        to_endpoint=to_ep,
+        conversation=conv,
+        body=body,
+        owner_agent=agent,
+        raw_payload={"source": "eval_injection", "sender_user_id": sender_user_id},
+    )
+
+    # Attachments
+    if attachments:
+        _save_attachments(message, attachments)
+        enqueue_import_after_commit(str(message.id))
+
+    # Trigger Processing
+    if trigger_processing:
+        from api.agent.tasks import process_agent_events_task
+        process_agent_events_task.delay(str(agent.id))
+
+    return message, conv

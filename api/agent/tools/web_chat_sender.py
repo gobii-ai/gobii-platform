@@ -108,26 +108,30 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
             "message": "Recipient address is not valid for this agent.",
         }
 
-    User = get_user_model()
-    try:
-        recipient_user = User.objects.get(id=user_id)
-    except User.DoesNotExist:
-        recipient_user = None
+    # Check if this is a normal user interaction or a test/eval interaction
+    is_eval_mode = (agent.execution_environment == "eval")
 
-    if not recipient_user or get_active_web_session(agent, recipient_user) is None:
-        return {
-            "status": "error",
-            "message": (
-                "No active web chat session exists for this user. Retry using the user's most recently "
-                "active non-web communication channel (e.g., email or SMS)."
-            ),
-        }
+    if not is_eval_mode:
+        User = get_user_model()
+        try:
+            recipient_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            recipient_user = None
 
-    if not agent.is_recipient_whitelisted(CommsChannel.WEB, to_address):
-        return {
-            "status": "error",
-            "message": "Recipient is not authorized for web chat with this agent.",
-        }
+        if not recipient_user or get_active_web_session(agent, recipient_user) is None:
+            return {
+                "status": "error",
+                "message": (
+                    "No active web chat session exists for this user. Retry using the user's most recently "
+                    "active non-web communication channel (e.g., email or SMS)."
+                ),
+            }
+
+        if not agent.is_recipient_whitelisted(CommsChannel.WEB, to_address):
+            return {
+                "status": "error",
+                "message": "Recipient is not authorized for web chat with this agent.",
+            }
 
     agent_endpoint = _ensure_agent_web_endpoint(agent)
     user_endpoint = _ensure_user_web_endpoint(to_address)

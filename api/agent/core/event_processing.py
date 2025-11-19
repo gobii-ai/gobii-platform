@@ -75,6 +75,7 @@ from ..files.filesystem_prompt import get_agent_filesystem_prompt
 from api.services.daily_credit_settings import get_daily_credit_settings
 from api.services.prompt_settings import get_prompt_settings
 from api.services import mcp_servers as mcp_server_service
+from api.agent.events import publish_agent_event, AgentEventType
 
 from ..tools.email_sender import execute_send_email, get_send_email_tool
 from ..tools.sms_sender import execute_send_sms, get_send_sms_tool
@@ -1664,39 +1665,52 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
     is_first_run = prior_run_count == 0
     run_sequence_number = prior_run_count + 1
 
-    with transaction.atomic():
-        processing_step = PersistentAgentStep.objects.create(
-            agent=agent,
-            description="Process events",
-        )
-        sys_step = PersistentAgentSystemStep.objects.create(
-            step=processing_step,
-            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-        )
-
-    logger.info(
-        "Processing agent %s (is_first_run=%s, run_sequence_number=%s)",
-        agent.id,
-        is_first_run,
-        run_sequence_number,
-    )
-    span.set_attribute('processing_step.id', str(processing_step.id))
-    span.set_attribute('processing.is_first_run', is_first_run)
-    span.set_attribute('processing.run_sequence_number', run_sequence_number)
-
-    cumulative_token_usage = _run_agent_loop(
-        agent,
-        is_first_run=is_first_run,
-        credit_snapshot=credit_snapshot,
-        run_sequence_number=run_sequence_number,
-    )
-
-    sys_step.notes = "simplified"
     try:
-        sys_step.save(update_fields=["notes"])
-    except OperationalError:
-        close_old_connections()
-        sys_step.save(update_fields=["notes"])
+        publish_agent_event(str(agent.id), AgentEventType.PROCESSING_STARTED)
+
+        with transaction.atomic():
+            processing_step = PersistentAgentStep.objects.create(
+                agent=agent,
+                description="Process events",
+            )
+            sys_step = PersistentAgentSystemStep.objects.create(
+                step=processing_step,
+                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            )
+
+        logger.info(
+            "Processing agent %s (is_first_run=%s, run_sequence_number=%s)",
+            agent.id,
+            is_first_run,
+            run_sequence_number,
+        )
+        span.set_attribute('processing_step.id', str(processing_step.id))
+        span.set_attribute('processing.is_first_run', is_first_run)
+        span.set_attribute('processing.run_sequence_number', run_sequence_number)
+
+        cumulative_token_usage = _run_agent_loop(
+            agent,
+            is_first_run=is_first_run,
+            credit_snapshot=credit_snapshot,
+            run_sequence_number=run_sequence_number,
+        )
+
+        sys_step.notes = "simplified"
+        try:
+            sys_step.save(update_fields=["notes"])
+        except OperationalError:
+            close_old_connections()
+            sys_step.save(update_fields=["notes"])
+    finally:
+        try:
+            outstanding = AgentBudgetManager.get_total_outstanding_work(agent_id=str(agent.id))
+            publish_agent_event(
+                str(agent.id), 
+                AgentEventType.PROCESSING_COMPLETE,
+                {"outstanding_tasks": outstanding}
+            )
+        except Exception:
+            logger.exception("Failed to publish completion event for agent %s", agent.id)
 
     return agent
 

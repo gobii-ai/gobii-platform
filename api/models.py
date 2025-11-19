@@ -171,7 +171,7 @@ class AgentColor(models.Model):
 #  Web chat addressing helpers
 # ---------------------------------------------------------------------------
 
-WEB_USER_ADDRESS_RE = re.compile(r"^web://user/(?P<user_id>\d+)/agent/(?P<agent_id>[0-9a-fA-F-]+)$")
+WEB_USER_ADDRESS_RE = re.compile(r"^web://user/(?P<user_id>-?\d+)/agent/(?P<agent_id>[0-9a-fA-F-]+)$")
 WEB_AGENT_ADDRESS_RE = re.compile(r"^web://agent/(?P<agent_id>[0-9a-fA-F-]+)$")
 
 
@@ -6787,3 +6787,85 @@ class OrganizationInvite(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class EvalRun(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        ERRORED = "errored", "Errored"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    scenario_slug = models.CharField(max_length=200)
+    scenario_version = models.CharField(max_length=50, blank=True)
+    agent = models.ForeignKey(PersistentAgent, on_delete=models.CASCADE)
+    initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    
+    # Execution context
+    budget_id = models.CharField(max_length=100, blank=True)
+    branch_id = models.CharField(max_length=100, blank=True)
+    
+    # Metrics snapshots (aggregated after run)
+    tokens_used = models.IntegerField(default=0)
+    credits_cost = models.DecimalField(max_digits=20, decimal_places=6, default=Decimal("0"))
+    completion_count = models.IntegerField(default=0)
+    step_count = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.scenario_slug} ({self.id})"
+
+
+class EvalRunTask(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        PASSED = "passed", "Passed"
+        FAILED = "failed", "Failed"
+        ERRORED = "errored", "Errored"
+        SKIPPED = "skipped", "Skipped"
+
+    run = models.ForeignKey(EvalRun, on_delete=models.CASCADE, related_name='tasks')
+    sequence = models.IntegerField()
+    name = models.CharField(max_length=200)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    assertion_type = models.CharField(max_length=50)
+    
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    
+    # Summaries
+    expected_summary = models.TextField(blank=True)
+    observed_summary = models.TextField(blank=True)
+    
+    # Artifact links
+    first_step = models.ForeignKey(PersistentAgentStep, on_delete=models.SET_NULL, null=True, blank=True)
+    first_message = models.ForeignKey(PersistentAgentMessage, on_delete=models.SET_NULL, null=True, blank=True)
+    first_browser_task = models.ForeignKey(BrowserUseAgentTask, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    # Specific assertion data
+    tool_called = models.CharField(max_length=200, blank=True)
+    charter_before = models.TextField(blank=True)
+    charter_after = models.TextField(blank=True)
+    schedule_before = models.TextField(blank=True)
+    schedule_after = models.TextField(blank=True)
+    llm_question = models.TextField(blank=True)
+    llm_answer = models.TextField(blank=True)
+    llm_model = models.CharField(max_length=100, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['sequence']
+
+    def __str__(self):
+        return f"{self.run.scenario_slug} - {self.name} ({self.status})"

@@ -93,3 +93,18 @@ uv run python manage.py test --settings=config.test_settings --parallel auto
 - **Need a clean database** – run `docker compose -f docker-compose.dev.yaml down -v` to drop the local Postgres volume, then bring it back up and rerun migrations.
 
 ---
+
+## Agent Evaluations
+
+The platform includes an end-to-end evaluation system for verifying agent behavior, tool usage, and prompt effectiveness.
+
+To run the standard evaluation suite against a temporary test agent:
+
+```bash
+uv run python manage.py run_evals
+```
+
+Options:
+- `--scenario <slug>`: Run a specific scenario (e.g., `--scenario echo_response`).
+- `--sync`: Run synchronously (eager mode) for debugging without a separate Celery worker.
+- `--agent-id <uuid>`: Run against an existing Persistent Agent instead of creating a temporary one.
