@@ -22,7 +22,9 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.utils.text import slugify
+from django.middleware.csrf import get_token
 from datetime import timedelta, datetime, timezone as dt_timezone
 from functools import cached_property, wraps
 import uuid
@@ -35,7 +37,8 @@ from api.services.dedicated_proxy_service import (
     is_multi_assign_enabled,
 )
 from api.agent.core.llm_config import AgentLLMTier, get_llm_tier_multipliers, max_allowed_tier_for_plan
-from api.agent.short_description import build_listing_description, build_mini_description
+from api.agent.short_description import build_listing_description, build_mini_description, \
+    maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
 from api.services.daily_credit_settings import get_daily_credit_settings
 
@@ -83,10 +86,12 @@ from util.subscription_helper import (
     get_organization_plan,
     has_unlimited_agents,
     is_community_unlimited_mode,
+    get_user_max_contacts_per_agent,
 )
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
+from waffle import flag_is_active
 
 
 def _clamp_color(value: int) -> int:
@@ -2709,7 +2714,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         ).count()
         total_contacts = active_count + pending_count
         context['active_allowlist_count'] = total_contacts
-        from util.subscription_helper import get_user_max_contacts_per_agent
         max_contacts_limit = get_user_max_contacts_per_agent(
             agent.user,
             organization=agent.organization,
@@ -2909,13 +2913,336 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         ).first()
         context['pending_transfer_invite'] = pending_transfer
 
+        context['agent_detail_props'] = self._build_agent_detail_props(context)
+
         return context
+
+    def _serialize_allowlist_state(
+        self,
+        agent: PersistentAgent,
+        *,
+        entries=None,
+        pending_invites=None,
+        owner_email: str | None = None,
+        owner_phone: str | None = None,
+        active_count: int | None = None,
+        pending_count: int | None = None,
+        max_contacts: int | None = None,
+        pending_contact_requests: int | None = None,
+    ) -> dict[str, object]:
+        from api.models import CommsAllowlistEntry, AgentAllowlistInvite
+
+        entries_qs = entries
+        if entries_qs is None:
+            entries_qs = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
+        entries_list = list(entries_qs)
+
+        pending_qs = pending_invites
+        if pending_qs is None:
+            pending_qs = AgentAllowlistInvite.objects.filter(
+                agent=agent,
+                status=AgentAllowlistInvite.InviteStatus.PENDING,
+            ).order_by('channel', 'address')
+        pending_list = list(pending_qs)
+
+        if owner_email is None:
+            owner_email = agent.user.email
+
+        if owner_phone is None:
+            phone_obj = UserPhoneNumber.objects.filter(user=agent.user, is_verified=True).first()
+            owner_phone = phone_obj.phone_number if phone_obj else None
+
+        if active_count is None:
+            active_count = CommsAllowlistEntry.objects.filter(agent=agent, is_active=True).count()
+        if pending_count is None:
+            pending_count = AgentAllowlistInvite.objects.filter(
+                agent=agent,
+                status=AgentAllowlistInvite.InviteStatus.PENDING,
+            ).count()
+
+        return {
+            'show': True,
+            'ownerEmail': owner_email,
+            'ownerPhone': owner_phone,
+            'entries': [
+                {
+                    'id': str(entry.id),
+                    'channel': entry.channel,
+                    'address': entry.address,
+                    'allowInbound': entry.allow_inbound,
+                    'allowOutbound': entry.allow_outbound,
+                }
+                for entry in entries_list
+            ],
+            'pendingInvites': [
+                {
+                    'id': str(invite.id),
+                    'channel': invite.channel,
+                    'address': invite.address,
+                    'allowInbound': invite.allow_inbound,
+                    'allowOutbound': invite.allow_outbound,
+                }
+                for invite in pending_list
+            ],
+            'activeCount': (active_count or 0) + (pending_count or 0),
+            'maxContacts': max_contacts,
+            'pendingContactRequests': pending_contact_requests,
+        }
+
+    def _build_agent_detail_props(self, context: dict[str, Any]) -> dict[str, Any]:
+        agent: PersistentAgent = context['agent']
+        request = self.request
+
+        def _decimal_to_float(value: Any) -> float | None:
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except Exception:
+                return None
+
+        def _datetime_iso(value):
+            if not value:
+                return None
+            localized = timezone.localtime(value)
+            return localized.isoformat()
+
+        def _datetime_display(value, fmt: str):
+            if not value:
+                return None
+            localized = timezone.localtime(value)
+            return date_format(localized, fmt)
+
+        daily_credits = {
+            'limit': _decimal_to_float(context.get('daily_credit_limit')),
+            'hardLimit': _decimal_to_float(context.get('daily_credit_hard_limit')),
+            'usage': _decimal_to_float(context.get('daily_credit_usage')) or 0.0,
+            'remaining': _decimal_to_float(context.get('daily_credit_remaining')),
+            'softRemaining': _decimal_to_float(context.get('daily_credit_soft_remaining')),
+            'unlimited': bool(context.get('daily_credit_unlimited')),
+            'percentUsed': _decimal_to_float(context.get('daily_credit_percent_used')),
+            'softPercentUsed': _decimal_to_float(context.get('daily_credit_soft_percent_used')),
+            'nextResetIso': _datetime_iso(context.get('daily_credit_next_reset')),
+            'nextResetLabel': _datetime_display(context.get('daily_credit_next_reset'), "Y-m-d H:i T"),
+            'low': bool(context.get('daily_credit_low')),
+            'sliderMin': _decimal_to_float(context.get('daily_credit_slider_min')) or 0.0,
+            'sliderMax': _decimal_to_float(context.get('daily_credit_slider_max')) or 0.0,
+            'sliderStep': _decimal_to_float(context.get('daily_credit_slider_step')) or 1.0,
+            'sliderValue': _decimal_to_float(context.get('daily_credit_slider_value'))
+            or _decimal_to_float(context.get('daily_credit_slider_min'))
+            or 0.0,
+            'sliderEmptyValue': _decimal_to_float(context.get('daily_credit_slider_min')) or 0.0,
+        }
+
+        dedicated_options = [
+            {
+                'id': str(option.get('id')),
+                'label': option.get('label'),
+                'inUseElsewhere': bool(option.get('in_use_elsewhere')),
+                'disabled': bool(option.get('disabled')),
+                'assignedNames': option.get('assigned_names', []),
+            }
+            for option in context.get('dedicated_proxy_options', [])
+        ]
+
+        account_usage = (context.get('account') or {}).get('usage') or {}
+        max_contacts = context.get('max_contacts_per_agent') or account_usage.get('max_contacts_per_agent')
+
+        allowlist = self._serialize_allowlist_state(
+            agent,
+            entries=context.get('allowlist_entries'),
+            pending_invites=context.get('pending_invites'),
+            owner_email=context.get('owner_email'),
+            owner_phone=context.get('owner_phone'),
+            active_count=context.get('active_allowlist_count'),
+            max_contacts=max_contacts,
+            pending_contact_requests=context.get('pending_contact_requests'),
+        )
+        allowlist['show'] = bool(context.get('show_allowlist'))
+
+        inherited_servers = [
+            {
+                'id': str(server.get('id')),
+                'displayName': server.get('display_name'),
+                'description': server.get('description'),
+                'scope': server.get('scope'),
+                'inherited': bool(server.get('inherited')),
+                'assigned': bool(server.get('assigned')),
+            }
+            for server in context.get('inherited_mcp_servers', [])
+        ]
+
+        personal_servers = [
+            {
+                'id': str(server.get('id')),
+                'displayName': server.get('display_name'),
+                'description': server.get('description'),
+                'assigned': bool(server.get('assigned')),
+            }
+            for server in context.get('personal_mcp_servers', [])
+        ]
+
+        peer_link_entries = []
+        for entry in context.get('peer_links', []):
+            link = entry['link']
+            counterpart = entry.get('counterpart')
+            state = entry.get('state')
+            peer_link_entries.append(
+                {
+                    'id': str(link.id),
+                    'counterpartId': str(counterpart.id) if counterpart else None,
+                    'counterpartName': counterpart.name if counterpart else None,
+                    'isEnabled': link.is_enabled,
+                    'messagesPerWindow': link.messages_per_window,
+                    'windowHours': link.window_hours,
+                    'featureFlag': link.feature_flag,
+                    'createdOnLabel': _datetime_display(link.created_at, "M j, Y"),
+                    'state': (
+                        {
+                            'creditsRemaining': state.credits_remaining,
+                            'windowResetLabel': _datetime_display(state.window_reset_at, "M j, Y H:i"),
+                        }
+                        if state
+                        else None
+                    ),
+                }
+            )
+
+        peer_link_candidates = [
+            {
+                'id': str(candidate.id),
+                'name': candidate.name,
+            }
+            for candidate in context.get('peer_link_candidates', [])
+        ]
+
+        peer_link_defaults = context.get('peer_link_defaults', {})
+
+        pending_transfer = context.get('pending_transfer_invite')
+        pending_transfer_payload = None
+        if pending_transfer:
+            pending_transfer_payload = {
+                'toEmail': pending_transfer.to_email,
+                'createdAtIso': _datetime_iso(pending_transfer.created_at),
+                'createdAtDisplay': _datetime_display(pending_transfer.created_at, "M j, Y g:i A"),
+            }
+
+        primary_email = context.get('primary_email')
+        primary_sms = context.get('primary_sms')
+
+        features = {
+            'organizations': flag_is_active(request, 'organizations'),
+        }
+
+        can_reassign = bool(context.get('can_reassign'))
+        reassignment = {
+            'enabled': can_reassign,
+            'canReassign': can_reassign,
+            'organizations': [
+                {
+                    'id': str(org.id),
+                    'name': org.name,
+                }
+                for org in context.get('reassignable_orgs', [])
+            ],
+            'assignedOrg': (
+                {
+                    'id': str(agent.organization_id),
+                    'name': agent.organization.name,
+                }
+                if agent.organization_id
+                else None
+            ),
+        }
+
+        mcp_can_manage = False
+        current_context = context.get('current_context', {}) or {}
+        if current_context.get('type') == 'personal' or context.get('can_manage_org_agents'):
+            mcp_can_manage = True
+
+        webhooks = [
+            {
+                'id': str(webhook.id),
+                'name': webhook.name,
+                'url': webhook.url,
+            }
+            for webhook in context.get('agent_webhooks', [])
+        ]
+
+        mcp_manage_url = reverse('console-mcp-servers')
+
+        return {
+            'csrfToken': get_token(request),
+            'urls': {
+                'detail': request.path,
+                'list': reverse('agents'),
+                'chat': reverse('agent_chat_shell', kwargs={'pk': agent.id}),
+                'secrets': reverse('agent_secrets', args=[agent.id]),
+                'emailSettings': reverse('agent_email_settings', args=[agent.id]),
+                'smsEnable': reverse('agent_enable_sms', args=[agent.id]),
+                'contactRequests': reverse('agent_contact_requests', args=[agent.id]),
+                'delete': reverse('agent_delete', args=[agent.id]),
+                'mcpServersManage': mcp_manage_url,
+            },
+            'agent': {
+                'id': str(agent.id),
+                'name': agent.name,
+                'charter': agent.charter,
+                'isActive': agent.is_active,
+                'createdAtDisplay': _datetime_display(agent.created_at, "F j, Y \a\t g:i A"),
+                'pendingTransfer': pending_transfer_payload,
+                'whitelistPolicy': agent.whitelist_policy,
+                'organization': (
+                    {
+                        'id': str(agent.organization_id),
+                        'name': agent.organization.name,
+                    }
+                    if agent.organization_id
+                    else None
+                ),
+            },
+            'primaryEmail': {'address': primary_email.address} if primary_email else None,
+            'primarySms': {'address': primary_sms.address} if primary_sms else None,
+            'dailyCredits': daily_credits,
+            'dedicatedIps': {
+                'total': context.get('dedicated_ip_total', 0),
+                'available': context.get('dedicated_ip_available', 0),
+                'multiAssign': bool(context.get('dedicated_ip_multi_assign')),
+                'ownerType': context.get('dedicated_ip_owner_type') or 'user',
+                'selectedId': context.get('selected_dedicated_proxy_id') or None,
+                'options': dedicated_options,
+                'organizationName': agent.organization.name if agent.organization_id else None,
+            },
+            'allowlist': allowlist,
+            'mcpServers': {
+                'inherited': inherited_servers,
+                'personal': personal_servers,
+                'showPersonalForm': bool(context.get('show_personal_mcp_form')),
+                'canManage': mcp_can_manage,
+                'manageUrl': mcp_manage_url,
+            },
+            'peerLinks': {
+                'entries': peer_link_entries,
+                'candidates': peer_link_candidates,
+                'defaults': {
+                    'messagesPerWindow': peer_link_defaults.get('messages_per_window', 30),
+                    'windowHours': peer_link_defaults.get('window_hours', 6),
+                },
+            },
+            'webhooks': webhooks,
+            'features': features,
+            'reassignment': reassignment,
+        }
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - Post")
     def post(self, request, *args, **kwargs):
         """Handle agent configuration updates and allowlist management."""
         agent = self.get_object()
         credit_settings = get_daily_credit_settings()
+        max_contacts_per_agent = get_user_max_contacts_per_agent(
+            agent.user,
+            organization=agent.organization,
+        )
         
         peer_action = request.POST.get('peer_link_action')
         if peer_action:
@@ -3050,8 +3377,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         status=AgentAllowlistInvite.InviteStatus.PENDING
                     ).count()
                     total_count = active_count + pending_count
-                    
-                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count})
+                    allowlist_payload = self._serialize_allowlist_state(
+                        agent,
+                        entries=entries,
+                        pending_invites=pending_invites,
+                        owner_email=owner_email,
+                        owner_phone=owner_phone,
+                        active_count=active_count,
+                        pending_count=pending_count,
+                        max_contacts=max_contacts_per_agent,
+                    )
+
+                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count, 'allowlist': allowlist_payload})
                     
                 except ValidationError as e:
                     existing_entry = locals().get('existing_entry')
@@ -3095,7 +3432,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         'owner_email': owner_email,
                         'owner_phone': owner_phone,
                     })
-                    
+
                     # Count active entries AND pending invitations for the counter
                     active_count = CommsAllowlistEntry.objects.filter(
                         agent=agent,
@@ -3106,8 +3443,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         status=AgentAllowlistInvite.InviteStatus.PENDING
                     ).count()
                     total_count = active_count + pending_count
-                    
-                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count})
+                    allowlist_payload = self._serialize_allowlist_state(
+                        agent,
+                        entries=entries,
+                        pending_invites=pending_invites,
+                        owner_email=owner_email,
+                        owner_phone=owner_phone,
+                        active_count=active_count,
+                        pending_count=pending_count,
+                        max_contacts=max_contacts_per_agent,
+                    )
+
+                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count, 'allowlist': allowlist_payload})
                     
                 except Exception as e:
                     return JsonResponse({'success': False, 'error': str(e)})
@@ -3156,8 +3503,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         status=AgentAllowlistInvite.InviteStatus.PENDING
                     ).count()
                     total_count = active_count + pending_count
-                    
-                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count})
+                    allowlist_payload = self._serialize_allowlist_state(
+                        agent,
+                        entries=entries,
+                        pending_invites=pending_invites,
+                        owner_email=owner_email,
+                        owner_phone=owner_phone,
+                        active_count=active_count,
+                        pending_count=pending_count,
+                        max_contacts=max_contacts_per_agent,
+                    )
+
+                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count, 'allowlist': allowlist_payload})
                     
                 except Exception as e:
                     return JsonResponse({'success': False, 'error': str(e)})
@@ -5128,7 +5485,6 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         context['has_pending_requests'] = pending_requests.exists()
         
         # Get current allowlist usage for limit display
-        from util.subscription_helper import get_user_max_contacts_per_agent
         max_contacts = get_user_max_contacts_per_agent(
             agent.user,
             organization=agent.organization,
