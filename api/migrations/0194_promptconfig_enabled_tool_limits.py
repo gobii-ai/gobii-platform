@@ -11,7 +11,7 @@ from api.services.prompt_settings import (
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0193_merge_20251119_1614")
+        ("api", "0193_merge_20251119_1601")
     ]
 
     operations = [
