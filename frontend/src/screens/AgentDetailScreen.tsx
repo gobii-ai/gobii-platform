@@ -9,6 +9,8 @@ import {
   ChevronDown,
   CircleHelp,
   Info,
+  Loader2,
+  Lock,
   KeyRound,
   Mail,
   MessageSquare,
@@ -20,6 +22,24 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
+import { updateAgent } from '../api/agents'
+import { HttpError } from '../api/http'
+
+type IntelligenceTierKey = 'standard' | 'premium' | 'max'
+
+type LlmIntelligenceOption = {
+  key: IntelligenceTierKey
+  label: string
+  description: string
+  multiplier: number
+}
+
+type LlmIntelligenceConfig = {
+  options: LlmIntelligenceOption[]
+  canEdit: boolean
+  disabledReason: string | null
+  upgradeUrl: string | null
+}
 
 type PrimaryEndpoint = {
   address: string
@@ -45,6 +65,7 @@ type AgentSummary = {
   pendingTransfer: PendingTransfer | null
   whitelistPolicy: string
   organization: AgentOrganization
+  preferredLlmTier: IntelligenceTierKey
 }
 
 type DailyCreditsInfo = {
@@ -205,6 +226,7 @@ type AgentDetailPageData = {
     organizations: boolean
   }
   reassignment: ReassignmentInfo
+  llmIntelligence: LlmIntelligenceConfig | null
 }
 
 export type AgentDetailScreenProps = {
@@ -261,6 +283,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   )
 
   const [formState, setFormState] = useState<FormState>(initialFormState)
+  const [preferredTier, setPreferredTier] = useState<IntelligenceTierKey>(initialData.agent.preferredLlmTier ?? 'standard')
   const [allowlistState, setAllowlistState] = useState(initialData.allowlist)
   const [allowlistError, setAllowlistError] = useState<string | null>(null)
   const [allowlistBusy, setAllowlistBusy] = useState(false)
@@ -652,6 +675,22 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
                 </div>
               </div>
 
+              {initialData.llmIntelligence && (
+                <>
+                  <div className="sm:col-span-3">
+                    <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Intelligence</span>
+                  </div>
+                  <div className="sm:col-span-9">
+                    <AgentIntelligenceSlider
+                      agentId={initialData.agent.id}
+                      currentTier={preferredTier}
+                      config={initialData.llmIntelligence}
+                      onTierChange={setPreferredTier}
+                    />
+                  </div>
+                </>
+              )}
+
               <div className="sm:col-span-3">
                 <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Dedicated IPs</span>
               </div>
@@ -841,6 +880,108 @@ function DedicatedIpSummary({ dedicatedIps, organizationName, selectedValue, onC
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+type AgentIntelligenceSliderProps = {
+  agentId: string
+  currentTier: IntelligenceTierKey
+  config: LlmIntelligenceConfig
+  onTierChange: (tier: IntelligenceTierKey) => void
+}
+
+function AgentIntelligenceSlider({ agentId, currentTier, config, onTierChange }: AgentIntelligenceSliderProps) {
+  const [pendingTier, setPendingTier] = useState<IntelligenceTierKey | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const activeTier = pendingTier ?? currentTier
+  const isDisabled = !config.canEdit
+
+  const handleSelect = (tier: IntelligenceTierKey) => {
+    if (isDisabled || tier === currentTier || pendingTier) {
+      return
+    }
+    setPendingTier(tier)
+    setError(null)
+    updateAgent(agentId, { preferred_llm_tier: tier })
+      .then(() => {
+        onTierChange(tier)
+      })
+      .catch((err: unknown) => {
+        let message = 'Unable to update intelligence tier. Please try again.'
+        if (err instanceof HttpError) {
+          if (err.body && typeof err.body === 'object') {
+            const detail = (err.body as Record<string, unknown>).detail
+            if (typeof detail === 'string' && detail.trim()) {
+              message = detail
+            }
+          } else if (typeof err.body === 'string' && err.body.trim()) {
+            message = err.body
+          } else if (err.message) {
+            message = err.message
+          }
+        }
+        setError(message)
+      })
+      .finally(() => setPendingTier(null))
+  }
+
+  const renderMultiplier = (value: number) => {
+    if (!Number.isFinite(value)) {
+      return '× credits'
+    }
+    const formatted = value % 1 === 0 ? value.toFixed(0) : value.toFixed(1)
+    return `${formatted}× credits`
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Intelligence</p>
+          {!config.canEdit && config.disabledReason && (
+            <p className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+              <Lock className="h-3.5 w-3.5 text-gray-400" aria-hidden="true" />
+              <span>
+                {config.disabledReason}
+                {config.upgradeUrl && (
+                  <>
+                    {' '}
+                    <a href={config.upgradeUrl} className="text-indigo-600 underline">
+                      Upgrade
+                    </a>
+                  </>
+                )}
+              </span>
+            </p>
+          )}
+        </div>
+        {pendingTier && (
+          <Loader2 className="h-4 w-4 animate-spin text-indigo-600" aria-hidden="true" />
+        )}
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {config.options.map((option) => {
+          const selected = activeTier === option.key
+          return (
+            <button
+              type="button"
+              key={option.key}
+              onClick={() => handleSelect(option.key)}
+              disabled={isDisabled}
+              className={`flex flex-col rounded-lg border p-3 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                selected ? 'border-indigo-500 bg-indigo-50 shadow-sm' : 'border-gray-200 bg-white hover:border-indigo-300'
+              } ${isDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
+            >
+              <span className="text-sm font-semibold text-gray-800">{option.label}</span>
+              <span className="mt-1 text-xs text-gray-500">{option.description}</span>
+              <span className="mt-2 text-xs font-medium text-gray-500">{renderMultiplier(option.multiplier)}</span>
+            </button>
+          )
+        })}
+      </div>
+      {error && <p className="mt-2 text-xs text-rose-600">{error}</p>}
     </div>
   )
 }

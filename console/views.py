@@ -204,6 +204,57 @@ def _coerce_decimal_to_float(value) -> float | None:
         return None
 
 
+def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_url: str | None) -> dict[str, Any]:
+    plan = None
+    if owner is not None:
+        try:
+            if owner_type == 'organization':
+                plan = get_organization_plan(organization)
+            else:
+                plan = get_user_plan(owner)
+        except Exception:
+            plan = None
+
+    allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
+    can_edit = bool(
+        settings.GOBII_PROPRIETARY_MODE
+        and owner is not None
+        and (owner_type == 'organization' or allowed_tier != AgentLLMTier.STANDARD)
+    )
+    disabled_reason = None
+    if not can_edit:
+        disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
+
+    multipliers = get_llm_tier_multipliers()
+    options = [
+        {
+            "key": AgentLLMTier.STANDARD.value,
+            "label": "Standard",
+            "description": "Balanced routing that uses 1× credits.",
+            "multiplier": float(multipliers.get("standard", 1)),
+        },
+        {
+            "key": AgentLLMTier.PREMIUM.value,
+            "label": "Smarter",
+            "description": "Premium routing with improved reasoning.",
+            "multiplier": float(multipliers.get("premium", 1)),
+        },
+        {
+            "key": AgentLLMTier.MAX.value,
+            "label": "Smartest",
+            "description": f"Top-tier models that consume {multipliers.get('max', Decimal('5'))}× credits.",
+            "multiplier": float(multipliers.get("max", 5)),
+        },
+    ]
+
+    return {
+        "options": options,
+        "canEdit": can_edit,
+        "disabledReason": disabled_reason,
+        "upgradeUrl": upgrade_url,
+    }
+
+
 def _resolve_dedicated_ip_pricing(plan):
     plan = plan or {}
     currency = plan.get("currency")
@@ -1848,6 +1899,10 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             except NoReverseMatch:
                 upgrade_url = None
 
+        owner, owner_type, organization = self._resolve_context_owner(context)
+
+        llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
+
         return {
             'agents': [self._serialize_agent_for_frontend(agent) for agent in agents],
             'hasAgents': bool(agents),
@@ -1858,57 +1913,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'createFirstAgentEvent': AnalyticsCTAs.CTA_CREATE_FIRST_AGENT_CLICKED.value,
             'agentsAvailable': capacity['agents_available'],
             'agentsUnlimited': capacity['agents_unlimited'],
-            'llmIntelligence': self._build_llm_intelligence_props(context, upgrade_url),
-        }
-
-    def _build_llm_intelligence_props(self, context: dict[str, Any], upgrade_url: str | None) -> dict[str, Any]:
-        owner, owner_type, organization = self._resolve_context_owner(context)
-        plan = None
-        if owner is not None:
-            try:
-                if owner_type == 'organization':
-                    plan = get_organization_plan(organization)
-                else:
-                    plan = get_user_plan(owner)
-            except Exception:
-                plan = None
-
-        allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
-        can_edit = bool(
-            settings.GOBII_PROPRIETARY_MODE
-            and owner is not None
-            and (owner_type == 'organization' or allowed_tier != AgentLLMTier.STANDARD)
-        )
-        disabled_reason = None
-        if not can_edit:
-            disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
-
-        multipliers = get_llm_tier_multipliers()
-        options = [
-            {
-                "key": AgentLLMTier.STANDARD.value,
-                "label": "Standard",
-                "description": "Balanced routing that uses 1× credits.",
-                "multiplier": float(multipliers.get("standard", 1)),
-            },
-            {
-                "key": AgentLLMTier.PREMIUM.value,
-                "label": "Smarter",
-                "description": "Premium routing with improved reasoning.",
-                "multiplier": float(multipliers.get("premium", 1)),
-            },
-            {
-                "key": AgentLLMTier.MAX.value,
-                "label": "Smartest",
-                "description": f"Top-tier models that consume {multipliers.get('max', Decimal('5'))}× credits.",
-                "multiplier": float(multipliers.get("max", 5)),
-            },
-        ]
-        return {
-            "options": options,
-            "canEdit": can_edit,
-            "disabledReason": disabled_reason,
-            "upgradeUrl": upgrade_url,
+            'llmIntelligence': llm_intelligence,
         }
 
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
@@ -2992,6 +2997,23 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
     def _build_agent_detail_props(self, context: dict[str, Any]) -> dict[str, Any]:
         agent: PersistentAgent = context['agent']
         request = self.request
+        upgrade_url = None
+        if settings.GOBII_PROPRIETARY_MODE:
+            try:
+                upgrade_url = reverse('proprietary:pricing')
+            except NoReverseMatch:
+                upgrade_url = None
+
+        if agent.organization_id:
+            owner = agent.organization
+            owner_type = 'organization'
+            organization = agent.organization
+        else:
+            owner = agent.user
+            owner_type = 'user'
+            organization = None
+
+        llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
 
         def _decimal_to_float(value: Any) -> float | None:
             if value is None:
@@ -3192,6 +3214,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 'createdAtDisplay': _datetime_display(agent.created_at, "F j, Y \a\t g:i A"),
                 'pendingTransfer': pending_transfer_payload,
                 'whitelistPolicy': agent.whitelist_policy,
+                'preferredLlmTier': getattr(agent, 'preferred_llm_tier', AgentLLMTier.STANDARD.value),
                 'organization': (
                     {
                         'id': str(agent.organization_id),
@@ -3232,6 +3255,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'webhooks': webhooks,
             'features': features,
             'reassignment': reassignment,
+            'llmIntelligence': llm_intelligence,
         }
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - Post")
