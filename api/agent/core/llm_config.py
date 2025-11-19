@@ -11,6 +11,7 @@ import os
 import logging
 import random
 from datetime import timedelta
+from enum import Enum
 from typing import Dict, List, Tuple, Any, Optional
 
 from django.apps import apps
@@ -64,16 +65,24 @@ _PREMIUM_PLAN_NAMES = {"pro", "org", PlanNames.SCALE}
 _PREMIUM_ACCOUNT_AGE_DAYS = 30
 
 
-def should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) -> bool:
-    """Return True when the provided agent should prefer premium LLM tiers."""
+class AgentLLMTier(str, Enum):
+    """LLM routing tiers supported by the platform."""
+
+    STANDARD = "standard"
+    PREMIUM = "premium"
+    MAX = "max"
+
+
+def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> AgentLLMTier:
+    """Return the highest LLM tier the provided agent is eligible to use."""
 
     if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
-        return False
+        return AgentLLMTier.STANDARD
     if agent is None:
-        return False
+        return AgentLLMTier.STANDARD
 
     if is_first_loop:
-        return True
+        return AgentLLMTier.PREMIUM
 
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
     plan = None
@@ -89,21 +98,35 @@ def should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) 
     plan_id = str(plan.get("id", "")).lower() if plan else ""
     plan_name = str(plan.get("name", "")).lower() if plan else ""
     if plan_id in _PREMIUM_PLAN_IDS or plan_name in _PREMIUM_PLAN_NAMES:
-        return True
+        return AgentLLMTier.PREMIUM
 
     user = getattr(agent, "user", None)
     date_joined = getattr(user, "date_joined", None) if user is not None else None
     if date_joined is not None:
         try:
             if date_joined >= timezone.now() - timedelta(days=_PREMIUM_ACCOUNT_AGE_DAYS):
-                return True
+                return AgentLLMTier.PREMIUM
         except Exception:
             logger.debug(
                 "Unable to evaluate account age for agent %s",
                 getattr(agent, "id", None),
                 exc_info=True,
             )
-    return False
+
+    # Placeholder: once qualification criteria exist, return AgentLLMTier.MAX where appropriate.
+    return AgentLLMTier.STANDARD
+
+
+def should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) -> bool:
+    """Return True when the provided agent should prefer premium-or-better tiers."""
+
+    return get_agent_llm_tier(agent, is_first_loop=is_first_loop) != AgentLLMTier.STANDARD
+
+
+def should_prioritize_max(agent: Any, *, is_first_loop: bool | None = None) -> bool:
+    """Return True when the provided agent should route to the max tier."""
+
+    return get_agent_llm_tier(agent, is_first_loop=is_first_loop) is AgentLLMTier.MAX
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -492,7 +515,7 @@ def get_llm_config_with_failover(
 
     if token_range is not None:
         agent_instance = agent
-        prefer_premium = False
+        agent_tier = AgentLLMTier.STANDARD
         if getattr(settings, "GOBII_PROPRIETARY_MODE", False):
             if agent_instance is None and agent_id:
                 try:
@@ -507,17 +530,31 @@ def get_llm_config_with_failover(
                         exc_info=True,
                     )
                     agent_instance = None
-            prefer_premium = should_prioritize_premium(
+            agent_tier = get_agent_llm_tier(
                 agent_instance,
                 is_first_loop=is_first_loop,
             )
 
         combined_configs: List[Tuple[str, str, dict]] = []
 
-        if prefer_premium:
+        if agent_tier is AgentLLMTier.MAX:
+            max_tiers = PersistentLLMTier.objects.filter(
+                token_range=token_range,
+                is_max=True,
+            ).order_by("order")
+            max_configs = _collect_failover_configs(
+                max_tiers,
+                token_range_name=token_range.name,
+                tier_label="max",
+            )
+            if max_configs:
+                combined_configs.extend(max_configs)
+
+        if agent_tier in (AgentLLMTier.MAX, AgentLLMTier.PREMIUM):
             premium_tiers = PersistentLLMTier.objects.filter(
                 token_range=token_range,
                 is_premium=True,
+                is_max=False,
             ).order_by("order")
             premium_configs = _collect_failover_configs(
                 premium_tiers,
@@ -530,6 +567,7 @@ def get_llm_config_with_failover(
         standard_tiers = PersistentLLMTier.objects.filter(
             token_range=token_range,
             is_premium=False,
+            is_max=False,
         ).order_by("order")
         standard_configs = _collect_failover_configs(
             standard_tiers,

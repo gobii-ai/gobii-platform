@@ -13,6 +13,7 @@ from django.db.models.expressions import OuterRef, Exists
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
 from api.services.proactive_activation import ProactiveActivationService
+from api.agent.core.llm_config import AgentLLMTier
 from .admin_forms import (
     TestSmsForm,
     GrantPlanCreditsForm,
@@ -678,25 +679,28 @@ class PromptConfigAdmin(admin.ModelAdmin):
     list_display = (
         "standard_prompt_token_budget",
         "premium_prompt_token_budget",
+        "max_prompt_token_budget",
         "standard_message_history_limit",
         "premium_message_history_limit",
+        "max_message_history_limit",
         "standard_tool_call_history_limit",
         "premium_tool_call_history_limit",
+        "max_tool_call_history_limit",
         "updated_at",
     )
     readonly_fields = ("singleton_id", "created_at", "updated_at")
     fieldsets = (
         (
             "Prompt token budgets",
-            {"fields": ("standard_prompt_token_budget", "premium_prompt_token_budget")},
+            {"fields": ("standard_prompt_token_budget", "premium_prompt_token_budget", "max_prompt_token_budget")},
         ),
         (
             "Message history limits",
-            {"fields": ("standard_message_history_limit", "premium_message_history_limit")},
+            {"fields": ("standard_message_history_limit", "premium_message_history_limit", "max_message_history_limit")},
         ),
         (
             "Tool call history limits",
-            {"fields": ("standard_tool_call_history_limit", "premium_tool_call_history_limit")},
+            {"fields": ("standard_tool_call_history_limit", "premium_tool_call_history_limit", "max_tool_call_history_limit")},
         ),
         ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
     )
@@ -3457,13 +3461,52 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
 class PersistentTierEndpointInline(admin.TabularInline):
     model = PersistentTierEndpoint
     extra = 0
-    readonly_fields = ("is_premium",)
+    readonly_fields = ("is_premium", "is_max")
+
+
+PERSISTENT_LLMTIER_CHOICES = tuple((tier.value, tier.value.title()) for tier in AgentLLMTier)
+
+
+class PersistentLLMTierForm(forms.ModelForm):
+
+    tier_type = forms.ChoiceField(
+        choices=PERSISTENT_LLMTIER_CHOICES,
+        label="Tier type",
+        initial=AgentLLMTier.STANDARD.value,
+        help_text="Select whether this tier is standard, premium, or max.",
+    )
+
+    class Meta:
+        model = PersistentLLMTier
+        fields = ("token_range", "order", "description")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.is_bound:
+            self.fields["tier_type"].initial = self._tier_type_from_instance(self.instance)
+
+    @staticmethod
+    def _tier_type_from_instance(instance):
+        if getattr(instance, "is_max", False):
+            return AgentLLMTier.MAX.value
+        if getattr(instance, "is_premium", False):
+            return AgentLLMTier.PREMIUM.value
+        return AgentLLMTier.STANDARD.value
+
+    def save(self, commit=True):
+        tier_type = self.cleaned_data.get("tier_type", AgentLLMTier.STANDARD.value)
+        tier_enum = AgentLLMTier(tier_type)
+        self.instance.is_max = tier_enum == AgentLLMTier.MAX
+        self.instance.is_premium = tier_enum == AgentLLMTier.PREMIUM
+        return super().save(commit=commit)
 
 
 @admin.register(PersistentLLMTier)
 class PersistentLLMTierAdmin(admin.ModelAdmin):
-    list_display = ("token_range", "order", "description", "is_premium")
-    list_filter = ("token_range", "is_premium")
+    form = PersistentLLMTierForm
+    list_display = ("token_range", "order", "description", "is_premium", "is_max")
+    list_filter = ("token_range", "is_premium", "is_max")
+    fields = ("token_range", "order", "description", "tier_type")
     inlines = [PersistentTierEndpointInline]
 
 

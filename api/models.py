@@ -32,6 +32,9 @@ from constants.plans import (
     OrganizationPlanNamesChoices,
 )
 from api.services.prompt_settings import (
+    DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
+    DEFAULT_MAX_PROMPT_TOKEN_BUDGET,
+    DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT,
     DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT,
     DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET,
     DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
@@ -630,6 +633,11 @@ class PromptConfig(models.Model):
         validators=[MinValueValidator(1)],
         help_text="Token budget applied when rendering prompts for premium tier agents.",
     )
+    max_prompt_token_budget = models.PositiveIntegerField(
+        default=DEFAULT_MAX_PROMPT_TOKEN_BUDGET,
+        validators=[MinValueValidator(1)],
+        help_text="Token budget applied when rendering prompts for max tier agents.",
+    )
     standard_message_history_limit = models.PositiveSmallIntegerField(
         default=DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT,
         validators=[MinValueValidator(1)],
@@ -640,6 +648,11 @@ class PromptConfig(models.Model):
         validators=[MinValueValidator(1)],
         help_text="Number of recent messages included for premium tier agents.",
     )
+    max_message_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent messages included for max tier agents.",
+    )
     standard_tool_call_history_limit = models.PositiveSmallIntegerField(
         default=DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
         validators=[MinValueValidator(1)],
@@ -649,6 +662,11 @@ class PromptConfig(models.Model):
         default=DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
         validators=[MinValueValidator(1)],
         help_text="Number of recent tool calls included for premium tier agents.",
+    )
+    max_tool_call_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent tool calls included for max tier agents.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1606,13 +1624,29 @@ class PersistentLLMTier(models.Model):
         help_text="Marks tiers reserved for premium routing.",
         db_index=True,
     )
+    is_max = models.BooleanField(
+        default=False,
+        help_text="Marks tiers reserved for max-tier routing.",
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["token_range__min_tokens", "order"]
-        unique_together = (("token_range", "order", "is_premium"),)
+        unique_together = (("token_range", "order", "is_premium", "is_max"),)
+        constraints = [
+            models.CheckConstraint(
+                check=~Q(is_max=True, is_premium=True),
+                name="persistentllmtier_max_excludes_premium",
+            )
+        ]
 
     def __str__(self):
-        tier_type = "premium" if bool(self.is_premium) else "standard"
+        if self.is_max:
+            tier_type = "max"
+        elif self.is_premium:
+            tier_type = "premium"
+        else:
+            tier_type = "standard"
         return f"{self.token_range.name} {tier_type} tier {self.order}"
 
 
@@ -1629,17 +1663,29 @@ class PersistentTierEndpoint(models.Model):
         editable=False,
         db_index=True,
     )
+    is_max = models.BooleanField(
+        default=False,
+        help_text="Matches the max-tier status of the associated tier.",
+        editable=False,
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["tier__order", "endpoint__key"]
         unique_together = (("tier", "endpoint"),)
 
     def __str__(self):
-        tier_type = "premium" if self.tier.is_premium else "standard"
+        if self.tier.is_max:
+            tier_type = "max"
+        elif self.tier.is_premium:
+            tier_type = "premium"
+        else:
+            tier_type = "standard"
         return f"{self.tier} → {self.endpoint.key} [{tier_type}] (w={self.weight})"
 
     def save(self, *args, **kwargs):
         self.is_premium = bool(self.tier.is_premium)
+        self.is_max = bool(self.tier.is_max)
         super().save(*args, **kwargs)
 
 

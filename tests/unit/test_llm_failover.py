@@ -11,6 +11,7 @@ from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
 from api.agent.core.llm_config import (
+    AgentLLMTier,
     get_llm_config,
     get_llm_config_with_failover,
     PROVIDER_CONFIG,
@@ -223,6 +224,59 @@ class TestLLMFailover(TestCase):
         _, model, params = configs[0]
         self.assertEqual(model, 'openai/gpt-5')
         self.assertEqual(params.get("temperature"), 1.0)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_max_tier_configs_take_priority(self):
+        clear_llm_db()
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+        PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+        PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='openai',
+            display_name='OpenAI',
+            enabled=True,
+            env_var_name='OPENAI_API_KEY',
+            browser_backend='OPENAI',
+        )
+        max_endpoint = PersistentModelEndpoint.objects.create(
+            key='openai_max',
+            provider=provider,
+            enabled=True,
+            litellm_model='openai/gpt-5-max',
+            supports_tool_choice=True,
+        )
+        premium_endpoint = PersistentModelEndpoint.objects.create(
+            key='openai_premium',
+            provider=provider,
+            enabled=True,
+            litellm_model='openai/gpt-4.1',
+            supports_tool_choice=True,
+        )
+        standard_endpoint = PersistentModelEndpoint.objects.create(
+            key='openai_standard',
+            provider=provider,
+            enabled=True,
+            litellm_model='openai/gpt-4o-mini',
+            supports_tool_choice=True,
+        )
+
+        token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
+        max_tier = PersistentLLMTier.objects.create(token_range=token_range, order=1, is_max=True)
+        premium_tier = PersistentLLMTier.objects.create(token_range=token_range, order=2, is_premium=True)
+        standard_tier = PersistentLLMTier.objects.create(token_range=token_range, order=3)
+        PersistentTierEndpoint.objects.create(tier=max_tier, endpoint=max_endpoint, weight=1.0)
+        PersistentTierEndpoint.objects.create(tier=premium_tier, endpoint=premium_endpoint, weight=1.0)
+        PersistentTierEndpoint.objects.create(tier=standard_tier, endpoint=standard_endpoint, weight=1.0)
+
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
+            with mock.patch("api.agent.core.llm_config.get_agent_llm_tier", return_value=AgentLLMTier.MAX):
+                configs = get_llm_config_with_failover(token_count=0)
+
+        endpoint_order = [cfg[0] for cfg in configs]
+        self.assertEqual(endpoint_order, ["openai_max", "openai_premium", "openai_standard"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_premium_tiers_preferred_for_paid_plan(self):

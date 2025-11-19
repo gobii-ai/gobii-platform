@@ -6,12 +6,15 @@ from django.core.cache import cache
 
 DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET = 120000
 DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET = 120000
+DEFAULT_MAX_PROMPT_TOKEN_BUDGET = 120000
 DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT = 15
 DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT = 20
+DEFAULT_MAX_MESSAGE_HISTORY_LIMIT = 20
 DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT = 15
 DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT = 20
+DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT = 20
 
-_CACHE_KEY = "prompt_settings:v1"
+_CACHE_KEY = "prompt_settings:v2"
 _CACHE_TTL_SECONDS = 300
 
 
@@ -19,20 +22,26 @@ _CACHE_TTL_SECONDS = 300
 class PromptSettings:
     standard_prompt_token_budget: int
     premium_prompt_token_budget: int
+    max_prompt_token_budget: int
     standard_message_history_limit: int
     premium_message_history_limit: int
+    max_message_history_limit: int
     standard_tool_call_history_limit: int
     premium_tool_call_history_limit: int
+    max_tool_call_history_limit: int
 
 
 def _serialise(config) -> dict:
     return {
         "standard_prompt_token_budget": config.standard_prompt_token_budget,
         "premium_prompt_token_budget": config.premium_prompt_token_budget,
+        "max_prompt_token_budget": config.max_prompt_token_budget,
         "standard_message_history_limit": config.standard_message_history_limit,
         "premium_message_history_limit": config.premium_message_history_limit,
+        "max_message_history_limit": config.max_message_history_limit,
         "standard_tool_call_history_limit": config.standard_tool_call_history_limit,
         "premium_tool_call_history_limit": config.premium_tool_call_history_limit,
+        "max_tool_call_history_limit": config.max_tool_call_history_limit,
     }
 
 
@@ -53,10 +62,13 @@ def get_prompt_settings() -> PromptSettings:
         config = PromptConfig.objects.create(
             standard_prompt_token_budget=DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET,
             premium_prompt_token_budget=DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET,
+            max_prompt_token_budget=DEFAULT_MAX_PROMPT_TOKEN_BUDGET,
             standard_message_history_limit=DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT,
             premium_message_history_limit=DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT,
+            max_message_history_limit=DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
             standard_tool_call_history_limit=DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
             premium_tool_call_history_limit=DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
+            max_tool_call_history_limit=DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT,
         )
 
     data = _serialise(config)

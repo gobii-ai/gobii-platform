@@ -51,6 +51,7 @@ export type PersistentTier = {
   order: number
   description: string
   is_premium: boolean
+  is_max: boolean
   endpoints: TierEndpoint[]
 }
 
