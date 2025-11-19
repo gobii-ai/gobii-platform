@@ -17,7 +17,7 @@ from ...models import PersistentAgent
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from .mcp_manager import get_mcp_manager
-from .tool_manager import enable_tools, BUILTIN_TOOL_REGISTRY
+from .tool_manager import enable_tools, BUILTIN_TOOL_REGISTRY, get_enabled_tool_limit
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -135,6 +135,8 @@ def _search_with_llm(
                     provider,
                     model,
                 )
+                max_items = get_enabled_tool_limit(agent)
+
                 enable_tools_def = {
                     "type": "function",
                     "function": {
@@ -150,6 +152,7 @@ def _search_with_llm(
                                     "type": "array",
                                     "items": {"type": "string"},
                                     "minItems": 1,
+                                    "maxItems": max_items,
                                     "uniqueItems": True,
                                     "description": "List of full tool names to enable",
                                 }

@@ -14,14 +14,13 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 from django.db.models import F
 
 from ...models import PersistentAgent, PersistentAgentEnabledTool
+from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
+from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
 
 logger = logging.getLogger(__name__)
-
-# Global cap on concurrently enabled tools per agent.
-MAX_ENABLED_TOOLS = 40
 
 SQLITE_TOOL_NAME = "sqlite_batch"
 HTTP_REQUEST_TOOL_NAME = "http_request"
@@ -57,6 +56,38 @@ def _get_manager() -> MCPToolManager:
     if not manager._initialized:
         manager.initialize()
     return manager
+
+
+def _normalize_tool_limit(
+    limit: Optional[int],
+    fallback: int = DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
+) -> int:
+    baseline = max(int(fallback or 1), 1)
+    try:
+        parsed = int(limit) if limit is not None else baseline
+    except (TypeError, ValueError):  # pragma: no cover - defensive fallback
+        parsed = baseline
+    return max(parsed, 1)
+
+
+def get_enabled_tool_limit(agent: Optional[PersistentAgent]) -> int:
+    """Return the configured tool cap for the agent's tier."""
+    fallback = DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
+    if agent is None:
+        return _normalize_tool_limit(None, fallback)
+
+    try:
+        settings = get_prompt_settings()
+        fallback = settings.standard_enabled_tool_limit
+        tier = get_agent_llm_tier(agent)
+        limit_map = {
+            AgentLLMTier.MAX: settings.max_enabled_tool_limit,
+            AgentLLMTier.PREMIUM: settings.premium_enabled_tool_limit,
+        }
+        return _normalize_tool_limit(limit_map.get(tier, fallback), fallback)
+    except Exception:  # pragma: no cover - defensive fallback
+        logger.exception("Failed to resolve enabled tool limit for agent %s", getattr(agent, "id", None))
+        return _normalize_tool_limit(None, fallback)
 
 
 def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalogEntry]:
@@ -95,13 +126,19 @@ def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalog
     return catalog
 
 
-def _evict_surplus_tools(agent: PersistentAgent, exclude: Optional[Sequence[str]] = None) -> List[str]:
+def _evict_surplus_tools(
+    agent: PersistentAgent,
+    exclude: Optional[Sequence[str]] = None,
+    *,
+    limit: Optional[int] = None,
+) -> List[str]:
     """Enforce the enabled tool cap by evicting the least recently used entries."""
+    cap = _normalize_tool_limit(limit if limit is not None else get_enabled_tool_limit(agent))
     total = PersistentAgentEnabledTool.objects.filter(agent=agent).count()
-    if total <= MAX_ENABLED_TOOLS:
+    if total <= cap:
         return []
 
-    overflow = total - MAX_ENABLED_TOOLS
+    overflow = total - cap
     queryset = PersistentAgentEnabledTool.objects.filter(agent=agent)
     if exclude:
         queryset = queryset.exclude(tool_full_name__in=list(exclude))
@@ -123,7 +160,7 @@ def _evict_surplus_tools(agent: PersistentAgent, exclude: Optional[Sequence[str]
         "Evicted %d tool(s) for agent %s due to %d-tool cap: %s",
         len(evicted_names),
         agent.id,
-        MAX_ENABLED_TOOLS,
+        cap,
         ", ".join(evicted_names),
     )
     return evicted_names
@@ -158,9 +195,10 @@ def _apply_tool_metadata(row: PersistentAgentEnabledTool, entry: Optional[ToolCa
 
 
 def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str, Any]:
-    """Enable multiple tools for an agent, respecting the global cap."""
+    """Enable multiple tools for an agent, respecting the tiered cap."""
     catalog = _build_available_tool_index(agent)
     manager = _get_manager()
+    limit = get_enabled_tool_limit(agent)
 
     requested: List[str] = []
     seen: Set[str] = set()
@@ -206,7 +244,7 @@ def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str,
             already_enabled.append(name)
 
     if enabled or already_enabled:
-        evicted = _evict_surplus_tools(agent)
+        evicted = _evict_surplus_tools(agent, limit=limit)
 
     parts: List[str] = []
     if enabled:
@@ -232,6 +270,7 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     """Enable a single MCP tool for the agent (with LRU eviction if needed)."""
     catalog = _build_available_tool_index(agent)
     manager = _get_manager()
+    limit = get_enabled_tool_limit(agent)
 
     if manager.is_tool_blacklisted(tool_name):
         return {
@@ -281,12 +320,12 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     if metadata_updates:
         row.save(update_fields=list(dict.fromkeys(metadata_updates)))
 
-    evicted = _evict_surplus_tools(agent, exclude=[tool_name])
+    evicted = _evict_surplus_tools(agent, exclude=[tool_name], limit=limit)
     disabled_tool = evicted[0] if evicted else None
 
     message = f"Successfully enabled tool '{tool_name}'"
     if disabled_tool:
-        message += f" (disabled '{disabled_tool}' due to {MAX_ENABLED_TOOLS} tool limit)"
+        message += f" (disabled '{disabled_tool}' due to {limit} tool limit)"
 
     return {
         "status": "success",
