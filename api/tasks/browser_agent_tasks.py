@@ -35,7 +35,6 @@ from ..models import (
     AgentFsNode, PersistentAgent,
 )
 from ..services.task_webhooks import trigger_task_webhook
-from ..llm.utils import normalize_model_name
 from ..openrouter import DEFAULT_API_BASE, get_attribution_headers
 from util import EphemeralXvfb, should_use_ephemeral_xvfb
 
@@ -367,14 +366,19 @@ def _resolve_browser_provider_priority_from_db(*, prefer_premium: bool = False):
                         api_key = 'sk-noauth'
                     if not api_key:
                         continue
-                    effective_model = normalize_model_name(provider, endpoint.browser_model, api_base=endpoint.browser_base_url or None)
+                    raw_model = (endpoint.browser_model or "").strip()
+                    base_url = endpoint.browser_base_url or ""
+                    if provider.key == "openrouter" and not base_url:
+                        base_url = DEFAULT_API_BASE
+                    if not raw_model:
+                        continue
 
                     entries.append({
                         'provider_key': provider.key,
                         'endpoint_key': endpoint.key,
                         'weight': float(te.weight),
-                        'browser_model': effective_model,
-                        'base_url': endpoint.browser_base_url or '',
+                        'browser_model': raw_model,
+                        'base_url': base_url,
                         'max_output_tokens': endpoint.max_output_tokens,
                         'backend': provider.browser_backend,
                         'supports_vision': bool(getattr(endpoint, 'supports_vision', False)),
