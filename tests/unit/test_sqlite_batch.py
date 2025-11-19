@@ -264,6 +264,19 @@ class SqliteBatchToolTests(TestCase):
                 any(err["error"].get("at_original_index") == 0 for err in errors if "error" in err)
             )
 
+    def test_semicolon_only_operation_is_invalid(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            payload = {
+                "operations": [
+                    "CREATE TABLE t(a INTEGER)",
+                    ";",
+                ]
+            }
+            out = execute_sqlite_batch(self.agent, payload)
+            self.assertEqual(out.get("status"), "error")
+            errors = [res for res in out.get("results", []) if not res.get("ok")]
+            self.assertTrue(any(err["error"]["code"] == "invalid_input" for err in errors))
+
     def test_all_insert_batch_sets_auto_sleep_flag(self):
         with self._with_temp_db() as (db_path, token, tmp):
             execute_sqlite_batch(self.agent, {"operations": ["CREATE TABLE t(a INTEGER)"]})

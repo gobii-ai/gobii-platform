@@ -98,8 +98,8 @@ def _is_transaction_control(sql: str) -> bool:
 def _split_sql_statements(sql: str) -> List[str]:
     """Split SQL on top-level semicolons while respecting comments/literals."""
 
-    if not sql:
-        return [""]
+    if not sql or not sql.strip():
+        return []
 
     statements: List[str] = []
     buf: List[str] = []
@@ -218,7 +218,7 @@ def _split_sql_statements(sql: str) -> List[str]:
     if tail:
         statements.append(tail)
 
-    return statements or [sql]
+    return statements
 
 
 def _has_multiple_statements(sql: str) -> bool:
@@ -328,6 +328,9 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     for original_index, raw_sql in enumerate(ops):
         sanitized = _sanitize_sql(raw_sql)
         statements = _split_sql_statements(sanitized)
+        if not statements:
+            # Force downstream validation to flag empty statements explicitly
+            statements = [""]
         if len(statements) > 1:
             split_warnings.append(
                 f"Operation {original_index} contained multiple statements. Auto-split into {len(statements)} entries; send separate operations to save credits."
