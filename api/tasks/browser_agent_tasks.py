@@ -1156,6 +1156,7 @@ def _execute_agent_with_failover(
     output_schema: Optional[dict] = None,
     browser_use_agent_id: Optional[str] = None,
     persistent_agent_id: Optional[str] = None,
+    is_eval: bool = False,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """
     Execute the agent with tiered, weighted load-balancing and fail-over.
@@ -1315,6 +1316,7 @@ def _execute_agent_with_failover(
                         provider_backend_override=backend,
                         supports_vision=vision_enabled,
                         override_max_output_tokens=max_output_tokens,
+                        is_eval=is_eval,
                     )
                 )
 
@@ -1533,20 +1535,17 @@ def _process_browser_use_task_core(
                         is_eval = True
                         agent_span.set_attribute("execution_environment", "eval")
 
-                raw_result, token_usage = asyncio.run(
-                    _run_agent(
-                        task_input=task_obj.prompt,
-                        llm_api_key=llm_api_key,
-                        task_id=str(task_obj.id),
-                        proxy_server=proxy_server,
-                        controller=controller,
-                        sensitive_data=sensitive_data,
-                        provider_priority=provider_priority,
-                        output_schema=task_obj.output_schema,
-                        browser_use_agent_id=browser_use_agent_id,
-                        persistent_agent_id=persistent_agent_id,
-                        is_eval=is_eval,
-                    )
+                raw_result, token_usage = _execute_agent_with_failover(
+                    task_input=task_obj.prompt,
+                    task_id=str(task_obj.id),
+                    proxy_server=proxy_server,
+                    controller=controller,
+                    sensitive_data=sensitive_data,
+                    provider_priority=provider_priority,
+                    output_schema=task_obj.output_schema,
+                    browser_use_agent_id=browser_use_agent_id,
+                    persistent_agent_id=persistent_agent_id,
+                    is_eval=is_eval,
                 )
 
                 safe_result = _jsonify(raw_result)

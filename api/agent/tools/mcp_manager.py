@@ -679,6 +679,24 @@ class MCPToolManager:
     def _register_server(self, server: MCPServerRuntime):
         """Register an MCP server and cache its tools."""
 
+        if server.name == "pipedream":
+            # Check Pipedream credentials before attempting registration
+            token = self._get_pipedream_access_token()
+            if not token:
+                if not self._pd_missing_credentials_logged:
+                    logger.warning("Skipping Pipedream MCP registration: credentials missing.")
+                    self._pd_missing_credentials_logged = True
+                return
+
+        if server.name == "brightdata":
+            # Check BrightData credentials before attempting registration
+            # Assuming the env var name is BRIGHTDATA_API_KEY or similar based on the error
+            # The server runtime env might have it, or process env.
+            # Checking process env as a safe default if runtime.env is unreliable for this check.
+            if not os.environ.get("BRIGHTDATA_API_KEY") and not server.env.get("API_TOKEN"):
+                 logger.warning("Skipping BrightData MCP registration: API_TOKEN/BRIGHTDATA_API_KEY missing.")
+                 return
+
         if server.url:
             from fastmcp.client.transports import StreamableHttpTransport
 
