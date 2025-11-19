@@ -712,12 +712,11 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
 
       <IntegrationsSection
         csrfToken={initialData.csrfToken}
-        urls={initialData.urls}
         mcpServers={initialData.mcpServers}
         peerLinks={initialData.peerLinks}
       />
 
-      <WebhooksSection webhooks={initialData.webhooks} csrfToken={initialData.csrfToken} detailUrl={initialData.urls.detail} onEdit={openWebhookModal} />
+      <WebhooksSection webhooks={initialData.webhooks} csrfToken={initialData.csrfToken} onEdit={openWebhookModal} />
 
       <ActionsSection
         csrfToken={initialData.csrfToken}
@@ -1226,7 +1225,6 @@ function AllowlistDirectionFlags({ allowInbound, allowOutbound, labelColor }: Al
 
 type IntegrationsSectionProps = {
   csrfToken: string
-  urls: AgentDetailPageData['urls']
   mcpServers: McpServersInfo
   peerLinks: PeerLinksInfo
 }
@@ -1482,7 +1480,6 @@ function IntegrationsSection({ csrfToken, mcpServers, peerLinks }: IntegrationsS
 type WebhooksSectionProps = {
   webhooks: AgentWebhook[]
   csrfToken: string
-  detailUrl: string
   onEdit: (mode: 'create' | 'edit', webhook?: AgentWebhook | null) => void
 }
 
