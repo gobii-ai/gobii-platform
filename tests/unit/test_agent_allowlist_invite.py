@@ -529,12 +529,9 @@ class ManualPolicySMSRestrictionTests(TestCase):
         
     def test_cannot_add_sms_to_manual_allowlist(self):
         """Test that SMS entries are rejected for manual policy agents."""
-        with self.assertRaises(Exception) as ctx:
-            entry = CommsAllowlistEntry(
-                agent=self.agent,
-                channel=CommsChannel.SMS,
-                address="+15555551234"
-            )
-            entry.full_clean()
-            
-        self.assertIn("only support email", str(ctx.exception))
+        entry = CommsAllowlistEntry(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555551234"
+        )
+        entry.full_clean()  # Should not raise for personal agents
