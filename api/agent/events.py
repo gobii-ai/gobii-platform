@@ -18,6 +18,9 @@ class AgentEventType(str, Enum):
 def get_agent_event_channel(agent_id: str) -> str:
     return f"agent:events:{agent_id}"
 
+def get_agent_event_stream(agent_id: str) -> str:
+    return f"agent:events:{agent_id}:stream"
+
 def publish_agent_event(
     agent_id: str, 
     event_type: AgentEventType | str, 
@@ -37,8 +40,27 @@ def publish_agent_event(
         }
         
         redis = get_redis_client()
-        # Use publish for fire-and-forget event bus
-        redis.publish(channel, json.dumps(message))
+        encoded = json.dumps(message)
+
+        # Publish for fire-and-forget listeners
+        redis.publish(channel, encoded)
+
+        # Also append to a short stream buffer so late listeners can catch up without polling
+        try:
+            redis.xadd(
+                get_agent_event_stream(agent_id),
+                {"data": encoded},
+                maxlen=500,
+                approximate=True,
+            )
+        except Exception:
+            # Stream persistence is best-effort; do not block agent execution
+            logger.debug(
+                "Failed to append agent event %s to stream for %s",
+                event_type,
+                agent_id,
+                exc_info=True,
+            )
         
     except Exception as e:
         # Never block agent execution due to metric/event publishing failures

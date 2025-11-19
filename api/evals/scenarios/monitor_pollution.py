@@ -1,3 +1,5 @@
+import time
+
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
@@ -30,24 +32,48 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
             "Also, update your charter and set a reasonable schedule to check this regularly."
         )
 
-        # Inject message and trigger processing
-        msg = self.inject_message(agent_id, instruction, trigger_processing=True)
-        
-        # Wait for the initial processing to complete (which should spawn the web task)
-        self.wait_for_event(agent_id, AgentEventType.PROCESSING_COMPLETE)
-        
-        # Now we need to wait for the web task to complete. 
-        # The agent will go idle after spawning the task, then wake up again when the task completes.
-        # So we wait for a second PROCESSING_COMPLETE event.
-        # We use a reasonable timeout to allow for browser startup and navigation
-        event = self.wait_for_event(agent_id, AgentEventType.PROCESSING_COMPLETE, timeout=180)
-        
-        if not event:
-             self.record_task_result(
-                run_id, 1, EvalRunTask.Status.FAILED,
-                observed_summary="Timed out waiting for agent to complete task processing."
-            )
-             return
+        # Inject message and capture events using a listener that subscribes before any processing starts
+        msg = None
+        with self.agent_event_listener(agent_id, start_time=time.time()) as events:
+            msg = self.inject_message(agent_id, instruction, trigger_processing=True)
+
+            first_event = events.wait_for(AgentEventType.PROCESSING_COMPLETE, timeout=60)
+            if not first_event:
+                self.record_task_result(
+                    run_id,
+                    1,
+                    EvalRunTask.Status.FAILED,
+                    observed_summary="Timed out waiting for initial agent processing to complete.",
+                )
+                return
+
+            # If the agent spawned background work, wait for it to drain to idle
+            outstanding = int((first_event.get("payload") or {}).get("outstanding_tasks", 0) or 0)
+            completion_event = first_event
+            if outstanding:
+                idle_wait_start = time.time()
+                remaining = 180
+                while remaining > 0:
+                    completion_event = events.wait_for(
+                        AgentEventType.PROCESSING_COMPLETE,
+                        timeout=remaining,
+                    )
+                    if not completion_event:
+                        break
+                    outstanding = int((completion_event.get("payload") or {}).get("outstanding_tasks", 0) or 0)
+                    if outstanding == 0:
+                        break
+                    remaining = max(0, 180 - int(time.time() - idle_wait_start))
+
+            final_outstanding = int((completion_event.get("payload") or {}).get("outstanding_tasks", 0) or 0) if completion_event else None
+            if not completion_event or final_outstanding != 0:
+                self.record_task_result(
+                    run_id,
+                    1,
+                    EvalRunTask.Status.FAILED,
+                    observed_summary="Timed out waiting for agent to finish background web task.",
+                )
+                return
 
         self.record_task_result(
             run_id, 1, EvalRunTask.Status.PASSED,
