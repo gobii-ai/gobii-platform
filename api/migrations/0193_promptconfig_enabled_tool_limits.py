@@ -11,8 +11,7 @@ from api.services.prompt_settings import (
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0191_add_max_llm_tier"),
-        ("api", "0191_persistentagent_proactive_sched_idx"),
+        ("api", "0192_merge_20251119_1544")
     ]
 
     operations = [
