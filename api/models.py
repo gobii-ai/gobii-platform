@@ -1492,7 +1492,7 @@ class DedicatedProxyAllocation(models.Model):
             raise ValidationError({"owner": "Dedicated proxies must be linked to exactly one owner."})
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        self.full_clean(validate_unique=False, validate_constraints=False)
         return super().save(*args, **kwargs)
 
     def release(self):
@@ -2256,7 +2256,7 @@ class OrganizationBilling(models.Model):
         return max(self.purchased_seats - self.seats_reserved, 0)
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        self.full_clean(validate_unique=False, validate_constraints=False)
         return super().save(*args, **kwargs)
 
     class Meta:
@@ -4479,7 +4479,7 @@ class CommsAllowlistEntry(models.Model):
                 })
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        self.full_clean(validate_unique=False, validate_constraints=False)
         return super().save(*args, **kwargs)
 
     def __str__(self):
@@ -4581,7 +4581,7 @@ class AgentAllowlistInvite(models.Model):
                 })
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        self.full_clean(validate_unique=False, validate_constraints=False)
         return super().save(*args, **kwargs)
     
     def is_expired(self):
