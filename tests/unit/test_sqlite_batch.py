@@ -217,6 +217,53 @@ class SqliteBatchToolTests(TestCase):
             warning_texts = out.get("warnings") or []
             self.assertTrue(any("auto-split" in w.lower() for w in warning_texts))
 
+    def test_curly_quotes_are_sanitized(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            ops = [
+                "CREATE TABLE t(val TEXT)",
+                "INSERT INTO t(val) VALUES (‘alpha’)",
+                "INSERT INTO t(val) VALUES (‘It’s done’)",
+                "SELECT val FROM t ORDER BY val",
+            ]
+            out = execute_sqlite_batch(self.agent, {"operations": ops})
+            self.assertEqual(out.get("status"), "ok")
+            rows = [row["val"] for row in out["results"][-1]["rows"]]
+            self.assertCountEqual(rows, ["alpha", "It's done"])
+
+    def test_create_trigger_statement_not_split(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            ops = [
+                "CREATE TABLE t(id INTEGER PRIMARY KEY)",
+                "CREATE TABLE log(entry INTEGER)",
+                (
+                    "CREATE TRIGGER trig AFTER INSERT ON t BEGIN "
+                    "INSERT INTO log(entry) VALUES (NEW.id); "
+                    "INSERT INTO log(entry) VALUES (NEW.id + 1); "
+                    "END;"
+                ),
+                "INSERT INTO t(id) VALUES (5)",
+                "SELECT entry FROM log ORDER BY entry",
+            ]
+            out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
+            self.assertEqual(out.get("status"), "ok")
+            rows = out["results"][-1]["rows"]
+            self.assertEqual(rows, [{"entry": 5}, {"entry": 6}])
+
+    def test_auto_split_errors_include_original_index(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            payload = {
+                "operations": [
+                    "CREATE TABLE t(a INTEGER); INSERT INTO missing_table VALUES (1)"
+                ]
+            }
+            out = execute_sqlite_batch(self.agent, payload)
+            self.assertEqual(out.get("status"), "error")
+            errors = [res for res in out.get("results", []) if not res.get("ok")]
+            self.assertTrue(errors)
+            self.assertTrue(
+                any(err["error"].get("at_original_index") == 0 for err in errors if "error" in err)
+            )
+
     def test_all_insert_batch_sets_auto_sleep_flag(self):
         with self._with_temp_db() as (db_path, token, tmp):
             execute_sqlite_batch(self.agent, {"operations": ["CREATE TABLE t(a INTEGER)"]})
