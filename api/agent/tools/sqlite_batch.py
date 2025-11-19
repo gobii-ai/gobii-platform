@@ -8,7 +8,6 @@ per-operation results, and resilient error handling.
 import json
 import logging
 import os
-import re
 import sqlite3
 import time
 from typing import Any, Dict, List, Optional
@@ -20,6 +19,114 @@ from .sqlite_state import _sqlite_db_path_var  # type: ignore
 from .sqlite_helpers import is_write_statement
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_sql(sql: str) -> str:
+    """Normalise common quote variants so downstream parsing/execution is stable."""
+
+    s = sql or ""
+    # Normalise typographic quotes
+    s = s.replace("“", '"').replace("”", '"')
+    # Replace fancy apostrophes with doubled single quotes for SQL string literals
+    s = s.replace("’", "''").replace("‘", "'")
+    # Convert backslash-escaped single quotes to standard doubled quotes for SQLite
+    s = s.replace("\\'", "''")
+
+    return s
+
+
+def _is_transaction_control(sql: str) -> bool:
+    if not sql:
+        return False
+
+    stripped = sql.lstrip()
+    upper = stripped.upper()
+    for keyword in ("BEGIN", "COMMIT", "ROLLBACK"):
+        if upper.startswith(keyword):
+            next_idx = len(keyword)
+            if len(upper) == next_idx or not upper[next_idx].isalpha():
+                return True
+    return False
+
+
+def _has_multiple_statements(sql: str) -> bool:
+    """Heuristic: flag multiple statements if a semicolon appears outside quotes."""
+
+    if not sql:
+        return False
+
+    in_single = False
+    in_double = False
+    i = 0
+    length = len(sql)
+    while i < length:
+        ch = sql[i]
+        if ch == "'" and not in_double:
+            if in_single and i + 1 < length and sql[i + 1] == "'":
+                i += 2
+                continue
+            in_single = not in_single
+            i += 1
+            continue
+        if ch == '"' and not in_single:
+            if in_double and i + 1 < length and sql[i + 1] == '"':
+                i += 2
+                continue
+            in_double = not in_double
+            i += 1
+            continue
+        if ch == ";" and not in_single and not in_double:
+            if sql[i + 1 :].strip():
+                return True
+        i += 1
+    return False
+
+
+def _split_sql_statements(sql: str) -> List[str]:
+    """Split a SQL string on top-level semicolons without attempting a full parse."""
+
+    statements: List[str] = []
+    buf: List[str] = []
+    in_single = False
+    in_double = False
+    i = 0
+    length = len(sql)
+
+    while i < length:
+        ch = sql[i]
+        if ch == "'" and not in_double:
+            if in_single and i + 1 < length and sql[i + 1] == "'":
+                buf.append("''")
+                i += 2
+                continue
+            in_single = not in_single
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == '"' and not in_single:
+            if in_double and i + 1 < length and sql[i + 1] == '"':
+                buf.append('""')
+                i += 2
+                continue
+            in_double = not in_double
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == ";" and not in_single and not in_double:
+            statement = "".join(buf).strip()
+            if statement:
+                statements.append(statement)
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+
+    return statements or [sql]
 
 def _classify_sqlite_error(exc: Exception) -> str:
     msg = str(exc).lower()
@@ -76,7 +183,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     Expected params:
         - operations: list[str] (SQL statements executed in order)
-        - mode: 'atomic' | 'per_statement' (default 'atomic')
+        - mode: 'atomic' | 'per_statement' (default 'per_statement')
     """
 
     ops_raw = params.get("operations")
@@ -91,7 +198,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         )
         return {"status": "error", "message": "'operations' must be a non-empty array of SQL strings."}
 
-    mode = params.get("mode", "atomic")
+    mode = params.get("mode", "per_statement")
     if mode not in ("atomic", "per_statement"):
         return {"status": "error", "message": f"Invalid mode '{mode}'. Must be 'atomic' or 'per_statement'."}
 
@@ -116,6 +223,30 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     if not db_path:
         return {"status": "error", "message": "SQLite DB path unavailable"}
 
+    # Expand operations so each entry contains at most one SQL statement
+    expanded_ops: List[str] = []
+    expanded_display_ops: List[str] = []
+    split_warnings: List[str] = []
+    for original_index, raw_sql in enumerate(ops):
+        sanitized = _sanitize_sql(raw_sql)
+        statements = [sanitized]
+        if _has_multiple_statements(sanitized):
+            split_statements = _split_sql_statements(sanitized)
+            if len(split_statements) > 1:
+                statements = split_statements
+                split_warnings.append(
+                    f"Operation {original_index} contained multiple statements. Auto-split into {len(statements)} entries; send separate operations to save credits."
+                )
+        for stmt in statements:
+            expanded_ops.append(stmt)
+            if len(statements) == 1:
+                expanded_display_ops.append(raw_sql)
+            else:
+                expanded_display_ops.append(stmt)
+
+    ops = expanded_ops
+    op_display_strings = expanded_display_ops
+
     results: List[Dict[str, Any]] = []
     total_changes = 0
     any_truncated = False
@@ -128,7 +259,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     try:
         preview_ops = [
             (sql.strip()[:160] + ("..." if len(sql.strip()) > 160 else ""))
-            for sql in ops[:10]
+            for sql in op_display_strings[:10]
         ]
         logger.info(
             "Agent %s executing sqlite_batch: %s ops, mode=%s, preview=%s",
@@ -136,35 +267,6 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         )
     except Exception:
         logger.info("Agent %s executing sqlite_batch: %s ops, mode=%s", agent.id, len(ops), mode)
-
-    # Helper: best-effort SQL sanitation to mitigate common errors without attempting a full SQL parse
-    def _sanitize_sql(sql: str) -> str:
-        s = sql
-        # Normalise typographic quotes
-        s = s.replace("“", '"').replace("”", '"')
-        # Replace fancy apostrophes with doubled single quotes for SQL string literals
-        s = s.replace("’", "''")
-        # Convert backslash-escaped single quotes to standard doubled quotes for SQLite
-        s = s.replace("\\'", "''")
-
-        return s
-
-    def _is_transaction_control(sql: str) -> bool:
-        return bool(re.match(r"^\s*(BEGIN|COMMIT|ROLLBACK)\b", sql, re.IGNORECASE))
-
-    def _has_multiple_statements(sql: str) -> bool:
-        """Heuristic: flag multiple statements if there is a semicolon outside quotes."""
-        in_single = False
-        in_double = False
-        for i, ch in enumerate(sql):
-            if ch == "'" and not in_double:
-                in_single = not in_single
-            elif ch == '"' and not in_single:
-                in_double = not in_double
-            elif ch == ";" and not in_single and not in_double:
-                if sql[i + 1:].strip():
-                    return True
-        return False
 
     # connect with busy timeout (seconds)
     conn: Optional[sqlite3.Connection] = None
@@ -226,10 +328,11 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             return False  # signal to continue to next operation
 
         for idx, sql in enumerate(ops):
+            display_sql = op_display_strings[idx]
             if not isinstance(sql, str) or not sql.strip():
                 results.append({
                     "ok": False,
-                    "error": {"code": "invalid_input", "message": "Operation must be a non-empty SQL string", "at_index": idx},
+                    "error": {"code": "invalid_input", "message": "Operation must be a non-empty SQL string", "at_sql": display_sql, "at_index": idx},
                 })
                 failed += 1
                 only_write_ops = False
@@ -241,15 +344,14 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
             t0 = time.monotonic()
             try:
-                # Preflight checks and best-effort sanitisation
-                sql_sanitized = _sanitize_sql(sql)
+                sql_sanitized = sql
                 only_write_ops = only_write_ops and is_write_statement(sql_sanitized)
                 if _is_transaction_control(sql_sanitized):
                     only_write_ops = False
                     should_break = _handle_preflight_error(
                         "transaction_control_disallowed",
                         "Remove explicit BEGIN/COMMIT/ROLLBACK. The tool manages transactions automatically in atomic mode.",
-                        sql,
+                        display_sql,
                         idx,
                     )
                     if should_break:
@@ -262,7 +364,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     should_break = _handle_preflight_error(
                         "multiple_statements",
                         "Provide exactly one SQL statement per operation. Split statements into separate items in the operations array.",
-                        sql,
+                        display_sql,
                         idx,
                     )
                     if should_break:
@@ -320,7 +422,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 elapsed = int((time.monotonic() - t0) * 1000)
                 results.append({
                     "ok": False,
-                    "error": {"code": code, "message": f"{e}", "at_sql": sql, "at_index": idx},
+                    "error": {"code": code, "message": f"{e}", "at_sql": display_sql, "at_index": idx},
                     "time_ms": elapsed,
                 })
                 failed += 1
@@ -352,6 +454,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         db_size_mb = _get_db_size_mb(db_path)
         if db_size_mb > 50:
             warnings.append("WARNING: DB SIZE EXCEEDS 50MB. CONSIDER CLEANUP/VACUUM TO AVOID WIPE AT 100MB.")
+        warnings.extend(split_warnings)
 
         status = "ok" if failed == 0 else "error"
         response = {
@@ -382,21 +485,12 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Use this tool only when you need durable structured data, complex math, or set-based queries. "
-                "For simple math, checklists, or one-off comparisons, reason directly without SQL. "
-                "If you create tables, keep them small, focused, and pruned; the database must stay under 50 MB. "
-                "Store only information you will reuse; do not treat SQLite as a scratchpad. "
-                "Use SQLite deliberately for medium and long-term memory, not transient values. "
-                "Execute one or more SQLite operations in order, including DDL and queries. "
-                "Provide exactly ONE SQL statement per item in 'operations' (no semicolon-chaining). "
-                "Do NOT include BEGIN/COMMIT/ROLLBACK; the tool manages transactions for mode='atomic'. "
-                "Escape single quotes by doubling them (e.g., 'What''s new'); avoid backslash escaping. "
-                f"Each SELECT will return at most {DEFAULT_SELECT_ROW_LIMIT} rows by default. "
-                f"If you truly need more, set 'row_limit' (max {MAX_SELECT_ROW_LIMIT}) explicitly and page through results. "
-                "Prefer 'INSERT OR IGNORE' or 'INSERT ... ON CONFLICT(col) DO UPDATE ...' to avoid UNIQUE violations. "
-                "Use mode='atomic' for dependent ops (all-or-nothing) or 'per_statement' to continue past individual errors. "
-                "For a single query, pass a single-item 'operations' array. "
-                "Call enable_database if you need to enable this tool for the current agent."
+                "Durable SQLite memory for structured data. \n"
+                "Rules:\n"
+                "- Provide exactly one SQL statement per entry in 'operations'. We can auto-split semicolon chains, but it costs more tokens.\n"
+                "- DO NOT INCLUDE BEGIN/COMMIT/ROLLBACK. Default mode is 'per_statement' so later statements can run; switch to 'atomic' when ops must succeed together.\n"
+                "- Escape single quotes by doubling them (e.g., 'What''s new'). Keep tables tight and prune data so the DB stays under 50 MB.\n"
+                f"- Each SELECT returns at most {DEFAULT_SELECT_ROW_LIMIT} rows unless you raise 'row_limit' (max {MAX_SELECT_ROW_LIMIT}). Page through large results yourself.\n"
             ),
             "parameters": {
                 "type": "object",
@@ -407,7 +501,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                         "minItems": 1,
                         "description": "List of SQL statements to execute in order.",
                     },
-                    "mode": {"type": "string", "enum": ["atomic", "per_statement"], "default": "atomic"},
+                    "mode": {"type": "string", "enum": ["atomic", "per_statement"], "default": "per_statement"},
                     "row_limit": {
                         "type": "integer",
                         "minimum": 1,

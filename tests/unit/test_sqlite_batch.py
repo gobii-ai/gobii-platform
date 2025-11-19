@@ -200,6 +200,23 @@ class SqliteBatchToolTests(TestCase):
             rows = out["results"][-1]["rows"]
             self.assertEqual(rows[0]["a"], 7)
 
+    def test_auto_split_multiple_statements(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            payload = {
+                "operations": [
+                    "CREATE TABLE t(a INTEGER); INSERT INTO t(a) VALUES (1); INSERT INTO t(a) VALUES (2); SELECT COUNT(*) as c FROM t"
+                ],
+                "mode": "atomic",
+            }
+            out = execute_sqlite_batch(self.agent, payload)
+            self.assertEqual(out.get("status"), "ok")
+            results = out.get("results", [])
+            # Expect four entries after auto-split
+            self.assertEqual(len(results), 4)
+            self.assertEqual(results[-1]["rows"][0]["c"], 2)
+            warning_texts = out.get("warnings") or []
+            self.assertTrue(any("auto-split" in w.lower() for w in warning_texts))
+
     def test_all_insert_batch_sets_auto_sleep_flag(self):
         with self._with_temp_db() as (db_path, token, tmp):
             execute_sqlite_batch(self.agent, {"operations": ["CREATE TABLE t(a INTEGER)"]})

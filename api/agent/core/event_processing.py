@@ -2466,14 +2466,20 @@ def _build_prompt_context(
     # Browser tasks - each task gets its own section for better token management
     _build_browser_tasks_sections(agent, variable_group)
     
-    # SQLite schema - can be truncated aggressively if needed
-    sqlite_schema_block = get_sqlite_schema_prompt()
-    variable_group.section_text(
-        "sqlite_schema",
-        sqlite_schema_block,
-        weight=1,
-        shrinker="hmt"
-    )
+    # SQLite schema - include only when sqlite_batch is enabled to save tokens
+    sqlite_enabled = PersistentAgentEnabledTool.objects.filter(
+        agent=agent,
+        tool_full_name=SQLITE_TOOL_NAME,
+    ).exists()
+    sqlite_schema_block = ""
+    if sqlite_enabled:
+        sqlite_schema_block = get_sqlite_schema_prompt()
+        variable_group.section_text(
+            "sqlite_schema",
+            sqlite_schema_block,
+            weight=1,
+            shrinker="hmt"
+        )
 
     # Agent filesystem listing - simple list of accessible files
     files_listing_block = get_agent_filesystem_prompt(agent)
@@ -2485,15 +2491,20 @@ def _build_prompt_context(
     )
 
     # Contextual note based on whether a schema already exists
-    if any(line.startswith("Table ") for line in sqlite_schema_block.splitlines()):
+    if sqlite_enabled and any(line.startswith("Table ") for line in sqlite_schema_block.splitlines()):
         sqlite_note = (
-            "This is your current SQLite schema. Call enable_database to enable the sqlite_batch tool whenever you need durable structured memory, complex analysis, or set-based queries. "
+            "This is your current SQLite schema. Use sqlite_batch whenever you need durable structured memory, complex analysis, or set-based queries. "
             "You can execute DDL or other SQL statements at any time to modify and evolve the schema so it best supports your ongoing task or charter."
+        )
+    elif sqlite_enabled:
+        sqlite_note = (
+            "SQLite is enabled but no user tables exist yet. Use sqlite_batch to create whatever schema best supports your current task or charter."
         )
     else:
         sqlite_note = (
-            "Call enable_database to enable the sqlite_batch tool whenever you need durable structured memory, complex analysis, or set-based queries. "
-            "You can execute DDL or other SQL statements at any time to create and evolve a SQLite database that will help with your current task or charter."
+            "Call enable_database to enable sqlite_batch ONLY if you need durable structured memory, complex analysis, or set-based queries. "
+            "Reason inline for quick math, short lists, or one-off comparisons. "
+            "Once enabled, you can create and evolve a SQLite schema to support your objectives."
         )
     variable_group.section_text(
         "sqlite_note",
