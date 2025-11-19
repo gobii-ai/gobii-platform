@@ -593,6 +593,7 @@ async def _run_agent(
     provider_backend_override: Optional[str] = None,
     override_max_output_tokens: Optional[int] = None,
     supports_vision: bool = True,
+    is_eval: bool = False,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """Execute the Browser‑Use agent for a single provider."""
     if baggage:
@@ -750,9 +751,13 @@ async def _run_agent(
                     logger.warning("Failed to build available_file_paths in thread for agent %s", persistent_agent_id, exc_info=True)
 
             accept_downloads = persistent_agent_id is not None and settings.ALLOW_FILE_DOWNLOAD
+            
+            # Force headless if this is an eval run to avoid X server issues during CI/tests
+            headless_mode = settings.BROWSER_HEADLESS or is_eval
+            
             profile = BrowserProfile(
                 stealth=True,
-                headless=settings.BROWSER_HEADLESS,
+                headless=headless_mode,
                 user_data_dir=temp_profile_dir,
                 timeout=30_000,
                 no_viewport=True,
@@ -1519,16 +1524,29 @@ def _process_browser_use_task_core(
                 else:
                     provider_priority = db_priority
 
-                raw_result, token_usage = _execute_agent_with_failover(
-                    task_input=task_obj.prompt,
-                    task_id=str(task_obj.id),
-                    proxy_server=proxy_server,
-                    controller=controller,
-                    sensitive_data=sensitive_data,
-                    provider_priority=provider_priority,
-                    output_schema=task_obj.output_schema,
-                    browser_use_agent_id=browser_use_agent_id,
-                    persistent_agent_id=persistent_agent_id
+                # Check if this is an evaluation run
+                is_eval = False
+                if agent_context:
+                    execution_env = getattr(agent_context, "execution_environment", None)
+                    # "eval" is the environment key used by run_evals command
+                    if execution_env == "eval":
+                        is_eval = True
+                        agent_span.set_attribute("execution_environment", "eval")
+
+                raw_result, token_usage = asyncio.run(
+                    _run_agent(
+                        task_input=task_obj.prompt,
+                        llm_api_key=llm_api_key,
+                        task_id=str(task_obj.id),
+                        proxy_server=proxy_server,
+                        controller=controller,
+                        sensitive_data=sensitive_data,
+                        provider_priority=provider_priority,
+                        output_schema=task_obj.output_schema,
+                        browser_use_agent_id=browser_use_agent_id,
+                        persistent_agent_id=persistent_agent_id,
+                        is_eval=is_eval,
+                    )
                 )
 
                 safe_result = _jsonify(raw_result)
