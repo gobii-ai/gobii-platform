@@ -16,6 +16,7 @@ from api.models import (
     AgentAllowlistInvite,
     Organization,
     OrganizationMembership,
+    UserBilling,
 )
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG
@@ -44,6 +45,11 @@ class ContactLimitEnforcementTests(TestCase):
             browser_use_agent=self.browser_agent,
             whitelist_policy=PersistentAgent.WhitelistPolicy.MANUAL
         )
+
+    def _set_user_billing_contact_limit(self, limit: int):
+        billing, _ = UserBilling.objects.get_or_create(user=self.user)
+        billing.max_contacts_per_agent = limit
+        billing.save(update_fields=["max_contacts_per_agent"])
 
     @patch('util.subscription_helper.get_user_plan')
     def test_user_quota_override_takes_precedence(self, mock_get_user_plan):
@@ -79,6 +85,104 @@ class ContactLimitEnforcementTests(TestCase):
         with self.assertRaises(ValidationError) as ctx:
             entry2.full_clean()
         self.assertIn("Maximum 1 contacts", str(ctx.exception))
+
+    @patch('util.subscription_helper.get_user_plan')
+    def test_user_billing_override_takes_precedence(self, mock_get_user_plan):
+        """Billing overrides should apply before other per-user overrides."""
+        mock_get_user_plan.return_value = PLAN_CONFIG['startup']
+
+        billing, _ = UserBilling.objects.get_or_create(user=self.user)
+        billing.max_contacts_per_agent = 2
+        billing.save(update_fields=["max_contacts_per_agent"])
+
+        from api.models import UserQuota
+        quota, _ = UserQuota.objects.get_or_create(user=self.user)
+        quota.max_agent_contacts = 5
+        quota.save(update_fields=["max_agent_contacts"]) 
+
+        limit = get_user_max_contacts_per_agent(self.user)
+        self.assertEqual(limit, 2)
+
+        for address in ["one@example.com", "two@example.com"]:
+            entry = CommsAllowlistEntry(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address=address,
+                is_active=True,
+            )
+            entry.full_clean()
+            entry.save()
+
+        entry3 = CommsAllowlistEntry(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="three@example.com",
+            is_active=True,
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            entry3.full_clean()
+        self.assertIn("Maximum 2 contacts", str(ctx.exception))
+
+    def test_direct_creation_enforces_limit_from_billing_override(self):
+        """Creating entries via .objects.create should respect billing overrides."""
+        self._set_user_billing_contact_limit(2)
+
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="direct1@example.com",
+            is_active=True,
+        )
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="direct2@example.com",
+            is_active=True,
+        )
+
+        with self.assertRaises(ValidationError):
+            CommsAllowlistEntry.objects.create(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address="direct3@example.com",
+                is_active=True,
+            )
+
+    def test_reactivating_inactive_entry_checks_limit(self):
+        """Re-activating an entry should also enforce the contact cap."""
+        self._set_user_billing_contact_limit(2)
+
+        entry1 = CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="reactivate1@example.com",
+            is_active=True,
+        )
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="reactivate2@example.com",
+            is_active=True,
+        )
+
+        # Free a slot by disabling the first entry
+        entry1.is_active = False
+        entry1.save(update_fields=["is_active"])
+
+        # Fill available slot with another entry
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="reactivate3@example.com",
+            is_active=True,
+        )
+
+        entry1.is_active = True
+        with self.assertRaises(ValidationError):
+            entry1.save(update_fields=["is_active"])
+
+        entry1.refresh_from_db()
+        self.assertFalse(entry1.is_active)
 
     
     @patch('util.subscription_helper.get_user_plan')

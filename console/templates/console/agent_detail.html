@@ -446,7 +446,10 @@
           You can add additional contacts below. Note: Multi-recipient messaging is limited to email only.
         </p>
 
-        <div id="allowlist-entries" class="space-y-4">
+        <div id="allowlist-entries"
+             class="space-y-4"
+             data-max-contacts="{{ max_contacts_per_agent|default:account.usage.max_contacts_per_agent }}"
+             data-limit-reached="{% if allowlist_limit_reached %}true{% else %}false{% endif %}">
           <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <h4 class="text-sm font-medium text-gray-700 mb-2">Add Allowed Contact</h4>
             <div id="add-allowlist-form" class="space-y-2">
@@ -460,24 +463,29 @@
                        id="allowlist-address"
                        name="address"
                        placeholder="email@example.com"
-                       class="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+                       class="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100"
+                       {% if allowlist_limit_reached %}disabled{% endif %}>
               </div>
               <div class="flex gap-4 items-center">
                 <label class="flex items-center gap-1 text-sm">
-                  <input type="checkbox" id="allow-inbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                  <input type="checkbox" id="allow-inbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                         {% if allowlist_limit_reached %}disabled{% endif %}>
                   <span>Allow Inbound</span>
                   <span class="text-xs text-gray-500">(can send to agent)</span>
                 </label>
                 <label class="flex items-center gap-1 text-sm">
-                  <input type="checkbox" id="allow-outbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                  <input type="checkbox" id="allow-outbound" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                         {% if allowlist_limit_reached %}disabled{% endif %}>
                   <span>Allow Outbound</span>
                   <span class="text-xs text-gray-500">(agent can send to)</span>
                 </label>
               </div>
               <div class="flex gap-2">
                 <button type="button"
+                        id="allowlist-add-btn"
                         onclick="addAllowlistEntry()"
-                        class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                        class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 transition {% if allowlist_limit_reached %}opacity-50 cursor-not-allowed{% endif %}"
+                        {% if allowlist_limit_reached %}disabled{% endif %}>
                   Add
                 </button>
                 <button type="button"
@@ -485,6 +493,9 @@
                         class="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400">
                   Cancel
                 </button>
+              </div>
+              <div id="allowlist-limit-notice" class="text-xs text-gray-600 {% if not allowlist_limit_reached %}hidden{% endif %}">
+                Contact limit reached. Remove an existing contact or pending invite to add more.
               </div>
             </div>
             <div id="allowlist-error" class="mt-2 text-xs text-red-600 hidden"></div>
@@ -510,7 +521,12 @@
             <div class="flex justify-between items-center mb-2">
               <h4 class="text-sm font-medium text-gray-700">Allowed Contacts</h4>
               <span class="text-xs text-gray-500">
-                <span id="contact-count">{{ active_allowlist_count }}</span> / {{ max_contacts_per_agent|default:account.usage.max_contacts_per_agent }} contacts
+                <span id="contact-count">{{ active_allowlist_count }}</span>
+                /
+                {{ max_contacts_per_agent|default:account.usage.max_contacts_per_agent }} contacts
+                {% if max_contacts_per_agent_override %}
+                    <span class="text-xs text-gray-500">(custom limit)</span>
+                {% endif %}
               </span>
             </div>
             <div id="allowlist-entries-container">
@@ -1208,8 +1224,90 @@ document.addEventListener('DOMContentLoaded', function() {
             postReassign(null);
         });
     }
+
+    const contactCountEl = document.getElementById('contact-count');
+    if (contactCountEl) {
+        const initialCount = parseInt(contactCountEl.textContent || '0', 10);
+        updateAllowlistLimitState(Number.isNaN(initialCount) ? undefined : initialCount);
+    }
     
 });
+
+function getAllowlistContainer() {
+    return document.getElementById('allowlist-entries');
+}
+
+function getAllowlistMaxContacts() {
+    const container = getAllowlistContainer();
+    if (!container) {
+        return null;
+    }
+    const maxValue = parseInt(container.dataset.maxContacts || '0', 10);
+    return Number.isNaN(maxValue) ? null : maxValue;
+}
+
+function updateAllowlistLimitState(activeCount) {
+    const container = getAllowlistContainer();
+    if (!container) {
+        return;
+    }
+
+    const maxContacts = getAllowlistMaxContacts();
+    let currentCount = typeof activeCount === 'number' ? activeCount : null;
+    if (currentCount === null) {
+        const countEl = document.getElementById('contact-count');
+        if (countEl) {
+            const parsed = parseInt(countEl.textContent || '0', 10);
+            currentCount = Number.isNaN(parsed) ? null : parsed;
+        }
+    }
+
+    const limitReached = Boolean(
+        maxContacts && currentCount !== null && currentCount >= maxContacts
+    );
+    container.dataset.limitReached = limitReached ? 'true' : 'false';
+
+    const addButton = document.getElementById('allowlist-add-btn');
+    const addressInput = document.getElementById('allowlist-address');
+    const inboundCheckbox = document.getElementById('allow-inbound');
+    const outboundCheckbox = document.getElementById('allow-outbound');
+    const limitNotice = document.getElementById('allowlist-limit-notice');
+
+    [addButton, addressInput, inboundCheckbox, outboundCheckbox].forEach((el) => {
+        if (!el) {
+            return;
+        }
+        el.disabled = limitReached;
+    });
+
+    if (addButton) {
+        addButton.classList.toggle('opacity-50', limitReached);
+        addButton.classList.toggle('cursor-not-allowed', limitReached);
+    }
+    if (limitNotice) {
+        limitNotice.classList.toggle('hidden', !limitReached);
+    }
+}
+
+function isAllowlistLimitReached() {
+    const container = getAllowlistContainer();
+    if (!container) {
+        return false;
+    }
+    if (container.dataset.limitReached === 'true') {
+        return true;
+    }
+    const maxContacts = getAllowlistMaxContacts();
+    if (!maxContacts) {
+        return false;
+    }
+    const countEl = document.getElementById('contact-count');
+    if (!countEl) {
+        return false;
+    }
+    const currentCount = parseInt(countEl.textContent || '0', 10);
+    return !Number.isNaN(currentCount) && currentCount >= maxContacts;
+}
 
 // Function to add allowlist entry
 function addAllowlistEntry() {
@@ -1225,6 +1323,12 @@ function addAllowlistEntry() {
     
     if (!address) {
         errorDiv.textContent = 'Please enter an email address';
+        errorDiv.classList.remove('hidden');
+        return;
+    }
+
+    if (isAllowlistLimitReached()) {
+        errorDiv.textContent = 'Contact limit reached. Remove a contact or cancel a pending invite to add more.';
         errorDiv.classList.remove('hidden');
         return;
     }
@@ -1274,6 +1378,7 @@ function addAllowlistEntry() {
             // Update contact count
             if (data.active_count !== undefined) {
                 document.getElementById('contact-count').textContent = data.active_count;
+                updateAllowlistLimitState(data.active_count);
             }
         } else {
             // Show error message
@@ -1335,6 +1440,7 @@ function cancelInvite(inviteId) {
             // Update contact count
             if (data.active_count !== undefined) {
                 document.getElementById('contact-count').textContent = data.active_count;
+                updateAllowlistLimitState(data.active_count);
             }
         } else {
             alert(data.error || 'Failed to cancel invitation');
@@ -1378,6 +1484,7 @@ function removeAllowlistEntry(entryId) {
             // Update contact count
             if (data.active_count !== undefined) {
                 document.getElementById('contact-count').textContent = data.active_count;
+                updateAllowlistLimitState(data.active_count);
             }
         } else {
             alert(data.error || 'Failed to remove entry');

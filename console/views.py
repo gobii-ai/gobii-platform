@@ -116,6 +116,18 @@ def _adjust_hex(hex_color: str, ratio: float) -> str:
     return _rgb_to_hex(r, g, b)
 
 
+def _format_validation_error(error: ValidationError) -> str:
+    if hasattr(error, "message_dict") and error.message_dict:
+        messages = []
+        for field_errors in error.message_dict.values():
+            messages.extend(field_errors)
+        if messages:
+            return " ".join(messages)
+    if hasattr(error, "messages") and error.messages:
+        return " ".join(error.messages)
+    return str(error)
+
+
 def _build_agent_gradient(hex_color: str) -> str:
     base = (hex_color or "#0074D4").upper()
     lighter = _adjust_hex(base, 0.35)
@@ -2489,7 +2501,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
           is an active member of that organization.
         - Personal context: user-owned agents without an organization.
         """
-        qs = super().get_queryset()
+        qs = super().get_queryset().select_related('user__billing')
 
         context_type = self.request.session.get('context_type', 'personal')
         if context_type == 'organization':
@@ -2609,11 +2621,27 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             agent=agent,
             status=AgentAllowlistInvite.InviteStatus.PENDING
         ).count()
-        context['active_allowlist_count'] = active_count + pending_count
+        total_contacts = active_count + pending_count
+        context['active_allowlist_count'] = total_contacts
         from util.subscription_helper import get_user_max_contacts_per_agent
-        context['max_contacts_per_agent'] = get_user_max_contacts_per_agent(
+        max_contacts_limit = get_user_max_contacts_per_agent(
             agent.user,
             organization=agent.organization,
+        )
+        context['max_contacts_per_agent'] = max_contacts_limit
+
+        max_contacts_override = None
+        if agent.organization_id is None:
+            billing = getattr(agent.user, 'billing', None)
+            if (
+                billing is not None
+                and billing.max_contacts_per_agent is not None
+                and billing.max_contacts_per_agent > 0
+            ):
+                max_contacts_override = int(billing.max_contacts_per_agent)
+        context['max_contacts_per_agent_override'] = max_contacts_override
+        context['allowlist_limit_reached'] = (
+            max_contacts_limit > 0 and total_contacts >= max_contacts_limit
         )
 
         # Add pending contact requests count
@@ -2936,19 +2964,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     return JsonResponse({'success': True, 'html': html, 'active_count': total_count})
                     
                 except ValidationError as e:
-                    # Handle ValidationError properly
-                    error_msg = 'Validation error'
-                    if hasattr(e, 'message_dict'):
-                        # Get first error message from the dict
-                        for field, msgs in e.message_dict.items():
-                            if msgs:
-                                error_msg = msgs[0] if isinstance(msgs[0], str) else str(msgs[0])
-                                break
-                    elif hasattr(e, 'messages') and e.messages:
-                        error_msg = e.messages[0] if isinstance(e.messages[0], str) else str(e.messages[0])
-                    else:
-                        error_msg = str(e)
-                    return JsonResponse({'success': False, 'error': error_msg})
+                    existing_entry = locals().get('existing_entry')
+                    if existing_entry and existing_entry.pk:
+                        existing_entry.refresh_from_db()
+                    return JsonResponse({'success': False, 'error': _format_validation_error(e)})
                 except IntegrityError:
                     return JsonResponse({'success': False, 'error': 'This address is already in the allowlist'})
                 except Exception as e:

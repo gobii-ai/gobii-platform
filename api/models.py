@@ -2023,6 +2023,15 @@ class UserBilling(models.Model):
         default=0,
         help_text="Maximum number of additional tasks allowed beyond plan limits. 0 means no extra tasks, -1 means unlimited.",
     )
+    max_contacts_per_agent = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "If set, overrides the plan's max contacts per agent for this user. "
+            "Leave blank to use the default from the subscription plan."
+        ),
+    )
 
     billing_cycle_anchor = models.IntegerField(
         default=1,
@@ -4421,8 +4430,22 @@ class CommsAllowlistEntry(models.Model):
                                "Group SMS functionality is not yet available."
                 })
 
-        # Enforce per-agent cap on *active* entries and pending invitations (only when adding a new row)
-        if self.is_active and self._state.adding:
+        # Enforce per-agent cap on *active* entries and pending invitations when activating entries
+        enforce_cap = False
+        if self.is_active:
+            if self._state.adding:
+                enforce_cap = True
+            elif self.pk:
+                previous_active = (
+                    type(self)
+                    .objects
+                    .filter(pk=self.pk)
+                    .values_list('is_active', flat=True)
+                    .first()
+                )
+                enforce_cap = previous_active is False
+
+        if enforce_cap:
             # Get the plan-based limit for this agent's owner
             from util.subscription_helper import get_user_max_contacts_per_agent
             cap = get_user_max_contacts_per_agent(
@@ -4460,6 +4483,10 @@ class CommsAllowlistEntry(models.Model):
                         f"allowed per agent for your plan (including {pending_count} pending invitations)."
                     )
                 })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Allow<{self.channel}:{self.address}> for {self.agent_id}"
@@ -4558,6 +4585,10 @@ class AgentAllowlistInvite(models.Model):
                         f"allowed per agent for your plan (currently {active_count} active, {pending_count} pending)."
                     )
                 })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
     
     def is_expired(self):
         """Check if this invitation has expired."""
