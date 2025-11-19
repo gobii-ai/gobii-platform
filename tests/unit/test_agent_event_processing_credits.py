@@ -566,6 +566,43 @@ class PersistentAgentToolCreditTests(TestCase):
         tool_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "tool_cost_awareness")
         self.assertIn("send_email=1.2", tool_call.args[1])
 
+    @patch(
+        "api.agent.core.event_processing.get_tool_cost_overview",
+        return_value=(Decimal("1"), {}),
+    )
+    def test_budget_sections_emit_burn_rate_analytics_event(self, _mock_costs):
+        critical_group = MagicMock()
+        budget_group = MagicMock()
+        critical_group.group.return_value = budget_group
+        state = {
+            "limit": Decimal("10"),
+            "soft_target": Decimal("5"),
+            "used": Decimal("4"),
+            "remaining": Decimal("6"),
+            "soft_target_remaining": Decimal("1"),
+            "next_reset": timezone.now(),
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_window_minutes": 60,
+            "burn_rate_threshold_per_hour": Decimal("3"),
+        }
+        with patch("api.agent.core.event_processing.Analytics.track_event") as track_mock:
+            _add_budget_awareness_sections(
+                critical_group,
+                current_iteration=1,
+                max_iterations=2,
+                daily_credit_state=state,
+                agent=self.agent,
+            )
+        track_mock.assert_called_once()
+        kwargs = track_mock.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_WARNING)
+        self.assertEqual(kwargs["source"], AnalyticsSource.AGENT)
+        props = kwargs["properties"]
+        self.assertEqual(props["agent_id"], str(self.agent.id))
+        self.assertEqual(props["burn_rate_per_hour"], str(state["burn_rate_per_hour"]))
+        self.assertEqual(props["burn_rate_threshold_per_hour"], str(state["burn_rate_threshold_per_hour"]))
+
     def test_budget_sections_handle_unlimited_soft_target(self):
         critical_group = MagicMock()
         budget_group = MagicMock()

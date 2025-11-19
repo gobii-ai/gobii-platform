@@ -3124,6 +3124,28 @@ def _add_budget_awareness_sections(
                     2,
                     True,
                 ))
+                try:
+                    analytics_props: dict[str, Any] = {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "burn_rate_per_hour": str(burn_rate),
+                        "burn_rate_threshold_per_hour": str(burn_threshold),
+                    }
+                    props_with_org = Analytics.with_org_properties(
+                        analytics_props,
+                        organization=getattr(agent, "organization", None),
+                    )
+                    Analytics.track_event(
+                        user_id=agent.user.id,
+                        event=AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_WARNING,
+                        source=AnalyticsSource.AGENT,
+                        properties=props_with_org,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to emit analytics for agent %s burn rate warning",
+                        getattr(agent, "id", None),
+                    )
         except Exception as e:
             logger.warning("Failed to generate daily credit summary for prompt: %s", e, exc_info=True)
             # Do not block prompt creation if credit summary fails
