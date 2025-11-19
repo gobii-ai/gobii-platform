@@ -1367,12 +1367,22 @@ class MCPToolIntegrationTests(TestCase):
         agent.refresh_from_db()
         self.assertEqual(PersistentAgentEnabledTool.objects.filter(agent=agent).count(), 40)
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_enable_tools_uses_prompt_config_limit(self, mock_init, mock_get_tools):
         """Tiered prompt configuration controls the enabled tool cap."""
 
         config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        original_limit = config.standard_enabled_tool_limit
+
+        def _restore_prompt_limit():
+            config.standard_enabled_tool_limit = original_limit
+            config.save()
+            invalidate_prompt_settings_cache()
+
+        self.addCleanup(_restore_prompt_limit)
+
         config.standard_enabled_tool_limit = 5
         config.save()
         invalidate_prompt_settings_cache()
