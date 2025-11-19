@@ -34,6 +34,7 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyUnavailableError,
     is_multi_assign_enabled,
 )
+from api.agent.core.llm_config import AgentLLMTier, get_llm_tier_multipliers, max_allowed_tier_for_plan
 from api.agent.short_description import build_listing_description, build_mini_description
 from api.agent.tags import maybe_schedule_agent_tags
 from api.services.daily_credit_settings import get_daily_credit_settings
@@ -1744,12 +1745,12 @@ def task_result_view(request, task_id):
 class PersistentAgentsView(ConsoleViewMixin, TemplateView):
     template_name = "console/persistent_agents.html"
 
-    def _resolve_agent_capacity(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _resolve_context_owner(self, context: dict[str, Any]) -> tuple[Any | None, str, Any | None]:
         current_context = context.get('current_context', {})
         membership = context.get('current_membership')
-        organization = None
         owner = self.request.user
         owner_type = 'user'
+        organization = None
 
         if current_context.get('type') == 'organization':
             organization = getattr(membership, 'org', None)
@@ -1759,6 +1760,11 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                     organization = Organization.objects.filter(id=org_id).first()
             owner = organization
             owner_type = 'organization'
+
+        return owner, owner_type, organization
+
+    def _resolve_agent_capacity(self, context: dict[str, Any]) -> dict[str, Any]:
+        owner, owner_type, organization = self._resolve_context_owner(context)
 
         if owner is None:
             return {
@@ -1847,6 +1853,57 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'createFirstAgentEvent': AnalyticsCTAs.CTA_CREATE_FIRST_AGENT_CLICKED.value,
             'agentsAvailable': capacity['agents_available'],
             'agentsUnlimited': capacity['agents_unlimited'],
+            'llmIntelligence': self._build_llm_intelligence_props(context, upgrade_url),
+        }
+
+    def _build_llm_intelligence_props(self, context: dict[str, Any], upgrade_url: str | None) -> dict[str, Any]:
+        owner, owner_type, organization = self._resolve_context_owner(context)
+        plan = None
+        if owner is not None:
+            try:
+                if owner_type == 'organization':
+                    plan = get_organization_plan(organization)
+                else:
+                    plan = get_user_plan(owner)
+            except Exception:
+                plan = None
+
+        allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
+        can_edit = bool(
+            settings.GOBII_PROPRIETARY_MODE
+            and owner is not None
+            and (owner_type == 'organization' or allowed_tier != AgentLLMTier.STANDARD)
+        )
+        disabled_reason = None
+        if not can_edit:
+            disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
+
+        multipliers = get_llm_tier_multipliers()
+        options = [
+            {
+                "key": AgentLLMTier.STANDARD.value,
+                "label": "Standard",
+                "description": "Balanced routing that uses 1× credits.",
+                "multiplier": float(multipliers.get("standard", 1)),
+            },
+            {
+                "key": AgentLLMTier.PREMIUM.value,
+                "label": "Smarter",
+                "description": "Premium routing with improved reasoning.",
+                "multiplier": float(multipliers.get("premium", 1)),
+            },
+            {
+                "key": AgentLLMTier.MAX.value,
+                "label": "Smartest",
+                "description": f"Top-tier models that consume {multipliers.get('max', Decimal('5'))}× credits.",
+                "multiplier": float(multipliers.get("max", 5)),
+            },
+        ]
+        return {
+            "options": options,
+            "canEdit": can_edit,
+            "disabledReason": disabled_reason,
+            "upgradeUrl": upgrade_url,
         }
 
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")

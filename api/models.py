@@ -78,6 +78,24 @@ tracer = trace.get_tracer('gobii.utils')
 def generate_ulid() -> str:
     """Return a 26-character, time-ordered ULID string."""
     return str(ulid.new())
+LLM_TIER_CHOICES = (
+    ("standard", "Standard"),
+    ("premium", "Premium"),
+    ("max", "Max"),
+)
+DEFAULT_LLM_TIER = "standard"
+
+
+def _apply_tier_multiplier(agent, amount):
+    from api.agent.core import llm_config
+
+    return llm_config.apply_tier_credit_multiplier(agent, amount)
+
+
+def _invalidate_tier_multiplier_cache() -> None:
+    from api.agent.core import llm_config
+
+    llm_config.invalidate_llm_tier_multiplier_cache()
 
 
 class AgentColor(models.Model):
@@ -1660,6 +1678,13 @@ class PersistentLLMTier(models.Model):
         help_text="Marks tiers reserved for max-tier routing.",
         db_index=True,
     )
+    credit_multiplier = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("1.00"),
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text="Multiplier applied to credit consumption for this tier.",
+    )
 
     class Meta:
         ordering = ["token_range__min_tokens", "order"]
@@ -1679,6 +1704,16 @@ class PersistentLLMTier(models.Model):
         else:
             tier_type = "standard"
         return f"{self.token_range.name} {tier_type} tier {self.order}"
+
+    def save(self, *args, **kwargs):
+        result = super().save(*args, **kwargs)
+        _invalidate_tier_multiplier_cache()
+        return result
+
+    def delete(self, *args, **kwargs):
+        result = super().delete(*args, **kwargs)
+        _invalidate_tier_multiplier_cache()
+        return result
 
 
 class PersistentTierEndpoint(models.Model):
@@ -2915,6 +2950,12 @@ class PersistentAgent(models.Model):
         max_length=64,
         blank=True,
         help_text="SHA256 of the charter currently pending mini description generation.",
+    )
+    preferred_llm_tier = models.CharField(
+        max_length=16,
+        choices=LLM_TIER_CHOICES,
+        default=DEFAULT_LLM_TIER,
+        help_text="Preferred intelligence tier controlling LLM routing for this agent.",
     )
     agent_color = models.ForeignKey(
         AgentColor,
@@ -5732,15 +5773,17 @@ class PersistentAgentStep(models.Model):
 
             if owner is not None and should_charge:
                 default_cost = get_default_task_credit_cost()
-                amount = self.credits_cost if self.credits_cost is not None else default_cost
+                if self.credits_cost is not None:
+                    amount = self.credits_cost
+                else:
+                    amount = _apply_tier_multiplier(self.agent, default_cost)
+                    self.credits_cost = amount
                 result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
 
                 if not result.get('success'):
                     raise ValidationError({"quota": result.get('error_message')})
 
                 self.task_credit = result.get('credit')
-                if self.credits_cost is None:
-                    self.credits_cost = amount
                 if completion_to_mark is not None:
                     completion_mark_amount = amount
             elif completion_to_mark is not None and self.credits_cost is not None:
