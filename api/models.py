@@ -1635,8 +1635,8 @@ class PersistentLLMTier(models.Model):
         unique_together = (("token_range", "order", "is_premium", "is_max"),)
         constraints = [
             models.CheckConstraint(
-                check=~Q(is_max=True, is_premium=False),
-                name="persistentllmtier_max_requires_premium",
+                check=~Q(is_max=True, is_premium=True),
+                name="persistentllmtier_max_excludes_premium",
             )
         ]
 

@@ -264,7 +264,7 @@ class TestLLMFailover(TestCase):
         )
 
         token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
-        max_tier = PersistentLLMTier.objects.create(token_range=token_range, order=1, is_premium=True, is_max=True)
+        max_tier = PersistentLLMTier.objects.create(token_range=token_range, order=1, is_max=True)
         premium_tier = PersistentLLMTier.objects.create(token_range=token_range, order=2, is_premium=True)
         standard_tier = PersistentLLMTier.objects.create(token_range=token_range, order=3)
         PersistentTierEndpoint.objects.create(tier=max_tier, endpoint=max_endpoint, weight=1.0)
