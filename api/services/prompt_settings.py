@@ -13,8 +13,11 @@ DEFAULT_MAX_MESSAGE_HISTORY_LIMIT = 20
 DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT = 15
 DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT = 20
 DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT = 20
+DEFAULT_STANDARD_ENABLED_TOOL_LIMIT = 40
+DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT = 40
+DEFAULT_MAX_ENABLED_TOOL_LIMIT = 40
 
-_CACHE_KEY = "prompt_settings:v2"
+_CACHE_KEY = "prompt_settings:v3"
 _CACHE_TTL_SECONDS = 300
 
 
@@ -29,6 +32,9 @@ class PromptSettings:
     standard_tool_call_history_limit: int
     premium_tool_call_history_limit: int
     max_tool_call_history_limit: int
+    standard_enabled_tool_limit: int
+    premium_enabled_tool_limit: int
+    max_enabled_tool_limit: int
 
 
 def _serialise(config) -> dict:
@@ -42,6 +48,9 @@ def _serialise(config) -> dict:
         "standard_tool_call_history_limit": config.standard_tool_call_history_limit,
         "premium_tool_call_history_limit": config.premium_tool_call_history_limit,
         "max_tool_call_history_limit": config.max_tool_call_history_limit,
+        "standard_enabled_tool_limit": config.standard_enabled_tool_limit,
+        "premium_enabled_tool_limit": config.premium_enabled_tool_limit,
+        "max_enabled_tool_limit": config.max_enabled_tool_limit,
     }
 
 
@@ -69,6 +78,9 @@ def get_prompt_settings() -> PromptSettings:
             standard_tool_call_history_limit=DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
             premium_tool_call_history_limit=DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
             max_tool_call_history_limit=DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT,
+            standard_enabled_tool_limit=DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
+            premium_enabled_tool_limit=DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT,
+            max_enabled_tool_limit=DEFAULT_MAX_ENABLED_TOOL_LIMIT,
         )
 
     data = _serialise(config)

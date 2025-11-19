@@ -19,6 +19,7 @@ from api.models import (
     MCPServerConfig,
     MCPServerOAuthCredential,
     PersistentAgentMCPServer,
+    PromptConfig,
 )
 from api.agent.tools.mcp_manager import (
     MCPToolManager,
@@ -39,6 +40,7 @@ from api.agent.tools.search_tools import (
     get_search_tools_tool,
     search_tools,
 )
+from api.services.prompt_settings import invalidate_prompt_settings_cache
 from tests.utils.llm_seed import seed_persistent_basic
 
 
@@ -1364,3 +1366,33 @@ class MCPToolIntegrationTests(TestCase):
         self.assertEqual(len(result["evicted"]), 3)
         agent.refresh_from_db()
         self.assertEqual(PersistentAgentEnabledTool.objects.filter(agent=agent).count(), 40)
+
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_enable_tools_uses_prompt_config_limit(self, mock_init, mock_get_tools):
+        """Tiered prompt configuration controls the enabled tool cap."""
+
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.standard_enabled_tool_limit = 5
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        tools = [
+            MCPToolInfo(self.config_id, f"mcp_conf_{i}", self.server_name, f"t{i}", f"Tool {i}", {})
+            for i in range(10)
+        ]
+        mock_get_tools.return_value = tools
+
+        pre_enabled = [f"mcp_conf_{i}" for i in range(4)]
+        for name in pre_enabled:
+            enable_mcp_tool(self.agent, name)
+
+        result = enable_tools(self.agent, [f"mcp_conf_{i}" for i in range(4, 7)])
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["enabled"]), 3)
+        self.assertEqual(len(result["evicted"]), 2)
+        self.assertEqual(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent).count(),
+            config.standard_enabled_tool_limit,
+        )

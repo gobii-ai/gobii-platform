@@ -41,6 +41,9 @@ from api.services.prompt_settings import (
     DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT,
     DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET,
     DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
+    DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
+    DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT,
+    DEFAULT_MAX_ENABLED_TOOL_LIMIT,
 )
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
@@ -667,6 +670,21 @@ class PromptConfig(models.Model):
         default=DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT,
         validators=[MinValueValidator(1)],
         help_text="Number of recent tool calls included for max tier agents.",
+    )
+    standard_enabled_tool_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of concurrently enabled tools allowed for standard tier agents.",
+    )
+    premium_enabled_tool_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of concurrently enabled tools allowed for premium tier agents.",
+    )
+    max_enabled_tool_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_MAX_ENABLED_TOOL_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of concurrently enabled tools allowed for max tier agents.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
