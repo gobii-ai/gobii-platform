@@ -4415,20 +4415,14 @@ class CommsAllowlistEntry(models.Model):
         else:
             self.address = (self.address or "").strip()
         
-        # Restrict multi-player agents to email-only allowlists
-        # Multi-player = org-owned agents OR agents with manual whitelist policy
-        if self.channel == CommsChannel.SMS:
-            # Check if agent is org-owned or uses manual whitelist (multi-player scenarios)
-            if self.agent.organization_id is not None:
-                raise ValidationError({
-                    "channel": "Organization agents only support email addresses in allowlists. "
-                               "Group SMS functionality is not yet available."
-                })
-            elif self.agent.whitelist_policy == PersistentAgent.WhitelistPolicy.MANUAL:
-                raise ValidationError({
-                    "channel": "Multi-player agents only support email addresses in allowlists. "
-                               "Group SMS functionality is not yet available."
-                })
+        # Restrict organization-owned agents to email-only allowlists for now
+        if self.channel == CommsChannel.SMS and self.agent.organization_id is not None:
+            raise ValidationError({
+                "channel": (
+                    "Organization agents only support email addresses in allowlists. "
+                    "Group SMS functionality is not yet available."
+                )
+            })
 
         # Enforce per-agent cap on *active* entries and pending invitations when activating entries
         enforce_cap = False
