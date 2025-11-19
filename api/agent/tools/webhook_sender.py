@@ -94,7 +94,6 @@ def _track_webhook_attempt(
         'agent_name': agent.name,
         'webhook_id': str(webhook.id),
         'webhook_name': webhook.name,
-        'webhook_url': webhook.url,
         'result': result,
         'response_status_code': status_code,
         'payload_key_count': len(payload_key_list),

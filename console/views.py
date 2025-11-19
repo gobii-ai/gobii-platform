@@ -3432,7 +3432,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     'agent_name': agent.name,
                     'webhook_id': str(webhook_obj.id),
                     'webhook_name': webhook_obj.name,
-                    'webhook_url': webhook_obj.url,
                 },
                 organization=agent.organization,
             )
