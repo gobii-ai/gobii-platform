@@ -70,7 +70,7 @@ def _normalize_tool_limit(
     return max(parsed, 1)
 
 
-def _get_enabled_tool_limit(agent: Optional[PersistentAgent]) -> int:
+def get_enabled_tool_limit(agent: Optional[PersistentAgent]) -> int:
     """Return the configured tool cap for the agent's tier."""
     fallback = DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
     if agent is None:
@@ -133,7 +133,7 @@ def _evict_surplus_tools(
     limit: Optional[int] = None,
 ) -> List[str]:
     """Enforce the enabled tool cap by evicting the least recently used entries."""
-    cap = _normalize_tool_limit(limit if limit is not None else _get_enabled_tool_limit(agent))
+    cap = _normalize_tool_limit(limit if limit is not None else get_enabled_tool_limit(agent))
     total = PersistentAgentEnabledTool.objects.filter(agent=agent).count()
     if total <= cap:
         return []
@@ -198,7 +198,7 @@ def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str,
     """Enable multiple tools for an agent, respecting the tiered cap."""
     catalog = _build_available_tool_index(agent)
     manager = _get_manager()
-    limit = _get_enabled_tool_limit(agent)
+    limit = get_enabled_tool_limit(agent)
 
     requested: List[str] = []
     seen: Set[str] = set()
@@ -270,7 +270,7 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     """Enable a single MCP tool for the agent (with LRU eviction if needed)."""
     catalog = _build_available_tool_index(agent)
     manager = _get_manager()
-    limit = _get_enabled_tool_limit(agent)
+    limit = get_enabled_tool_limit(agent)
 
     if manager.is_tool_blacklisted(tool_name):
         return {
