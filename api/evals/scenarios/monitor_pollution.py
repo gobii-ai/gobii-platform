@@ -86,13 +86,14 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         
         # 2. Verify Charter Update
         self.record_task_result(run_id, 2, EvalRunTask.Status.RUNNING)
-        judge_model, _ = get_llm_config()
+        judge_model, judge_params = get_llm_config()
         
         charter_judge_q = "Does the agent's charter mention monitoring pollution or air quality in Washington DC?"
         charter_choice, charter_reason = self.llm_judge(
             question=charter_judge_q,
             context=f"Agent Charter:\n{agent.charter}",
-            model=judge_model
+            model=judge_model,
+            params=judge_params,
         )
         
         if charter_choice == "Yes":
@@ -118,7 +119,8 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         schedule_choice, schedule_reason = self.llm_judge(
             question=schedule_judge_q,
             context=f"Agent Schedule: {agent.schedule}",
-            model=judge_model
+            model=judge_model,
+            params=judge_params,
         )
 
         if schedule_choice == "Yes":
