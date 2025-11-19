@@ -112,12 +112,28 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENT_SOFT_LIMIT_EXCEEDED = 'Persistent Agent Soft Limit Exceeded'
     PERSISTENT_AGENT_HARD_LIMIT_EXCEEDED = 'Persistent Agent Hard Limit Exceeded'
     PERSISTENT_AGENT_BROWSER_DAILY_LIMIT_REACHED = 'Persistent Agent Browser Daily Limit Reached'
+    PERSISTENT_AGENT_BURN_RATE_WARNING = 'Persistent Agent Burn Rate Warning'
     PERSISTENT_AGENT_SHUTDOWN = 'Persistent Agent Shutdown'
     PERSISTENT_AGENT_CHARTER_SUBMIT = 'Persistent Agent Charter Submitted'
     PERSISTENT_AGENTS_LISTED = 'Persistent Agents Listed'
     PERSISTENT_AGENT_EMAIL_SENT = 'Persistent Agent Message Sent'
     PERSISTENT_AGENT_EMAIL_RECEIVED = 'Persistent Agent Message Received'
     PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS = 'Persistent Agent Out of Credits Email'
+
+    # PA Peer Links
+    PERSISTENT_AGENT_PEER_LINKED = 'Persistent Agent Linked'
+    PERSISTENT_AGENT_PEER_UNLINKED = 'Persistent Agent Unlinked'
+
+    # PA MCP
+    PERSISTENT_AGENT_MCP_LINKED = 'Persistent Agent MCP Linked'
+    PERSISTENT_AGENT_MCP_UNLINKED = 'Persistent Agent MCP Unlinked'
+
+    # PA Webhooks
+    PERSISTENT_AGENT_WEBHOOK_ADDED = 'Persistent Agent Webhook Added'
+    PERSISTENT_AGENT_WEBHOOK_UPDATED = 'Persistent Agent Webhook Updated'
+    PERSISTENT_AGENT_WEBHOOK_DELETED = 'Persistent Agent Webhook Deleted'
+    PERSISTENT_AGENT_WEBHOOK_TESTED = 'Persistent Agent Webhook Tested'
+    PERSISTENT_AGENT_WEBHOOK_TRIGGERED = 'Persistent Agent Webhook Triggered'
 
     # SMS Events
     PERSISTENT_AGENT_SMS_SENT = 'Persistent Agent SMS Sent'

@@ -3425,6 +3425,25 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             messages.error(request, "Unsupported webhook action.")
             return redirect_response
 
+        def _track_webhook_event(event_type: AnalyticsEvent, webhook_obj: PersistentAgentWebhook) -> None:
+            props = Analytics.with_org_properties(
+                {
+                    'agent_id': str(agent.pk),
+                    'agent_name': agent.name,
+                    'webhook_id': str(webhook_obj.id),
+                    'webhook_name': webhook_obj.name,
+                },
+                organization=agent.organization,
+            )
+            transaction.on_commit(
+                lambda evt=event_type, properties=props: Analytics.track_event(
+                    user_id=request.user.id,
+                    event=evt,
+                    source=AnalyticsSource.WEB,
+                    properties=properties.copy(),
+                )
+            )
+
         if normalized_action == "delete":
             webhook_id = request.POST.get("webhook_id")
             if not webhook_id:
@@ -3436,6 +3455,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 messages.error(request, "Webhook not found or no longer exists.")
                 return redirect_response
 
+            _track_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_DELETED, webhook)
             webhook.delete()
             messages.success(request, "Webhook removed.")
             return redirect_response
@@ -3482,8 +3502,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             return redirect_response
 
         if normalized_action == "create":
+            _track_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_ADDED, webhook)
             messages.success(request, "Webhook created.")
         else:
+            _track_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_UPDATED, webhook)
             messages.success(request, "Webhook updated.")
         return redirect_response
 
@@ -3494,7 +3516,12 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         server_ids = request.POST.getlist('personal_servers')
         try:
-            mcp_server_service.update_agent_personal_servers(agent, server_ids)
+            mcp_server_service.update_agent_personal_servers(
+                agent,
+                server_ids,
+                actor_user_id=request.user.id,
+                source=AnalyticsSource.WEB,
+            )
             messages.success(request, "Personal MCP server access updated.")
         except ValueError as exc:
             messages.error(request, str(exc))
@@ -3502,6 +3529,42 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
     def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str):
         redirect_response = redirect('agent_detail', pk=agent.pk)
+
+        def _track_peer_link_event(
+            event_type: AnalyticsEvent,
+            *,
+            peer_agent: PersistentAgent | None,
+            link_id: str,
+            messages_per_window: int,
+            window_hours: int,
+            feature_flag: str | None,
+            is_enabled: bool,
+        ) -> None:
+            props = {
+                'agent_id': str(agent.pk),
+                'agent_name': agent.name,
+                'peer_link_id': link_id,
+                'messages_per_window': messages_per_window,
+                'window_hours': window_hours,
+                'feature_flag': feature_flag or '',
+                'is_enabled': is_enabled,
+            }
+            if peer_agent is not None:
+                props['peer_agent_id'] = str(peer_agent.pk)
+                props['peer_agent_name'] = peer_agent.name
+
+            props = Analytics.with_org_properties(
+                props,
+                organization=agent.organization,
+            )
+            transaction.on_commit(
+                lambda evt=event_type, properties=props: Analytics.track_event(
+                    user_id=request.user.id,
+                    event=evt,
+                    source=AnalyticsSource.WEB,
+                    properties=properties.copy(),
+                )
+            )
 
         try:
             if action == 'create':
@@ -3538,6 +3601,15 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     messages.error(request, 'A peer link already exists for these agents.')
                     return redirect_response
 
+                _track_peer_link_event(
+                    AnalyticsEvent.PERSISTENT_AGENT_PEER_LINKED,
+                    peer_agent=peer_agent,
+                    link_id=str(new_link.id),
+                    messages_per_window=new_link.messages_per_window,
+                    window_hours=new_link.window_hours,
+                    feature_flag=new_link.feature_flag,
+                    is_enabled=new_link.is_enabled,
+                )
                 messages.success(request, 'Peer agent link created.')
                 return redirect_response
 
@@ -3598,6 +3670,14 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     if agent.id not in {link.agent_a_id, link.agent_b_id}:
                         messages.error(request, 'You do not have permission to remove this link.')
                         return redirect_response
+                    peer_agent = link.agent_a if link.agent_a_id != agent.id else link.agent_b
+                    link_snapshot = {
+                        'link_id': str(link.id),
+                        'messages_per_window': link.messages_per_window,
+                        'window_hours': link.window_hours,
+                        'feature_flag': link.feature_flag,
+                        'is_enabled': link.is_enabled,
+                    }
 
                     AgentCommPeerState.objects.filter(link=link).delete()
                     if link.conversation_id:
@@ -3608,6 +3688,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
                     link.delete()
 
+                _track_peer_link_event(
+                    AnalyticsEvent.PERSISTENT_AGENT_PEER_UNLINKED,
+                    peer_agent=peer_agent,
+                    **link_snapshot,
+                )
                 messages.success(request, 'Peer link removed.')
                 return redirect_response
 
@@ -3904,11 +3989,33 @@ class AgentSecretsView(LoginRequiredMixin, TemplateView):
     @tracer.start_as_current_span("CONSOLE Agent Secrets View - get_object")
     def get_object(self):
         """Get the agent or raise 404."""
-        return get_object_or_404(
+        cached = getattr(self, "_agent_cache", None)
+        if cached is not None:
+            return cached
+        agent = get_object_or_404(
             PersistentAgent,
             pk=self.kwargs['pk'],
             user=self.request.user
         )
+        self._agent_cache = agent
+        return agent
+
+    def get(self, request, *args, **kwargs):
+        agent = self.get_object()
+        props = Analytics.with_org_properties(
+            {
+                'agent_id': str(agent.pk),
+                'agent_name': agent.name,
+            },
+            organization=agent.organization,
+        )
+        Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_VIEWED,
+            source=AnalyticsSource.WEB,
+            properties=props.copy(),
+        )
+        return super().get(request, *args, **kwargs)
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets View - get_context_data")
     def get_context_data(self, **kwargs):
