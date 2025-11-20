@@ -55,6 +55,7 @@ from api.models import (
     PersistentAgentMessage,
     AgentPeerLink,
     AgentCommPeerState,
+    PersistentAgentConversation,
     PersistentAgentConversationParticipant,
     PersistentAgentSmsEndpoint,
     PersistentAgentStep,
@@ -4408,8 +4409,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     }
 
                     AgentCommPeerState.objects.filter(link=link).delete()
-                    if link.conversation_id:
+                    try:
                         conversation = link.conversation
+                    except PersistentAgentConversation.DoesNotExist:
+                        conversation = None
+                    if conversation:
                         conversation.peer_link = None
                         conversation.is_peer_dm = False
                         conversation.save(update_fields=['peer_link', 'is_peer_dm'])
