@@ -24,6 +24,7 @@ def reset_llm_tiers(apps, schema_editor):
 def seed_max_multipliers(apps, schema_editor):
     PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
     PersistentLLMTier.objects.filter(is_max=True).update(credit_multiplier=Decimal('5.00'))
+    PersistentLLMTier.objects.filter(is_premium=True).update(credit_multiplier=Decimal('2.00'))
 
 
 def reset_max_multipliers(apps, schema_editor):

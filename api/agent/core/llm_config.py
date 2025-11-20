@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 _TIER_MULTIPLIER_CACHE_KEY = "persistent_llm_tier_multipliers:v1"
 _DEFAULT_TIER_MULTIPLIERS: Dict[str, Decimal] = {
     "standard": Decimal("1.00"),
-    "premium": Decimal("1.00"),
+    "premium": Decimal("2.00"),
     "max": Decimal("5.00"),
 }
 
