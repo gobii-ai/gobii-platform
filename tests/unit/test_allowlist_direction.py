@@ -10,6 +10,7 @@ from api.models import (
     CommsAllowlistRequest,
     CommsChannel,
     BrowserUseAgent,
+    Organization,
 )
 
 User = get_user_model()
@@ -185,24 +186,43 @@ class AllowlistDirectionTests(TestCase):
         )
     
     def test_sms_channel_validation(self):
-        """Test that SMS channel is blocked for manual whitelist policy agents."""
-        # SMS is currently blocked for agents with manual whitelist policy
-        # This is enforced at the model validation level
+        """Personal agents may allow SMS; organization-owned agents remain blocked."""
         from django.core.exceptions import ValidationError
-        
+
+        # Personal/manual agent should allow SMS entries
         entry = CommsAllowlistEntry(
             agent=self.agent,
             channel=CommsChannel.SMS,
             address="+15551234567",
             allow_inbound=True,
-            allow_outbound=False
+            allow_outbound=False,
         )
-        
-        # Should raise validation error for SMS with manual whitelist policy
+        # No exception expected
+        entry.full_clean()
+
+        # Organization-owned agent should still reject SMS allowlist entries
+        org = Organization.objects.create(name="Org", slug="org", created_by=self.owner)
+        billing = org.billing
+        billing.purchased_seats = 1
+        billing.save(update_fields=["purchased_seats"])
+
+        org_browser = BrowserUseAgent.objects.create(user=self.owner, name="OrgBrowser")
+        org_agent = PersistentAgent.objects.create(
+            user=self.owner,
+            organization=org,
+            name="OrgAgent",
+            charter="org",
+            browser_use_agent=org_browser,
+            whitelist_policy=PersistentAgent.WhitelistPolicy.MANUAL,
+        )
+        org_entry = CommsAllowlistEntry(
+            agent=org_agent,
+            channel=CommsChannel.SMS,
+            address="+15557654321",
+        )
         with self.assertRaises(ValidationError) as context:
-            entry.full_clean()
-        
-        self.assertIn("Multi-player agents only support email", str(context.exception))
+            org_entry.full_clean()
+        self.assertIn("Organization agents only support email", str(context.exception))
     
     def test_case_insensitive_email_with_directions(self):
         """Test that email addresses are case-insensitive with direction settings."""

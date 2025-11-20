@@ -3143,10 +3143,26 @@ class PersistentAgentPromptArchiveAdmin(admin.ModelAdmin):
 
 @admin.register(UserBilling)
 class UserBillingAdmin(admin.ModelAdmin):
-    list_display = ['id', 'user_id', 'user', 'subscription', 'max_extra_tasks', 'billing_cycle_anchor']
+    list_display = [
+        'id',
+        'user_id',
+        'user',
+        'subscription',
+        'max_extra_tasks',
+        'max_contacts_per_agent',
+        'billing_cycle_anchor',
+    ]
     list_filter = ['subscription', 'user_id']
     search_fields = ['id', 'subscription', 'user__email', 'user__username']
     readonly_fields = ['id', 'user']
+    fieldsets = (
+        (None, {
+            'fields': ('id', 'user', 'subscription', 'billing_cycle_anchor', 'downgraded_at')
+        }),
+        ('Contact and Task Limits', {
+            'fields': ('max_extra_tasks', 'max_contacts_per_agent'),
+        }),
+    )
     actions = [
         'align_anchor_from_stripe',
     ]

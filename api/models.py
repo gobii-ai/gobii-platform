@@ -1492,7 +1492,7 @@ class DedicatedProxyAllocation(models.Model):
             raise ValidationError({"owner": "Dedicated proxies must be linked to exactly one owner."})
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        self.full_clean(validate_unique=False, validate_constraints=False)
         return super().save(*args, **kwargs)
 
     def release(self):
@@ -2023,6 +2023,15 @@ class UserBilling(models.Model):
         default=0,
         help_text="Maximum number of additional tasks allowed beyond plan limits. 0 means no extra tasks, -1 means unlimited.",
     )
+    max_contacts_per_agent = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "If set, overrides the plan's max contacts per agent for this user. "
+            "Leave blank to use the default from the subscription plan."
+        ),
+    )
 
     billing_cycle_anchor = models.IntegerField(
         default=1,
@@ -2247,7 +2256,7 @@ class OrganizationBilling(models.Model):
         return max(self.purchased_seats - self.seats_reserved, 0)
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        self.full_clean(validate_unique=False, validate_constraints=False)
         return super().save(*args, **kwargs)
 
     class Meta:
@@ -4406,23 +4415,31 @@ class CommsAllowlistEntry(models.Model):
         else:
             self.address = (self.address or "").strip()
         
-        # Restrict multi-player agents to email-only allowlists
-        # Multi-player = org-owned agents OR agents with manual whitelist policy
-        if self.channel == CommsChannel.SMS:
-            # Check if agent is org-owned or uses manual whitelist (multi-player scenarios)
-            if self.agent.organization_id is not None:
-                raise ValidationError({
-                    "channel": "Organization agents only support email addresses in allowlists. "
-                               "Group SMS functionality is not yet available."
-                })
-            elif self.agent.whitelist_policy == PersistentAgent.WhitelistPolicy.MANUAL:
-                raise ValidationError({
-                    "channel": "Multi-player agents only support email addresses in allowlists. "
-                               "Group SMS functionality is not yet available."
-                })
+        # Restrict organization-owned agents to email-only allowlists for now
+        if self.channel == CommsChannel.SMS and self.agent.organization_id is not None:
+            raise ValidationError({
+                "channel": (
+                    "Organization agents only support email addresses in allowlists. "
+                    "Group SMS functionality is not yet available."
+                )
+            })
 
-        # Enforce per-agent cap on *active* entries and pending invitations (only when adding a new row)
-        if self.is_active and self._state.adding:
+        # Enforce per-agent cap on *active* entries and pending invitations when activating entries
+        enforce_cap = False
+        if self.is_active:
+            if self._state.adding:
+                enforce_cap = True
+            elif self.pk:
+                previous_active = (
+                    type(self)
+                    .objects
+                    .filter(pk=self.pk)
+                    .values_list('is_active', flat=True)
+                    .first()
+                )
+                enforce_cap = previous_active is False
+
+        if enforce_cap:
             # Get the plan-based limit for this agent's owner
             from util.subscription_helper import get_user_max_contacts_per_agent
             cap = get_user_max_contacts_per_agent(
@@ -4460,6 +4477,10 @@ class CommsAllowlistEntry(models.Model):
                         f"allowed per agent for your plan (including {pending_count} pending invitations)."
                     )
                 })
+
+    def save(self, *args, **kwargs):
+        self.full_clean(validate_unique=False, validate_constraints=False)
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Allow<{self.channel}:{self.address}> for {self.agent_id}"
@@ -4558,6 +4579,10 @@ class AgentAllowlistInvite(models.Model):
                         f"allowed per agent for your plan (currently {active_count} active, {pending_count} pending)."
                     )
                 })
+
+    def save(self, *args, **kwargs):
+        self.full_clean(validate_unique=False, validate_constraints=False)
+        return super().save(*args, **kwargs)
     
     def is_expired(self):
         """Check if this invitation has expired."""
