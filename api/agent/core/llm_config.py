@@ -10,6 +10,7 @@ The configuration uses a similar pattern to browser use tasks for consistency.
 import os
 import logging
 import random
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 from typing import Dict, List, Tuple, Any, Optional
@@ -69,6 +70,9 @@ def _apply_required_temperature(model: str, params: Dict[str, Any]) -> None:
 
 _PREMIUM_PLAN_IDS = {"pro", "org", PlanNames.SCALE, "startup", "org_team"}
 _PREMIUM_PLAN_NAMES = {"pro", "org", PlanNames.SCALE}
+_NEW_ACCOUNT_PREMIUM_GRACE_DAYS = getattr(settings, "NEW_ACCOUNT_PREMIUM_GRACE_DAYS", 30)
+
+
 class AgentLLMTier(str, Enum):
     """LLM routing tiers supported by the platform."""
 
@@ -203,6 +207,29 @@ def apply_tier_credit_multiplier(agent: Any, amount: Optional[Decimal]) -> Optio
     return scaled.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
 
+def _within_new_account_premium_window(owner: Any | None) -> bool:
+    """Return True when the owner is within the premium trial window."""
+
+    if owner is None:
+        return False
+    joined = getattr(owner, "date_joined", None)
+    if not joined:
+        return False
+    try:
+        joined_dt = joined
+        if timezone.is_naive(joined_dt):
+            joined_dt = timezone.make_aware(joined_dt, timezone.utc)
+    except Exception:
+        return False
+    try:
+        days = int(_NEW_ACCOUNT_PREMIUM_GRACE_DAYS)  # type: ignore[arg-type]
+    except Exception:
+        days = 0
+    if days <= 0:
+        return False
+    return (timezone.now() - joined_dt) <= timedelta(days=days)
+
+
 def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> AgentLLMTier:
     """Return the highest LLM tier the provided agent is eligible to use."""
 
@@ -223,16 +250,26 @@ def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> Agen
                 exc_info=True,
             )
     is_org_owner = bool(getattr(agent, "organization_id", None))
+    trial_eligible = bool(not is_org_owner and _within_new_account_premium_window(owner))
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=is_org_owner)
+    trial_boost_active = trial_eligible and allowed_tier == AgentLLMTier.STANDARD
+    if trial_boost_active:
+        allowed_tier = AgentLLMTier.PREMIUM
 
     if is_first_loop:
         return AgentLLMTier.PREMIUM
 
     preferred_value = getattr(agent, "preferred_llm_tier", None)
-    try:
-        preferred = AgentLLMTier(preferred_value) if preferred_value else AgentLLMTier.STANDARD
-    except ValueError:
-        preferred = AgentLLMTier.STANDARD
+    if preferred_value:
+        try:
+            preferred = AgentLLMTier(preferred_value)
+        except ValueError:
+            preferred = default_preferred_tier_for_owner(owner)
+    else:
+        preferred = default_preferred_tier_for_owner(owner)
+
+    if trial_boost_active and preferred == AgentLLMTier.STANDARD:
+        preferred = AgentLLMTier.PREMIUM
 
     return _clamp_tier(preferred, allowed_tier)
 

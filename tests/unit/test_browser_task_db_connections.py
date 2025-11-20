@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
 from typing import Any
 
+from api.agent.core.llm_config import AgentLLMTier
 from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -107,6 +108,7 @@ class BrowserTaskPremiumTierTests(TestCase):
             user=self.user,
             name="Persistent Premium Agent",
             browser_use_agent=self.browser_agent,
+            preferred_llm_tier=AgentLLMTier.PREMIUM.value,
         )
         UserBilling.objects.update_or_create(
             user=self.user,

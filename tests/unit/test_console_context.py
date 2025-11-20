@@ -230,12 +230,16 @@ class ConsoleContextTests(TestCase):
         url = reverse("agent_detail", kwargs={"pk": self.personal_agent.id})
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode()
-        self.assertIn('data-dedicated-ip-total="1"', html)
-        self.assertIn('name="dedicated_proxy_id"', html)
-        self.assertIn('203.0.113.5', html)
-        self.assertIn('Use shared proxy pool', html)
-        self.assertIn('Remove', html)
+        props = resp.context.get("agent_detail_props") or {}
+        dedicated_ips = props.get("dedicatedIps") or {}
+        self.assertEqual(dedicated_ips.get("total"), 1)
+        self.assertEqual(dedicated_ips.get("available"), 1)
+        self.assertEqual(dedicated_ips.get("ownerType"), "user")
+        self.assertEqual(dedicated_ips.get("selectedId"), None)
+        options = dedicated_ips.get("options") or []
+        self.assertEqual(len(options), 1)
+        self.assertEqual(options[0]["label"], "203.0.113.5")
+        self.assertEqual(options[0]["assignedNames"], [])
 
     def test_billing_query_switches_to_org_context(self):
         self._set_personal_context()
