@@ -272,9 +272,9 @@ def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> Agen
                 getattr(agent, "id", None),
                 exc_info=True,
             )
-    is_org_owner = bool(getattr(agent, "organization_id", None))
-    trial_eligible = bool(not is_org_owner and _within_new_account_premium_window(owner))
-    allowed_tier = max_allowed_tier_for_plan(plan, is_organization=is_org_owner)
+    is_org_owned = bool(getattr(agent, "organization_id", None))
+    trial_eligible = bool(not is_org_owned and _within_new_account_premium_window(owner))
+    allowed_tier = max_allowed_tier_for_plan(plan, is_organization=is_org_owned)
     trial_boost_active = trial_eligible and allowed_tier == AgentLLMTier.STANDARD
     if trial_boost_active:
         allowed_tier = AgentLLMTier.PREMIUM
