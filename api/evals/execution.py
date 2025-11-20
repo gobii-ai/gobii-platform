@@ -165,25 +165,31 @@ class ScenarioExecutionTools:
     def record_task_result(
         self,
         run_id: str,
-        task_sequence: int,
+        task_sequence: Optional[int],
         status: str,
         observed_summary: str = "",
         expected_summary: str = "",
-        artifacts: Dict[str, Any] = None
+        artifacts: Dict[str, Any] = None,
+        task_name: Optional[str] = None
     ) -> EvalRunTask:
         """
         Update or create a task result record.
         """
         artifacts = artifacts or {}
         
-        task_obj, created = EvalRunTask.objects.get_or_create(
-            run_id=run_id,
-            sequence=task_sequence,
-            defaults={
-                "name": f"Task {task_sequence}",
-                "assertion_type": "manual"
-            }
-        )
+        if task_name:
+            task_obj = EvalRunTask.objects.get(run_id=run_id, name=task_name)
+        elif task_sequence is not None:
+            task_obj, created = EvalRunTask.objects.get_or_create(
+                run_id=run_id,
+                sequence=task_sequence,
+                defaults={
+                    "name": f"Task {task_sequence}",
+                    "assertion_type": "manual"
+                }
+            )
+        else:
+            raise ValueError("Must provide either task_sequence or task_name")
         
         task_obj.status = status
         if observed_summary:
