@@ -1,5 +1,8 @@
 import json
 from decimal import Decimal
+from datetime import timedelta
+
+from django.utils import timezone
 
 from django.test import TestCase, Client, tag, override_settings
 from django.contrib.messages import get_messages
@@ -414,11 +417,20 @@ class ConsoleViewsTest(TestCase):
             browser_use_agent=browser_agent,
             daily_credit_limit=1
         )
+        last_24h_cost = Decimal('0.5')
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(
                 agent=agent,
                 description='Usage',
                 credits_cost=Decimal('1.3'),
+            )
+            recent_step = PersistentAgentStep.objects.create(
+                agent=agent,
+                description='Yesterday Usage',
+                credits_cost=last_24h_cost,
+            )
+            PersistentAgentStep.objects.filter(id=recent_step.id).update(
+                created_at=timezone.now() - timedelta(hours=6)
             )
 
         response = self.client.get(reverse('agents'))
@@ -429,6 +441,8 @@ class ConsoleViewsTest(TestCase):
         agent_data = matching_agents[0]
         self.assertTrue(agent_data['dailyCreditLow'])
         self.assertAlmostEqual(agent_data['dailyCreditRemaining'], 0.7, places=2)
+        self.assertIn('last24hCreditBurn', agent_data)
+        self.assertAlmostEqual(agent_data['last24hCreditBurn'], float(last_24h_cost), places=2)
 
     @tag("batch_console_agents")
     @patch('console.views.AgentService.has_agents_available', return_value=True)

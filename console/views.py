@@ -14,7 +14,7 @@ from django.shortcuts import redirect, get_object_or_404, render
 from django.urls import NoReverseMatch, reverse, reverse_lazy
 from django.contrib import messages
 from django.db import transaction, models, IntegrityError
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404, HttpRequest
 from django.core.exceptions import ValidationError, PermissionDenied, ImproperlyConfigured
 from django.views.decorators.http import require_POST
@@ -53,6 +53,7 @@ from api.models import (
     AgentCommPeerState,
     PersistentAgentConversationParticipant,
     PersistentAgentSmsEndpoint,
+    PersistentAgentStep,
     CommsChannel,
     UserPhoneNumber,
     Organization,
@@ -1794,6 +1795,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         primary_email = _first_endpoint_address(getattr(agent, 'primary_email_endpoints', None))
         primary_sms = _first_endpoint_address(getattr(agent, 'primary_sms_endpoints', None))
         remaining = _coerce_decimal_to_float(getattr(agent, 'daily_credit_remaining', None))
+        recent_burn = _coerce_decimal_to_float(getattr(agent, 'daily_credit_last_24h_usage', None))
 
         return {
             'id': str(agent.id),
@@ -1820,6 +1822,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'headerLinkHoverClass': getattr(agent, 'header_link_hover_class', '') or '',
             'dailyCreditRemaining': remaining,
             'dailyCreditLow': bool(getattr(agent, 'daily_credit_low', False)),
+            'last24hCreditBurn': recent_burn,
         }
 
     def _build_agent_list_props(self, context: dict[str, Any], agents: list[PersistentAgent]) -> dict[str, Any]:
@@ -1889,6 +1892,25 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             )
             + timedelta(days=1)
         )
+        lookback_end = timezone.now()
+        lookback_start = lookback_end - timedelta(hours=24)
+        agent_ids = [agent.id for agent in persistent_agents]
+        recent_usage_map: dict[Any, Decimal] = {}
+        if agent_ids:
+            usage_rows = (
+                PersistentAgentStep.objects.filter(
+                    agent_id__in=agent_ids,
+                    created_at__gte=lookback_start,
+                    created_at__lt=lookback_end,
+                    credits_cost__isnull=False,
+                )
+                .values('agent_id')
+                .annotate(total=Sum('credits_cost'))
+            )
+            recent_usage_map = {
+                row['agent_id']: row['total'] or Decimal("0")
+                for row in usage_rows
+            }
 
         for agent in persistent_agents:
             description, source = build_listing_description(agent, max_length=200)
@@ -1917,6 +1939,8 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 status=AgentTransferInvite.Status.PENDING,
             ).first()
 
+            last_24h_usage = recent_usage_map.get(agent.id, Decimal("0"))
+
             try:
                 soft_target = agent.get_daily_credit_soft_target()
                 hard_limit = agent.get_daily_credit_hard_limit()
@@ -1929,6 +1953,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 remaining = None
 
             agent.daily_credit_usage = usage
+            agent.daily_credit_last_24h_usage = last_24h_usage
             agent.daily_credit_remaining = remaining
             agent.daily_credit_unlimited = soft_target is None
             agent.daily_credit_next_reset = next_reset
