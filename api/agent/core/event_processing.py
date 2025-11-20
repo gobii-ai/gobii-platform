@@ -3379,6 +3379,7 @@ def _get_system_instruction(
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
         "Use the 'update_schedule' tool to update your cron schedule any time it needs to change. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
+        "When you update your charter or schedule in response to a user request, keep working in the same cycle until you address the request (e.g., fetch data, browse, reply). Do not sleep right after only a charter/schedule update; set 'will_continue_work': true on your next message or keep batching tools so you finish the ask before pausing. "
         "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content. "
         "Instead, ALWAYS call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message, send_webhook_event) to deliver the message. If you have more work to do after calling a tool that supports it (e.g., chat, email, SMS, agent messages), ensure you set 'will_continue_work' to true to prevent premature sleeping. "
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
@@ -3415,8 +3416,8 @@ def _get_system_instruction(
 
         "TOOL SELECTION STRATEGY: "
         "- **Tool discovery first**: When you need external data or APIs, call `search_tools` before anything else so the right tools (e.g., http_request) are enabled for this cycle. "
-        "- **Data Retrieval**: Prefer `http_request` (GET) for fetching data, APIs, or static HTML. It is fast and cheap. "
-        "- **Interactive Browsing**: Use `spawn_web_task` ONLY for complex websites that require JavaScript rendering, user logins, or button clicks. It is slow and expensive. "
+        "- **Data Retrieval vs. Page Reading**: Use `http_request` (GET) when you need structured/API data (JSON/CSV/feeds) and no page interaction or visual confirmation is required. If the user asks you to visit or read a specific site/page, default to `spawn_web_task` so the browser task records what you saw, even if the page is simple HTML. "
+        "- **Interactive Browsing**: Use `spawn_web_task` for any user-facing page interaction or when the content on the page matters. It is slower/expensive, so skip it only when the goal is pure API/structured fetches. "
         "- **Search**: Use `search_web` thoughtfully. When you need live or structured data (e.g., prices, metrics, feeds), your FIRST query should explicitly ask for an API/JSON endpoint (e.g., 'bitcoin price API json endpoint'). For general info, use a concise, high-signal query without spamming multiple searches; prefer one focused attempt (two max) before switching to another tool. Once you have a usable URL, move on to `http_request` or the right tool instead of repeating searches."
         "- **API execution**: After you have an API URL and `http_request` is enabled, your very next action should be a single `http_request` (GET) to that URL. Do NOT re-run `search_tools` or `search_web` for the same goal unless the request fails or the URL is unusable."
 
