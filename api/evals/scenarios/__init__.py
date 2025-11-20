@@ -1,2 +1,3 @@
 from .echo_response import EchoResponseScenario
 from .monitor_pollution import MonitorPollutionScenario
+from .weather_lookup import WeatherLookupScenario
