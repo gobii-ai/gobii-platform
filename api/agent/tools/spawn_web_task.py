@@ -59,7 +59,10 @@ def get_spawn_web_task_tool() -> Dict[str, Any]:
         "function": {
             "name": "spawn_web_task",
             "description": (
-                "Spawn a new web automation task that runs asynchronously. Returns immediately with task_id. Be very detailed and specific in your instructions. "
+                "Spawn a new web automation task that runs asynchronously. Returns immediately with task_id. "
+                "WARNING: This is a slow, expensive headless browser. Do NOT use this for API endpoints or raw JSON feeds; use 'http_request' for pure data/API retrieval. "
+                "Use this tool when you need to read what a webpage shows (even simple HTML) or for complex sites requiring JavaScript execution, login, or user interaction. "
+                "Be very detailed and specific in your instructions. "
                 "Give instructions an AI web browsing agent could realistically complete. If you need URLs, you will need to ask for them. "
                 "If you mention secrets, mention them using their direct name, e.g. google_username, not <<<google_username>>>. "
                 "Use stored secrets for classic username/password logins only. Do NOT request or attempt to use OAuth credentials (Google, Slack, etc.); "

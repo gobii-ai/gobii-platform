@@ -27,7 +27,12 @@ def get_http_request_tool() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "http_request",
-            "description": "Perform an arbitrary HTTP request (GET, POST, PUT, etc.). The URL, headers, and body can include secret placeholders using the unique pattern <<<my_api_key>>>. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 30KB and binary bodies are omitted. You may need to look up API docs using the search_web spawn_web_task tool, or even get an openapi spec first using the http_request tool.",
+            "description": (
+                "Perform a fast and efficient HTTP request to fetch raw structured data (JSON, XML, CSV) or interact with APIs. "
+                "This is the PREFERRED tool for programmatic data retrieval from known endpoints. "
+                "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
+                "The URL, headers, and body can include secret placeholders using the unique pattern <<<my_api_key>>>. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 30KB and binary bodies are omitted. You may need to look up API docs using the search_web tool."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

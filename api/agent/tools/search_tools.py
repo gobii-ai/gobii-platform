@@ -17,7 +17,12 @@ from ...models import PersistentAgent
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from .mcp_manager import get_mcp_manager
-from .tool_manager import enable_tools, BUILTIN_TOOL_REGISTRY, get_enabled_tool_limit
+from .tool_manager import (
+    enable_tools,
+    BUILTIN_TOOL_REGISTRY,
+    HTTP_REQUEST_TOOL_NAME,
+    get_enabled_tool_limit,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -64,6 +69,27 @@ def _tool_attr(tool: Any, attr: str, default: Any = None) -> Any:
     return default
 
 
+def _fallback_builtin_selection(
+    query: str,
+    content_text: str,
+    available_names: set[str],
+) -> list[str]:
+    """
+    Heuristically select built-in tools when the LLM response does not call enable_tools.
+
+    This keeps core tools like http_request available even if the LLM fails to emit a
+    function call, which otherwise causes the agent to loop on search_tools/search_web.
+    """
+    text = f"{query} {content_text}".lower()
+    candidates: list[str] = []
+
+    wants_api = any(keyword in text for keyword in ["api", "http", "https", "request", "fetch", "endpoint", "json"])
+    if wants_api and HTTP_REQUEST_TOOL_NAME in available_names:
+        candidates.append(HTTP_REQUEST_TOOL_NAME)
+
+    return candidates
+
+
 def _search_with_llm(
     agent: PersistentAgent,
     query: str,
@@ -77,6 +103,11 @@ def _search_with_llm(
 
     if not tools:
         return {"status": "success", "tools": [], "message": empty_message}
+
+    available_names = {
+        _tool_attr(tool, "full_name") or _tool_attr(tool, "name")
+        for tool in tools
+    }
 
     tool_lines: List[str] = []
     for tool in tools:
@@ -229,6 +260,32 @@ def _search_with_llm(
                         summary.append(f"Invalid: {', '.join(enabled_result['invalid'])}")
                     if summary:
                         message_lines.append("; ".join(summary))
+
+                # Fallback: if the LLM did not call enable_tools, heuristically enable core built-ins
+                if not requested:
+                    fallback = _fallback_builtin_selection(query or "", content_text or "", available_names)
+                    if fallback:
+                        try:
+                            enabled_result = enable_callback(agent, fallback)
+                            logger.info(
+                                "search_tools.%s: heuristically enabled tools (no tool call): %s",
+                                provider_name,
+                                ", ".join(fallback),
+                            )
+                            if enabled_result and enabled_result.get("status") == "success":
+                                summary: List[str] = []
+                                if enabled_result.get("enabled"):
+                                    summary.append(f"Enabled: {', '.join(enabled_result['enabled'])}")
+                                if enabled_result.get("already_enabled"):
+                                    summary.append(f"Already enabled: {', '.join(enabled_result['already_enabled'])}")
+                                if enabled_result.get("evicted"):
+                                    summary.append(f"Evicted (LRU): {', '.join(enabled_result['evicted'])}")
+                                if enabled_result.get("invalid"):
+                                    summary.append(f"Invalid: {', '.join(enabled_result['invalid'])}")
+                                if summary:
+                                    message_lines.append("; ".join(summary))
+                        except Exception as err:  # pragma: no cover - defensive enabling
+                            logger.error("search_tools.%s: fallback enable_tools failed: %s", provider_name, err)
 
                 response_payload: ToolSearchResult = {
                     "status": "success",
