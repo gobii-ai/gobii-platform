@@ -3,7 +3,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
 from api.agent.core.llm_config import AgentLLMTier, get_agent_llm_tier
@@ -14,6 +14,7 @@ from api.models import (
     TaskCredit,
     TaskCreditConfig,
 )
+from constants.plans import PlanNames
 from util.tool_costs import clear_tool_credit_cost_cache
 
 
@@ -21,6 +22,7 @@ User = get_user_model()
 
 
 @tag("batch_llm_intelligence")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class AgentTierPreferenceTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -70,6 +72,7 @@ class BrowserUseTaskTierMultiplierTests(TestCase):
             credits_used=Decimal("0.000"),
             granted_date=timezone.now(),
             expiration_date=timezone.now() + timedelta(days=30),
+            plan=PlanNames.STARTUP,
             voided=False,
         )
 
