@@ -3419,15 +3419,14 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         if request.POST.get('mcp_server_action') == 'update_personal':
             return self._handle_mcp_server_update(request, agent, ajax=is_ajax)
 
-        # Handle AJAX allowlist operations
+        # Handle AJAX allowlist / reassignment operations
         # Check both modern header and legacy header for AJAX detection
-        if is_ajax:
-            from django.http import JsonResponse
+        action = request.POST.get('action')
+        ajax_actions = {'add_allowlist', 'remove_allowlist', 'cancel_invite', 'reassign_org'}
+        if is_ajax and action in ajax_actions:
             from api.models import CommsAllowlistEntry
             from django.db import IntegrityError
-            
-            action = request.POST.get('action')
-            
+
             if action == 'add_allowlist':
                 channel = request.POST.get('channel', 'email')
                 address = request.POST.get('address', '').strip()
@@ -3769,10 +3768,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     return JsonResponse({'success': False, 'error': 'An unexpected error occurred. Please try again.'}, status=500)
             
             return JsonResponse({'success': False, 'error': 'Invalid action'})
-        
+
         # Handle regular form submission
         # Check if this is an allowlist action that shouldn't have gotten here
-        action = request.POST.get('action', '')
+        action = action or ''
         if action in ['add_allowlist', 'remove_allowlist']:
             # This shouldn't happen, but if JavaScript failed, redirect back
             # Import messages here if needed
