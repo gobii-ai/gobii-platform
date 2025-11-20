@@ -7,6 +7,7 @@ from django.db import transaction
 from rest_framework import serializers
 from api.agent.core.llm_config import (
     AgentLLMTier,
+    TIER_ORDER,
     default_preferred_tier_for_owner,
     max_allowed_tier_for_plan,
 )
@@ -484,8 +485,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             except Exception:
                 plan = None
         allowed = max_allowed_tier_for_plan(plan, is_organization=is_org)
-        ordering = [AgentLLMTier.STANDARD, AgentLLMTier.PREMIUM, AgentLLMTier.MAX]
-        if ordering.index(tier) > ordering.index(allowed):
+        if TIER_ORDER[tier] > TIER_ORDER[allowed]:
             raise serializers.ValidationError("Upgrade your plan to choose this intelligence tier.")
         return tier.value
 

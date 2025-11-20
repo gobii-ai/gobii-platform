@@ -81,7 +81,7 @@ class AgentLLMTier(str, Enum):
     MAX = "max"
 
 
-_TIER_ORDER = {
+TIER_ORDER = {
     AgentLLMTier.STANDARD: 0,
     AgentLLMTier.PREMIUM: 1,
     AgentLLMTier.MAX: 2,
@@ -109,7 +109,7 @@ def max_allowed_tier_for_plan(
 
 
 def _clamp_tier(target: AgentLLMTier, max_allowed: AgentLLMTier) -> AgentLLMTier:
-    if _TIER_ORDER[target] <= _TIER_ORDER[max_allowed]:
+    if TIER_ORDER[target] <= TIER_ORDER[max_allowed]:
         return target
     return max_allowed
 

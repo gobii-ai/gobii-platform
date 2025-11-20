@@ -36,7 +36,7 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyUnavailableError,
     is_multi_assign_enabled,
 )
-from api.agent.core.llm_config import AgentLLMTier, get_llm_tier_multipliers, max_allowed_tier_for_plan
+from api.agent.core.llm_config import AgentLLMTier, TIER_ORDER, get_llm_tier_multipliers, max_allowed_tier_for_plan
 from api.agent.short_description import build_listing_description, build_mini_description, \
     maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
@@ -3945,12 +3945,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         if preferred_tier_changed:
             if not can_edit_intelligence:
                 return _general_error("Upgrade your plan to adjust intelligence levels.")
-            allowed_values = {AgentLLMTier.STANDARD}
-            if allowed_llm_tier in (AgentLLMTier.PREMIUM, AgentLLMTier.MAX):
-                allowed_values.add(AgentLLMTier.PREMIUM)
-            if allowed_llm_tier == AgentLLMTier.MAX:
-                allowed_values.add(AgentLLMTier.MAX)
-            if requested_preferred_tier not in allowed_values:
+            if TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
                 return _general_error("That intelligence level isn't available for this plan.")
 
         resolved_preferred_tier_value = requested_preferred_tier.value
