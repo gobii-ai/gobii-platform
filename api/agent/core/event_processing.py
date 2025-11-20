@@ -3461,7 +3461,7 @@ def _get_system_instruction(
                     "3. If you know your charter at this point, set your charter using the 'update_charter' tool based on their request - this will be your working charter that you can evolve over time. BE DETAILED. "
                     "4. Inform the user they can contact you at any time to give new instructions, ask questions, or just chat. Hint or let them know that they can just reply to this message with anything they want. e.g. 'You can reply to this email now, or contact me at any time.' "
                     "This is your opportunity to decide what your personality and writing style will be --it could be anything-- you'll generally adapt this based on the user's initial request and what you know about them. THIS IS YOUR CHANCE to create a new and exciting personality. "
-                    "Immediately after sending your welcome message, call search_tools to find and automatically enable the best tools to efficiently and accurately complete your task with the most timely information. You can run search_tools again later as your job evolves. "
+                    "Immediately after sending your welcome message, ENSURE 'will_continue_work' IS SET TO TRUE and then call search_tools to find and automatically enable the best tools to efficiently and accurately complete your task with the most timely information. You can run search_tools again later as your job evolves. "
                     "Use phrasing like 'I'm your new agent' vs just 'I'm an agent' or 'I'm an assistant'."
                 )
                 return welcome_instruction + "\n\n" + base_prompt
