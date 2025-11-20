@@ -3389,9 +3389,10 @@ def _get_system_instruction(
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
         "TOOL SELECTION STRATEGY: "
+        "- **Tool discovery first**: When you need external data or APIs, call `search_tools` before anything else so the right tools (e.g., http_request) are enabled for this cycle. "
         "- **Data Retrieval**: Prefer `http_request` (GET) for fetching data, APIs, or static HTML. It is fast and cheap. "
         "- **Interactive Browsing**: Use `spawn_web_task` ONLY for complex websites that require JavaScript rendering, user logins, or button clicks. It is slow and expensive. "
-        "- **Search**: Use `search_web` to find URLs. Once you have a URL, try `http_request` first."
+        "- **Search**: If you must use `search_web`, issue one tightly scoped query that explicitly asks for an API/JSON endpoint (include words like 'API', 'JSON', 'endpoint'). Once you have a URL, switch to `http_request` immediately and do NOT repeat `search_web`. At most two `search_web` attempts per goal."
 
         "TOOL GUIDELINES: "
         "- 'http_request': Fetch data or APIs. Proxy handled automatically. "
@@ -3404,7 +3405,7 @@ def _get_system_instruction(
         "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
         "TOOL USAGE RULES: "
-        "1. Every response requires a tool call. Never output text without a tool. "
+        "1. Every response requires a tool call. Never output text without a tool. Avoid repeating the same tool/params in consecutive turns; move forward once you have a usable URL or data. "
         "2. To speak: Use send_chat_message, send_email, or send_sms. "
         "3. To sleep: Use sleep_until_next_trigger ONLY if you have no message to send and no work to do. "
         "4. To chain: Set 'will_continue_work': true on message tools if you have more actions this cycle. "
