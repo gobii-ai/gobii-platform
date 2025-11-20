@@ -54,9 +54,10 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                 "status": "ok",
                 "result": "Web task simulated success"
             }
+            # Return a result that points to a "free" API so the agent chooses http_request
             mock_search.return_value = {
                 "status": "ok",
-                "result": "Search simulated success"
+                "result": "Found free weather API: https://api.weather.gov/gridpoints/LWX/96,70/forecast provides forecast for Frederick, MD. Also available: https://api.openweathermap.org/data/2.5/weather?q=Frederick,MD,US&appid=demo"
             }
             
             def enabled_tool_side_effect(agent, tool_name, params):
@@ -66,6 +67,13 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                         "content": '{"current_weather": "72F, Sunny"}', 
                         "status_code": 200
                     }
+                if tool_name == 'search_web':
+                    query = params.get('query', '').lower()
+                    if 'weather' in query:
+                        return {
+                            "status": "ok",
+                            "result": "Found free weather API: https://api.weather.gov/gridpoints/LWX/96,70/forecast provides forecast for Frederick, MD. Also available: https://api.openweathermap.org/data/2.5/weather?q=Frederick,MD,US&appid=demo"
+                        }
                 return {"status": "ok", "message": "Mock tool success"}
             
             mock_enabled_tool.side_effect = enabled_tool_side_effect
@@ -81,26 +89,22 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             task_name="verify_charter_update"
         )
         
-        steps = PersistentAgentStep.objects.filter(
-            agent_id=agent_id,
-            created_at__gte=msg.timestamp
-        ).select_related() # removed 'tool_call' as it's a reverse relation
+        # Query ToolCall directly for robustness
+        from api.models import PersistentAgentToolCall
+        charter_updates = PersistentAgentToolCall.objects.filter(
+            step__agent_id=agent_id,
+            step__created_at__gte=msg.timestamp,
+            tool_name__in=['update_charter', 'charter_updater']
+        )
 
-        charter_updates = []
-        for s in steps:
-            if hasattr(s, 'tool_call'):
-                # Safe access to reverse OneToOne
-                if s.tool_call.tool_name in ('update_charter', 'charter_updater'):
-                    charter_updates.append(s)
-
-        if charter_updates:
+        if charter_updates.exists():
              self.record_task_result(
                 run_id, 
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_charter_update",
                 observed_summary="Charter update tool called.",
-                artifacts={"step": charter_updates[0]}
+                artifacts={"tool_call": charter_updates.first()}
             )
         else:
             self.record_task_result(
