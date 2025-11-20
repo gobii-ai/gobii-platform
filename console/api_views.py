@@ -177,18 +177,23 @@ def _build_completion_params(
     api_base = (getattr(endpoint, base_attr, "") or "").strip() or None
     model = normalize_model_name(provider, raw_model, api_base=api_base)
 
-    temp_override = getattr(endpoint, "temperature_override", None)
-    temperature = float(temp_override if temp_override not in (None, "") else default_temperature)
+    supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
+    temperature: float | None = None
+    if supports_temperature:
+        temp_override = getattr(endpoint, "temperature_override", None)
+        temperature = float(temp_override if temp_override not in (None, "") else default_temperature)
     max_tokens_value = getattr(endpoint, "max_output_tokens", None)
     max_tokens = default_max_tokens
     if isinstance(max_tokens_value, (int, float)) and max_tokens_value > 0:
         max_tokens = min(int(max_tokens_value), 512)
 
     params: dict[str, Any] = {
-        "temperature": temperature,
         "max_tokens": max_tokens,
         "timeout": 20,
     }
+    if temperature is not None:
+        params["temperature"] = temperature
+    params["supports_temperature"] = supports_temperature
     if hasattr(endpoint, "supports_tool_choice"):
         params["supports_tool_choice"] = bool(getattr(endpoint, "supports_tool_choice", True))
     if hasattr(endpoint, "use_parallel_tool_calls"):
@@ -870,6 +875,7 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
             provider=provider,
             litellm_model=model,
             temperature_override=temperature_override,
+            supports_temperature=_coerce_bool(payload.get("supports_temperature", True)),
             supports_tool_choice=_coerce_bool(payload.get("supports_tool_choice", True)),
             use_parallel_tool_calls=_coerce_bool(payload.get("use_parallel_tool_calls", True)),
             supports_vision=_coerce_bool(payload.get("supports_vision", False)),
@@ -902,6 +908,8 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
                 endpoint.temperature_override = None
             else:
                 endpoint.temperature_override = float(temp)
+        if "supports_temperature" in payload:
+            endpoint.supports_temperature = _coerce_bool(payload.get("supports_temperature"))
         if "supports_tool_choice" in payload:
             endpoint.supports_tool_choice = _coerce_bool(payload.get("supports_tool_choice"))
         if "use_parallel_tool_calls" in payload:
@@ -1161,6 +1169,7 @@ class BrowserEndpointListCreateAPIView(SystemAdminAPIView):
             browser_model=model,
             browser_base_url=base_url,
             max_output_tokens=max_output_tokens,
+            supports_temperature=_coerce_bool(payload.get("supports_temperature", True)),
             supports_vision=_coerce_bool(payload.get("supports_vision", False)),
             enabled=_coerce_bool(payload.get("enabled", True)),
         )
@@ -1202,6 +1211,8 @@ class BrowserEndpointDetailAPIView(SystemAdminAPIView):
                     endpoint.max_output_tokens = int(value)
                 except (TypeError, ValueError):
                     return HttpResponseBadRequest("max_output_tokens must be an integer")
+        if "supports_temperature" in payload:
+            endpoint.supports_temperature = _coerce_bool(payload.get("supports_temperature"))
         if "supports_vision" in payload:
             endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
         if "enabled" in payload:

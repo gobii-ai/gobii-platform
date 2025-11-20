@@ -17,13 +17,17 @@ def run_completion(
 ):
     """Invoke ``litellm.completion`` with shared parameter handling.
 
-    - Removes internal hints (``supports_tool_choice``, ``use_parallel_tool_calls``, and ``supports_vision``).
+    - Removes internal hints (``supports_temperature``, ``supports_tool_choice``, ``use_parallel_tool_calls``, and ``supports_vision``).
     - Adds ``tool_choice`` when tools are provided and supported.
     - Propagates ``parallel_tool_calls`` when tools are provided *or* the endpoint
       supplied an explicit hint.
     - Allows callers to control ``drop_params`` while keeping consistent defaults.
     """
     params = dict(params or {})
+
+    supports_temperature = params.pop("supports_temperature", True)
+    if not supports_temperature:
+        params.pop("temperature", None)
 
     tool_choice_supported = params.pop("supports_tool_choice", True)
     parallel_hint_provided = "use_parallel_tool_calls" in params

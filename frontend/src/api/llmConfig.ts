@@ -14,6 +14,7 @@ export type ProviderEndpoint = {
   model: string
   api_base?: string
   temperature_override?: number | null
+  supports_temperature?: boolean
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
   supports_vision?: boolean

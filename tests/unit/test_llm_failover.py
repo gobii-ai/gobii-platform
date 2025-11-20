@@ -20,6 +20,7 @@ from api.agent.core.llm_config import (
     get_provider_config,
     get_summarization_llm_config,
 )
+from console.api_views import _build_completion_params
 from api.openrouter import DEFAULT_API_BASE
 from tests.utils.llm_seed import seed_persistent_basic, clear_llm_db
 
@@ -224,6 +225,60 @@ class TestLLMFailover(TestCase):
         _, model, params = configs[0]
         self.assertEqual(model, 'openai/gpt-5')
         self.assertEqual(params.get("temperature"), 1.0)
+
+    def test_temperature_param_dropped_when_unsupported(self):
+        seed_persistent_basic(include_openrouter=False)
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        endpoint = PersistentModelEndpoint.objects.get(key='anthropic_sonnet4')
+        endpoint.supports_temperature = False
+        endpoint.save(update_fields=["supports_temperature"])
+
+        with mock.patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "anthropic-key",
+            "GOOGLE_API_KEY": "google-key",
+        }, clear=True):
+            configs = get_llm_config_with_failover(token_count=0)
+
+        target = next((cfg for cfg in configs if cfg[0] == endpoint.key), None)
+        self.assertIsNotNone(target)
+        _, model, params = target
+        self.assertEqual(model, endpoint.litellm_model)
+        self.assertNotIn("temperature", params)
+        self.assertFalse(params.get("supports_temperature"))
+
+    def test_browser_temperature_param_dropped_when_unsupported(self):
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        BrowserModelEndpoint = apps.get_model('api', 'BrowserModelEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='openai',
+            display_name='OpenAI',
+            enabled=True,
+            env_var_name='OPENAI_API_KEY',
+            browser_backend='OPENAI',
+        )
+        endpoint = BrowserModelEndpoint.objects.create(
+            key='openai_browser',
+            provider=provider,
+            enabled=True,
+            browser_model='gpt-5.1-codex',
+            browser_base_url='https://api.example.com/v1',
+            supports_temperature=False,
+        )
+
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-browser"}, clear=True):
+            model, params = _build_completion_params(
+                endpoint,
+                provider,
+                model_attr="browser_model",
+                base_attr="browser_base_url",
+                default_temperature=0.5,
+                default_max_tokens=64,
+            )
+
+        self.assertEqual(model, "openai/gpt-5.1-codex")
+        self.assertNotIn("temperature", params)
+        self.assertFalse(params.get("supports_temperature"))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_max_tier_configs_take_priority(self):

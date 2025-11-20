@@ -1586,6 +1586,10 @@ class PersistentModelEndpoint(models.Model):
     # LiteLLM model string and options
     litellm_model = models.CharField(max_length=256)
     temperature_override = models.FloatField(null=True, blank=True)
+    supports_temperature = models.BooleanField(
+        default=True,
+        help_text="Indicates whether this model accepts a temperature parameter",
+    )
     supports_tool_choice = models.BooleanField(default=True)
     use_parallel_tool_calls = models.BooleanField(default=True)
     supports_vision = models.BooleanField(
@@ -1803,6 +1807,10 @@ class BrowserModelEndpoint(models.Model):
         null=True,
         blank=True,
         help_text="Optional override of the provider's max output tokens; null disables the override.",
+    )
+    supports_temperature = models.BooleanField(
+        default=True,
+        help_text="Indicates whether this model accepts a temperature parameter",
     )
     supports_vision = models.BooleanField(
         default=False,

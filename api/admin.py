@@ -3420,6 +3420,7 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "litellm_model",
         "api_base",
         "enabled",
+        "supports_temperature",
         "supports_tool_choice",
         "use_parallel_tool_calls",
         "supports_vision",
@@ -3433,6 +3434,7 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "litellm_model",
         "api_base",
         "temperature_override",
+        "supports_temperature",
         "supports_tool_choice",
         "use_parallel_tool_calls",
         "supports_vision",
@@ -3534,6 +3536,7 @@ class BrowserModelEndpointAdmin(admin.ModelAdmin):
         "browser_base_url",
         "max_output_tokens",
         "enabled",
+        "supports_temperature",
         "supports_vision",
     )
     list_filter = ("enabled", "provider", "supports_vision")
@@ -3545,6 +3548,7 @@ class BrowserModelEndpointAdmin(admin.ModelAdmin):
         "browser_model",
         "browser_base_url",
         "max_output_tokens",
+        "supports_temperature",
         "supports_vision",
     )
 

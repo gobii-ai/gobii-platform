@@ -72,6 +72,7 @@ type ProviderEndpointCard = {
   browser_base_url?: string
   max_output_tokens?: number | null
   temperature?: number | null
+  supports_temperature?: boolean
   supports_vision?: boolean
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
@@ -108,6 +109,7 @@ type EndpointTestStatus = {
 type EndpointFormValues = {
   model: string
   temperature?: string
+  supportsTemperature?: boolean
   api_base?: string
   browser_base_url?: string
   max_output_tokens?: string
@@ -435,6 +437,7 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       browser_base_url: endpoint.browser_base_url,
       max_output_tokens: endpoint.max_output_tokens ?? null,
       temperature: endpoint.temperature_override ?? null,
+      supports_temperature: endpoint.supports_temperature ?? true,
       supports_vision: endpoint.supports_vision,
       supports_tool_choice: endpoint.supports_tool_choice,
       use_parallel_tool_calls: endpoint.use_parallel_tool_calls,
@@ -887,6 +890,9 @@ type EndpointEditorProps = {
 function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorProps) {
   const [model, setModel] = useState(endpoint.name)
   const [temperature, setTemperature] = useState(endpoint.temperature?.toString() ?? '')
+  const [supportsTemperature, setSupportsTemperature] = useState(
+    endpoint.supports_temperature ?? true,
+  )
   const [apiBase, setApiBase] = useState(endpoint.api_base || endpoint.browser_base_url || '')
   const [maxTokens, setMaxTokens] = useState(endpoint.max_output_tokens?.toString() ?? '')
   const [supportsVision, setSupportsVision] = useState(Boolean(endpoint.supports_vision))
@@ -900,6 +906,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       api_base: apiBase,
       browser_base_url: apiBase,
       max_output_tokens: maxTokens,
+      supportsTemperature,
       supportsToolChoice: supportsToolChoice,
       useParallelToolCalls: parallelTools,
       supportsVision: supportsVision,
@@ -920,7 +927,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
         {!isBrowser && (
           <div>
             <label className="text-xs text-slate-500">Temperature override</label>
-            <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+            <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
           </div>
         )}
         <div>
@@ -935,6 +942,10 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
         )}
       </div>
       <div className="flex flex-wrap gap-4 text-sm">
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+          Supports temperature
+        </label>
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
           Vision
@@ -976,6 +987,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [apiBase, setApiBase] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
   const [supportsVision, setSupportsVision] = useState(false)
+  const [supportsTemperature, setSupportsTemperature] = useState(true)
   const [supportsTools, setSupportsTools] = useState(true)
   const [parallelTools, setParallelTools] = useState(true)
   const [temperature, setTemperature] = useState('')
@@ -997,6 +1009,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         api_base: apiBase,
         browser_base_url: apiBase,
         max_output_tokens: maxTokens,
+        supportsTemperature,
         supportsVision,
         supportsToolChoice: supportsTools,
         useParallelToolCalls: parallelTools,
@@ -1031,7 +1044,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
             {(type === 'persistent' || type === 'embedding') && (
               <div>
                 <label className="text-xs text-slate-500">Temperature override</label>
-                <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+                <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
               </div>
             )}
             {type === 'browser' && (
@@ -1046,6 +1059,10 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
             </div>
           </div>
           <div className="flex flex-wrap gap-4 text-sm">
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+              Supports temperature
+            </label>
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
               Vision
@@ -1678,6 +1695,7 @@ export function LlmConfigScreen() {
       payload.browser_base_url = values.browser_base_url || values.api_base || ''
       const maxTokens = parseNumber(values.max_output_tokens)
       if (maxTokens !== undefined) payload.max_output_tokens = maxTokens
+      payload.supports_temperature = values.supportsTemperature ?? true
       payload.supports_vision = Boolean(values.supportsVision)
       payload.enabled = true
     } else if (type === 'embedding') {
@@ -1691,6 +1709,7 @@ export function LlmConfigScreen() {
       payload.api_base = values.api_base || ''
       const temp = parseNumber(values.temperature)
       payload.temperature_override = temp ?? null
+      payload.supports_temperature = values.supportsTemperature ?? true
       payload.supports_tool_choice = values.supportsToolChoice ?? true
       payload.use_parallel_tool_calls = values.useParallelToolCalls ?? true
       payload.supports_vision = values.supportsVision ?? false
@@ -1730,6 +1749,7 @@ export function LlmConfigScreen() {
       const parsed = parseNumber(values.temperature)
       payload.temperature_override = parsed ?? null
     }
+    if (values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
     if (values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
     if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
