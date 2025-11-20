@@ -6,7 +6,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0195_persistentagent_preferred_llm_tier_and_more'),
+        ('api', '0199_persistentagent_preferred_llm_tier_and_more'),
         ('api', '0199_merge_20251120_1338'),
     ]
 

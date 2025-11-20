@@ -1190,7 +1190,21 @@ class BrowserUseAgentTask(models.Model):
                 # Use consolidated credit checking and consumption logic (owner-aware)
                 # Determine amount to consume; persist it on the task for auditability
                 default_cost = get_default_task_credit_cost()
-                amount = self.credits_cost if self.credits_cost is not None else default_cost
+                persistent_agent = None
+                if self.agent_id:
+                    try:
+                        persistent_agent = self.agent.persistent_agent
+                    except Exception:
+                        persistent_agent = None
+
+                if self.credits_cost is not None:
+                    amount = self.credits_cost
+                else:
+                    amount = default_cost
+                    if persistent_agent is not None:
+                        amount = _apply_tier_multiplier(persistent_agent, amount)
+                    self.credits_cost = amount
+
                 result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
                 
                 if not result['success']:
@@ -1198,9 +1212,6 @@ class BrowserUseAgentTask(models.Model):
                 
                 # Associate the consumed credit with this task
                 self.task_credit = result['credit']
-                # Persist the actual credits charged for this task
-                if self.credits_cost is None:
-                    self.credits_cost = default_cost
 
         super().save(*args, **kwargs)
 

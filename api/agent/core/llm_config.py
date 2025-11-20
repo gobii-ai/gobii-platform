@@ -226,7 +226,7 @@ def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> Agen
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=is_org_owner)
 
     if is_first_loop:
-        return _clamp_tier(AgentLLMTier.PREMIUM, allowed_tier)
+        return AgentLLMTier.PREMIUM
 
     preferred_value = getattr(agent, "preferred_llm_tier", None)
     try:
