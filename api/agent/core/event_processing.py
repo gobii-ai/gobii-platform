@@ -377,6 +377,19 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
     if budget_ctx is None:
         return
 
+    # If a pending follow-up is queued, keep the cycle open so it can run
+    try:
+        redis_client = get_redis_client()
+        pending_key = f"agent-event-processing:pending:{agent.id}"
+        if redis_client.get(pending_key):
+            logger.info(
+                "Agent %s sleeping with pending follow-up flag; keeping cycle active.",
+                agent.id,
+            )
+            return
+    except Exception:
+        logger.debug("Pending-flag check failed; proceeding to default close logic", exc_info=True)
+
     try:
         current_depth = (
             AgentBudgetManager.get_branch_depth(
