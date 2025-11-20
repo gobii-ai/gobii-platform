@@ -69,10 +69,24 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_efficient_tool_usage")
 
         with patch('api.agent.core.event_processing.execute_spawn_web_task') as mock_spawn, \
+             patch('api.agent.core.event_processing.execute_search_web') as mock_search, \
              patch('api.agent.core.event_processing.execute_enabled_tool') as mock_enabled_tool:
             
             mock_spawn.return_value = {"status": "ok", "result": "Web task simulated success"}
             
+            # Mock search_web (direct call)
+            def search_side_effect(agent, params):
+                query = params.get('query', '').lower()
+                if 'bitcoin' in query or 'crypto' in query or 'price' in query:
+                    return {
+                        "status": "ok",
+                        "result": "Found free Bitcoin price API: https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+                    }
+                return {"status": "ok", "result": "No relevant results found."}
+            
+            mock_search.side_effect = search_side_effect
+
+            # Mock enabled tools (http_request via search_tools)
             def enabled_tool_side_effect(agent, tool_name, params):
                 if tool_name == 'http_request':
                      # Return a realistic Bitcoin price API response
@@ -81,14 +95,6 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
                         "content": json.dumps({"bitcoin":{"usd":68500.50}}), 
                         "status_code": 200
                     }
-                if tool_name == 'search_web':
-                    query = params.get('query', '').lower()
-                    # Mock search_web to return a Bitcoin API URL
-                    if 'bitcoin' in query or 'crypto' in query or 'price' in query:
-                        return {
-                            "status": "ok",
-                            "result": "Found free Bitcoin price API: https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-                        }
                 return {"status": "ok", "message": "Mock tool success"}
             
             mock_enabled_tool.side_effect = enabled_tool_side_effect

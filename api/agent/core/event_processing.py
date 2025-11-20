@@ -3389,9 +3389,9 @@ def _get_system_instruction(
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
         "DATA RETRIEVAL PRIORITY: "
-        "1. DIRECT API (Best): If you know a free API URL, call it with 'http_request'. Accept the data it returns; do not verify with a browser unless the data is clearly broken. "
-        "2. SEARCH FOR API: Use 'search_web' to find a free API. "
-        "3. BROWSER (Last Resort): Use 'spawn_web_task' ONLY if no API exists or for complex login/navigation. "
+        "1. DIRECT API (Best): If you have an API/data URL (JSON, XML, csv, or 'api.'), call it with 'http_request'. NEVER browse these with 'spawn_web_task'. "
+        "2. SEARCH FOR API: Use 'search_web' to find a free API (e.g. query: 'free API for <topic>'), NOT the answer itself. "
+        "3. BROWSER (Last Resort): Use 'spawn_web_task' ONLY for user-facing HTML websites when no API exists. "
 
         "TOOL GUIDELINES: "
         "- 'http_request': Supports all methods. Proxy handled automatically. "
