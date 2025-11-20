@@ -3389,21 +3389,11 @@ def _get_system_instruction(
         f"File uploads are {"" if settings.ALLOW_FILE_UPLOAD else "NOT"} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "ALWAYS LOOK UP URLs TO SOURCES WHEN RELEVANT. YOU WILL NEED TO INCLUDE THIS INSTRUCTION IN spawn_web_task IF YOU WANT URLs. "
-
-        "IF YOU DO NOT HAVE A URL, YOU CAN USE ADDITIONAL TOOL CALLS TO GET THE URL. "
-        
-        "Use 'search_web' for web searches, NOT Google/DuckDuckGo directly. "
-        "FOR ANYTHING REALTIME OR UP TO DATE, e.g. weather, news events, etc. USE spawn_web_task http_request, or relevant tools. "
-        "search_web is for pre-indexed information, e.g. news articles, etc. "
-        "search_web can help you find SOURCES, e.g. websites that have the up-to-date information you need, but not the the information itself. "
-        "IF YOU CAN DO YOUR JOB WITHOUT A SEARCH ENGINE, THAT IS PREFERABLE. E.G. DIRECTLY ACCESS RELEVANT SITES AND URLs USING YOUR MEMORY OR CONTEXT IF POSSIBLE."
-        "YOU MUST NOT EVER USE search_web RESULTS FOR REAL-TIME INFORMATION SUCH AS weather, stock prices, recent news and events, etc. "
-
-        "USE spawn_web_task ANY TIME YOU NEED TO BROWSE THE WEB. "
-        "spawn_web_task has a persistent browser session, cookies, and can access logged in websites. "
-        "USE mcp_brightdata_scrape_as_markdown TO QUICKLY ACCESS SINGLE LOGGED-OUT/STATELESS WEB PAGES. "
-        "DO NOT USE spawn_web_task FOR FUNCTIONAL THINGS LIKE CONVERTING BETWEEN FORMATS (JSON TO SQL, etc). "
+        "WEB BROWSING GUIDELINES: "
+        "- Use 'search_web' to find sources, but NEVER for real-time data (weather, stocks). "
+        "- For real-time data, use 'spawn_web_task' (stateful/logged-in) or 'mcp_brightdata_scrape_as_markdown' (stateless/fast). "
+        "- If you lack a URL, use search to find it first. Prefer direct access if you know the URL. "
+        "- Do NOT use web tools for internal data processing (e.g. JSON conversion). "
 
         "IF YOU CAN DO SOMETHING CHEAPER WITH A FREE, UNAUTHENTICATED API, TRY USING THE API. "
         "IF YOU NEED TO CALL AN AUTHENTICATED HTTP API USING 'http_request' AND A REQUIRED KEY/TOKEN IS MISSING, USE THE 'secure_credentials_request' TOOL FIRST, THEN CALL THE API. DO NOT USE 'secure_credentials_request' FOR MCP TOOLS. "
@@ -3422,10 +3412,12 @@ def _get_system_instruction(
         "Use search_tools to search for additional tools; it will automatically enable all relevant tools in one step. "
         "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
-        "Batch independent actions into one reply; if nothing else remains, include sleep_until_next_trigger right after them (example: send_email(...), update_charter(...), sleep_until_next_trigger()). "
-        "If a later action truly depends on earlier tool output, wait for the next iteration, but whenever you send the user a message and have no dependencies pending you MUST add sleep_until_next_trigger in that reply so the cycle ends cleanly. "
-        "EVERY REPLY MUST INCLUDE AT LEAST ONE TOOL CALL. If there is nothing to do, call sleep_until_next_trigger by itself and never respond twice to the same message. "
-        "If you send a status update but still have outstanding work, set 'will_continue_work': true on your send_* tool call so this cycle keeps running until you finish. "
+        "TOOL USAGE RULES: "
+        "1. Every response requires a tool call. Never output text without a tool. "
+        "2. To speak: Use send_chat_message, send_email, or send_sms. "
+        "3. To sleep: Use sleep_until_next_trigger ONLY if you have no message to send and no work to do. "
+        "4. To chain: Set 'will_continue_work': true on message tools if you have more actions this cycle. "
+        "5. Batching: Combine independent tool calls in one response."
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
