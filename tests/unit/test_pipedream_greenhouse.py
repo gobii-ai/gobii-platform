@@ -198,34 +198,35 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
         with patch.object(mgr, '_pd_build_headers', side_effect=fake_headers) as mock_hdrs:
             # Avoid creating an un-awaited coroutine by stubbing async fetch
             with patch.object(mgr, '_fetch_server_tools', return_value=[]):
-                from django.test import override_settings
-                with override_settings(
-                    PIPEDREAM_CLIENT_ID="cli",
-                    PIPEDREAM_CLIENT_SECRET="sec",
-                    PIPEDREAM_PROJECT_ID="proj",
-                    PIPEDREAM_ENVIRONMENT="development",
-                    PIPEDREAM_PREFETCH_APPS="greenhouse",
-                ):
-                    config = _get_or_create_pipedream_config()
-                    runtime = MCPServerRuntime(
-                        config_id=str(config.id),
-                        name=config.name,
-                        display_name=config.display_name,
-                        description=config.description,
-                        command=config.command or None,
-                        args=list(config.command_args or []),
-                        url=config.url or "",
-                        auth_method=config.auth_method,
-                        env=config.environment or {},
-                        headers=config.headers or {},
-                        prefetch_apps=["greenhouse"],
-                        scope=config.scope,
-                        organization_id=str(config.organization_id) if config.organization_id else None,
-                        user_id=str(config.user_id) if config.user_id else None,
-                        updated_at=config.updated_at,
-                    )
-                    mgr._server_cache = {runtime.config_id: runtime}
-                    mgr._register_server(runtime)
+                with patch.object(mgr, '_get_pipedream_access_token', return_value="pd_token"):
+                    from django.test import override_settings
+                    with override_settings(
+                        PIPEDREAM_CLIENT_ID="cli",
+                        PIPEDREAM_CLIENT_SECRET="sec",
+                        PIPEDREAM_PROJECT_ID="proj",
+                        PIPEDREAM_ENVIRONMENT="development",
+                        PIPEDREAM_PREFETCH_APPS="greenhouse",
+                    ):
+                        config = _get_or_create_pipedream_config()
+                        runtime = MCPServerRuntime(
+                            config_id=str(config.id),
+                            name=config.name,
+                            display_name=config.display_name,
+                            description=config.description,
+                            command=config.command or None,
+                            args=list(config.command_args or []),
+                            url=config.url or "",
+                            auth_method=config.auth_method,
+                            env=config.environment or {},
+                            headers=config.headers or {},
+                            prefetch_apps=["greenhouse"],
+                            scope=config.scope,
+                            organization_id=str(config.organization_id) if config.organization_id else None,
+                            user_id=str(config.user_id) if config.user_id else None,
+                            updated_at=config.updated_at,
+                        )
+                        mgr._server_cache = {runtime.config_id: runtime}
+                        mgr._register_server(runtime)
 
         self.assertEqual(seen_app.get('app'), 'greenhouse')
         # Transport should be initialized with headers including x-pd-app-slug
@@ -251,6 +252,7 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
 
         with patch.object(mgr, '_fetch_server_tools', return_value=[]), \
              patch.object(mgr, '_pd_build_headers', return_value={}), \
+             patch.object(mgr, '_get_pipedream_access_token', return_value="pd_token"), \
              self.assertLogs('api.agent.tools.mcp_manager', level='WARNING') as logs:
             config = _get_or_create_pipedream_config()
             runtime = MCPServerRuntime(
@@ -291,6 +293,7 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
 
         with patch.object(mgr, '_fetch_server_tools', return_value=[]), \
              patch.object(mgr, '_pd_build_headers', return_value={}), \
+             patch.object(mgr, '_get_pipedream_access_token', return_value="pd_token"), \
              self.assertLogs('api.agent.tools.mcp_manager', level='ERROR') as logs, \
              self.assertRaises(RuntimeError):
             config = _get_or_create_pipedream_config()
