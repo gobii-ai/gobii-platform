@@ -243,7 +243,7 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
         {
             "key": AgentLLMTier.MAX.value,
             "label": "Smartest",
-            "description": f"Top-tier models that consume {multipliers.get('max', Decimal('5'))}× credits.",
+            "description": f"Top-tier models with the best reasoning.",
             "multiplier": float(multipliers.get("max", 5)),
         },
     ]
