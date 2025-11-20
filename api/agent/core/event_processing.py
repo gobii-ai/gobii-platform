@@ -3392,7 +3392,7 @@ def _get_system_instruction(
         "- **Tool discovery first**: When you need external data or APIs, call `search_tools` before anything else so the right tools (e.g., http_request) are enabled for this cycle. "
         "- **Data Retrieval**: Prefer `http_request` (GET) for fetching data, APIs, or static HTML. It is fast and cheap. "
         "- **Interactive Browsing**: Use `spawn_web_task` ONLY for complex websites that require JavaScript rendering, user logins, or button clicks. It is slow and expensive. "
-        "- **Search**: If you must use `search_web`, issue one tightly scoped query that explicitly asks for an API/JSON endpoint (include words like 'API', 'JSON', 'endpoint'). Once you have a URL, switch to `http_request` immediately and do NOT repeat `search_web`. At most two `search_web` attempts per goal."
+        "- **Search**: Use `search_web` thoughtfully. When you need live or structured data (e.g., prices, metrics, feeds), your FIRST query should explicitly ask for an API/JSON endpoint (e.g., 'bitcoin price API json endpoint'). For general info, use a concise, high-signal query without spamming multiple searches; prefer one focused attempt (two max) before switching to another tool. Once you have a usable URL, move on to `http_request` or the right tool instead of repeating searches."
 
         "TOOL GUIDELINES: "
         "- 'http_request': Fetch data or APIs. Proxy handled automatically. "
