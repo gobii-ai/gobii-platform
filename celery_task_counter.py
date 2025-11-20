@@ -27,6 +27,63 @@ _MAX_TASK_COUNT = int(os.getenv("BROWSER_USE_TASK_MAX_COUNT", "10"))
 _shutdown_requested = False
 
 
+def _is_eval_task(task) -> bool:
+    """
+    Return True when the browser-use task is running in eval mode.
+    Detection mirrors other parts of the codebase:
+    - Prefer the agent execution_environment (set to "eval" by run_evals)
+    - Fall back to GOBII_RELEASE_ENV if explicitly set to "eval"
+    """
+    try:
+        # Global override based on release env
+        if os.getenv("GOBII_RELEASE_ENV", "").lower() == "eval":
+            return True
+
+        req = getattr(task, "request", None)
+        if req is None:
+            return False
+
+        # persistent_agent_id is the third positional arg; also accept kwarg
+        persistent_agent_id = None
+        try:
+            persistent_agent_id = (getattr(req, "kwargs", None) or {}).get("persistent_agent_id")
+            if not persistent_agent_id:
+                args = list(getattr(req, "args", []) or [])
+                if len(args) >= 3:
+                    persistent_agent_id = args[2]
+        except Exception:
+            persistent_agent_id = None
+
+        if not persistent_agent_id:
+            return False
+
+        try:
+            from api.models import PersistentAgent
+
+            agent = (
+                PersistentAgent.objects
+                .filter(id=persistent_agent_id)
+                .only("execution_environment")
+                .first()
+            )
+            return bool(agent and getattr(agent, "execution_environment", None) == "eval")
+        except Exception:
+            logger.debug(
+                "Unable to resolve agent %s for eval detection in task %s",
+                persistent_agent_id,
+                getattr(task, "name", "unknown"),
+                exc_info=True,
+            )
+            return False
+    except Exception:
+        logger.debug(
+            "Failed to determine eval mode for task %s",
+            getattr(task, "name", "unknown"),
+            exc_info=True,
+        )
+        return False
+
+
 # --------------------------------------------------------------------------- #
 #  Low-level helpers
 # --------------------------------------------------------------------------- #
@@ -155,6 +212,8 @@ def _task_postrun_handler(task_id=None, task=None, hostname=None, **_):  # noqa:
         return
 
     try:
+        is_eval = _is_eval_task(task)
+
         worker_name = (
             hostname
             or getattr(task.request, "hostname", None)
@@ -162,6 +221,16 @@ def _task_postrun_handler(task_id=None, task=None, hostname=None, **_):  # noqa:
             or os.getenv("HOSTNAME", "unknown")
         )
         current_count = _increment_count(worker_name)
+        if is_eval:
+            if _MAX_TASK_COUNT > 0 and current_count >= _MAX_TASK_COUNT:
+                logger.info(
+                    "Browser-use task count %s reached max %s on %s – skipping shutdown in eval mode",
+                    current_count,
+                    _MAX_TASK_COUNT,
+                    worker_name,
+                )
+            return
+
         _maybe_trigger_shutdown(worker_name, current_count)
     except Exception:
         logger.exception("Failed to update browser-use task counter")

@@ -30,9 +30,14 @@ def normalize_model_name(
         return model
 
     if provider is not None:
-        prefix = (provider.model_prefix or "").strip()
-        if prefix and not model.startswith(prefix):
-            model = f"{prefix}{model}"
+        # Only apply the provider's static prefix (e.g. "openrouter/") if we
+        # are NOT using a custom base URL. When a custom base is present, we
+        # assume the caller is targeting that specific endpoint directly and
+        # wants to send the raw model ID (or handles routing differently).
+        if not api_base:
+            prefix = (provider.model_prefix or "").strip()
+            if prefix and not model.startswith(prefix):
+                model = f"{prefix}{model}"
 
     backend = getattr(provider, "browser_backend", None)
     if api_base and backend in OPENAI_BACKENDS and "/" not in model:

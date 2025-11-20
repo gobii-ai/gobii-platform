@@ -12,6 +12,15 @@ from ..core.schedule_parser import ScheduleParser
 logger = logging.getLogger(__name__)
 
 
+def _should_continue_work(params: dict) -> bool:
+    """Return True if the agent indicates more work right after this schedule update."""
+    raw = params.get("will_continue_work")
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        return normalized in {"1", "true", "yes"}
+    return bool(raw)
+
+
 def execute_update_schedule(agent, params: dict) -> dict:
     """Execute schedule update for a persistent agent.
     
@@ -28,6 +37,7 @@ def execute_update_schedule(agent, params: dict) -> dict:
     if new_schedule_str is not None:
         new_schedule_str = new_schedule_str.strip() or None
     original_schedule = agent.schedule
+    will_continue = _should_continue_work(params)
     
     # Log schedule update attempt
     logger.info(
@@ -65,12 +75,12 @@ def execute_update_schedule(agent, params: dict) -> dict:
             return {
                 "status": "ok",
                 "message": f"Schedule updated to '{new_schedule_str}'.",
-                "auto_sleep_ok": True,
+                "auto_sleep_ok": not will_continue,
             }
         return {
             "status": "ok",
             "message": "Schedule has been disabled.",
-            "auto_sleep_ok": True,
+            "auto_sleep_ok": not will_continue,
         }
 
     except (ValidationError, ValueError) as e:
@@ -101,7 +111,11 @@ def get_update_schedule_tool() -> dict:
                     "new_schedule": {
                         "type": "string",
                         "description": "Cron expression or '@daily', '@every 2h'. Use '' or null to disable. RANDOMIZE IF POSSIBLE TO AVOID THUNDERING HERD. REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISING TIMING.",
-                    }
+                    },
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": "Set true if you're updating your schedule but will continue working immediately afterward.",
+                    },
                 },
             },
         },

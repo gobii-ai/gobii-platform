@@ -17,6 +17,7 @@ from django.views import View
 from django.views.decorators.http import require_POST
 
 from api.agent.core.llm_utils import run_completion
+from api.llm.utils import normalize_model_name
 from api.openrouter import get_attribution_headers
 
 from api.agent.core.llm_config import (
@@ -310,8 +311,7 @@ class SetupWizardView(View):
         supports_tool_choice: bool = bool(data.get("orchestrator_supports_tool_choice"))
         use_parallel_tools: bool = bool(data.get("orchestrator_use_parallel_tools"))
         supports_vision: bool = bool(data.get("orchestrator_supports_vision"))
-        if provider_choice != LLMConfigForm.PROVIDER_CUSTOM:
-            model = _normalize_model_identifier(provider_choice, model)
+        # Store the raw model; provider prefixes are handled at runtime via model_prefix.
 
         if provider_choice == LLMConfigForm.PROVIDER_CUSTOM:
             provider = self._create_custom_provider(
@@ -347,13 +347,12 @@ class SetupWizardView(View):
             endpoint.use_parallel_tool_calls = use_parallel_tools
             endpoint.supports_vision = supports_vision
             endpoint.enabled = True
+            # For persistent (LiteLLM) we only persist a base URL when explicitly provided
+            # or for custom providers. OpenRouter/other built-ins route by provider prefix.
             if api_base:
                 endpoint.api_base = api_base
             elif provider_choice == LLMConfigForm.PROVIDER_CUSTOM:
                 endpoint.api_base = api_base
-            else:
-                if provider_choice in DEFAULT_BROWSER_BASE_URLS:
-                    endpoint.api_base = DEFAULT_BROWSER_BASE_URLS.get(provider_choice, "")
             endpoint.save()
 
         self._reset_persistent_tiers(endpoint)
@@ -381,8 +380,6 @@ class SetupWizardView(View):
             api_base = data.get("browser_api_base", "").strip()
             if not api_base:
                 api_base = orchestrator_endpoint.api_base or DEFAULT_BROWSER_BASE_URLS.get(provider_choice, "")
-            if provider_choice:
-                model = _normalize_model_identifier(provider_choice, model)
             endpoint_key_hint = BROWSER_ENDPOINT_KEYS.get(provider_choice)
             endpoint = self._ensure_browser_endpoint(
                 provider=provider,
@@ -421,8 +418,6 @@ class SetupWizardView(View):
                 provider.save()
 
                 endpoint_key = BROWSER_ENDPOINT_KEYS[provider_choice]
-                if provider_choice:
-                    model = _normalize_model_identifier(provider_choice, model)
                 endpoint = self._ensure_browser_endpoint(
                     provider=provider,
                     key_hint=endpoint_key,
@@ -583,8 +578,16 @@ def test_llm_connection(request):
     if not provider_choice or not model:
         return JsonResponse({"ok": False, "message": "Select a provider and enter a model name before testing."}, status=400)
 
+    runtime_provider = None
     if provider_choice != LLMConfigForm.PROVIDER_CUSTOM:
-        model = _normalize_model_identifier(provider_choice, model)
+        try:
+            runtime_provider = LLMProvider.objects.filter(key=PROVIDER_KEY_MAP[provider_choice]).first()
+        except Exception:
+            runtime_provider = None
+        if runtime_provider:
+            model = normalize_model_name(runtime_provider, model, api_base=api_base)
+        else:
+            model = _normalize_model_identifier(provider_choice, model)
 
     try:
         params = _build_test_params(provider_choice, model, api_key, api_base)

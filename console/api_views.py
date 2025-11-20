@@ -76,7 +76,7 @@ import litellm
 from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
 from api.agent.core.llm_utils import run_completion
 from api.llm.utils import normalize_model_name
-from api.openrouter import get_attribution_headers
+from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
 
 
@@ -177,18 +177,23 @@ def _build_completion_params(
     api_base = (getattr(endpoint, base_attr, "") or "").strip() or None
     model = normalize_model_name(provider, raw_model, api_base=api_base)
 
-    temp_override = getattr(endpoint, "temperature_override", None)
-    temperature = float(temp_override if temp_override not in (None, "") else default_temperature)
+    supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
+    temperature: float | None = None
+    if supports_temperature:
+        temp_override = getattr(endpoint, "temperature_override", None)
+        temperature = float(temp_override if temp_override not in (None, "") else default_temperature)
     max_tokens_value = getattr(endpoint, "max_output_tokens", None)
     max_tokens = default_max_tokens
     if isinstance(max_tokens_value, (int, float)) and max_tokens_value > 0:
         max_tokens = min(int(max_tokens_value), 512)
 
     params: dict[str, Any] = {
-        "temperature": temperature,
         "max_tokens": max_tokens,
         "timeout": 20,
     }
+    if temperature is not None:
+        params["temperature"] = temperature
+    params["supports_temperature"] = supports_temperature
     if hasattr(endpoint, "supports_tool_choice"):
         params["supports_tool_choice"] = bool(getattr(endpoint, "supports_tool_choice", True))
     if hasattr(endpoint, "use_parallel_tool_calls"):
@@ -298,10 +303,10 @@ def _run_embedding_test(endpoint: EmbeddingsModelEndpoint) -> dict[str, Any]:
     if provider and not provider.enabled:
         raise ValueError("Provider is disabled")
     raw_model = (endpoint.litellm_model or "").strip()
+    api_base = (endpoint.api_base or "").strip() or None
     model = normalize_model_name(provider, raw_model, api_base=api_base)
     if not model:
         raise ValueError("Endpoint does not specify a model identifier")
-    api_base = (endpoint.api_base or "").strip() or None
     api_key = _resolve_provider_api_key(provider)
     if not api_key and api_base:
         api_key = "sk-noauth"
@@ -857,6 +862,8 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("key and model are required")
         if PersistentModelEndpoint.objects.filter(key=key).exists():
             return HttpResponseBadRequest("Endpoint key already exists")
+        if provider.model_prefix and model.startswith(provider.model_prefix):
+            return HttpResponseBadRequest("Store persistent models without the provider prefix; it is applied at runtime.")
 
         temp_value = payload.get("temperature_override")
         temperature_override = None
@@ -868,6 +875,7 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
             provider=provider,
             litellm_model=model,
             temperature_override=temperature_override,
+            supports_temperature=_coerce_bool(payload.get("supports_temperature", True)),
             supports_tool_choice=_coerce_bool(payload.get("supports_tool_choice", True)),
             use_parallel_tool_calls=_coerce_bool(payload.get("use_parallel_tool_calls", True)),
             supports_vision=_coerce_bool(payload.get("supports_vision", False)),
@@ -891,6 +899,8 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
         if "model" in payload or "litellm_model" in payload:
             model = (payload.get("model") or payload.get("litellm_model") or "").strip()
             if model:
+                if endpoint.provider and endpoint.provider.model_prefix and model.startswith(endpoint.provider.model_prefix):
+                    return HttpResponseBadRequest("Store persistent models without the provider prefix; it is applied at runtime.")
                 endpoint.litellm_model = model
         if "temperature_override" in payload:
             temp = payload.get("temperature_override")
@@ -898,6 +908,8 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
                 endpoint.temperature_override = None
             else:
                 endpoint.temperature_override = float(temp)
+        if "supports_temperature" in payload:
+            endpoint.supports_temperature = _coerce_bool(payload.get("supports_temperature"))
         if "supports_tool_choice" in payload:
             endpoint.supports_tool_choice = _coerce_bool(payload.get("supports_tool_choice"))
         if "use_parallel_tool_calls" in payload:
@@ -1133,6 +1145,8 @@ class BrowserEndpointListCreateAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("key and model are required")
         if BrowserModelEndpoint.objects.filter(key=key).exists():
             return HttpResponseBadRequest("Endpoint key already exists")
+        if provider.model_prefix and model.startswith(provider.model_prefix):
+            return HttpResponseBadRequest("Store browser models without the provider prefix; it is applied at runtime when necessary.")
 
         max_tokens_val = payload.get("max_output_tokens")
         max_output_tokens = None
@@ -1142,12 +1156,20 @@ class BrowserEndpointListCreateAPIView(SystemAdminAPIView):
             except (TypeError, ValueError):
                 return HttpResponseBadRequest("max_output_tokens must be an integer")
 
+        base_url = (payload.get("browser_base_url") or payload.get("api_base") or "").strip()
+        if provider.browser_backend == LLMProvider.BrowserBackend.OPENAI_COMPAT and not base_url:
+            if provider.key == "openrouter":
+                base_url = DEFAULT_API_BASE
+            else:
+                return HttpResponseBadRequest("Browser API base URL is required for OpenAI-compatible providers.")
+
         endpoint = BrowserModelEndpoint.objects.create(
             key=key,
             provider=provider,
             browser_model=model,
-            browser_base_url=(payload.get("browser_base_url") or payload.get("api_base") or "").strip(),
+            browser_base_url=base_url,
             max_output_tokens=max_output_tokens,
+            supports_temperature=_coerce_bool(payload.get("supports_temperature", True)),
             supports_vision=_coerce_bool(payload.get("supports_vision", False)),
             enabled=_coerce_bool(payload.get("enabled", True)),
         )
@@ -1167,9 +1189,19 @@ class BrowserEndpointDetailAPIView(SystemAdminAPIView):
         if "model" in payload or "browser_model" in payload:
             model = (payload.get("model") or payload.get("browser_model") or "").strip()
             if model:
+                provider = endpoint.provider
+                if provider and provider.model_prefix and model.startswith(provider.model_prefix):
+                    return HttpResponseBadRequest("Store browser models without the provider prefix; it is applied at runtime when necessary.")
                 endpoint.browser_model = model
         if "browser_base_url" in payload or "api_base" in payload:
-            endpoint.browser_base_url = (payload.get("browser_base_url") or payload.get("api_base") or "").strip()
+            provider = endpoint.provider
+            base_url = (payload.get("browser_base_url") or payload.get("api_base") or "").strip()
+            if provider and provider.browser_backend == LLMProvider.BrowserBackend.OPENAI_COMPAT and not base_url:
+                if provider.key == "openrouter":
+                    base_url = DEFAULT_API_BASE
+                else:
+                    return HttpResponseBadRequest("Browser API base URL is required for OpenAI-compatible providers.")
+            endpoint.browser_base_url = base_url
         if "max_output_tokens" in payload:
             value = payload.get("max_output_tokens")
             if value in (None, ""):
@@ -1179,6 +1211,8 @@ class BrowserEndpointDetailAPIView(SystemAdminAPIView):
                     endpoint.max_output_tokens = int(value)
                 except (TypeError, ValueError):
                     return HttpResponseBadRequest("max_output_tokens must be an integer")
+        if "supports_temperature" in payload:
+            endpoint.supports_temperature = _coerce_bool(payload.get("supports_temperature"))
         if "supports_vision" in payload:
             endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
         if "enabled" in payload:

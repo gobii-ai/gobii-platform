@@ -270,7 +270,7 @@ def get_llm_config() -> Tuple[str, dict]:
     params = {
         k: v
         for k, v in params.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision")
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_temperature")
     }
     return model, params
 
@@ -394,7 +394,10 @@ def _collect_failover_configs(
             selected_idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
             endpoint, provider, _weight, effective_model = remaining.pop(selected_idx)
 
-            params: Dict[str, Any] = {"temperature": 0.1}
+            supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
+            params: Dict[str, Any] = {}
+            if supports_temperature:
+                params["temperature"] = 0.1
             try:
                 effective_key = None
                 if provider.api_key_encrypted:
@@ -409,7 +412,7 @@ def _collect_failover_configs(
                         params["api_key"] = "sk-noauth"
             except Exception:
                 logger.debug("Unable to determine API key for endpoint %s", endpoint.key, exc_info=True)
-            if endpoint.temperature_override is not None:
+            if supports_temperature and endpoint.temperature_override is not None:
                 params["temperature"] = float(endpoint.temperature_override)
             if provider.key == "google":
                 vertex_project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
@@ -438,9 +441,13 @@ def _collect_failover_configs(
                     tier_label,
                 )
 
-            _apply_required_temperature(effective_model, params)
+            if supports_temperature:
+                _apply_required_temperature(effective_model, params)
+            else:
+                params.pop("temperature", None)
 
             params_with_hints = dict(params)
+            params_with_hints["supports_temperature"] = supports_temperature
             params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
             params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
             params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
@@ -618,17 +625,23 @@ def get_summarization_llm_config(
     )
     _provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm
+    supports_temperature = bool(params_with_hints.get("supports_temperature", True))
     params = {
         k: v for k, v in params_with_hints.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision")
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_temperature")
     }
 
     # Default to deterministic temperature unless the endpoint already
     # specifies a requirement (e.g., GPT-5 must run at temperature=1).
-    if "temperature" not in params or params["temperature"] is None:
+    if not supports_temperature:
+        params.pop("temperature", None)
+    elif "temperature" not in params or params["temperature"] is None:
         params["temperature"] = 0
 
-    _apply_required_temperature(model, params)
+    if supports_temperature:
+        _apply_required_temperature(model, params)
+    else:
+        params.pop("temperature", None)
 
     return model, params
 

@@ -377,6 +377,19 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
     if budget_ctx is None:
         return
 
+    # If a pending follow-up is queued, keep the cycle open so it can run
+    try:
+        redis_client = get_redis_client()
+        pending_key = f"agent-event-processing:pending:{agent.id}"
+        if redis_client.get(pending_key):
+            logger.info(
+                "Agent %s sleeping with pending follow-up flag; keeping cycle active.",
+                agent.id,
+            )
+            return
+    except Exception:
+        logger.debug("Pending-flag check failed; proceeding to default close logic", exc_info=True)
+
     try:
         current_depth = (
             AgentBudgetManager.get_branch_depth(
@@ -3069,8 +3082,7 @@ def _add_budget_awareness_sections(
                 else:
                     soft_target_warning = ""
                 soft_text = (
-                    "This is your task usage target for today. Try to stay within this limit. "
-                    "Every tool call you make consumes credits against this target. "
+                    "This is your daily task usage target. Every tool call consumes credits. "
                     "If you exceed this target, you will not be stopped immediately, but you risk hitting your hard limit sooner. "
                     f"Soft target progress: {used}/{soft_target} credits consumed today. "
                     f"{soft_target_warning}"
@@ -3339,18 +3351,18 @@ def _get_system_instruction(
         f"You are a persistent AI agent."
         "Use your tools to perform the next logical step. "
         "If your charter is unknown or not clear, contact the user to clarify it. "
-        "If your charter changes, update your charter using the 'update_charter' tool. BE DETAILED. Update and add detail and nuance any time the user gives you feedback or you can infer intent from the user's communication. BE DETAILED. "
+        "If your charter changes, update your charter using the 'update_charter' tool. BE DETAILED. Update and add nuance any time the user gives you feedback or you can infer intent. "
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
         "Use the 'update_schedule' tool to update your cron schedule any time it needs to change. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
         "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content. "
-        "Instead, ALWAYS call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message, send_webhook_event) to deliver the message. "
+        "Instead, ALWAYS call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message, send_webhook_event) to deliver the message. If you have more work to do after calling a tool that supports it (e.g., chat, email, SMS, agent messages), ensure you set 'will_continue_work' to true to prevent premature sleeping. "
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
         "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISE TIMING --CONFIRM WITH THE USER. "
         "IF RELEVANT, ASK THE USER DETAILS SUCH AS TIMEZONE, etc. "
-        "You can set it to an empty string to disable the schedule. "
-        "You will typically want to contact the user and let them know that you updated your charter/schedule if relevant, so they can give you corrections if needed. "
-        "Don't use the word 'charter' when talking to the user, just talk as if you are human --as far as they are concerned, you are an employee/intern with a job. "
+
+        "Inform the user when you update your charter/schedule so they can provide corrections. "
+        "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "If you contact the user with information, make sure it is *new* information, do not repeat things you have already sent to the user. "
         "You may not even need to send a message at all if there is nothing new."
         "You may break work down into multiple web agent tasks. "
@@ -3381,8 +3393,7 @@ def _get_system_instruction(
 
         "IF YOU DO NOT HAVE A URL, YOU CAN USE ADDITIONAL TOOL CALLS TO GET THE URL. "
         
-        "IF YOU NEED TO SEARCH THE WEB, USE THE 'search_web' TOOL NOT GOOGLE. "
-        "DO NOT USE DuckDuckGo or Google. "
+        "Use 'search_web' for web searches, NOT Google/DuckDuckGo directly. "
         "FOR ANYTHING REALTIME OR UP TO DATE, e.g. weather, news events, etc. USE spawn_web_task http_request, or relevant tools. "
         "search_web is for pre-indexed information, e.g. news articles, etc. "
         "search_web can help you find SOURCES, e.g. websites that have the up-to-date information you need, but not the the information itself. "
@@ -3472,7 +3483,7 @@ def _get_system_instruction(
                     "3. If you know your charter at this point, set your charter using the 'update_charter' tool based on their request - this will be your working charter that you can evolve over time. BE DETAILED. "
                     "4. Inform the user they can contact you at any time to give new instructions, ask questions, or just chat. Hint or let them know that they can just reply to this message with anything they want. e.g. 'You can reply to this email now, or contact me at any time.' "
                     "This is your opportunity to decide what your personality and writing style will be --it could be anything-- you'll generally adapt this based on the user's initial request and what you know about them. THIS IS YOUR CHANCE to create a new and exciting personality. "
-                    "Immediately after sending your welcome message, call search_tools to find and automatically enable the best tools to efficiently and accurately complete your task with the most timely information. You can run search_tools again later as your job evolves. "
+                    "Immediately after sending your welcome message, ENSURE 'will_continue_work' IS SET TO TRUE and then call search_tools to find and automatically enable the best tools to efficiently and accurately complete your task with the most timely information. You can run search_tools again later as your job evolves. "
                     "Use phrasing like 'I'm your new agent' vs just 'I'm an agent' or 'I'm an assistant'."
                 )
                 return welcome_instruction + "\n\n" + base_prompt

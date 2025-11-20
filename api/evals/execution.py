@@ -3,19 +3,101 @@ import logging
 from typing import Any, Iterable, Optional, Tuple, Dict
 from uuid import UUID
 import json
+import time
 
 from api.models import (
     PersistentAgent,
     PersistentAgentMessage,
     EvalRunTask,
     EvalRun,
-    BrowserUseAgentTask,
     CommsAllowlistEntry
 )
 from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.core.llm_utils import run_completion
+from api.agent.events import AgentEventType, get_agent_event_stream
+from config.redis_client import get_redis_client
+from api.agent.core.llm_config import get_llm_config, LLMNotConfiguredError
 
 logger = logging.getLogger(__name__)
+
+class AgentEventListener:
+    """
+    Lightweight, event-driven listener that reads the agent event stream.
+    Designed to avoid polling and to tolerate events that were emitted just
+    before the listener started (by filtering on start_time).
+    """
+    def __init__(self, agent_id: str, *, start_time: Optional[float] = None):
+        self.agent_id = str(agent_id)
+        self.stream_key = get_agent_event_stream(agent_id)
+        self.start_time = start_time or time.time()
+        self.redis = get_redis_client()
+        self.last_id = "0-0"
+
+    def __enter__(self) -> "AgentEventListener":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        # No resources to release; propagate exceptions if any
+        return False
+
+    def wait_for(
+        self,
+        event_type: AgentEventType | str,
+        timeout: int = 30,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Block on the Redis stream for a matching event or until timeout.
+        Returns the decoded event dict or None on timeout/error.
+        """
+        target_type = event_type.value if isinstance(event_type, AgentEventType) else str(event_type)
+        deadline = time.time() + timeout
+
+        while time.time() < deadline:
+            remaining_ms = max(1, int((deadline - time.time()) * 1000))
+            try:
+                messages = self.redis.xread(
+                    {self.stream_key: self.last_id},
+                    count=50,
+                    block=remaining_ms,
+                )
+            except Exception:
+                logger.warning("Failed to read agent event stream for %s", self.agent_id, exc_info=True)
+                return None
+
+            if not messages:
+                continue
+
+            for _stream, entries in messages:
+                for entry_id, raw_fields in entries:
+                    self.last_id = entry_id
+                    raw = raw_fields.get("data") or raw_fields.get(b"data")
+                    if raw is None:
+                        continue
+                    try:
+                        if isinstance(raw, bytes):
+                            event = json.loads(raw.decode("utf-8"))
+                        elif isinstance(raw, str):
+                            event = json.loads(raw)
+                        elif isinstance(raw, dict):
+                            event = raw
+                        else:
+                            continue
+                    except Exception:
+                        continue
+
+                    try:
+                        ts_val = float(event.get("timestamp", 0))
+                    except Exception:
+                        ts_val = 0.0
+
+                    # Ignore stale events that occurred before we started listening
+                    if ts_val < self.start_time:
+                        continue
+
+                    if event.get("type") == target_type:
+                        return event
+
+        return None
 
 class ScenarioExecutionTools:
     """
@@ -74,6 +156,12 @@ class ScenarioExecutionTools:
         from api.agent.tasks import process_agent_events_task
         process_agent_events_task.delay(str(agent_id))
 
+    def agent_event_listener(self, agent_id: str, *, start_time: Optional[float] = None) -> AgentEventListener:
+        """
+        Convenience helper to create an AgentEventListener with a start timestamp.
+        """
+        return AgentEventListener(agent_id, start_time=start_time)
+
     def record_task_result(
         self,
         run_id: str,
@@ -119,17 +207,21 @@ class ScenarioExecutionTools:
         question: str, 
         context: str, 
         options: Iterable[str] = ("Yes", "No"),
-        model: str = "openai/gpt-4o"
+        model: Optional[str] = None,
+        params: Optional[Dict[str, Any]] = None,
     ) -> Tuple[str, str]:
         """
         Ask an LLM to judge a context based on a question and a set of options.
-        Uses tool calling to ensure structured output. 
+        Uses tool calling to ensure structured output. Automatically falls back to
+        the configured failover tier to pick the first available model when none
+        (or only a model name) is provided. 
         
         Args:
             question: The specific question to answer.
             context: The context text to evaluate.
             options: A list of valid answer options (default: ["Yes", "No"]).
-            model: The LLM model to use (default: "openai/gpt-4o").
+            model: Optional LLM model to use. If omitted, the configured default is used.
+            params: Optional LLM parameters. If omitted, the configured default params are used.
             
         Returns:
             A tuple of (choice, reasoning). choice will be one of the strings in `options`.
@@ -163,14 +255,36 @@ class ScenarioExecutionTools:
             {"role": "system", "content": "You are an impartial judge. Evaluate the context and answer the question by calling the `submit_judgment` tool."},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}\n\nValid Options: {', '.join(options_list)}"}
         ]
+
+        configured_model: Optional[str] = None
+        configured_params: Dict[str, Any] = {}
+
+        if model is None or params is None:
+            try:
+                configured_model, configured_params = get_llm_config()
+            except LLMNotConfiguredError as exc:
+                # If a caller passed a model but no params, continue with empty params.
+                if model is None:
+                    logger.error("LLM judge missing configuration: %s", exc)
+                    return "Error", "No LLM configuration available for judgment."
+                configured_params = {}
+
+        effective_model = model or configured_model
+        if not effective_model:
+            return "Error", "No LLM model available for judgment."
+
+        safe_params = dict(params or configured_params or {})
+        # Default to deterministic temperature unless the endpoint requires its own value.
+        if safe_params.get("temperature") is None:
+            safe_params["temperature"] = 0.0
         
         try:
             response = run_completion(
-                model=model,
+                model=effective_model,
                 messages=prompt,
                 tools=[tool_definition],
                 tool_choice={"type": "function", "function": {"name": "submit_judgment"}},
-                params={"temperature": 0.0}
+                params=safe_params
             )
             
             tool_calls = response.choices[0].message.tool_calls
@@ -189,70 +303,35 @@ class ScenarioExecutionTools:
         self,
         agent_id: str,
         event_type: str,
-        timeout: int = 30
+        timeout: int = 30,
+        start_time: Optional[float] = None,
+        listener: Optional[AgentEventListener] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Block until a specific event type is received for the agent using Redis Pub/Sub.
-        Returns the event payload if received, None if timeout.
+        Block until a specific event type is received for the agent using the event stream.
+        Returns the full event payload if received, None if timeout.
+        If a listener is provided, it will be used (and advanced) to avoid duplicate reads.
         """
-        from api.agent.events import get_agent_event_channel
-        from config.redis_client import get_redis_client
-        import json
-        import time
-
-        redis = get_redis_client()
-        pubsub = redis.pubsub()
-        channel = get_agent_event_channel(agent_id)
-        pubsub.subscribe(channel)
-
-        start_time = time.time()
-        while (time.time() - start_time) < timeout:
-            message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-            if message:
-                try:
-                    data = json.loads(message['data'])
-                    if data.get('type') == event_type:
-                        pubsub.unsubscribe()
-                        return data
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            # Small sleep to prevent tight loop if timeout is ignored by get_message
-            # (though redis-py get_message with timeout usually blocks efficiently)
-            
-        pubsub.unsubscribe()
-        return None
+        effective_listener = listener or AgentEventListener(agent_id, start_time=start_time)
+        return effective_listener.wait_for(event_type, timeout=timeout)
 
     def wait_for_idle(self, agent_id: str, timeout: int = 60) -> bool:
         """
         Wait until the agent emits PROCESSING_COMPLETE with 0 outstanding tasks.
         Returns True if idle state reached, False if timeout.
         """
-        from api.agent.events import get_agent_event_channel, AgentEventType
-        from config.redis_client import get_redis_client
-        import json
-        import time
+        listener = AgentEventListener(agent_id, start_time=time.time())
+        deadline = time.time() + timeout
+        remaining = timeout
 
-        redis = get_redis_client()
-        pubsub = redis.pubsub()
-        channel = get_agent_event_channel(agent_id)
-        pubsub.subscribe(channel)
-
-        start_time = time.time()
-        while (time.time() - start_time) < timeout:
-            message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-            if message:
-                try:
-                    data = json.loads(message['data'])
-                    if data.get('type') == AgentEventType.PROCESSING_COMPLETE.value:
-                        payload = data.get('payload', {})
-                        outstanding = payload.get('outstanding_tasks', 0)
-                        if outstanding == 0:
-                            pubsub.unsubscribe()
-                            return True
-                except Exception:
-                    pass
-        
-        pubsub.unsubscribe()
+        while remaining > 0:
+            event = listener.wait_for(AgentEventType.PROCESSING_COMPLETE, timeout=int(remaining))
+            if not event:
+                return False
+            outstanding = int((event.get("payload") or {}).get("outstanding_tasks", 0) or 0)
+            if outstanding == 0:
+                return True
+            remaining = max(0, deadline - time.time())
         return False
 
     def wait_for_agent_idle(self, agent_id: str, timeout: int = 60):
@@ -273,57 +352,29 @@ class WaitForIdleContext:
     def __init__(self, agent_id: str, timeout: int = 60):
         self.agent_id = agent_id
         self.timeout = timeout
-        self.pubsub = None
-        self.redis = None
+        self.listener: Optional[AgentEventListener] = None
 
     def __enter__(self):
-        from api.agent.events import get_agent_event_channel
-        from config.redis_client import get_redis_client
-        
-        self.redis = get_redis_client()
-        self.pubsub = self.redis.pubsub()
-        channel = get_agent_event_channel(self.agent_id)
-        self.pubsub.subscribe(channel)
+        self.listener = AgentEventListener(self.agent_id, start_time=time.time())
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type:
-            if self.pubsub:
-                self.pubsub.unsubscribe()
             return False  # Propagate exception
 
-        from api.agent.events import AgentEventType
-        import json
-        import time
+        if not self.listener:
+            return False
 
-        start_time = time.time()
-        try:
-            while (time.time() - start_time) < self.timeout:
-                # Check for any buffered messages
-                message = self.pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                if message:
-                    try:
-                        data = json.loads(message['data'])
-                        if data.get('type') == AgentEventType.PROCESSING_COMPLETE.value:
-                            payload = data.get('payload', {})
-                            outstanding = payload.get('outstanding_tasks', 0)
-                            if outstanding == 0:
-                                return True # Success
-                    except Exception:
-                        pass
-        finally:
-            if self.pubsub:
-                self.pubsub.unsubscribe()
-        
-        # Timeout occurred
+        deadline = time.time() + self.timeout
+        remaining = self.timeout
+        while remaining > 0:
+            event = self.listener.wait_for(AgentEventType.PROCESSING_COMPLETE, timeout=int(remaining))
+            if not event:
+                break
+            outstanding = int((event.get("payload") or {}).get("outstanding_tasks", 0) or 0)
+            if outstanding == 0:
+                return True  # Success
+            remaining = max(0, deadline - time.time())
+
         logger.warning(f"Timeout waiting for agent {self.agent_id} to go idle.")
         return False # Do not suppress exceptions, but flow continues if no exception
-
-    def wait_for_agent_idle(self, agent_id: str, timeout: int = 60) -> WaitForIdleContext:
-        """
-        Return a context manager that waits for the agent to become idle after the block executes.
-        Usage:
-            with self.wait_for_agent_idle(agent_id):
-                self.inject_message(...)
-        """
-        return WaitForIdleContext(agent_id, timeout)
