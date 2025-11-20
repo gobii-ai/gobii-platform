@@ -128,7 +128,15 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                 http_call_args = args
                 break
 
-        if http_call_args:
+        if mock_spawn.called:
+            self.record_task_result(
+                run_id, 
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_http_request",
+                observed_summary="Agent used 'spawn_web_task', which is forbidden for this test. We want the agent to use a direct API request.",
+            )
+        elif http_call_args:
             params = http_call_args[2] if len(http_call_args) > 2 else {}
             
             # Run LLM Judge
@@ -160,15 +168,6 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                     observed_summary=f"HTTP request invalid/irrelevant. Reasoning: {reasoning}",
                     artifacts={"params": params}
                 )
-        
-        elif mock_spawn.called:
-            self.record_task_result(
-                run_id, 
-                None,
-                EvalRunTask.Status.FAILED,
-                task_name="verify_http_request",
-                observed_summary="Agent used 'spawn_web_task' instead of simple 'http_request'.",
-            )
         else:
              self.record_task_result(
                 run_id, 
