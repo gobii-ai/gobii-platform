@@ -152,7 +152,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             # Check the first significant search query
             first_api_search_query = search_web_calls[0].get('query', '')
             
-            judge_prompt = f"Analyze the following search query: '{first_api_search_query}'. Does it indicate an attempt to find an API, data source, or programmatic interface for a specific topic (e.g., 'bitcoin price API', 'coingecko api') rather than just searching for the direct answer (e.g., 'current bitcoin price')?"
+            judge_prompt = f"Analyze the following search query: '{first_api_search_query}'. Does it indicate an attempt to find an API, data source, or programmatic interface? If the query contains words like 'API', 'endpoint', 'JSON', or 'docs', answer 'Yes'. Does it look like a developer searching for a source?"
             choice, reasoning = self.llm_judge(
                 question=judge_prompt,
                 context=f"Agent's goal: find Bitcoin price. First search query: '{first_api_search_query}'",

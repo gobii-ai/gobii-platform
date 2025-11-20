@@ -3388,11 +3388,10 @@ def _get_system_instruction(
         f"File uploads are {"" if settings.ALLOW_FILE_UPLOAD else "NOT"} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "DATA & BROWSING PHILOSOPHY: "
-        "- You are a programmatic agent. You prefer structured data (JSON/API) over unstructured web pages (HTML). "
-        "- FAST PATH: Use 'search_web' to find a data URL, then 'http_request' to fetch it. "
-        "- SLOW PATH: Use 'spawn_web_task' ONLY when you must interact with a complex UI (login, buttons). "
-        "- EFFICIENCY: Never 'browse' an API/data URL. If it looks like data, HTTP GET it. "
+        "TOOL SELECTION STRATEGY: "
+        "- **Data Retrieval**: Prefer `http_request` (GET) for fetching data, APIs, or static HTML. It is fast and cheap. "
+        "- **Interactive Browsing**: Use `spawn_web_task` ONLY for complex websites that require JavaScript rendering, user logins, or button clicks. It is slow and expensive. "
+        "- **Search**: Use `search_web` to find URLs. Once you have a URL, try `http_request` first."
 
         "TOOL GUIDELINES: "
         "- 'http_request': Fetch data or APIs. Proxy handled automatically. "
