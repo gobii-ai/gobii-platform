@@ -17,6 +17,15 @@ from ..tags import maybe_schedule_agent_tags
 logger = logging.getLogger(__name__)
 
 
+
+def _should_continue_work(params: Dict[str, Any]) -> bool:
+    """Return True if the agent indicates more work right after this charter update."""
+    raw = params.get("will_continue_work")
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        return normalized in {"1", "true", "yes"}
+    return bool(raw)
+
 def get_update_charter_tool() -> Dict[str, Any]:
     """Return the update_charter tool definition for the LLM."""
     return {
@@ -28,6 +37,10 @@ def get_update_charter_tool() -> Dict[str, Any]:
                 "type": "object",
                 "properties": {
                     "new_charter": {"type": "string", "description": "New charter text."},
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": "Set true if you're updating your charter but will continue working immediately afterward.",
+                    },
                 },
                 "required": ["new_charter"],
             },
@@ -38,6 +51,7 @@ def get_update_charter_tool() -> Dict[str, Any]:
 def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the update_charter tool for a persistent agent."""
     new_charter = params.get("new_charter")
+    will_continue = _should_continue_work(params)
     if not new_charter or not isinstance(new_charter, str):
         return {"status": "error", "message": "Missing or invalid required parameter: new_charter"}
 
@@ -58,7 +72,7 @@ def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         return {
             "status": "ok",
             "message": "Charter updated successfully.",
-            "auto_sleep_ok": True,
+            "auto_sleep_ok": not will_continue,
         }
     except Exception as e:
         logger.exception("Failed to update charter for agent %s", agent.id)
