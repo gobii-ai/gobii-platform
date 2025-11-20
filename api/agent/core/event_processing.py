@@ -2018,7 +2018,32 @@ def _run_agent_loop(
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
                     tool_span.set_attribute("persistent_agent.id", str(agent.id))
-                    tool_name = call.function.name
+                    tool_name = getattr(getattr(call, "function", None), "name", None)
+                    if not tool_name:
+                        logger.warning(
+                            "Agent %s: received tool call without a function name; skipping and requesting resend.",
+                            agent.id,
+                        )
+                        try:
+                            step_kwargs = {
+                                "agent": agent,
+                                "description": (
+                                    "Tool call error: missing function name. "
+                                    "Re-send the SAME tool call with a valid 'name' and JSON arguments."
+                                ),
+                            }
+                            _attach_completion(step_kwargs)
+                            step = PersistentAgentStep.objects.create(**step_kwargs)
+                            _attach_prompt_archive(step)
+                            logger.info(
+                                "Agent %s: added correction step_id=%s for missing tool name",
+                                agent.id,
+                                getattr(step, "id", None),
+                            )
+                        except Exception:
+                            logger.debug("Failed to persist correction step for missing tool name", exc_info=True)
+                        followup_required = True
+                        break
                     tool_span.set_attribute("tool.name", tool_name)
                     logger.info("Agent %s executing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
@@ -3350,7 +3375,7 @@ def _get_system_instruction(
     base_prompt = (
         f"You are a persistent AI agent."
         "Use your tools to perform the next logical step. "
-        "CORE RESPONSIBILITY: Maintain an accurate charter. If your charter is unknown, unclear, or needs to change based on new user input/intent, call 'update_charter' IMMEDIATELY. This is your primary memory of your purpose. "
+        "CORE RESPONSIBILITY: Maintain an accurate charter. If your charter is unknown, unclear, generic (e.g., 'test agent'), or needs to change based on new user input/intent, call 'update_charter' IMMEDIATELY. Do this right away when a user gives you a specific request—ideally in the same tool batch as your greeting. This is your primary memory of your purpose. "
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
         "Use the 'update_schedule' tool to update your cron schedule any time it needs to change. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
@@ -3393,6 +3418,7 @@ def _get_system_instruction(
         "- **Data Retrieval**: Prefer `http_request` (GET) for fetching data, APIs, or static HTML. It is fast and cheap. "
         "- **Interactive Browsing**: Use `spawn_web_task` ONLY for complex websites that require JavaScript rendering, user logins, or button clicks. It is slow and expensive. "
         "- **Search**: Use `search_web` thoughtfully. When you need live or structured data (e.g., prices, metrics, feeds), your FIRST query should explicitly ask for an API/JSON endpoint (e.g., 'bitcoin price API json endpoint'). For general info, use a concise, high-signal query without spamming multiple searches; prefer one focused attempt (two max) before switching to another tool. Once you have a usable URL, move on to `http_request` or the right tool instead of repeating searches."
+        "- **API execution**: After you have an API URL and `http_request` is enabled, your very next action should be a single `http_request` (GET) to that URL. Do NOT re-run `search_tools` or `search_web` for the same goal unless the request fails or the URL is unusable."
 
         "TOOL GUIDELINES: "
         "- 'http_request': Fetch data or APIs. Proxy handled automatically. "
