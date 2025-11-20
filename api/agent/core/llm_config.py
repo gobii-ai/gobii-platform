@@ -202,7 +202,10 @@ def apply_tier_credit_multiplier(agent: Any, amount: Optional[Decimal]) -> Optio
         logger.debug("Unable to normalize credit amount %s for agent %s", amount, getattr(agent, "id", None))
         return amount
 
-    multiplier = get_credit_multiplier_for_tier(get_agent_llm_tier(agent))
+    tier = get_agent_llm_tier(agent)
+    if tier is AgentLLMTier.PREMIUM and _is_trial_discount_eligible(agent):
+        tier = AgentLLMTier.STANDARD
+    multiplier = get_credit_multiplier_for_tier(tier)
     scaled = base_amount * multiplier
     return scaled.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
@@ -228,6 +231,26 @@ def _within_new_account_premium_window(owner: Any | None) -> bool:
     if days <= 0:
         return False
     return (timezone.now() - joined_dt) <= timedelta(days=days)
+
+
+def _is_trial_discount_eligible(agent: Any | None) -> bool:
+    """Return True when an agent's premium tier comes from the new-account trial."""
+
+    if agent is None:
+        return False
+    if getattr(agent, "organization_id", None):
+        return False
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        return False
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    if owner is None:
+        return False
+    try:
+        plan = get_owner_plan(owner)
+    except Exception:
+        plan = None
+    allowed = max_allowed_tier_for_plan(plan, is_organization=False)
+    return allowed == AgentLLMTier.STANDARD and _within_new_account_premium_window(owner)
 
 
 def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> AgentLLMTier:

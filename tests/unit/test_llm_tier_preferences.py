@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
-from api.agent.core.llm_config import AgentLLMTier, get_agent_llm_tier
+from api.agent.core.llm_config import AgentLLMTier, get_agent_llm_tier, apply_tier_credit_multiplier
 from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -43,6 +43,13 @@ class AgentTierPreferenceTests(TestCase):
         """Brand new agents should be routed through premium tier on their first loop."""
         tier = get_agent_llm_tier(self.agent, is_first_loop=True)
         self.assertEqual(tier, AgentLLMTier.PREMIUM)
+
+    def test_trial_accounts_pay_standard_multiplier(self):
+        """Premium trial routing should still charge 1× credits."""
+        self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.PREMIUM)
+        amount = Decimal("1.000")
+        discounted = apply_tier_credit_multiplier(self.agent, amount)
+        self.assertEqual(discounted, Decimal("1.000"))
 
 
 @tag("batch_llm_intelligence")
