@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { useCallback, useMemo, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   ArrowDownToLine,
@@ -10,7 +10,6 @@ import {
   ChevronDown,
   CircleHelp,
   Info,
-  Loader2,
   Lock,
   KeyRound,
   Mail,
@@ -23,8 +22,6 @@ import {
   XCircle,
 } from 'lucide-react'
 import { Checkbox as AriaCheckbox, Slider as AriaSlider, SliderThumb, SliderTrack, Switch as AriaSwitch } from 'react-aria-components'
-import { updateAgent } from '../api/agents'
-import { HttpError } from '../api/http'
 import { Modal } from '../components/common/Modal'
 import { useModal } from '../hooks/useModal'
 
@@ -196,6 +193,26 @@ type AgentWebhook = {
   url: string
 }
 
+type PendingWebhookAction =
+  | { type: 'create'; tempId: string; name: string; url: string }
+  | { type: 'update'; id: string; name: string; url: string }
+  | { type: 'delete'; id: string }
+
+type DisplayWebhook = AgentWebhook & {
+  pendingType?: PendingWebhookAction['type']
+  temp?: boolean
+}
+
+type PendingPeerLinkAction =
+  | { type: 'create'; tempId: string; peerAgentId: string; peerAgentName: string; messagesPerWindow: number; windowHours: number }
+  | { type: 'update'; id: string; messagesPerWindow: number; windowHours: number; featureFlag: string; isEnabled: boolean }
+  | { type: 'delete'; id: string }
+
+type PeerLinkEntryState = PeerLinkEntry & {
+  pendingType?: PendingPeerLinkAction['type']
+  temp?: boolean
+}
+
 type ConfirmActionConfig = {
   title: string
   body: ReactNode
@@ -252,6 +269,7 @@ type FormState = {
   dailyCreditInput: string
   sliderValue: number
   dedicatedProxyId: string
+  preferredTier: IntelligenceTierKey
 }
 
 type AllowlistInput = {
@@ -259,6 +277,23 @@ type AllowlistInput = {
   channel: string
   allowInbound: boolean
   allowOutbound: boolean
+}
+
+const generateTempId = () =>
+  typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+const normalizeWebhooks = (hooks: AgentWebhook[]): DisplayWebhook[] => hooks.map((hook) => ({ ...hook }))
+
+function areSetsEqual<T>(a: Set<T>, b: Set<T>): boolean {
+  if (a.size !== b.size) {
+    return false
+  }
+  for (const value of a) {
+    if (!b.has(value)) {
+      return false
+    }
+  }
+  return true
 }
 
 export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
@@ -275,11 +310,13 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
           : '',
       sliderValue: initialData.dailyCredits.sliderValue ?? sliderEmptyValue,
       dedicatedProxyId: initialData.dedicatedIps.selectedId ?? '',
+      preferredTier: initialData.agent.preferredLlmTier ?? 'standard',
     }),
     [
       initialData.agent.name,
       initialData.agent.charter,
       initialData.agent.isActive,
+      initialData.agent.preferredLlmTier,
       initialData.dailyCredits.limit,
       initialData.dailyCredits.sliderValue,
       initialData.dedicatedIps.selectedId,
@@ -287,8 +324,362 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
     ],
   )
 
+  const [savedFormState, setSavedFormState] = useState<FormState>(initialFormState)
   const [formState, setFormState] = useState<FormState>(initialFormState)
-  const [preferredTier, setPreferredTier] = useState<IntelligenceTierKey>(initialData.agent.preferredLlmTier ?? 'standard')
+  const generalFormRef = useRef<HTMLFormElement | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [savedWebhooks, setSavedWebhooks] = useState<AgentWebhook[]>(initialData.webhooks)
+  const [webhooksState, setWebhooksState] = useState<DisplayWebhook[]>(() => normalizeWebhooks(initialData.webhooks))
+  const [pendingWebhookActions, setPendingWebhookActions] = useState<PendingWebhookAction[]>([])
+  const initialPersonalServerSet = useMemo(() => {
+    return new Set(initialData.mcpServers.personal.filter((server) => server.assigned).map((server) => server.id))
+  }, [initialData.mcpServers.personal])
+  const [savedPersonalServers, setSavedPersonalServers] = useState<Set<string>>(() => new Set(initialPersonalServerSet))
+  const [selectedPersonalServers, setSelectedPersonalServers] = useState<Set<string>>(() => new Set(initialPersonalServerSet))
+  const [savedPeerLinks, setSavedPeerLinks] = useState(initialData.peerLinks)
+  const [peerLinksState, setPeerLinksState] = useState<PeerLinkEntryState[]>(initialData.peerLinks.entries)
+  const [peerLinkCandidates, setPeerLinkCandidates] = useState(initialData.peerLinks.candidates)
+  const [peerLinkDefaults, setPeerLinkDefaults] = useState(initialData.peerLinks.defaults)
+  const [pendingPeerActions, setPendingPeerActions] = useState<PendingPeerLinkAction[]>([])
+
+  const generalHasChanges = useMemo(() => {
+    return (
+      formState.name !== savedFormState.name ||
+      formState.charter !== savedFormState.charter ||
+      formState.isActive !== savedFormState.isActive ||
+      formState.dailyCreditInput !== savedFormState.dailyCreditInput ||
+      formState.sliderValue !== savedFormState.sliderValue ||
+      formState.dedicatedProxyId !== savedFormState.dedicatedProxyId ||
+      formState.preferredTier !== savedFormState.preferredTier
+    )
+  }, [formState, savedFormState])
+
+  useEffect(() => {
+    setSavedFormState(initialFormState)
+    setFormState(initialFormState)
+  }, [initialFormState])
+
+  useEffect(() => {
+    setSavedWebhooks(initialData.webhooks)
+    setWebhooksState(normalizeWebhooks(initialData.webhooks))
+    setPendingWebhookActions([])
+  }, [initialData.webhooks])
+
+  useEffect(() => {
+    setSavedPersonalServers(new Set(initialPersonalServerSet))
+    setSelectedPersonalServers(new Set(initialPersonalServerSet))
+  }, [initialPersonalServerSet])
+
+  useEffect(() => {
+    setSavedPeerLinks(initialData.peerLinks)
+    setPeerLinksState(initialData.peerLinks.entries)
+    setPeerLinkCandidates(initialData.peerLinks.candidates)
+    setPeerLinkDefaults(initialData.peerLinks.defaults)
+    setPendingPeerActions([])
+  }, [initialData.peerLinks])
+
+  const mcpHasChanges = useMemo(
+    () => !areSetsEqual(selectedPersonalServers, savedPersonalServers),
+    [selectedPersonalServers, savedPersonalServers],
+  )
+
+  const togglePersonalServer = useCallback((serverId: string) => {
+    setSelectedPersonalServers((prev) => {
+      const next = new Set(prev)
+      if (next.has(serverId)) {
+        next.delete(serverId)
+      } else {
+        next.add(serverId)
+      }
+      return next
+    })
+  }, [])
+
+  const submitFormData = useCallback(
+    async (formData: FormData) => {
+      if (!formData.has('csrfmiddlewaretoken')) {
+        formData.append('csrfmiddlewaretoken', initialData.csrfToken)
+      }
+      const response = await fetch(initialData.urls.detail, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+        body: formData,
+      })
+      let data: any = null
+      try {
+        data = await response.json()
+      } catch (error) {
+        data = null
+      }
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || 'Update failed. Please try again.')
+      }
+      return data
+    },
+    [initialData.csrfToken, initialData.urls.detail],
+  )
+
+  const handleWebhookDraft = useCallback(
+    ({ id, name, url }: { id?: string; name: string; url: string }) => {
+      if (id) {
+        setWebhooksState((prev) => prev.map((hook) => (hook.id === id ? { ...hook, name, url, pendingType: 'update' } : hook)))
+        setPendingWebhookActions((prev) => {
+          const next = prev.filter((action) => !(action.type === 'update' && action.id === id))
+          return [...next, { type: 'update', id, name, url }]
+        })
+        return
+      }
+      const tempId = generateTempId()
+      setWebhooksState((prev) => [...prev, { id: tempId, name, url, temp: true, pendingType: 'create' }])
+      setPendingWebhookActions((prev) => [...prev, { type: 'create', tempId, name, url }])
+    },
+    [],
+  )
+
+  const stageWebhookDelete = useCallback((hook: DisplayWebhook) => {
+    if (hook.temp) {
+      setWebhooksState((prev) => prev.filter((entry) => entry.id !== hook.id))
+      setPendingWebhookActions((prev) => prev.filter((action) => !(action.type === 'create' && action.tempId === hook.id)))
+      return
+    }
+    setWebhooksState((prev) => prev.map((entry) => (entry.id === hook.id ? { ...entry, pendingType: 'delete' } : entry)))
+    setPendingWebhookActions((prev) => {
+      const next = prev.filter((action) => !(action.type === 'delete' && action.id === hook.id) && !(action.type === 'update' && action.id === hook.id))
+      return [...next, { type: 'delete', id: hook.id }]
+    })
+  }, [])
+
+  const stagePeerLinkCreate = useCallback(
+    (payload: { peerAgentId: string; messagesPerWindow: number; windowHours: number }) => {
+      const candidate = peerLinkCandidates.find((entry) => entry.id === payload.peerAgentId)
+      if (!candidate) {
+        setSaveError('Select a valid agent to link.')
+        return
+      }
+      const tempId = generateTempId()
+      setPeerLinksState((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          counterpartId: candidate.id,
+          counterpartName: candidate.name,
+          isEnabled: true,
+          messagesPerWindow: payload.messagesPerWindow,
+          windowHours: payload.windowHours,
+          featureFlag: '',
+          createdOnLabel: 'Pending save',
+          state: null,
+          pendingType: 'create',
+          temp: true,
+        },
+      ])
+      setPendingPeerActions((prev) => [
+        ...prev,
+        {
+          type: 'create',
+          tempId,
+          peerAgentId: candidate.id,
+          peerAgentName: candidate.name,
+          messagesPerWindow: payload.messagesPerWindow,
+          windowHours: payload.windowHours,
+        },
+      ])
+    },
+    [peerLinkCandidates],
+  )
+
+  const stagePeerLinkUpdate = useCallback(
+    (payload: { id: string; messagesPerWindow: number; windowHours: number; featureFlag: string; isEnabled: boolean }) => {
+      setPeerLinksState((prev) =>
+        prev.map((entry) =>
+          entry.id === payload.id
+            ? {
+                ...entry,
+                messagesPerWindow: payload.messagesPerWindow,
+                windowHours: payload.windowHours,
+                featureFlag: payload.featureFlag,
+                isEnabled: payload.isEnabled,
+                pendingType: entry.temp ? entry.pendingType : 'update',
+              }
+            : entry,
+        ),
+      )
+      setPendingPeerActions((prev) => {
+        const createIndex = prev.findIndex((action) => action.type === 'create' && action.tempId === payload.id)
+        if (createIndex !== -1) {
+          const next = [...prev]
+          const existing = next[createIndex] as Extract<PendingPeerLinkAction, { type: 'create' }>
+          next[createIndex] = {
+            ...existing,
+            messagesPerWindow: payload.messagesPerWindow,
+            windowHours: payload.windowHours,
+          }
+          return next
+        }
+        const filtered = prev.filter((action) => !(action.type === 'update' && action.id === payload.id))
+        return [
+          ...filtered,
+          {
+            type: 'update',
+            id: payload.id,
+            messagesPerWindow: payload.messagesPerWindow,
+            windowHours: payload.windowHours,
+            featureFlag: payload.featureFlag,
+            isEnabled: payload.isEnabled,
+          },
+        ]
+      })
+    },
+    [],
+  )
+
+  const stagePeerLinkDelete = useCallback((entry: PeerLinkEntryState) => {
+    if (entry.temp) {
+      setPeerLinksState((prev) => prev.filter((item) => item.id !== entry.id))
+      setPendingPeerActions((prev) => prev.filter((action) => !(action.type === 'create' && action.tempId === entry.id)))
+      return
+    }
+    setPeerLinksState((prev) => prev.map((item) => (item.id === entry.id ? { ...item, pendingType: 'delete' } : item)))
+    setPendingPeerActions((prev) => {
+      const next = prev.filter(
+        (action) => !(action.type === 'delete' && action.id === entry.id) && !(action.type === 'update' && action.id === entry.id),
+      )
+      return [...next, { type: 'delete', id: entry.id }]
+    })
+  }, [])
+
+  const webhooksDirty = pendingWebhookActions.length > 0
+  const peerLinksDirty = pendingPeerActions.length > 0
+  const hasAnyChanges = generalHasChanges || mcpHasChanges || webhooksDirty || peerLinksDirty
+
+  const applyPeerLinkPayload = useCallback((payload: PeerLinksInfo) => {
+    setSavedPeerLinks(payload)
+    setPeerLinksState(payload.entries)
+    setPeerLinkCandidates(payload.candidates)
+    setPeerLinkDefaults(payload.defaults)
+  }, [])
+
+  const resetForm = useCallback(() => {
+    setFormState(savedFormState)
+  }, [savedFormState])
+
+  const handleResetAll = useCallback(() => {
+    resetForm()
+    setSelectedPersonalServers(new Set(savedPersonalServers))
+    setPendingWebhookActions([])
+    setWebhooksState(normalizeWebhooks(savedWebhooks))
+    setPendingPeerActions([])
+    setPeerLinksState(savedPeerLinks.entries)
+    setPeerLinkCandidates(savedPeerLinks.candidates)
+    setPeerLinkDefaults(savedPeerLinks.defaults)
+    setSaveError(null)
+  }, [resetForm, savedPeerLinks, savedPersonalServers, savedWebhooks])
+
+  const handleSaveAll = useCallback(async () => {
+    if (!hasAnyChanges) {
+      return
+    }
+    setSaving(true)
+    setSaveError(null)
+    let processedWebhookActions = 0
+    let processedPeerActions = 0
+    try {
+      if (generalHasChanges && generalFormRef.current) {
+        await submitFormData(new FormData(generalFormRef.current))
+        setSavedFormState({ ...formState })
+      }
+
+      if (mcpHasChanges) {
+        const formData = new FormData()
+        formData.append('mcp_server_action', 'update_personal')
+        selectedPersonalServers.forEach((id) => formData.append('personal_servers', id))
+        await submitFormData(formData)
+        setSavedPersonalServers(new Set(selectedPersonalServers))
+      }
+
+      if (pendingWebhookActions.length) {
+        for (const action of pendingWebhookActions) {
+          const formData = new FormData()
+          if (action.type === 'create') {
+            formData.append('webhook_action', 'create')
+            formData.append('webhook_name', action.name)
+            formData.append('webhook_url', action.url)
+          } else if (action.type === 'update') {
+            formData.append('webhook_action', 'update')
+            formData.append('webhook_id', action.id)
+            formData.append('webhook_name', action.name)
+            formData.append('webhook_url', action.url)
+          } else {
+            formData.append('webhook_action', 'delete')
+            formData.append('webhook_id', action.id)
+          }
+          const data = await submitFormData(formData)
+          if (data?.webhooks) {
+            const normalized = normalizeWebhooks(data.webhooks as AgentWebhook[])
+            setSavedWebhooks(data.webhooks as AgentWebhook[])
+            setWebhooksState(normalized)
+          }
+          processedWebhookActions += 1
+        }
+        setPendingWebhookActions([])
+      }
+
+      if (pendingPeerActions.length) {
+        for (const action of pendingPeerActions) {
+          const formData = new FormData()
+          if (action.type === 'create') {
+            formData.append('peer_link_action', 'create')
+            formData.append('peer_agent_id', action.peerAgentId)
+            formData.append('messages_per_window', String(action.messagesPerWindow))
+            formData.append('window_hours', String(action.windowHours))
+          } else if (action.type === 'update') {
+            formData.append('peer_link_action', 'update')
+            formData.append('link_id', action.id)
+            formData.append('messages_per_window', String(action.messagesPerWindow))
+            formData.append('window_hours', String(action.windowHours))
+            formData.append('feature_flag', action.featureFlag)
+            if (action.isEnabled) {
+              formData.append('is_enabled', 'on')
+            }
+          } else {
+            formData.append('peer_link_action', 'delete')
+            formData.append('link_id', action.id)
+          }
+          const data = await submitFormData(formData)
+          if (data?.peerLinks) {
+            applyPeerLinkPayload(data.peerLinks as PeerLinksInfo)
+          }
+          processedPeerActions += 1
+        }
+        setPendingPeerActions([])
+      }
+
+      setSaveError(null)
+    } catch (error) {
+      if (processedWebhookActions > 0) {
+        setPendingWebhookActions((prev) => prev.slice(processedWebhookActions))
+      }
+      if (processedPeerActions > 0) {
+        setPendingPeerActions((prev) => prev.slice(processedPeerActions))
+      }
+      setSaveError(error instanceof Error ? error.message : 'Failed to save changes. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }, [
+    applyPeerLinkPayload,
+    formState,
+    generalFormRef,
+    generalHasChanges,
+    hasAnyChanges,
+    mcpHasChanges,
+    pendingPeerActions,
+    pendingWebhookActions,
+    selectedPersonalServers,
+    submitFormData,
+  ])
   const [allowlistState, setAllowlistState] = useState(initialData.allowlist)
   const [allowlistError, setAllowlistError] = useState<string | null>(null)
   const [allowlistBusy, setAllowlistBusy] = useState(false)
@@ -302,17 +693,6 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
     },
     [showModal],
   )
-
-  const hasChanges = useMemo(() => {
-    return (
-      formState.name !== initialFormState.name ||
-      formState.charter !== initialFormState.charter ||
-      formState.isActive !== initialFormState.isActive ||
-      formState.dailyCreditInput !== initialFormState.dailyCreditInput ||
-      formState.sliderValue !== initialFormState.sliderValue ||
-      formState.dedicatedProxyId !== initialFormState.dedicatedProxyId
-    )
-  }, [formState, initialFormState])
 
   const clampSlider = useCallback(
     (value: number) => {
@@ -349,10 +729,6 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
     },
     [sliderEmptyValue, updateSliderValue],
   )
-
-  const resetForm = useCallback(() => {
-    setFormState(initialFormState)
-  }, [initialFormState])
 
   const formatNumber = useCallback((value: number | null, fractionDigits = 0) => {
     if (value === null || !Number.isFinite(value)) {
@@ -478,18 +854,53 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   )
 
   const openWebhookModal = useCallback(
-    (mode: 'create' | 'edit', webhook: AgentWebhook | null = null) => {
+    (mode: 'create' | 'edit', webhook: DisplayWebhook | null = null) => {
       showModal((onClose) => (
         <WebhookModal
-          csrfToken={initialData.csrfToken}
-          detailUrl={initialData.urls.detail}
           mode={mode}
           webhook={webhook}
+          onSubmit={(draft) => {
+            handleWebhookDraft(draft)
+            onClose()
+          }}
           onClose={onClose}
         />
       ))
     },
-    [initialData.csrfToken, initialData.urls.detail, showModal],
+    [handleWebhookDraft, showModal],
+  )
+
+  const openPeerLinkModal = useCallback(
+    (mode: 'create' | 'edit', entry: PeerLinkEntryState | null = null) => {
+      showModal((onClose) => (
+        <PeerLinkModal
+          mode={mode}
+          entry={entry}
+          candidates={peerLinkCandidates}
+          defaults={peerLinkDefaults}
+          onSubmit={(values) => {
+            if (mode === 'create' && values.peerAgentId) {
+              stagePeerLinkCreate({
+                peerAgentId: values.peerAgentId,
+                messagesPerWindow: values.messagesPerWindow,
+                windowHours: values.windowHours,
+              })
+            } else if (mode === 'edit' && entry) {
+              stagePeerLinkUpdate({
+                id: entry.id,
+                messagesPerWindow: values.messagesPerWindow,
+                windowHours: values.windowHours,
+                featureFlag: values.featureFlag,
+                isEnabled: values.isEnabled,
+              })
+            }
+            onClose()
+          }}
+          onClose={onClose}
+        />
+      ))
+    },
+    [peerLinkCandidates, peerLinkDefaults, showModal, stagePeerLinkCreate, stagePeerLinkUpdate],
   )
 
   return (
@@ -550,7 +961,16 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
         </div>
       )}
 
-      <form method="post" action={initialData.urls.detail} id="general-settings-form">
+      <form
+        method="post"
+        action={initialData.urls.detail}
+        id="general-settings-form"
+        ref={generalFormRef}
+        onSubmit={(event) => {
+          event.preventDefault()
+          handleSaveAll()
+        }}
+      >
         <input type="hidden" name="csrfmiddlewaretoken" value={initialData.csrfToken} />
         {initialData.allowlist.show && (
           <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
@@ -582,6 +1002,23 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
                 />
                 <p className="mt-2 text-xs text-gray-500">Choose a memorable name that describes this agent's purpose.</p>
               </div>
+
+              {initialData.llmIntelligence && (
+                <>
+                  <div className="sm:col-span-3">
+                    <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Intelligence</span>
+                    <CircleHelp className="ms-1 inline-block size-3 text-gray-400" aria-hidden="true" />
+                  </div>
+                  <div className="sm:col-span-9">
+                    <input type="hidden" name="preferred_llm_tier" value={formState.preferredTier} />
+                    <AgentIntelligenceSlider
+                      currentTier={formState.preferredTier}
+                      config={initialData.llmIntelligence}
+                      onTierChange={(tier) => setFormState((prev) => ({ ...prev, preferredTier: tier }))}
+                    />
+                  </div>
+                </>
+              )}
 
               <div className="sm:col-span-3">
                 <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Status</span>
@@ -722,22 +1159,6 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
                 </div>
               </div>
 
-              {initialData.llmIntelligence && (
-                <>
-                  <div className="sm:col-span-3">
-                    <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Intelligence</span>
-                  </div>
-                  <div className="sm:col-span-9">
-                    <AgentIntelligenceSlider
-                      agentId={initialData.agent.id}
-                      currentTier={preferredTier}
-                      config={initialData.llmIntelligence}
-                      onTierChange={setPreferredTier}
-                    />
-                  </div>
-                </>
-              )}
-
               <div className="sm:col-span-3">
                 <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Dedicated IPs</span>
               </div>
@@ -761,10 +1182,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
         </details>
       </form>
 
-      <SaveBar
-        visible={hasChanges}
-        onCancel={resetForm}
-      />
+      <SaveBar visible={hasAnyChanges} onCancel={handleResetAll} onSave={handleSaveAll} busy={saving} error={saveError} />
 
       <details className="gobii-card-base group" id="agent-contact-controls">
         <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
@@ -798,16 +1216,17 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
       </details>
 
       <IntegrationsSection
-        csrfToken={initialData.csrfToken}
         mcpServers={initialData.mcpServers}
-        peerLinks={initialData.peerLinks}
-        onConfirmAction={openConfirmAction}
-      />
-
-      <WebhooksSection
-        webhooks={initialData.webhooks}
-        csrfToken={initialData.csrfToken}
-        onEdit={openWebhookModal}
+        selectedPersonalServers={selectedPersonalServers}
+        onTogglePersonalServer={togglePersonalServer}
+        peerLinks={{ entries: peerLinksState, candidates: peerLinkCandidates, defaults: peerLinkDefaults }}
+        onPeerLinkAdd={() => openPeerLinkModal('create')}
+        onPeerLinkEdit={(entry) => openPeerLinkModal('edit', entry)}
+        onPeerLinkDelete={stagePeerLinkDelete}
+        webhooks={webhooksState}
+        onWebhookCreate={() => openWebhookModal('create')}
+        onWebhookEdit={(hook) => openWebhookModal('edit', hook)}
+        onWebhookDelete={stageWebhookDelete}
         onConfirmAction={openConfirmAction}
       />
 
@@ -931,46 +1350,19 @@ function DedicatedIpSummary({ dedicatedIps, organizationName, selectedValue, onC
 }
 
 type AgentIntelligenceSliderProps = {
-  agentId: string
   currentTier: IntelligenceTierKey
   config: LlmIntelligenceConfig
   onTierChange: (tier: IntelligenceTierKey) => void
 }
 
-function AgentIntelligenceSlider({ agentId, currentTier, config, onTierChange }: AgentIntelligenceSliderProps) {
-  const [pendingTier, setPendingTier] = useState<IntelligenceTierKey | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const activeTier = pendingTier ?? currentTier
+function AgentIntelligenceSlider({ currentTier, config, onTierChange }: AgentIntelligenceSliderProps) {
   const isDisabled = !config.canEdit
 
   const handleSelect = (tier: IntelligenceTierKey) => {
-    if (isDisabled || tier === currentTier || pendingTier) {
+    if (isDisabled || tier === currentTier) {
       return
     }
-    setPendingTier(tier)
-    setError(null)
-    updateAgent(agentId, { preferred_llm_tier: tier })
-      .then(() => {
-        onTierChange(tier)
-      })
-      .catch((err: unknown) => {
-        let message = 'Unable to update intelligence tier. Please try again.'
-        if (err instanceof HttpError) {
-          if (err.body && typeof err.body === 'object') {
-            const detail = (err.body as Record<string, unknown>).detail
-            if (typeof detail === 'string' && detail.trim()) {
-              message = detail
-            }
-          } else if (typeof err.body === 'string' && err.body.trim()) {
-            message = err.body
-          } else if (err.message) {
-            message = err.message
-          }
-        }
-        setError(message)
-      })
-      .finally(() => setPendingTier(null))
+    onTierChange(tier)
   }
 
   const renderMultiplier = (value: number) => {
@@ -982,34 +1374,26 @@ function AgentIntelligenceSlider({ agentId, currentTier, config, onTierChange }:
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Intelligence</p>
-          {!config.canEdit && config.disabledReason && (
-            <p className="mt-1 flex items-center gap-1 text-xs text-gray-500">
-              <Lock className="h-3.5 w-3.5 text-gray-400" aria-hidden="true" />
-              <span>
-                {config.disabledReason}
-                {config.upgradeUrl && (
-                  <>
-                    {' '}
-                    <a href={config.upgradeUrl} className="text-indigo-600 underline">
-                      Upgrade
-                    </a>
-                  </>
-                )}
-              </span>
-            </p>
-          )}
-        </div>
-        {pendingTier && (
-          <Loader2 className="h-4 w-4 animate-spin text-indigo-600" aria-hidden="true" />
-        )}
-      </div>
-      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+    <div className="space-y-2">
+      {!config.canEdit && config.disabledReason && (
+        <p className="flex items-center gap-1 text-xs text-gray-500">
+          <Lock className="h-3.5 w-3.5 text-gray-400" aria-hidden="true" />
+          <span>
+            {config.disabledReason}
+            {config.upgradeUrl && (
+              <>
+                {' '}
+                <a href={config.upgradeUrl} className="text-indigo-600 underline">
+                  Upgrade
+                </a>
+              </>
+            )}
+          </span>
+        </p>
+      )}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {config.options.map((option) => {
-          const selected = activeTier === option.key
+          const selected = currentTier === option.key
           return (
             <button
               type="button"
@@ -1027,7 +1411,6 @@ function AgentIntelligenceSlider({ agentId, currentTier, config, onTierChange }:
           )
         })}
       </div>
-      {error && <p className="mt-2 text-xs text-rose-600">{error}</p>}
     </div>
   )
 }
@@ -1035,9 +1418,12 @@ function AgentIntelligenceSlider({ agentId, currentTier, config, onTierChange }:
 type SaveBarProps = {
   visible: boolean
   onCancel: () => void
+  onSave: () => Promise<void> | void
+  busy?: boolean
+  error?: string | null
 }
 
-function SaveBar({ visible, onCancel }: SaveBarProps) {
+function SaveBar({ visible, onCancel, onSave, busy, error }: SaveBarProps) {
   if (!visible) {
     return null
   }
@@ -1045,9 +1431,17 @@ function SaveBar({ visible, onCancel }: SaveBarProps) {
     <div id="agent-save-bar" className="fixed inset-x-0 bottom-0 z-40 pointer-events-none">
       <div className="pointer-events-auto mx-auto w-full max-w-5xl px-4 pb-4">
         <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.25)] sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 text-sm text-gray-700">
+          <div className="flex flex-col gap-1 text-sm text-gray-700">
+            <div className="flex items-center gap-2">
             <Info className="h-4 w-4 text-blue-600" aria-hidden="true" />
             <span>You have unsaved changes</span>
+          </div>
+            {error && (
+              <div className="flex items-center gap-2 text-xs text-red-600">
+                <XCircle className="h-4 w-4" aria-hidden="true" />
+                <span>{error}</span>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -1058,12 +1452,13 @@ function SaveBar({ visible, onCancel }: SaveBarProps) {
               Cancel
             </button>
             <button
-              type="submit"
-              form="general-settings-form"
-              className="inline-flex items-center gap-2 rounded-lg border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              type="button"
+              onClick={onSave}
+              disabled={busy}
+              className="inline-flex items-center gap-2 rounded-lg border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60"
             >
               <Check className="h-4 w-4" aria-hidden="true" />
-              Save Changes
+              {busy ? 'Saving…' : 'Save Changes'}
             </button>
           </div>
         </div>
@@ -1443,13 +1838,38 @@ function AllowlistDirectionFlags({ allowInbound, allowOutbound, labelColor }: Al
 }
 
 type IntegrationsSectionProps = {
-  csrfToken: string
   mcpServers: McpServersInfo
-  peerLinks: PeerLinksInfo
+  selectedPersonalServers: Set<string>
+  onTogglePersonalServer: (id: string) => void
+  peerLinks: {
+    entries: PeerLinkEntryState[]
+    candidates: PeerLinkCandidate[]
+    defaults: PeerLinksInfo['defaults']
+  }
+  onPeerLinkAdd: () => void
+  onPeerLinkEdit: (entry: PeerLinkEntryState) => void
+  onPeerLinkDelete: (entry: PeerLinkEntryState) => void
+  webhooks: DisplayWebhook[]
+  onWebhookCreate: () => void
+  onWebhookEdit: (webhook: DisplayWebhook) => void
+  onWebhookDelete: (webhook: DisplayWebhook) => void
   onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
-function IntegrationsSection({ csrfToken, mcpServers, peerLinks, onConfirmAction }: IntegrationsSectionProps) {
+function IntegrationsSection({
+  mcpServers,
+  selectedPersonalServers,
+  onTogglePersonalServer,
+  peerLinks,
+  onPeerLinkAdd,
+  onPeerLinkEdit,
+  onPeerLinkDelete,
+  webhooks,
+  onWebhookCreate,
+  onWebhookEdit,
+  onWebhookDelete,
+  onConfirmAction,
+}: IntegrationsSectionProps) {
   return (
     <details className="gobii-card-base group" id="agent-integrations">
       <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
@@ -1485,42 +1905,37 @@ function IntegrationsSection({ csrfToken, mcpServers, peerLinks, onConfirmAction
 
           {mcpServers.personal.length > 0 ? (
             mcpServers.showPersonalForm ? (
-              <div className="border border-gray-200 rounded-xl bg-white p-4">
-                <form method="post" className="space-y-4">
-                  <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
-                  <input type="hidden" name="mcp_server_action" value="update_personal" />
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {mcpServers.personal.map((server) => (
+              <div className="border border-gray-200 rounded-xl bg-white p-4 space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  {mcpServers.personal.map((server) => {
+                    const checked = selectedPersonalServers.has(server.id)
+                    return (
                       <label key={server.id} className="flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3">
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded"
-                          name="personal_servers"
-                          value={server.id}
-                          defaultChecked={server.assigned}
+                          checked={checked}
+                          onChange={() => onTogglePersonalServer(server.id)}
                         />
                         <div>
                           <p className="text-sm font-medium text-gray-800">{server.displayName}</p>
                           {server.description && <p className="text-sm text-gray-600">{server.description}</p>}
                         </div>
                       </label>
-                    ))}
+                    )
+                  })}
+                </div>
+                {mcpServers.canManage && mcpServers.manageUrl && (
+                  <div className="flex justify-end">
+                    <a
+                      href={mcpServers.manageUrl}
+                      className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50"
+                    >
+                      <ServerCog className="h-4 w-4" aria-hidden="true" />
+                      Manage All Servers
+                    </a>
                   </div>
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    {mcpServers.canManage && mcpServers.manageUrl && (
-                      <a
-                        href={mcpServers.manageUrl}
-                        className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50"
-                      >
-                        <ServerCog className="h-4 w-4" aria-hidden="true" />
-                        Manage All Servers
-                      </a>
-                    )}
-                    <button type="submit" className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-                      Save Personal Servers
-                    </button>
-                  </div>
-                </form>
+                )}
               </div>
             ) : (
               <p className="text-sm text-gray-500">Personal MCP servers are managed on personal agents. Switch to a personal agent to configure access.</p>
@@ -1531,61 +1946,24 @@ function IntegrationsSection({ csrfToken, mcpServers, peerLinks, onConfirmAction
         </section>
 
         <section className="p-6 sm:p-8 space-y-6">
-          <div>
-            <h3 className="text-base font-semibold text-gray-800">Agent Contacts (Peer Links)</h3>
-            <p className="text-sm text-gray-500">Create direct channels between this agent and other agents you control.</p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-gray-800">Agent Contacts (Peer Links)</h3>
+              <p className="text-sm text-gray-500">Create direct channels between this agent and other agents you control.</p>
+            </div>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              onClick={onPeerLinkAdd}
+              disabled={peerLinks.candidates.length === 0}
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              Add Peer Link
+            </button>
           </div>
-
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-            <form method="post" className="space-y-3">
-              <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
-              <input type="hidden" name="peer_link_action" value="create" />
-              <div className="grid md:grid-cols-4 gap-3">
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Agent</label>
-                  <select name="peer_agent_id" className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
-                    <option value="">Select an agent...</option>
-                    {peerLinks.candidates.map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>
-                        {candidate.name}
-                      </option>
-                    ))}
-                  </select>
-                  {peerLinks.candidates.length === 0 && (
-                    <p className="mt-2 text-xs text-gray-500">No additional eligible agents available.</p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Messages / Window</label>
-                  <input
-                    type="number"
-                    min="1"
-                    name="messages_per_window"
-                    defaultValue={peerLinks.defaults.messagesPerWindow}
-                    className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Window Hours</label>
-                  <input
-                    type="number"
-                    min="1"
-                    name="window_hours"
-                    defaultValue={peerLinks.defaults.windowHours}
-                    className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-              <button
-                type="submit"
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
-                disabled={peerLinks.candidates.length === 0}
-              >
-                <Plus className="w-4 h-4" aria-hidden="true" />
-                Create Link
-              </button>
-            </form>
-          </div>
+          {peerLinks.candidates.length === 0 && (
+            <p className="text-xs text-gray-500">No additional eligible agents available right now.</p>
+          )}
 
           {peerLinks.entries.length > 0 ? (
             <div className="overflow-hidden border border-gray-200 rounded-xl">
@@ -1601,85 +1979,55 @@ function IntegrationsSection({ csrfToken, mcpServers, peerLinks, onConfirmAction
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {peerLinks.entries.map((entry) => (
-                    <tr key={entry.id} className="align-top">
-                      <td className="px-4 py-3 text-sm text-gray-800">
-                        <div className="font-medium">{entry.counterpartName ?? '(Agent unavailable)'}</div>
-                        <div className="text-xs text-gray-500 mt-1">Linked {entry.createdOnLabel}</div>
-                        <div className="text-xs mt-1">
-                          Status:{' '}
-                          <span className={entry.isEnabled ? 'text-green-600' : 'text-gray-500'}>
-                            {entry.isEnabled ? 'Enabled' : 'Disabled'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">
-                        {entry.messagesPerWindow} / {entry.windowHours} h
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{entry.state?.creditsRemaining ?? '--'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{entry.state?.windowResetLabel ?? '--'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{entry.featureFlag ?? '--'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 space-y-2">
-                        <form method="post" className="space-y-2">
-                          <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
-                          <input type="hidden" name="peer_link_action" value="update" />
-                          <input type="hidden" name="link_id" value={entry.id} />
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
-                            <input
-                              type="number"
-                              min="1"
-                              name="messages_per_window"
-                              defaultValue={entry.messagesPerWindow}
-                              className="w-full sm:w-24 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500"
-                            />
-                            <input
-                              type="number"
-                              min="1"
-                              name="window_hours"
-                              defaultValue={entry.windowHours}
-                              className="w-full sm:w-20 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500"
-                            />
-                            <input
-                              type="text"
-                              name="feature_flag"
-                              defaultValue={entry.featureFlag ?? ''}
-                              placeholder="Flag (optional)"
-                              className="w-full sm:w-28 py-1.5 px-2 text-xs border-gray-300 rounded-md focus:border-blue-500 focus:ring-blue-500"
-                            />
+                  {peerLinks.entries.map((entry) => {
+                    const pendingLabel =
+                      entry.pendingType === 'delete'
+                        ? 'Pending removal'
+                        : entry.pendingType === 'update'
+                          ? 'Pending update'
+                          : entry.pendingType === 'create'
+                            ? 'Pending create'
+                            : null
+                    const rowClasses = entry.pendingType === 'delete' ? 'opacity-60' : ''
+                    return (
+                      <tr key={entry.id} className={`align-top ${rowClasses}`}>
+                        <td className="px-4 py-3 text-sm text-gray-800">
+                          <div className="font-medium">{entry.counterpartName ?? '(Agent unavailable)'}</div>
+                          <div className="text-xs text-gray-500 mt-1">Linked {entry.createdOnLabel}</div>
+                          {pendingLabel && <div className="text-xs text-amber-600">{pendingLabel}</div>}
+                          <div className="text-xs mt-1">
+                            Status:{' '}
+                            <span className={entry.isEnabled ? 'text-green-600' : 'text-gray-500'}>
+                              {entry.isEnabled ? 'Enabled' : 'Disabled'}
+                            </span>
                           </div>
-                          <label className="inline-flex items-center gap-2 text-xs text-gray-600">
-                            <input
-                              type="checkbox"
-                              name="is_enabled"
-                              defaultChecked={entry.isEnabled}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span>Link enabled</span>
-                          </label>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">
+                          {entry.messagesPerWindow} / {entry.windowHours} h
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{entry.state?.creditsRemaining ?? '--'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{entry.state?.windowResetLabel ?? '--'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{entry.featureFlag ?? '--'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700 space-y-2">
                           <div className="flex flex-wrap gap-2">
                             <button
-                              type="submit"
-                              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                              type="button"
+                              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                              onClick={() => onPeerLinkEdit(entry)}
+                              disabled={entry.pendingType === 'delete'}
                             >
-                              <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                              Update
+                              Edit
                             </button>
                             <button
                               type="button"
-                              name="peer_link_action"
-                              value="delete"
                               className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50"
-                              onClick={(event) => {
-                                const button = event.currentTarget
-                                const form = button.form
+                              onClick={() => {
                                 onConfirmAction({
                                   title: 'Remove peer link',
                                   body: 'Remove this link? This cannot be undone.',
                                   confirmLabel: 'Remove link',
                                   tone: 'danger',
-                                  onConfirm: () => {
-                                    form?.requestSubmit(button)
-                                  },
+                                  onConfirm: () => onPeerLinkDelete(entry),
                                 })
                               }}
                             >
@@ -1687,16 +2035,102 @@ function IntegrationsSection({ csrfToken, mcpServers, peerLinks, onConfirmAction
                               Remove
                             </button>
                           </div>
-                        </form>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
           ) : (
             <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
-              No peer links yet. Use the form above to connect this agent with another agent you control.
+              No peer links yet. Use the button above to connect this agent with another agent you control.
+            </div>
+          )}
+        </section>
+
+        <section className="p-6 sm:p-8 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div>
+              <h3 className="text-base font-semibold text-gray-800">Outbound Webhooks</h3>
+              <p className="text-sm text-gray-500">Webhooks notify your systems when the agent completes important actions.</p>
+            </div>
+            <button
+              type="button"
+              onClick={onWebhookCreate}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              Add Webhook
+            </button>
+          </div>
+
+          {webhooks.length > 0 ? (
+            <div className="overflow-hidden border border-gray-200 rounded-xl">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">URL</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {webhooks.map((webhook) => {
+                    const pendingLabel =
+                      webhook.pendingType === 'delete'
+                        ? 'Pending removal'
+                        : webhook.pendingType === 'update'
+                          ? 'Pending update'
+                          : webhook.pendingType === 'create'
+                            ? 'Pending create'
+                            : null
+                    const rowClasses = webhook.pendingType === 'delete' ? 'opacity-60' : ''
+                    return (
+                      <tr key={webhook.id} className={rowClasses}>
+                        <td className="px-4 py-3 text-sm text-gray-800">
+                          <div className="flex flex-col">
+                            <span>{webhook.name}</span>
+                            {pendingLabel && <span className="text-xs text-amber-600">{pendingLabel}</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 break-all">{webhook.url}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700 space-y-2">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => onWebhookEdit(webhook)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50"
+                              onClick={() =>
+                                onConfirmAction({
+                                  title: 'Delete webhook',
+                                  body: `Remove the webhook "${webhook.name}"? This cannot be undone.`,
+                                  confirmLabel: 'Delete webhook',
+                                  tone: 'danger',
+                                  onConfirm: () => onWebhookDelete(webhook),
+                                })
+                              }
+                            >
+                              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
+              No webhooks yet. Add one to let your agent notify external systems.
             </div>
           )}
         </section>
@@ -1705,113 +2139,155 @@ function IntegrationsSection({ csrfToken, mcpServers, peerLinks, onConfirmAction
   )
 }
 
-type WebhooksSectionProps = {
-  webhooks: AgentWebhook[]
-  csrfToken: string
-  onEdit: (mode: 'create' | 'edit', webhook?: AgentWebhook | null) => void
-  onConfirmAction: (config: ConfirmActionConfig) => void
+type PeerLinkModalProps = {
+  mode: 'create' | 'edit'
+  entry: PeerLinkEntryState | null
+  candidates: PeerLinkCandidate[]
+  defaults: PeerLinksInfo['defaults']
+  onSubmit: (values: { peerAgentId?: string; messagesPerWindow: number; windowHours: number; featureFlag: string; isEnabled: boolean }) => void
+  onClose: () => void
 }
 
-function WebhooksSection({ webhooks, csrfToken, onEdit, onConfirmAction }: WebhooksSectionProps) {
-  return (
-    <details className="gobii-card-base group" id="agent-webhooks">
-      <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-800">Outbound Webhooks</h2>
-          <p className="text-sm text-gray-500">Manage webhook endpoints this agent can trigger.</p>
-        </div>
-        <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
-      </summary>
-      <div className="p-6 sm:p-8 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <p className="text-sm text-gray-500">Webhooks notify your systems when the agent completes important actions.</p>
-          <button
-            type="button"
-            onClick={() => onEdit('create')}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700"
-          >
-            <Plus className="w-4 h-4" aria-hidden="true" />
-            Add Webhook
-          </button>
-        </div>
+function PeerLinkModal({ mode, entry, candidates, defaults, onSubmit, onClose }: PeerLinkModalProps) {
+  const isCreate = mode === 'create'
+  const [peerAgentId, setPeerAgentId] = useState(entry?.counterpartId ?? candidates[0]?.id ?? '')
+  const [messagesInput, setMessagesInput] = useState(String(entry?.messagesPerWindow ?? defaults.messagesPerWindow))
+  const [windowInput, setWindowInput] = useState(String(entry?.windowHours ?? defaults.windowHours))
+  const [featureFlag, setFeatureFlag] = useState(entry?.featureFlag ?? '')
+  const [isEnabled, setIsEnabled] = useState(entry?.isEnabled ?? true)
 
-        {webhooks.length > 0 ? (
-          <div className="overflow-hidden border border-gray-200 rounded-xl">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">URL</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {webhooks.map((webhook) => (
-                  <tr key={webhook.id}>
-                    <td className="px-4 py-3 text-sm text-gray-800">{webhook.name}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600 break-all">{webhook.url}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700 space-y-2">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onEdit('edit', webhook)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50"
-                        >
-                          Edit
-                        </button>
-                        <form method="post" className="inline-flex">
-                          <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
-                          <input type="hidden" name="webhook_action" value="delete" />
-                          <input type="hidden" name="webhook_id" value={webhook.id} />
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50"
-                            onClick={(event) => {
-                              const button = event.currentTarget
-                              const form = button.form
-                              onConfirmAction({
-                                title: 'Delete webhook',
-                                body: `Remove the webhook "${webhook.name}"? This cannot be undone.`,
-                                confirmLabel: 'Delete webhook',
-                                tone: 'danger',
-                                onConfirm: () => {
-                                  form?.requestSubmit(button)
-                                },
-                              })
-                            }}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                            Delete
-                          </button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+  const parseNumber = (value: string, fallback: number) => {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return fallback
+    }
+    return Math.round(numeric)
+  }
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (isCreate && !peerAgentId) {
+      return
+    }
+    onSubmit({
+      peerAgentId: isCreate ? peerAgentId : entry?.counterpartId ?? undefined,
+      messagesPerWindow: parseNumber(messagesInput, defaults.messagesPerWindow),
+      windowHours: parseNumber(windowInput, defaults.windowHours),
+      featureFlag: featureFlag.trim(),
+      isEnabled,
+    })
+  }
+
+  return (
+    <Modal
+      title={isCreate ? 'Add Peer Link' : 'Edit Peer Link'}
+      subtitle={isCreate ? 'Select an agent and quota limits.' : 'Adjust quota and feature flag controls for this link.'}
+      onClose={onClose}
+      widthClass="sm:max-w-lg"
+    >
+      <form className="space-y-5" onSubmit={handleSubmit}>
+        {isCreate ? (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Agent</label>
+            <select
+              value={peerAgentId}
+              onChange={(event) => setPeerAgentId(event.target.value)}
+              className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+              disabled={candidates.length === 0}
+            >
+              <option value="">Select an agent...</option>
+              {candidates.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name}
+                </option>
+              ))}
+            </select>
+            {candidates.length === 0 && <p className="text-xs text-gray-500 mt-1">No additional eligible agents available.</p>}
           </div>
         ) : (
-          <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
-            No webhooks yet. Add one to let your agent notify external systems.
+          <div>
+            <span className="block text-sm font-medium text-gray-700">Agent</span>
+            <p className="mt-1 text-sm text-gray-600">{entry?.counterpartName ?? '(Agent unavailable)'}</p>
           </div>
         )}
-      </div>
-    </details>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Messages per Window</label>
+          <input
+            type="number"
+            min="1"
+            value={messagesInput}
+            onChange={(event) => setMessagesInput(event.target.value)}
+            className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Window Hours</label>
+          <input
+            type="number"
+            min="1"
+            value={windowInput}
+            onChange={(event) => setWindowInput(event.target.value)}
+            className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+          />
+        </div>
+
+        {!isCreate && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Feature Flag</label>
+              <input
+                type="text"
+                value={featureFlag}
+                onChange={(event) => setFeatureFlag(event.target.value)}
+                placeholder="optional"
+                className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+              />
+            </div>
+            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={isEnabled}
+                onChange={(event) => setIsEnabled(event.target.checked)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Link enabled</span>
+            </label>
+          </>
+        )}
+
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <button type="button" className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={isCreate && !peerAgentId}
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60"
+          >
+            Save Link
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
 type WebhookModalProps = {
-  csrfToken: string
-  detailUrl: string
   mode: 'create' | 'edit'
-  webhook: AgentWebhook | null
+  webhook: DisplayWebhook | null
+  onSubmit: (draft: { id?: string; name: string; url: string }) => void
   onClose: () => void
 }
 
-function WebhookModal({ csrfToken, detailUrl, mode, webhook, onClose }: WebhookModalProps) {
+function WebhookModal({ mode, webhook, onSubmit, onClose }: WebhookModalProps) {
   const [name, setName] = useState(webhook?.name ?? '')
   const [url, setUrl] = useState(webhook?.url ?? '')
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    onSubmit({ id: webhook?.id, name, url })
+  }
 
   return (
     <Modal
@@ -1820,10 +2296,7 @@ function WebhookModal({ csrfToken, detailUrl, mode, webhook, onClose }: WebhookM
       onClose={onClose}
       widthClass="sm:max-w-lg"
     >
-      <form method="post" action={detailUrl} className="space-y-5">
-        <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
-        <input type="hidden" name="webhook_action" value={mode === 'create' ? 'create' : 'update'} />
-        {mode === 'edit' && webhook && <input type="hidden" name="webhook_id" value={webhook.id} />}
+      <form className="space-y-5" onSubmit={handleSubmit}>
         <div>
           <label htmlFor="webhook-name-field" className="block text-sm font-medium text-gray-700">
             Webhook Name

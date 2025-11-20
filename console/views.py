@@ -2994,6 +2994,142 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'pendingContactRequests': pending_contact_requests,
         }
 
+    def _build_mcp_servers_payload(
+        self,
+        request: HttpRequest,
+        agent: PersistentAgent,
+        *,
+        server_overview: list[dict[str, object]] | None = None,
+        current_context: dict[str, object] | None = None,
+        can_manage_org_agents: bool | None = None,
+    ) -> dict[str, object]:
+        if server_overview is None:
+            server_overview = mcp_server_service.agent_server_overview(agent)
+
+        inherited_servers = [
+            {
+                'id': str(server.get('id')),
+                'displayName': server.get('display_name'),
+                'description': server.get('description'),
+                'scope': server.get('scope'),
+                'inherited': bool(server.get('inherited')),
+                'assigned': bool(server.get('assigned')),
+            }
+            for server in server_overview
+            if server.get('inherited')
+        ]
+
+        personal_servers = [
+            {
+                'id': str(server.get('id')),
+                'displayName': server.get('display_name'),
+                'description': server.get('description'),
+                'assigned': bool(server.get('assigned')),
+            }
+            for server in server_overview
+            if server.get('scope') == MCPServerConfig.Scope.USER
+        ]
+
+        if current_context is None or can_manage_org_agents is None:
+            resolved = build_console_context(request)
+            current_context = {
+                'type': resolved.current_context.type,
+            }
+            can_manage_org_agents = resolved.can_manage_org_agents
+
+        can_manage = False
+        if current_context.get('type') == 'personal' or can_manage_org_agents:
+            can_manage = True
+
+        return {
+            'inherited': inherited_servers,
+            'personal': personal_servers,
+            'showPersonalForm': agent.organization_id is None and bool(personal_servers),
+            'canManage': can_manage,
+            'manageUrl': reverse('console-mcp-servers'),
+        }
+
+    def _build_webhooks_payload(self, agent: PersistentAgent) -> list[dict[str, str]]:
+        return [
+            {
+                'id': str(webhook.id),
+                'name': webhook.name,
+                'url': webhook.url,
+            }
+            for webhook in agent.webhooks.order_by('name')
+        ]
+
+    def _build_peer_links_payload(self, agent: PersistentAgent) -> dict[str, object]:
+        peer_links_qs = (
+            AgentPeerLink.objects.filter(Q(agent_a=agent) | Q(agent_b=agent))
+            .select_related("agent_a", "agent_b")
+            .prefetch_related("communication_states")
+            .order_by("created_at")
+        )
+
+        entries: list[dict[str, object]] = []
+        linked_agent_ids: set[str] = set()
+
+        for link in peer_links_qs:
+            counterpart = link.get_other_agent(agent)
+            if counterpart:
+                linked_agent_ids.add(str(counterpart.id))
+            linked_agent_ids.add(str(link.agent_a_id))
+            linked_agent_ids.add(str(link.agent_b_id))
+
+            state = next(
+                (s for s in link.communication_states.all() if s.channel == CommsChannel.OTHER),
+                None,
+            )
+
+            entries.append(
+                {
+                    'id': str(link.id),
+                    'counterpartId': str(counterpart.id) if counterpart else None,
+                    'counterpartName': counterpart.name if counterpart else None,
+                    'isEnabled': link.is_enabled,
+                    'messagesPerWindow': link.messages_per_window,
+                    'windowHours': link.window_hours,
+                    'featureFlag': link.feature_flag,
+                    'createdOnLabel': date_format(timezone.localtime(link.created_at), "M j, Y"),
+                    'state': (
+                        {
+                            'creditsRemaining': state.credits_remaining,
+                            'windowResetLabel': date_format(timezone.localtime(state.window_reset_at), "M j, Y H:i"),
+                        }
+                        if state
+                        else None
+                    ),
+                }
+            )
+
+        linked_agent_ids.discard(str(agent.id))
+
+        if agent.organization_id:
+            candidate_qs = PersistentAgent.objects.filter(organization_id=agent.organization_id)
+        else:
+            candidate_qs = PersistentAgent.objects.filter(user=agent.user, organization__isnull=True)
+
+        if linked_agent_ids:
+            candidate_qs = candidate_qs.exclude(id__in=linked_agent_ids)
+
+        candidates = [
+            {
+                'id': str(candidate.id),
+                'name': candidate.name,
+            }
+            for candidate in candidate_qs.exclude(id=agent.id).order_by('name')
+        ]
+
+        return {
+            'entries': entries,
+            'candidates': candidates,
+            'defaults': {
+                'messagesPerWindow': 30,
+                'windowHours': 6,
+            },
+        }
+
     def _build_agent_detail_props(self, context: dict[str, Any]) -> dict[str, Any]:
         agent: PersistentAgent = context['agent']
         request = self.request
@@ -3262,27 +3398,29 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
     def post(self, request, *args, **kwargs):
         """Handle agent configuration updates and allowlist management."""
         agent = self.get_object()
+        self.object = agent
         credit_settings = get_daily_credit_settings()
         max_contacts_per_agent = get_user_max_contacts_per_agent(
             agent.user,
             organization=agent.organization,
         )
-        
+
+        # Handle AJAX detection early so we can reuse for multiple branches
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.META.get('HTTP_X_REQUESTED_WITH') == 'XMLHttpRequest'
+
         peer_action = request.POST.get('peer_link_action')
         if peer_action:
-            return self._handle_peer_link_action(request, agent, peer_action)
+            return self._handle_peer_link_action(request, agent, peer_action, ajax=is_ajax)
 
         webhook_action = request.POST.get('webhook_action')
         if webhook_action:
-            return self._handle_webhook_action(request, agent, webhook_action)
+            return self._handle_webhook_action(request, agent, webhook_action, ajax=is_ajax)
 
         if request.POST.get('mcp_server_action') == 'update_personal':
-            return self._handle_mcp_server_update(request, agent)
+            return self._handle_mcp_server_update(request, agent, ajax=is_ajax)
 
         # Handle AJAX allowlist operations
         # Check both modern header and legacy header for AJAX detection
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.META.get('HTTP_X_REQUESTED_WITH') == 'XMLHttpRequest'
-        
         if is_ajax:
             from django.http import JsonResponse
             from api.models import CommsAllowlistEntry
@@ -3707,6 +3845,12 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 messages.info(request, "There is no pending transfer invitation to cancel.")
             return redirect('agent_detail', pk=agent.pk)
 
+        def _general_error(message: str, status: int = 400):
+            if is_ajax:
+                return JsonResponse({'success': False, 'error': message}, status=status)
+            messages.error(request, message)
+            return redirect('agent_detail', pk=agent.pk)
+
         new_name = request.POST.get('name', '').strip()
         new_charter = request.POST.get('charter', '').strip()
         # Checkbox inputs are only present in POST data when checked. Determine the desired
@@ -3726,12 +3870,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             try:
                 parsed_limit = Decimal(limit_source)
             except InvalidOperation:
-                messages.error(request, "Enter a whole number for the daily credit soft target.")
-                return redirect('agent_detail', pk=agent.pk)
+                return _general_error("Enter a whole number for the daily credit soft target.")
 
             if parsed_limit != parsed_limit.to_integral_value(rounding=ROUND_DOWN):
-                messages.error(request, "Enter a whole number for the daily credit soft target.")
-                return redirect('agent_detail', pk=agent.pk)
+                return _general_error("Enter a whole number for the daily credit soft target.")
 
             parsed_limit = parsed_limit.to_integral_value(rounding=ROUND_HALF_UP)
             if parsed_limit <= Decimal("0"):
@@ -3746,12 +3888,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 new_daily_limit = int(parsed_limit)
 
         if not new_name:
-            messages.error(request, "Agent name cannot be empty.")
-            return redirect('agent_detail', pk=agent.pk)
+            return _general_error("Agent name cannot be empty.")
 
         if not new_charter:
-            messages.error(request, "Agent assignment cannot be empty.")
-            return redirect('agent_detail', pk=agent.pk)
+            return _general_error("Agent assignment cannot be empty.")
 
         # Fetch the browser agent defensively; it may be missing due to historical corruption.
         browser_agent: BrowserUseAgent | None = None
@@ -3765,14 +3905,59 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 )
 
         owner = agent.organization or agent.user
+        organization = agent.organization if agent.organization_id else None
+        owner_type = 'organization' if agent.organization_id else 'user'
         multi_assign = is_multi_assign_enabled()
         dedicated_proxy_id = (request.POST.get('dedicated_proxy_id') or '').strip()
         selected_proxy: ProxyServer | None = None
 
+        plan = None
+        if owner is not None:
+            try:
+                if owner_type == 'organization' and organization is not None:
+                    plan = get_organization_plan(organization)
+                else:
+                    plan = get_user_plan(owner)
+            except Exception:
+                plan = None
+
+        allowed_llm_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
+        can_edit_intelligence = bool(
+            settings.GOBII_PROPRIETARY_MODE
+            and owner is not None
+            and (owner_type == 'organization' or allowed_llm_tier != AgentLLMTier.STANDARD)
+        )
+        current_preferred_tier_value = getattr(agent, 'preferred_llm_tier', AgentLLMTier.STANDARD.value)
+        try:
+            AgentLLMTier(current_preferred_tier_value)
+        except ValueError:
+            current_preferred_tier_value = AgentLLMTier.STANDARD.value
+
+        preferred_tier_input = (request.POST.get('preferred_llm_tier') or '').strip()
+        if not preferred_tier_input:
+            preferred_tier_input = current_preferred_tier_value
+        try:
+            requested_preferred_tier = AgentLLMTier(preferred_tier_input)
+        except ValueError:
+            return _general_error("Select a valid intelligence level.")
+
+        preferred_tier_changed = requested_preferred_tier.value != current_preferred_tier_value
+        if preferred_tier_changed:
+            if not can_edit_intelligence:
+                return _general_error("Upgrade your plan to adjust intelligence levels.")
+            allowed_values = {AgentLLMTier.STANDARD}
+            if allowed_llm_tier in (AgentLLMTier.PREMIUM, AgentLLMTier.MAX):
+                allowed_values.add(AgentLLMTier.PREMIUM)
+            if allowed_llm_tier == AgentLLMTier.MAX:
+                allowed_values.add(AgentLLMTier.MAX)
+            if requested_preferred_tier not in allowed_values:
+                return _general_error("That intelligence level isn't available for this plan.")
+
+        resolved_preferred_tier_value = requested_preferred_tier.value
+
         if dedicated_proxy_id:
             if owner is None:
-                messages.error(request, "Dedicated IPs require an account or organization owner.")
-                return redirect('agent_detail', pk=agent.pk)
+                return _general_error("Dedicated IPs require an account or organization owner.")
             try:
                 selected_proxy = (
                     DedicatedProxyService.allocated_proxies(owner)
@@ -3780,20 +3965,16 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     .get(id=dedicated_proxy_id)
                 )
             except ProxyServer.DoesNotExist:
-                messages.error(request, "Invalid dedicated IP selection.")
-                return redirect('agent_detail', pk=agent.pk)
+                return _general_error("Invalid dedicated IP selection.")
             if browser_agent is None:
-                messages.error(
-                    request,
-                    "Unable to assign a dedicated IP because the agent is missing its browser component.",
+                return _general_error(
+                    "Unable to assign a dedicated IP because the agent is missing its browser component."
                 )
-                return redirect('agent_detail', pk=agent.pk)
             if (
                 not multi_assign
                 and selected_proxy.browser_agents.exclude(persistent_agent=agent).exists()
             ):
-                messages.error(request, "That dedicated IP is already assigned to another agent.")
-                return redirect('agent_detail', pk=agent.pk)
+                return _general_error("That dedicated IP is already assigned to another agent.")
 
         # Check for uniqueness, excluding the current agent's BrowserUseAgent (if present)
         exclude_pk = browser_agent.id if browser_agent else agent.browser_use_agent_id
@@ -3804,8 +3985,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         if exclude_pk:
             browser_name_conflict = browser_name_conflict.exclude(pk=exclude_pk)
         if browser_name_conflict.exists():
-            messages.error(request, f"You already have an agent named '{new_name}'.")
-            return redirect('agent_detail', pk=agent.pk)
+            return _general_error(f"You already have an agent named '{new_name}'.")
 
         try:
             with transaction.atomic():
@@ -3842,6 +4022,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if agent.daily_credit_limit != new_daily_limit:
                     agent.daily_credit_limit = new_daily_limit
                     agent_fields_to_update.append('daily_credit_limit')
+
+                if agent.preferred_llm_tier != resolved_preferred_tier_value:
+                    agent.preferred_llm_tier = resolved_preferred_tier_value
+                    agent_fields_to_update.append('preferred_llm_tier')
 
                 if browser_agent is not None:
                     current_proxy_id = browser_agent.preferred_proxy_id
@@ -3890,7 +4074,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     fields.append('life_state')
                     agent.save(update_fields=fields)
 
-                messages.success(request, "Agent updated successfully.")
+                if not is_ajax:
+                    messages.success(request, "Agent updated successfully.")
 
                 soft_value = float(new_daily_limit) if new_daily_limit is not None else None
                 hard_limit_value = agent.get_daily_credit_hard_limit()
@@ -3903,6 +4088,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         'daily_credit_limit': soft_value,
                         'daily_credit_soft_target': soft_value,
                         'daily_credit_hard_limit': float(hard_limit_value) if hard_limit_value is not None else None,
+                        'preferred_llm_tier': resolved_preferred_tier_value,
                     },
                     organization=agent.organization,
                 )
@@ -3913,17 +4099,40 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     properties=update_props.copy(),
                 )
         except Exception as e:
+            if is_ajax:
+                return JsonResponse({'success': False, 'error': f"Error updating agent: {e}"}, status=500)
             messages.error(request, f"Error updating agent: {e}")
+            return redirect('agent_detail', pk=agent.pk)
+
+        if is_ajax:
+            return JsonResponse({'success': True, 'message': "Agent updated successfully."})
 
         return redirect('agent_detail', pk=agent.pk)
 
-    def _handle_webhook_action(self, request, agent: PersistentAgent, action: str):
+    def _handle_webhook_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
         redirect_response = redirect('agent_detail', pk=agent.pk)
         normalized_action = (action or "").lower()
 
-        if normalized_action not in {"create", "update", "delete"}:
-            messages.error(request, "Unsupported webhook action.")
+        def _error_response(message: str, status: int = 400):
+            if ajax:
+                return JsonResponse({'success': False, 'error': message}, status=status)
+            messages.error(request, message)
             return redirect_response
+
+        def _success_response(message: str):
+            if ajax:
+                return JsonResponse(
+                    {
+                        'success': True,
+                        'message': message,
+                        'webhooks': self._build_webhooks_payload(agent),
+                    }
+                )
+            messages.success(request, message)
+            return redirect_response
+
+        if normalized_action not in {"create", "update", "delete"}:
+            return _error_response("Unsupported webhook action.")
 
         def _track_webhook_event(event_type: AnalyticsEvent, webhook_obj: PersistentAgentWebhook) -> None:
             props = Analytics.with_org_properties(
@@ -3947,37 +4156,31 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         if normalized_action == "delete":
             webhook_id = request.POST.get("webhook_id")
             if not webhook_id:
-                messages.error(request, "Missing webhook identifier.")
-                return redirect_response
+                return _error_response("Missing webhook identifier.")
             try:
                 webhook = agent.webhooks.get(id=webhook_id)
             except PersistentAgentWebhook.DoesNotExist:
-                messages.error(request, "Webhook not found or no longer exists.")
-                return redirect_response
+                return _error_response("Webhook not found or no longer exists.")
 
             _track_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_DELETED, webhook)
             webhook.delete()
-            messages.success(request, "Webhook removed.")
-            return redirect_response
+            return _success_response("Webhook removed.")
 
         name = (request.POST.get("webhook_name") or "").strip()
         url = (request.POST.get("webhook_url") or "").strip()
         if not name or not url:
-            messages.error(request, "Webhook name and URL are required.")
-            return redirect_response
+            return _error_response("Webhook name and URL are required.")
 
         if normalized_action == "create":
             webhook = PersistentAgentWebhook(agent=agent, name=name, url=url)
         else:
             webhook_id = request.POST.get("webhook_id")
             if not webhook_id:
-                messages.error(request, "Missing webhook identifier.")
-                return redirect_response
+                return _error_response("Missing webhook identifier.")
             try:
                 webhook = agent.webhooks.get(id=webhook_id)
             except PersistentAgentWebhook.DoesNotExist:
-                messages.error(request, "Webhook not found or no longer exists.")
-                return redirect_response
+                return _error_response("Webhook not found or no longer exists.")
             webhook.name = name
             webhook.url = url
 
@@ -3995,24 +4198,43 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 error_messages.append(str(exc))
 
             message_text = "; ".join(error_messages) if error_messages else "Invalid data."
-            messages.error(request, f"Unable to save webhook: {message_text}")
-            return redirect_response
+            return _error_response(f"Unable to save webhook: {message_text}")
         except IntegrityError:
-            messages.error(request, "A webhook with that name already exists for this agent.")
-            return redirect_response
+            return _error_response("A webhook with that name already exists for this agent.")
 
         if normalized_action == "create":
             _track_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_ADDED, webhook)
-            messages.success(request, "Webhook created.")
+            return _success_response("Webhook created.")
         else:
             _track_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_UPDATED, webhook)
-            messages.success(request, "Webhook updated.")
-        return redirect_response
+            return _success_response("Webhook updated.")
 
-    def _handle_mcp_server_update(self, request, agent: PersistentAgent):
+    def _handle_mcp_server_update(self, request, agent: PersistentAgent, *, ajax: bool = False):
+        redirect_response = redirect('agent_detail', pk=agent.pk)
+
+        def _error_response(message: str, status: int = 400):
+            if ajax:
+                return JsonResponse({'success': False, 'error': message}, status=status)
+            messages.error(request, message)
+            return redirect_response
+
+        def _success_response(message: str):
+            if ajax:
+                return JsonResponse(
+                    {
+                        'success': True,
+                        'message': message,
+                        'mcpServers': self._build_mcp_servers_payload(
+                            request,
+                            agent,
+                        ),
+                    }
+                )
+            messages.success(request, message)
+            return redirect_response
+
         if agent.organization_id:
-            messages.error(request, "Personal MCP servers can only be configured for your own agents.")
-            return redirect('agent_detail', pk=agent.pk)
+            return _error_response("Personal MCP servers can only be configured for your own agents.")
 
         server_ids = request.POST.getlist('personal_servers')
         try:
@@ -4022,13 +4244,31 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 actor_user_id=request.user.id,
                 source=AnalyticsSource.WEB,
             )
-            messages.success(request, "Personal MCP server access updated.")
         except ValueError as exc:
-            messages.error(request, str(exc))
-        return redirect('agent_detail', pk=agent.pk)
+            return _error_response(str(exc))
 
-    def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str):
+        return _success_response("Personal MCP server access updated.")
+
+    def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
         redirect_response = redirect('agent_detail', pk=agent.pk)
+
+        def _error_response(message: str, status: int = 400):
+            if ajax:
+                return JsonResponse({'success': False, 'error': message}, status=status)
+            messages.error(request, message)
+            return redirect_response
+
+        def _success_response(message: str):
+            if ajax:
+                return JsonResponse(
+                    {
+                        'success': True,
+                        'message': message,
+                        'peerLinks': self._build_peer_links_payload(agent),
+                    }
+                )
+            messages.success(request, message)
+            return redirect_response
 
         def _track_peer_link_event(
             event_type: AnalyticsEvent,
@@ -4070,21 +4310,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             if action == 'create':
                 peer_agent_id = request.POST.get('peer_agent_id')
                 if not peer_agent_id:
-                    messages.error(request, 'Select an agent to link.')
-                    return redirect_response
+                    return _error_response('Select an agent to link.')
 
                 try:
                     messages_per_window = int(request.POST.get('messages_per_window', 30))
                     window_hours = int(request.POST.get('window_hours', 6))
                 except ValueError:
-                    messages.error(request, 'Quotas must be positive integers.')
-                    return redirect_response
+                    return _error_response('Quotas must be positive integers.')
 
                 try:
                     peer_agent = PersistentAgent.objects.non_eval().get(id=peer_agent_id)
                 except PersistentAgent.DoesNotExist:
-                    messages.error(request, 'Selected agent no longer exists.')
-                    return redirect_response
+                    return _error_response('Selected agent no longer exists.')
 
                 new_link = AgentPeerLink(
                     agent_a=agent,
@@ -4098,8 +4335,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     with transaction.atomic():
                         new_link.save()
                 except IntegrityError:
-                    messages.error(request, 'A peer link already exists for these agents.')
-                    return redirect_response
+                    return _error_response('A peer link already exists for these agents.')
 
                 _track_peer_link_event(
                     AnalyticsEvent.PERSISTENT_AGENT_PEER_LINKED,
@@ -4110,21 +4346,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     feature_flag=new_link.feature_flag,
                     is_enabled=new_link.is_enabled,
                 )
-                messages.success(request, 'Peer agent link created.')
-                return redirect_response
+                return _success_response('Peer agent link created.')
 
             if action == 'update':
                 link_id = request.POST.get('link_id')
                 if not link_id:
-                    messages.error(request, 'Missing peer link identifier.')
-                    return redirect_response
+                    return _error_response('Missing peer link identifier.')
 
                 try:
                     with transaction.atomic():
                         link = AgentPeerLink.objects.select_for_update().prefetch_related('communication_states').get(id=link_id)
                         if agent.id not in {link.agent_a_id, link.agent_b_id}:
-                            messages.error(request, 'You do not have permission to update this link.')
-                            return redirect_response
+                            return _error_response('You do not have permission to update this link.')
 
                         if 'messages_per_window' in request.POST:
                             link.messages_per_window = int(request.POST.get('messages_per_window', link.messages_per_window))
@@ -4153,23 +4386,19 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                                 state.save(update_fields=updates)
 
                 except AgentPeerLink.DoesNotExist:
-                    messages.error(request, 'Peer link not found.')
-                    return redirect_response
+                    return _error_response('Peer link not found.')
 
-                messages.success(request, 'Peer link updated.')
-                return redirect_response
+                return _success_response('Peer link updated.')
 
             if action == 'delete':
                 link_id = request.POST.get('link_id')
                 if not link_id:
-                    messages.error(request, 'Missing peer link identifier.')
-                    return redirect_response
+                    return _error_response('Missing peer link identifier.')
 
                 with transaction.atomic():
                     link = AgentPeerLink.objects.select_related('conversation').get(id=link_id)
                     if agent.id not in {link.agent_a_id, link.agent_b_id}:
-                        messages.error(request, 'You do not have permission to remove this link.')
-                        return redirect_response
+                        return _error_response('You do not have permission to remove this link.')
                     peer_agent = link.agent_a if link.agent_a_id != agent.id else link.agent_b
                     link_snapshot = {
                         'link_id': str(link.id),
@@ -4193,23 +4422,19 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     peer_agent=peer_agent,
                     **link_snapshot,
                 )
-                messages.success(request, 'Peer link removed.')
-                return redirect_response
+                return _success_response('Peer link removed.')
 
-            messages.error(request, 'Unsupported peer link action.')
-            return redirect_response
+            return _error_response('Unsupported peer link action.')
 
         except AgentPeerLink.DoesNotExist:
-            messages.error(request, 'Peer link not found.')
+            return _error_response('Peer link not found.')
         except ValueError:
-            messages.error(request, 'Invalid values supplied for peer link settings.')
+            return _error_response('Invalid values supplied for peer link settings.')
         except ValidationError as exc:
-            messages.error(request, '; '.join(exc.messages))
+            return _error_response('; '.join(exc.messages))
         except Exception as exc:
             logger.exception('Peer link operation failed for agent %s', agent.id, exc_info=True)
-            messages.error(request, f'Peer link operation failed: {exc}')
-
-        return redirect_response
+            return _error_response(f'Peer link operation failed: {exc}', status=500)
 
 
 class ConsoleDiagnosticsView(ConsoleViewMixin, TemplateView):

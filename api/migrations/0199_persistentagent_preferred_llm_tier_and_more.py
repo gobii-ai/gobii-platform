@@ -34,7 +34,7 @@ def reset_max_multipliers(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0194_promptconfig_enabled_tool_limits'),
+        ('api', '0198_add_browser_supports_temperature'),
     ]
 
     operations = [
