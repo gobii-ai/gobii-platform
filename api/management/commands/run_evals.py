@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
-from api.evals.tasks import run_eval_task
+from api.evals.tasks import run_eval_task, gc_eval_runs_task
 from api.evals.runner import _update_suite_state
 from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, PersistentAgent
 
@@ -138,6 +138,7 @@ class Command(BaseCommand):
 
             self.stdout.write(self.style.SUCCESS(f"Created suite run {suite_run.id} ({suite_slug})"))
 
+            created_for_suite = 0
             for scenario_slug in scenario_slugs:
                 scenario = ScenarioRegistry.get(scenario_slug)
                 if not scenario:
@@ -161,8 +162,13 @@ class Command(BaseCommand):
 
                 run_eval_task.delay(str(run.id))
                 run_ids.append(run)
+                created_for_suite += 1
 
             suite_runs.append(suite_run)
+            if created_for_suite == 0:
+                suite_run.status = EvalSuiteRun.Status.ERRORED
+                suite_run.finished_at = timezone.now()
+                suite_run.save(update_fields=["status", "finished_at", "updated_at"])
             _update_suite_state(suite_run.id)
 
         self.stdout.write(self.style.SUCCESS(f"Dispatched {len(run_ids)} scenario runs across {len(suite_runs)} suite(s)."))
@@ -235,3 +241,9 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"Suite {suite_run.suite_slug} ({suite_run.id}) finished with status {suite_run.status}"
             )
+
+        # Kick off GC after finishing this invocation
+        try:
+            gc_eval_runs_task.delay()
+        except Exception:
+            self.stdout.write(self.style.WARNING("Unable to enqueue eval GC task."))

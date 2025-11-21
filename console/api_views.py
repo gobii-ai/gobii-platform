@@ -79,6 +79,7 @@ import litellm
 
 from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
 from api.agent.core.llm_utils import run_completion
+from api.evals.tasks import gc_eval_runs_task
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task
@@ -2349,6 +2350,7 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 started_at=timezone.now(),
             )
 
+            created_for_suite = 0
             for scenario_slug in scenario_slugs:
                 scenario = ScenarioRegistry.get(scenario_slug)
                 if not scenario:
@@ -2368,7 +2370,12 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 )
                 run_eval_task.delay(str(run.id))
                 created_runs.append(run)
+                created_for_suite += 1
 
+            if created_for_suite == 0:
+                suite_run.status = EvalSuiteRun.Status.ERRORED
+                suite_run.finished_at = timezone.now()
+                suite_run.save(update_fields=["status", "finished_at", "updated_at"])
             created_suite_runs.append(suite_run)
 
         # Update suite aggregate state and return payload
@@ -2377,6 +2384,12 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
             _update_suite_state(suite_run.id)
             suite_run.refresh_from_db()
             response_suites.append(_serialize_suite_run(suite_run, include_runs=True, include_tasks=False))
+
+        # Trigger background GC to clean up any stale runs
+        try:
+            gc_eval_runs_task.delay()
+        except Exception:
+            logger.debug("Failed to enqueue eval GC task", exc_info=True)
 
         return JsonResponse(
             {
@@ -2408,6 +2421,16 @@ class EvalSuiteRunListAPIView(SystemAdminAPIView):
             qs = qs.filter(suite_slug=suite_filter)
 
         suite_runs = list(qs.order_by("-created_at")[:limit])
+        # Refresh stale aggregates so UI doesn't show stuck "running" rows
+        for suite in suite_runs:
+            _update_suite_state(suite.id)
+
+        suite_runs = list(
+            EvalSuiteRun.objects.filter(id__in=[suite.id for suite in suite_runs])
+            .select_related("initiated_by", "shared_agent")
+            .prefetch_related("runs")
+            .order_by("-created_at")
+        )
         payload = [_serialize_suite_run(suite, include_runs=True, include_tasks=False) for suite in suite_runs]
         return JsonResponse({"suite_runs": payload})
 
@@ -2417,6 +2440,7 @@ class EvalSuiteRunDetailAPIView(SystemAdminAPIView):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, suite_run_id: str, *args: Any, **kwargs: Any):
+        _update_suite_state(suite_run_id)
         suite = get_object_or_404(
             EvalSuiteRun.objects.prefetch_related("runs__tasks", "runs__agent"),
             pk=suite_run_id,
