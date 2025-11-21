@@ -1,160 +1,237 @@
-from django.core.management.base import BaseCommand, CommandError
-from api.models import PersistentAgent, EvalRun, BrowserUseAgent, EvalRunTask
-from api.evals.registry import ScenarioRegistry
-from api.evals.tasks import run_eval_task
-from django.contrib.auth import get_user_model
-import uuid
 import time
+import uuid
+
+from django.contrib.auth import get_user_model
+from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
+
+from api.evals.registry import ScenarioRegistry
+from api.evals.suites import SuiteRegistry
+from api.evals.tasks import run_eval_task
+from api.evals.runner import _update_suite_state
+from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, PersistentAgent
+
 
 class Command(BaseCommand):
-    help = 'Runs the evaluation suite or specific scenarios.'
+    help = "Runs one or more eval suites (each suite runs its scenarios concurrently)."
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '--scenario',
-            type=str,
-            help='Slug of the specific scenario to run (default: run all)',
+            "--suite",
+            action="append",
+            dest="suites",
+            help="Suite slug to run (can be repeated). Defaults to 'all'.",
         )
         parser.add_argument(
-            '--agent-id',
+            "--scenario",
             type=str,
-            help='UUID of an existing agent to test against. If omitted, a temporary agent is created.',
+            help="(Deprecated) Run a single scenario by slug. Prefer --suite.",
         )
         parser.add_argument(
-            '--sync',
-            action='store_true',
-            help='Run synchronously (eager mode) for debugging.',
+            "--agent-id",
+            type=str,
+            help="UUID of an existing agent to reuse (only valid with --agent-strategy reuse_agent).",
+        )
+        parser.add_argument(
+            "--agent-strategy",
+            type=str,
+            choices=[
+                EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO,
+                EvalSuiteRun.AgentStrategy.REUSE_AGENT,
+            ],
+            default=EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO,
+            help="How agents are provisioned for the suite.",
+        )
+        parser.add_argument(
+            "--sync",
+            action="store_true",
+            help="Run synchronously (eager mode) for debugging.",
         )
 
     def handle(self, *args, **options):
-        scenario_slug = options['scenario']
-        agent_id = options['agent_id']
-        sync_mode = options['sync']
+        suites_requested = options["suites"] or []
+        scenario_slug = options["scenario"]
+        agent_id = options["agent_id"]
+        agent_strategy = options["agent_strategy"]
+        sync_mode = options["sync"]
 
         if sync_mode:
             from django.conf import settings
+
             settings.CELERY_TASK_ALWAYS_EAGER = True
             settings.CELERY_TASK_EAGER_PROPAGATES = True
             self.stdout.write("Running in SYNCHRONOUS mode.")
 
-        # 1. Select Scenarios
-        scenarios_to_run = []
+        # Resolve suites
+        suite_slugs: list[str] = suites_requested[:]
         if scenario_slug:
-            scenario = ScenarioRegistry.get(scenario_slug)
-            if not scenario:
-                raise CommandError(f"Scenario '{scenario_slug}' not found.")
-            scenarios_to_run.append(scenario)
-        else:
-            scenarios_to_run = list(ScenarioRegistry.list_all().values())
+            self.stdout.write(self.style.WARNING("`--scenario` is deprecated; creating a one-off suite for it."))
+            suite_slugs.append(f"single::{scenario_slug}")
 
-        if not scenarios_to_run:
-            self.stdout.write(self.style.WARNING("No scenarios found to run."))
+        if not suite_slugs:
+            suite_slugs = ["all"]
+
+        suites = []
+        for slug in suite_slugs:
+            if slug.startswith("single::"):
+                scenario_only = slug.split("single::", 1)[1]
+                scenario = ScenarioRegistry.get(scenario_only)
+                if not scenario:
+                    raise CommandError(f"Scenario '{scenario_only}' not found.")
+                suites.append(
+                    (
+                        slug,
+                        [scenario.slug],
+                        f"Ad-hoc suite for scenario {scenario.slug}",
+                    )
+                )
+                continue
+
+            suite_obj = SuiteRegistry.get(slug)
+            if not suite_obj:
+                raise CommandError(f"Suite '{slug}' not found.")
+            suites.append((suite_obj.slug, list(suite_obj.scenario_slugs), suite_obj.description))
+
+        if not suites:
+            self.stdout.write(self.style.WARNING("No suites found to run."))
             return
 
-        # 2. Prepare Agent
-        agent = None
+        # Base user attribution
         User = get_user_model()
-        # Ensure we have a user for attribution
         user, _ = User.objects.get_or_create(username="eval_runner", defaults={"email": "eval@localhost"})
 
-        if agent_id:
-            try:
-                agent = PersistentAgent.objects.get(id=agent_id)
-                self.stdout.write(f"Using existing agent: {agent.name} ({agent.id})")
-            except PersistentAgent.DoesNotExist:
-                raise CommandError(f"Agent {agent_id} not found.")
-        else:
-            # Create temp agent
-            unique_id = str(uuid.uuid4())[:8]
+        def _create_ephemeral_agent(label_suffix: str) -> PersistentAgent:
+            unique_id = f"{label_suffix}-{uuid.uuid4().hex[:8]}" if label_suffix else uuid.uuid4().hex[:12]
             browser_agent = BrowserUseAgent.objects.create(name=f"Eval Browser {unique_id}", user=user)
             agent = PersistentAgent.objects.create(
                 name=f"Eval Agent {unique_id}",
                 user=user,
                 browser_use_agent=browser_agent,
                 execution_environment="eval",
-                charter="You are a test agent."
+                charter="You are a test agent.",
             )
-            self.stdout.write(f"Created temporary agent: {agent.name} ({agent.id})")
+            return agent
 
-        # 3. Launch Runs
+        shared_agent: PersistentAgent | None = None
+        if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT:
+            if not agent_id:
+                raise CommandError("--agent-id is required when agent-strategy is reuse_agent")
+            try:
+                shared_agent = PersistentAgent.objects.get(id=agent_id)
+            except PersistentAgent.DoesNotExist:
+                raise CommandError(f"Agent {agent_id} not found.")
+            self.stdout.write(f"Using provided agent for reuse: {shared_agent.name} ({shared_agent.id})")
+
+        suite_runs = []
         run_ids = []
-        for scenario in scenarios_to_run:
-            run = EvalRun.objects.create(
-                scenario_slug=scenario.slug,
-                agent=agent,
-                initiated_by=user,
-                status=EvalRun.Status.PENDING
-            )
-            self.stdout.write(f"Scheduling run {run.id} for scenario '{scenario.slug}'...")
-            
-            # Dispatch
-            run_eval_task.delay(str(run.id))
-            run_ids.append(run)
 
-        self.stdout.write(self.style.SUCCESS(f"Dispatched {len(run_ids)} eval runs."))
-        
-        # 4. Wait and Report (Realtime)
+        for suite_slug, scenario_slugs, description in suites:
+            scenario_slugs = list(dict.fromkeys(scenario_slugs))
+            suite_run = EvalSuiteRun.objects.create(
+                suite_slug=suite_slug,
+                initiated_by=user,
+                status=EvalSuiteRun.Status.RUNNING,
+                agent_strategy=agent_strategy,
+                shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
+                started_at=timezone.now(),
+            )
+
+            self.stdout.write(self.style.SUCCESS(f"Created suite run {suite_run.id} ({suite_slug})"))
+
+            for scenario_slug in scenario_slugs:
+                scenario = ScenarioRegistry.get(scenario_slug)
+                if not scenario:
+                    self.stdout.write(self.style.ERROR(f"Scenario '{scenario_slug}' missing; skipping."))
+                    continue
+
+                run_agent = shared_agent
+                if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
+                    run_agent = _create_ephemeral_agent(label_suffix=scenario.slug[:8])
+                    self.stdout.write(f"  Created ephemeral agent for {scenario.slug}: {run_agent.id}")
+
+                run = EvalRun.objects.create(
+                    suite_run=suite_run,
+                    scenario_slug=scenario.slug,
+                    scenario_version=getattr(scenario, "version", "") or "",
+                    agent=run_agent,
+                    initiated_by=user,
+                    status=EvalRun.Status.PENDING,
+                )
+                self.stdout.write(f"  Scheduling run {run.id} for scenario '{scenario.slug}'...")
+
+                run_eval_task.delay(str(run.id))
+                run_ids.append(run)
+
+            suite_runs.append(suite_run)
+            _update_suite_state(suite_run.id)
+
+        self.stdout.write(self.style.SUCCESS(f"Dispatched {len(run_ids)} scenario runs across {len(suite_runs)} suite(s)."))
+
+        # Wait and report
         self.stdout.write("\n--- Waiting for Results ---\n")
-        
+
         pending_ids = {run.id for run in run_ids}
         printed_tasks = {run.id: set() for run in run_ids}
-        completed_runs = []
-        
         total_tasks_all = 0
         passed_tasks_all = 0
 
         try:
             while pending_ids:
-                # Fetch fresh state for all pending runs
                 current_runs = EvalRun.objects.filter(id__in=pending_ids)
-                
+
                 for run in current_runs:
-                    # Check and print new task completions
-                    for task in run.tasks.all().order_by('sequence'):
+                    for task in run.tasks.all().order_by("sequence"):
                         task_key = f"{task.sequence}-{task.status}"
-                        
-                        # We print terminal states (PASSED/FAILED/ERRORED/SKIPPED)
-                        # We generally skip PENDING/RUNNING unless we want very verbose output
+
                         terminal_states = [
-                            EvalRunTask.Status.PASSED, 
-                            EvalRunTask.Status.FAILED, 
-                            EvalRunTask.Status.ERRORED, 
-                            EvalRunTask.Status.SKIPPED
+                            EvalRunTask.Status.PASSED,
+                            EvalRunTask.Status.FAILED,
+                            EvalRunTask.Status.ERRORED,
+                            EvalRunTask.Status.SKIPPED,
                         ]
-                        
+
                         if task.status in terminal_states and task_key not in printed_tasks[run.id]:
                             status_color = self.style.SUCCESS if task.status == EvalRunTask.Status.PASSED else self.style.ERROR
                             self.stdout.write(f"[{run.scenario_slug}] Task {task.name}: " + status_color(f"{task.status}"))
                             if task.status == EvalRunTask.Status.FAILED:
                                 self.stdout.write(f"    Reason: {task.observed_summary}")
-                            
+
                             printed_tasks[run.id].add(task_key)
 
-                    # Check if run is finished
                     if run.status in (EvalRun.Status.COMPLETED, EvalRun.Status.ERRORED):
                         self.stdout.write(f"Run {run.id} ({run.scenario_slug}) finished: {run.status}")
-                        completed_runs.append(run)
                         pending_ids.remove(run.id)
-                
+                        _update_suite_state(run.suite_run_id)
+
                 if pending_ids:
                     time.sleep(0.5)
         except KeyboardInterrupt:
             self.stdout.write(self.style.WARNING("\nPolling interrupted. Runs may still be processing in background."))
             return
 
-        # 5. Final Summary
+        # Final summary
         self.stdout.write("\n--- Final Summary ---")
-        for run in run_ids: # Iterate original list to keep order
-            # Refresh one last time to be sure
+        for run in run_ids:
             run.refresh_from_db()
             for task in run.tasks.all():
                 total_tasks_all += 1
                 if task.status == EvalRunTask.Status.PASSED:
                     passed_tasks_all += 1
-        
+
         if total_tasks_all > 0:
             pass_rate = (passed_tasks_all / total_tasks_all) * 100
-            color = self.style.SUCCESS if pass_rate == 100 else (self.style.WARNING if pass_rate > 50 else self.style.ERROR)
+            color = (
+                self.style.SUCCESS
+                if pass_rate == 100
+                else (self.style.WARNING if pass_rate > 50 else self.style.ERROR)
+            )
             self.stdout.write(color(f"\nTotal Pass Rate: {pass_rate:.1f}% ({passed_tasks_all}/{total_tasks_all} tasks)"))
         else:
             self.stdout.write("No tasks executed.")
+
+        for suite_run in suite_runs:
+            suite_run.refresh_from_db()
+            _update_suite_state(suite_run.id)
+            self.stdout.write(
+                f"Suite {suite_run.suite_slug} ({suite_run.id}) finished with status {suite_run.status}"
+            )

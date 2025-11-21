@@ -1,11 +1,45 @@
 import logging
 import traceback
 from django.utils import timezone
-from api.models import EvalRun, EvalRunTask, PersistentAgent
+
+from api.models import EvalRun, EvalRunTask, EvalSuiteRun, PersistentAgent
 from api.evals.registry import ScenarioRegistry
+from api.evals.realtime import broadcast_run_update, broadcast_suite_update
 import api.evals.loader # noqa: F401
 
 logger = logging.getLogger(__name__)
+
+
+def _update_suite_state(suite_run_id) -> None:
+    if not suite_run_id:
+        return
+    try:
+        suite = (
+            EvalSuiteRun.objects.select_related("shared_agent")
+            .prefetch_related("runs")
+            .get(id=suite_run_id)
+        )
+    except EvalSuiteRun.DoesNotExist:
+        return
+
+    runs = list(suite.runs.all())
+    started_at_values = [r.started_at for r in runs if r.started_at]
+    finished_at_values = [r.finished_at for r in runs if r.finished_at]
+
+    if any(r.status == EvalRun.Status.ERRORED for r in runs):
+        status = EvalSuiteRun.Status.ERRORED
+    elif any(r.status in (EvalRun.Status.PENDING, EvalRun.Status.RUNNING) for r in runs):
+        status = EvalSuiteRun.Status.RUNNING
+    elif runs:
+        status = EvalSuiteRun.Status.COMPLETED
+    else:
+        status = EvalSuiteRun.Status.PENDING
+
+    suite.status = status
+    suite.started_at = min(started_at_values) if started_at_values else suite.started_at
+    suite.finished_at = max(finished_at_values) if finished_at_values else suite.finished_at
+    suite.save(update_fields=["status", "started_at", "finished_at", "updated_at"])
+    broadcast_suite_update(suite, include_runs=False)
 
 class EvalRunner:
     """
@@ -26,6 +60,8 @@ class EvalRunner:
         self.run.status = EvalRun.Status.RUNNING
         self.run.started_at = timezone.now()
         self.run.save(update_fields=['status', 'started_at'])
+        broadcast_run_update(self.run)
+        _update_suite_state(self.run.suite_run_id)
 
         try:
             # Pre-create tasks for visibility
@@ -56,3 +92,5 @@ class EvalRunner:
             self.run.finished_at = timezone.now()
             self.run.save()
             logger.info(f"Finished eval run {self.run.id} with status {self.run.status}")
+            broadcast_run_update(self.run, include_tasks=True)
+            _update_suite_state(self.run.suite_run_id)

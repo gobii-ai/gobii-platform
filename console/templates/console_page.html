@@ -140,6 +140,11 @@
             <i data-lucide="settings-2" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'console-llm-config' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
             LLM Config
           </a>
+          <a href="{% url 'console-evals' %}"
+             class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'console-evals' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
+            <i data-lucide="beaker" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'console-evals' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
+            Evals
+          </a>
           {% endif %}
           <a href="{% url 'console-mcp-servers' %}"
              class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'console-mcp-servers' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
