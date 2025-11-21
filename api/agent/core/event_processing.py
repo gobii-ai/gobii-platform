@@ -754,7 +754,6 @@ def _get_recent_preferred_config(
     streak_sample_size = max(1, max_streak_limit)
 
     try:
-        return None
         recent_completions = list(
             PersistentAgentCompletion.objects.filter(agent=agent)
             .only("created_at", "llm_model", "llm_provider")
