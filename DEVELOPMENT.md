@@ -54,9 +54,9 @@ uv run python manage.py createsuperuser
 
 3. **Start the Celery worker (new shell)**
    ```bash
-   uv run celery -A config worker -l info --pool solo
+   uv run celery -A config worker -l info --pool=threads --concurrency=4
    ```
-   The `--pool solo` setting avoids multiprocessing issues on macOS/Apple Silicon while keeping autoreload-friendly behavior.
+   macOS disables `fork` by default; the threads pool restores worker startup while remaining autoreload-friendly.
 
 4. **Front-end hot reload (new shell)**
    ```bash
