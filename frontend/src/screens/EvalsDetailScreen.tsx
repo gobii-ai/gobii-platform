@@ -212,9 +212,10 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
             </div>
           </section>
 
-          <section className="card">
-            <div className="card__header px-6 py-4 border-b border-slate-100">
-              <h2 className="card__title">Scenarios</h2>
+          {/* Scenarios section */}
+          <section className="card overflow-hidden" style={{ padding: 0 }}>
+            <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4">
+              <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Scenarios</h2>
             </div>
             <div className="divide-y divide-slate-100">
               {(suite.runs || []).map((run) => (

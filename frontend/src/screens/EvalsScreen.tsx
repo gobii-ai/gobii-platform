@@ -154,7 +154,7 @@ export function EvalsScreen() {
       )}
 
       <section className="card overflow-hidden" style={{ padding: 0 }}>
-        <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4 flex items-center justify-between">
           <div>
             <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Select Suites</h2>
             <p className="text-xs text-slate-500 mt-0.5">Choose which test suites to run against your agents.</p>
@@ -226,7 +226,7 @@ export function EvalsScreen() {
       </section>
 
       <section className="card overflow-hidden" style={{ padding: 0 }}>
-        <div className="bg-white border-b border-slate-200 px-6 py-4">
+        <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4">
           <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Recent Activity</h2>
         </div>
 
