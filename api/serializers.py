@@ -21,7 +21,6 @@ from .models import (
     PersistentAgentCommsEndpoint,
 )
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
-from util.subscription_helper import get_owner_plan
 from util.analytics import AnalyticsSource
 
 # Serializer for Listing Agents (id, name, created_at)
