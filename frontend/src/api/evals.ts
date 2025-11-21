@@ -1,5 +1,7 @@
 import { jsonFetch, jsonRequest } from './http'
 
+export type EvalRunType = 'one_off' | 'official'
+
 export type EvalTask = {
   id: number
   sequence: number
@@ -18,6 +20,7 @@ export type EvalRun = {
   scenario_slug: string
   scenario_version: string
   status: string
+  run_type: EvalRunType
   started_at: string | null
   finished_at: string | null
   agent_id: string | null
@@ -29,6 +32,7 @@ export type EvalSuiteRun = {
   id: string
   suite_slug: string
   status: string
+  run_type: EvalRunType
   agent_strategy: string
   shared_agent_id: string | null
   started_at: string | null
@@ -47,13 +51,14 @@ export function fetchSuites(signal?: AbortSignal): Promise<{ suites: EvalSuite[]
   return jsonFetch('/console/api/evals/suites/', { method: 'GET', signal })
 }
 
-export function fetchSuiteRuns(params: { status?: string; suite?: string; limit?: number } = {}): Promise<{
+export function fetchSuiteRuns(params: { status?: string; suite?: string; limit?: number; run_type?: EvalRunType } = {}): Promise<{
   suite_runs: EvalSuiteRun[]
 }> {
   const search = new URLSearchParams()
   if (params.status) search.set('status', params.status)
   if (params.suite) search.set('suite', params.suite)
   if (params.limit) search.set('limit', params.limit.toString())
+  if (params.run_type) search.set('run_type', params.run_type)
   const query = search.toString()
   const url = `/console/api/evals/suite-runs/${query ? `?${query}` : ''}`
   return jsonFetch(url, { method: 'GET' })
@@ -71,6 +76,8 @@ export type CreateSuiteRunPayload = {
   suite_slugs: string[]
   agent_strategy?: string
   agent_id?: string | null
+  run_type?: EvalRunType
+  official?: boolean
 }
 
 export function createSuiteRuns(payload: CreateSuiteRunPayload): Promise<{

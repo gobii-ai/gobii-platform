@@ -5,10 +5,12 @@ import {
   createSuiteRuns,
   fetchSuiteRuns,
   fetchSuites,
+  type EvalRunType,
   type EvalSuite,
   type EvalSuiteRun,
 } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
+import { RunTypeBadge } from '../components/common/RunTypeBadge'
 
 const formatTs = (value: string | null | undefined) => {
   if (!value) return '—'
@@ -26,11 +28,18 @@ export function EvalsScreen() {
   const [suites, setSuites] = useState<EvalSuite[]>([])
   const [suiteRuns, setSuiteRuns] = useState<EvalSuiteRun[]>([])
   const [selectedSuites, setSelectedSuites] = useState<Set<string>>(new Set())
+  const [runType, setRunType] = useState<EvalRunType>('one_off')
+  const [runTypeFilter, setRunTypeFilter] = useState<'all' | EvalRunType>('all')
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const listRefreshInFlight = useRef(false)
+  const runTypeFilterOptions: { value: 'all' | EvalRunType; label: string }[] = [
+    { value: 'all', label: 'All runs' },
+    { value: 'official', label: 'Official' },
+    { value: 'one_off', label: 'One-off' },
+  ]
 
   const loadSuites = useCallback(async () => {
     try {
@@ -47,7 +56,10 @@ export function EvalsScreen() {
     listRefreshInFlight.current = true
     setLoadingRuns(true)
     try {
-      const result = await fetchSuiteRuns({ limit: 25 })
+      const result = await fetchSuiteRuns({
+        limit: 25,
+        ...(runTypeFilter === 'all' ? {} : { run_type: runTypeFilter }),
+      })
       setSuiteRuns(result.suite_runs)
     } catch (error) {
       console.error(error)
@@ -56,7 +68,7 @@ export function EvalsScreen() {
       setLoadingRuns(false)
       listRefreshInFlight.current = false
     }
-  }, [])
+  }, [runTypeFilter])
 
   useEffect(() => {
     loadSuites()
@@ -88,7 +100,12 @@ export function EvalsScreen() {
     setErrorMessage(null)
     try {
       const suite_slugs = selectedSuites.size ? Array.from(selectedSuites) : ['all']
-      await createSuiteRuns({ suite_slugs, agent_strategy: 'ephemeral_per_scenario' })
+      await createSuiteRuns({
+        suite_slugs,
+        agent_strategy: 'ephemeral_per_scenario',
+        run_type: runType,
+        official: runType === 'official',
+      })
       await loadSuiteRuns()
     } catch (error) {
       console.error(error)
@@ -130,6 +147,44 @@ export function EvalsScreen() {
               {launching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
               Launch
             </button>
+          </div>
+        </div>
+        <div className="px-4 pb-4 sm:px-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Run mode</span>
+              <div className="inline-flex rounded-lg bg-slate-100 p-1 shadow-inner ring-1 ring-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => setRunType('one_off')}
+                  className={`
+                    px-3 py-1.5 text-xs font-semibold rounded-md transition-all
+                    ${runType === 'one_off'
+                      ? 'bg-white text-blue-700 shadow-sm ring-1 ring-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                    }
+                  `}
+                >
+                  One-off
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRunType('official')}
+                  className={`
+                    px-3 py-1.5 text-xs font-semibold rounded-md transition-all
+                    ${runType === 'official'
+                      ? 'bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                    }
+                  `}
+                >
+                  Official
+                </button>
+              </div>
+            </div>
+            <p className="text-xs leading-relaxed text-slate-600 sm:text-right">
+              One-off runs are for ad-hoc checks. Mark runs as official to keep them in long-term performance and cost tracking.
+            </p>
           </div>
         </div>
       </div>
@@ -216,8 +271,29 @@ export function EvalsScreen() {
       </section>
 
       <section className="card overflow-hidden" style={{ padding: 0 }}>
-        <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4">
+        <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Recent Activity</h2>
+          <div className="inline-flex items-center gap-1 rounded-lg bg-white/70 p-1 ring-1 ring-slate-200 shadow-sm">
+            {runTypeFilterOptions.map((option) => {
+              const active = runTypeFilter === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setRunTypeFilter(option.value)}
+                  className={`
+                    px-3 py-1 text-xs font-semibold rounded-md transition-all
+                    ${active
+                      ? 'bg-slate-900 text-white shadow-sm ring-1 ring-slate-900/10'
+                      : 'text-slate-600 hover:text-slate-900'
+                    }
+                  `}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         <div>
@@ -226,6 +302,7 @@ export function EvalsScreen() {
               <thead className="bg-white text-left text-xs uppercase tracking-wider text-slate-500 font-bold">
                 <tr>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Suite</th>
+                  <th className="px-6 py-4 bg-white border-b border-slate-100">Type</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Status</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Progress</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Started</th>
@@ -244,6 +321,9 @@ export function EvalsScreen() {
                       <td className="px-6 py-4">
                         <div className="font-semibold text-slate-900">{suite.suite_slug}</div>
                         <div className="text-xs font-mono text-slate-400 mt-0.5">{suite.id.slice(0, 8)}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <RunTypeBadge runType={suite.run_type} />
                       </td>
                       <td className="px-6 py-4">
                         <StatusBadge status={suite.status || 'pending'} />
@@ -272,7 +352,7 @@ export function EvalsScreen() {
                 })}
                 {!suiteRuns.length && (
                   <tr>
-                    <td className="px-6 py-12 text-sm text-slate-500 text-center" colSpan={6}>
+                    <td className="px-6 py-12 text-sm text-slate-500 text-center" colSpan={7}>
                       No historical runs yet. Launch one above!
                     </td>
                   </tr>
