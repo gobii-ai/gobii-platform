@@ -1,30 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Beaker, CheckCircle2, Loader2, RefreshCcw, XCircle } from 'lucide-react'
+import { AlertTriangle, Beaker, Loader2, RefreshCcw } from 'lucide-react'
 
 import { fetchSuiteRunDetail, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
-
-type Status = 'pending' | 'running' | 'completed' | 'errored'
-
-const statusLabel: Record<Status, string> = {
-  pending: 'Pending',
-  running: 'Running',
-  completed: 'Completed',
-  errored: 'Errored',
-}
-
-const statusColor: Record<Status, string> = {
-  pending: 'text-slate-600',
-  running: 'text-blue-600',
-  completed: 'text-emerald-600',
-  errored: 'text-rose-600',
-}
-
-const statusIcon: Record<Status, JSX.Element> = {
-  pending: <Loader2 className="w-4 h-4 animate-spin" />,
-  running: <Loader2 className="w-4 h-4 animate-spin" />,
-  completed: <CheckCircle2 className="w-4 h-4" />,
-  errored: <XCircle className="w-4 h-4" />,
-}
+import { StatusBadge } from '../components/common/StatusBadge'
 
 const formatTs = (value: string | null | undefined) => {
   if (!value) return '—'
@@ -125,21 +103,25 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
 
   return (
     <div className="app-shell">
-      <div className="max-w-4xl mx-auto space-y-4 pb-10 px-4">
+      <div className="max-w-5xl mx-auto space-y-6 pb-12 px-4 sm:px-6">
         <header className="card card--header">
-          <div className="card__body card__body--header flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <div className="flex items-center gap-2">
-                <Beaker className="w-6 h-6 text-blue-600" />
-                <h1 className="app-title">Eval Run Detail</h1>
-              </div>
-              <p className="app-subtitle">Suite run {suiteRunId}</p>
+          <div className="card__body card__body--header flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-start gap-3">
+               <div className="p-2 rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
+                 <Beaker className="w-5 h-5" />
+               </div>
+               <div>
+                 <div className="flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-slate-900">Eval Run Detail</h1>
+                    {suite && <StatusBadge status={suite.status || 'pending'} />}
+                 </div>
+                 <p className="text-sm text-slate-500 font-mono mt-0.5">{suiteRunId}</p>
+               </div>
             </div>
             <div className="flex items-center gap-2">
-              {suite && <StatusPill status={(suite.status as Status) || 'pending'} />}
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                className="btn btn--secondary gap-2 text-xs py-1.5"
                 onClick={() => {
                   fetchSuiteRunDetail(suiteRunId)
                     .then((res) => setSuite(res.suite_run))
@@ -149,7 +131,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                     })
                 }}
               >
-                <RefreshCcw className="w-4 h-4" />
+                <RefreshCcw className="w-3.5 h-3.5" />
                 Refresh
               </button>
             </div>
@@ -157,7 +139,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
         </header>
 
         {error && (
-          <div className="card border-rose-200 bg-rose-50 text-rose-700">
+          <div className="card border-red-200 bg-red-50 text-red-700">
             <div className="card__body flex items-start gap-2 text-sm">
               <AlertTriangle className="w-4 h-4 mt-0.5" />
               <div>{error}</div>
@@ -166,96 +148,119 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
         )}
 
         {loading && !suite && (
-          <div className="flex items-center gap-2 text-sm text-slate-600">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            Loading…
+          <div className="flex flex-col items-center justify-center py-12 gap-3 text-sm text-slate-600">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+            <p>Loading evaluation results…</p>
           </div>
         )}
 
         {suite && (
-          <section className="card space-y-4">
-            <div className="card__body flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Suite</p>
-                <p className="text-base font-semibold text-slate-900">{suite.suite_slug}</p>
-                <p className="text-[11px] text-slate-500">Strategy: {suite.agent_strategy}</p>
+          <>
+            <section className="grid gap-4 sm:grid-cols-3">
+              <div className="card p-4 space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Suite</p>
+                <p className="text-lg font-bold text-slate-900">{suite.suite_slug}</p>
+                <p className="text-xs text-slate-500">Strategy: <span className="font-medium">{suite.agent_strategy}</span></p>
               </div>
-              <StatusPill status={(suite.status as Status) || 'pending'} />
-            </div>
+              <div className="card p-4 space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Timing</p>
+                <div className="text-sm space-y-0.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Started:</span>
+                    <span className="font-medium text-slate-900">{formatTs(suite.started_at)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Finished:</span>
+                    <span className="font-medium text-slate-900">{formatTs(suite.finished_at)}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card p-4 space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Results</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold text-slate-900">
+                    {suite.run_totals
+                        ? suite.run_totals.completed
+                        : suite.runs?.filter((r) => r.status === 'completed').length ?? 0}
+                  </span>
+                  <span className="text-sm text-slate-500">
+                    / {suite.run_totals ? suite.run_totals.total_runs : suite.runs?.length ?? 0} runs
+                  </span>
+                </div>
+                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden mt-2">
+                   <div 
+                      className="h-full bg-blue-500 transition-all duration-500"
+                      style={{ width: `${suite.run_totals ? (suite.run_totals.completed / suite.run_totals.total_runs) * 100 : 0}%`}} 
+                   />
+                </div>
+              </div>
+            </section>
 
-            <div className="card__body grid gap-3 sm:grid-cols-3">
-              <Stat label="Started" value={formatTs(suite.started_at)} />
-              <Stat label="Finished" value={formatTs(suite.finished_at)} />
-              <Stat
-                label="Runs completed"
-                value={
-                  suite.run_totals
-                    ? `${suite.run_totals.completed}/${suite.run_totals.total_runs}`
-                    : suite.runs
-                      ? `${suite.runs.filter((r) => r.status === 'completed').length}/${suite.runs.length}`
-                      : '—'
-                }
-              />
-            </div>
-
-            <div className="card__body space-y-2">
-              <h2 className="text-sm font-semibold text-slate-800">Scenarios</h2>
-              <div className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+            <section className="space-y-4">
+              <h2 className="text-lg font-semibold text-slate-800 px-1">Scenarios</h2>
+              <div className="space-y-3">
                 {(suite.runs || []).map((run) => (
-                  <RunRow key={run.id} run={run} />
+                  <RunCard key={run.id} run={run} />
                 ))}
                 {!hasRuns && (
-                  <div className="p-3 text-sm text-slate-500">No scenario runs available.</div>
+                  <div className="card p-8 text-center text-slate-500">No scenario runs available.</div>
                 )}
               </div>
-            </div>
-          </section>
+            </section>
+          </>
         )}
       </div>
     </div>
   )
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function RunCard({ run }: { run: EvalRun }) {
+  const [expanded, setExpanded] = useState(true)
+  
+  const isCompleted = run.status === 'completed'
+  const isRunning = run.status === 'running'
+  
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-      <p className="text-[11px] uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="text-sm font-semibold text-slate-800">{value}</p>
-    </div>
-  )
-}
-
-function StatusPill({ status }: { status: Status }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${statusColor[status]} border-slate-200 bg-slate-50`}
-    >
-      {statusIcon[status]}
-      {statusLabel[status]}
-    </span>
-  )
-}
-
-function RunRow({ run }: { run: EvalRun }) {
-  return (
-    <div className="p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">{run.scenario_slug}</p>
-          <p className="text-[11px] text-slate-500">
-            Agent: {run.agent_id || 'ephemeral'} · Started {formatTs(run.started_at)}
-          </p>
+    <div className="card overflow-hidden transition-shadow hover:shadow-md">
+      <div 
+        className="card__body flex flex-wrap items-center justify-between gap-3 cursor-pointer bg-slate-50/50 hover:bg-slate-50"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-3">
+           <div className={`w-1.5 h-1.5 rounded-full ${isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`} />
+           <div>
+              <h3 className="text-sm font-bold text-slate-900">{run.scenario_slug}</h3>
+              <p className="text-xs text-slate-500">
+                Agent: <span className="font-mono text-slate-600">{run.agent_id || 'ephemeral'}</span>
+              </p>
+           </div>
         </div>
-        <StatusPill status={(run.status as Status) || 'pending'} />
+        <div className="flex items-center gap-4">
+           <div className="text-right hidden sm:block">
+             <div className="text-[10px] uppercase text-slate-400 font-semibold">Duration</div>
+             <div className="text-xs font-mono text-slate-700">
+                {run.finished_at && run.started_at 
+                  ? ((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000).toFixed(1) + 's'
+                  : '—'
+                }
+             </div>
+           </div>
+           <StatusBadge status={run.status || 'pending'} />
+        </div>
       </div>
-      {(run.tasks || []).length > 0 ? (
-        <div className="mt-3 space-y-2">
-          {run.tasks?.map((task) => (
-            <TaskRow key={task.id} task={task} />
-          ))}
+      
+      {expanded && (
+        <div className="border-t border-slate-100 bg-white px-4 py-3">
+          {(run.tasks || []).length > 0 ? (
+            <div className="space-y-2">
+              {run.tasks?.map((task) => (
+                <TaskRow key={task.id} task={task} />
+              ))}
+            </div>
+          ) : (
+            <p className="py-2 text-xs italic text-slate-400 text-center">Tasks not loaded or empty.</p>
+          )}
         </div>
-      ) : (
-        <p className="mt-2 text-xs text-slate-500">Tasks not loaded yet.</p>
       )}
     </div>
   )
@@ -264,19 +269,31 @@ function RunRow({ run }: { run: EvalRun }) {
 function TaskRow({ task }: { task: EvalTask }) {
   const isPass = task.status === 'passed'
   const isFail = task.status === 'failed' || task.status === 'errored'
-  const statusCls = isPass ? 'text-emerald-700' : isFail ? 'text-rose-700' : 'text-slate-700'
+  
   return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-900">
-            {task.sequence}. {task.name}
-          </p>
-          <p className="text-[11px] text-slate-500">Assertion: {task.assertion_type}</p>
-        </div>
-        <span className={`text-xs font-semibold ${statusCls}`}>{task.status}</span>
+    <div className={`
+      group flex items-start gap-3 rounded-md border p-3 text-sm transition-colors
+      ${isPass ? 'border-emerald-100 bg-emerald-50/30' : ''}
+      ${isFail ? 'border-rose-100 bg-rose-50/30' : ''}
+      ${!isPass && !isFail ? 'border-slate-100 bg-slate-50' : ''}
+    `}>
+      <div className="mt-0.5">
+         <StatusBadge status={task.status} animate={false} className="bg-white shadow-sm border-opacity-50" />
       </div>
-      {task.observed_summary && <p className="mt-1 text-xs text-slate-600">{task.observed_summary}</p>}
+      <div className="flex-1 space-y-1">
+        <div className="flex justify-between items-start">
+           <p className="font-medium text-slate-900">
+             {task.sequence}. {task.name}
+           </p>
+           <span className="text-[10px] font-mono text-slate-400">{task.assertion_type}</span>
+        </div>
+        
+        {task.observed_summary && (
+          <p className={`text-xs ${isFail ? 'text-rose-700 font-medium' : 'text-slate-600'}`}>
+            {task.observed_summary}
+          </p>
+        )}
+      </div>
     </div>
   )
 }
