@@ -594,7 +594,7 @@ def _collect_failover_configs(
                 logger.debug("Unable to determine API key for endpoint %s", endpoint.key, exc_info=True)
             if supports_temperature and endpoint.temperature_override is not None:
                 params["temperature"] = float(endpoint.temperature_override)
-            if provider.key == "google":
+            if "google" in provider.key:
                 vertex_project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
                 vertex_location = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
                 params.update(
