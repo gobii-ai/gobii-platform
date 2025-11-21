@@ -36,16 +36,6 @@ export function EvalsScreen() {
     try {
       const result = await fetchSuites()
       setSuites(result.suites)
-      // Auto-select 'core' or 'all' or first suite if nothing selected
-      if (!selectedSuites.size && result.suites.length) {
-        const defaultSuite =
-          result.suites.find((suite) => suite.slug === 'core') ||
-          result.suites.find((suite) => suite.slug === 'all') ||
-          result.suites[0]
-        if (defaultSuite) {
-          setSelectedSuites(new Set([defaultSuite.slug]))
-        }
-      }
     } catch (error) {
       console.error(error)
       setErrorMessage('Unable to load suites right now.')
