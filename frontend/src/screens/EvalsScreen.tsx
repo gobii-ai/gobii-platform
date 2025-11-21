@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Beaker, Loader2, Play, RefreshCcw, CheckSquare, Square } from 'lucide-react'
+import { AlertTriangle, Beaker, Loader2, Play, RefreshCcw, CheckSquare } from 'lucide-react'
 
 import {
   createSuiteRuns,
@@ -109,20 +109,22 @@ export function EvalsScreen() {
   }
 
   return (
-    <div className="app-shell">
-      <header className="app-header card card--header">
-        <div className="card__body card__body--header">
-          <div className="app-header__title">
-            <div className="flex items-center gap-2">
-              <Beaker className="w-6 h-6 text-blue-600" />
-              <h1 className="app-title">Evals</h1>
+    <div className="app-shell space-y-8">
+      <div className="card">
+        <div className="card__body flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 sm:py-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-600 rounded-xl shadow-md text-white">
+              <Beaker className="w-6 h-6" />
             </div>
-            <p className="app-subtitle">Run suites concurrently, watch progress, and inspect tasks.</p>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Evals</h1>
+              <p className="text-slate-500 mt-1.5">Run suites concurrently, watch progress, and inspect tasks.</p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
-              className="btn btn--secondary gap-2"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
               onClick={loadSuiteRuns}
               disabled={loadingRuns}
             >
@@ -131,42 +133,45 @@ export function EvalsScreen() {
             </button>
             <button
               type="button"
-              className="btn btn--primary gap-2"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleLaunch}
-              disabled={launching || suites.length === 0}
+              disabled={launching || (selectedSuites.size === 0 && suites.length > 0)}
             >
               {launching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
               Launch
             </button>
           </div>
         </div>
-      </header>
+      </div>
 
       {errorMessage && (
-        <div className="card border-red-200 bg-red-50 text-red-700 mb-6">
-          <div className="card__body flex items-start gap-2 text-sm">
-            <AlertTriangle className="w-4 h-4 mt-0.5" />
-            <div>{errorMessage}</div>
+        <div className="rounded-lg bg-red-50 p-4 text-red-700 shadow-sm ring-1 ring-red-200">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 mt-0.5 shrink-0" />
+            <div className="text-sm font-medium">{errorMessage}</div>
           </div>
         </div>
       )}
 
-      <section className="card mb-6">
-        <div className="card__body space-y-4">
+      <section className="card">
+        <div className="card__body">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-base font-semibold text-slate-800">Select Suites</h2>
-              <p className="text-xs text-slate-500">Choose which test suites to run.</p>
+              <h2 className="text-lg font-bold text-slate-900">Select Suites</h2>
+              <p className="text-sm text-slate-500">Choose which test suites to run against your agents.</p>
             </div>
-            <button
-              type="button"
-              onClick={toggleAllSuites}
-              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-            >
-              {selectedSuites.size === suites.length ? 'Deselect All' : 'Select All'}
-            </button>
+            {suites.length > 0 && (
+              <button
+                type="button"
+                onClick={toggleAllSuites}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
+              >
+                {selectedSuites.size === suites.length ? 'Deselect All' : 'Select All'}
+              </button>
+            )}
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {suites.map((suite) => {
               const checked = selectedSuites.has(suite.slug)
               return (
@@ -174,100 +179,117 @@ export function EvalsScreen() {
                   key={suite.slug}
                   onClick={() => toggleSuiteSelection(suite.slug)}
                   className={`
-                    group relative flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-all
+                    group relative flex cursor-pointer flex-col gap-3 rounded-xl p-4 transition-all
                     ${checked 
-                      ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' 
-                      : 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm'
+                      ? 'bg-blue-50/20 shadow-md ring-2 ring-blue-500' 
+                      : 'bg-white shadow-sm hover:shadow-md'
                     }
                   `}
+                  role="checkbox"
+                  aria-checked={checked}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      toggleSuiteSelection(suite.slug)
+                    }
+                  }}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`font-medium ${checked ? 'text-blue-900' : 'text-slate-900'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className={`font-semibold text-base break-all ${checked ? 'text-blue-900' : 'text-slate-900'}`}>
                       {suite.slug}
                     </span>
-                    {checked 
-                      ? <CheckSquare className="w-4 h-4 text-blue-600" />
-                      : <Square className="w-4 h-4 text-slate-300 group-hover:text-blue-400" />
-                    }
+                    <div className={`shrink-0 mt-0.5 transition-colors ${checked ? 'text-blue-600' : 'text-slate-300 group-hover:text-blue-400'}`}>
+                      {checked 
+                        ? <div className="bg-blue-600 text-white rounded-full p-0.5"><CheckSquare className="w-4 h-4" /></div>
+                        : <div className="rounded-full w-5 h-5 border-2 border-slate-300 group-hover:border-blue-400" />
+                      }
+                    </div>
                   </div>
-                  <p className={`text-xs line-clamp-2 ${checked ? 'text-blue-700' : 'text-slate-600'}`}>
-                    {suite.description || 'No description'}
+                  <p className={`text-sm line-clamp-3 leading-relaxed ${checked ? 'text-blue-800' : 'text-slate-600'}`}>
+                    {suite.description || 'No description provided.'}
                   </p>
-                  <div className="mt-auto pt-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                  <div className="mt-auto pt-3 border-t border-dashed border-slate-200 flex items-center gap-2 text-xs uppercase tracking-wider text-slate-400 font-bold">
                      {pluralize(suite.scenario_slugs.length, 'scenario')}
                   </div>
                 </div>
               )
             })}
-            {!suites.length && <div className="text-sm text-slate-500 col-span-full py-4 text-center">No suites registered.</div>}
+            {!suites.length && (
+              <div className="col-span-full py-12 text-center rounded-xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200">
+                <p className="text-sm font-medium">No suites registered.</p>
+              </div>
+            )}
           </div>
         </div>
       </section>
 
       <section className="card">
-        <div className="card__body space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-slate-800">Recent Suite Runs</h2>
+        <div className="card__body p-0">
+          <div className="flex items-center justify-between px-6 py-4">
+            <h2 className="text-lg font-bold text-slate-900">Recent Activity</h2>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 font-semibold">
-                <tr>
-                  <th className="px-4 py-3">Suite</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Progress</th>
-                  <th className="px-4 py-3">Started</th>
-                  <th className="px-4 py-3">Duration</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {suiteRuns.map((suite) => {
-                  const duration = suite.finished_at && suite.started_at
-                    ? Math.round((new Date(suite.finished_at).getTime() - new Date(suite.started_at).getTime()) / 1000) + 's'
-                    : '—'
-                    
-                  return (
-                    <tr key={suite.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-slate-900">
-                        {suite.suite_slug}
-                        <div className="text-xs text-slate-400 font-normal truncate max-w-[150px]">{suite.id.slice(0, 8)}...</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={suite.status || 'pending'} />
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                         {suite.run_totals ? (
-                           <div className="flex items-center gap-2">
-                             <span className="font-medium text-slate-900">{suite.run_totals.completed}</span>
-                             <span className="text-slate-400">/</span>
-                             <span className="text-slate-500">{suite.run_totals.total_runs}</span>
-                           </div>
-                         ) : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{formatTs(suite.started_at)}</td>
-                      <td className="px-4 py-3 text-slate-600">{duration}</td>
-                      <td className="px-4 py-3 text-right">
-                        <a
-                          className="inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-                          href={`/console/evals/${suite.id}/`}
-                        >
-                          View
-                        </a>
+          <div className="overflow-hidden rounded-b-[inherit]">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500 font-bold">
+                  <tr>
+                    <th className="px-6 py-4">Suite</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4">Progress</th>
+                    <th className="px-6 py-4">Started</th>
+                    <th className="px-6 py-4">Duration</th>
+                    <th className="px-6 py-4 text-right"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {suiteRuns.map((suite) => {
+                    const duration = suite.finished_at && suite.started_at
+                      ? Math.round((new Date(suite.finished_at).getTime() - new Date(suite.started_at).getTime()) / 1000) + 's'
+                      : '—'
+                      
+                    return (
+                      <tr key={suite.id} className="group hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="font-semibold text-slate-900">{suite.suite_slug}</div>
+                          <div className="text-xs font-mono text-slate-400 mt-0.5">{suite.id.slice(0, 8)}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <StatusBadge status={suite.status || 'pending'} />
+                        </td>
+                        <td className="px-6 py-4 text-slate-700">
+                           {suite.run_totals ? (
+                             <div className="flex items-center gap-1.5 text-xs font-medium bg-slate-100 px-2 py-1 rounded-md w-fit">
+                               <span className="text-slate-900">{suite.run_totals.completed}</span>
+                               <span className="text-slate-400">/</span>
+                               <span className="text-slate-600">{suite.run_totals.total_runs}</span>
+                             </div>
+                           ) : '—'}
+                        </td>
+                        <td className="px-6 py-4 text-slate-600 whitespace-nowrap">{formatTs(suite.started_at)}</td>
+                        <td className="px-6 py-4 text-slate-600 font-mono text-xs">{duration}</td>
+                        <td className="px-6 py-4 text-right">
+                          <a
+                            className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            href={`/console/evals/${suite.id}/`}
+                          >
+                            View Details
+                          </a>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {!suiteRuns.length && (
+                    <tr>
+                      <td className="px-6 py-12 text-sm text-slate-500 text-center" colSpan={6}>
+                        No historical runs yet. Launch one above!
                       </td>
                     </tr>
-                  )
-                })}
-                {!suiteRuns.length && (
-                  <tr>
-                    <td className="px-4 py-8 text-sm text-slate-500 text-center" colSpan={6}>
-                      No historical runs yet. Launch one above!
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>

@@ -102,114 +102,133 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   }, [suiteRunId])
 
   return (
-    <div className="app-shell">
-      <div className="max-w-5xl mx-auto space-y-6 pb-12 px-4 sm:px-6">
-        <header className="card card--header">
-          <div className="card__body card__body--header flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-start gap-3">
-               <div className="p-2 rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
-                 <Beaker className="w-5 h-5" />
-               </div>
-               <div>
-                 <div className="flex items-center gap-2">
-                    <h1 className="text-lg font-bold text-slate-900">Eval Run Detail</h1>
-                    {suite && <StatusBadge status={suite.status || 'pending'} />}
-                 </div>
-                 <p className="text-sm text-slate-500 font-mono mt-0.5">{suiteRunId}</p>
-               </div>
+    <div className="app-shell space-y-8">
+      <div className="card">
+        <div className="card__body flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 sm:py-3">
+          <div className="flex items-center gap-4">
+            <div className="p-2 rounded-xl bg-blue-600 shadow-md text-white">
+              <Beaker className="w-6 h-6" />
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="btn btn--secondary gap-2 text-xs py-1.5"
-                onClick={() => {
-                  fetchSuiteRunDetail(suiteRunId)
-                    .then((res) => setSuite(res.suite_run))
-                    .catch((err) => {
-                      console.error(err)
-                      setError('Unable to refresh right now.')
-                    })
-                }}
-              >
-                <RefreshCcw className="w-3.5 h-3.5" />
-                Refresh
-              </button>
-            </div>
-          </div>
-        </header>
-
-        {error && (
-          <div className="card border-red-200 bg-red-50 text-red-700">
-            <div className="card__body flex items-start gap-2 text-sm">
-              <AlertTriangle className="w-4 h-4 mt-0.5" />
-              <div>{error}</div>
-            </div>
-          </div>
-        )}
-
-        {loading && !suite && (
-          <div className="flex flex-col items-center justify-center py-12 gap-3 text-sm text-slate-600">
-            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-            <p>Loading evaluation results…</p>
-          </div>
-        )}
-
-        {suite && (
-          <>
-            <section className="grid gap-4 sm:grid-cols-3">
-              <div className="card p-4 space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Suite</p>
-                <p className="text-lg font-bold text-slate-900">{suite.suite_slug}</p>
-                <p className="text-xs text-slate-500">Strategy: <span className="font-medium">{suite.agent_strategy}</span></p>
-              </div>
-              <div className="card p-4 space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Timing</p>
-                <div className="text-sm space-y-0.5">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Started:</span>
-                    <span className="font-medium text-slate-900">{formatTs(suite.started_at)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Finished:</span>
-                    <span className="font-medium text-slate-900">{formatTs(suite.finished_at)}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="card p-4 space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Results</p>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-bold text-slate-900">
-                    {suite.run_totals
-                        ? suite.run_totals.completed
-                        : suite.runs?.filter((r) => r.status === 'completed').length ?? 0}
-                  </span>
-                  <span className="text-sm text-slate-500">
-                    / {suite.run_totals ? suite.run_totals.total_runs : suite.runs?.length ?? 0} runs
-                  </span>
-                </div>
-                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden mt-2">
-                   <div 
-                      className="h-full bg-blue-500 transition-all duration-500"
-                      style={{ width: `${suite.run_totals ? (suite.run_totals.completed / suite.run_totals.total_runs) * 100 : 0}%`}} 
-                   />
-                </div>
-              </div>
-            </section>
-
-            <section className="space-y-4">
-              <h2 className="text-lg font-semibold text-slate-800 px-1">Scenarios</h2>
-              <div className="space-y-3">
-                {(suite.runs || []).map((run) => (
-                  <RunCard key={run.id} run={run} />
-                ))}
-                {!hasRuns && (
-                  <div className="card p-8 text-center text-slate-500">No scenario runs available.</div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Eval Run Detail</h1>
+              <div className="flex items-center gap-3 mt-1.5 text-sm">
+                <span className="font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{suiteRunId}</span>
+                {suite && (
+                  <>
+                    <span className="text-slate-300">•</span>
+                    <StatusBadge status={suite.status || 'pending'} />
+                  </>
                 )}
               </div>
-            </section>
-          </>
-        )}
+            </div>
+          </div>
+          <div>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
+              onClick={() => {
+                fetchSuiteRunDetail(suiteRunId)
+                  .then((res) => setSuite(res.suite_run))
+                  .catch((err) => {
+                    console.error(err)
+                    setError('Unable to refresh right now.')
+                  })
+              }}
+            >
+              <RefreshCcw className="w-4 h-4" />
+              Refresh
+            </button>
+          </div>
+        </div>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 shadow-sm">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 mt-0.5 shrink-0" />
+            <div className="text-sm font-medium">{error}</div>
+          </div>
+        </div>
+      )}
+
+      {loading && !suite && (
+        <div className="flex flex-col items-center justify-center py-24 gap-4 text-sm text-slate-600">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          <p className="font-medium">Loading evaluation results...</p>
+        </div>
+      )}
+
+      {suite && (
+        <>
+          <section className="card">
+            <div className="card__body grid gap-6 sm:grid-cols-3">
+              <div className="flex flex-col justify-between space-y-2">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Suite Strategy</p>
+                  <p className="text-lg font-bold text-slate-900 mt-1">{suite.suite_slug}</p>
+                </div>
+                <p className="text-sm text-slate-500">
+                  Strategy: <span className="font-medium text-slate-700">{suite.agent_strategy}</span>
+                </p>
+              </div>
+
+              <div className="flex flex-col justify-between space-y-2 sm:pl-6">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Timing</p>
+                  <div className="space-y-1 mt-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Started:</span>
+                      <span className="font-mono text-slate-700">{formatTs(suite.started_at)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Finished:</span>
+                      <span className="font-mono text-slate-700">{formatTs(suite.finished_at)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col justify-between space-y-2 sm:pl-6">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Completion</p>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-3xl font-bold text-slate-900">
+                      {suite.run_totals
+                        ? suite.run_totals.completed
+                        : suite.runs?.filter((r) => r.status === 'completed').length ?? 0}
+                    </span>
+                    <span className="text-sm font-medium text-slate-500">
+                      / {suite.run_totals ? suite.run_totals.total_runs : suite.runs?.length ?? 0} runs
+                    </span>
+                  </div>
+                </div>
+                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-700 ease-out"
+                    style={{ width: `${suite.run_totals ? (suite.run_totals.completed / suite.run_totals.total_runs) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card__header px-6 py-4 border-b border-slate-100">
+              <h2 className="card__title">Scenarios</h2>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {(suite.runs || []).map((run) => (
+                <RunCard key={run.id} run={run} />
+              ))}
+              {!hasRuns && (
+                <div className="p-12 text-center text-slate-500 font-medium">
+                  No scenario runs available for this suite.
+                </div>
+              )}
+            </div>
+          </section>
+        </>
+      )}
     </div>
   )
 }
@@ -221,23 +240,23 @@ function RunCard({ run }: { run: EvalRun }) {
   const isRunning = run.status === 'running'
   
   return (
-    <div className="card overflow-hidden transition-shadow hover:shadow-md">
+    <div className="bg-white transition-colors hover:bg-slate-50/50">
       <div 
-        className="card__body flex flex-wrap items-center justify-between gap-3 cursor-pointer bg-slate-50/50 hover:bg-slate-50"
+        className="flex flex-wrap items-center justify-between gap-4 p-4 sm:px-6 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-3">
-           <div className={`w-1.5 h-1.5 rounded-full ${isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`} />
+           <div className={`w-2.5 h-2.5 rounded-full shadow-sm shrink-0 ${isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`} />
            <div>
               <h3 className="text-sm font-bold text-slate-900">{run.scenario_slug}</h3>
-              <p className="text-xs text-slate-500">
-                Agent: <span className="font-mono text-slate-600">{run.agent_id || 'ephemeral'}</span>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Agent: <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">{run.agent_id || 'ephemeral'}</span>
               </p>
            </div>
         </div>
         <div className="flex items-center gap-4">
            <div className="text-right hidden sm:block">
-             <div className="text-[10px] uppercase text-slate-400 font-semibold">Duration</div>
+             <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Duration</div>
              <div className="text-xs font-mono text-slate-700">
                 {run.finished_at && run.started_at 
                   ? ((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000).toFixed(1) + 's'
@@ -250,15 +269,17 @@ function RunCard({ run }: { run: EvalRun }) {
       </div>
       
       {expanded && (
-        <div className="border-t border-slate-100 bg-white px-4 py-3">
+        <div className="bg-slate-50/50 border-t border-slate-100 px-4 py-4 sm:px-6">
           {(run.tasks || []).length > 0 ? (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {run.tasks?.map((task) => (
                 <TaskRow key={task.id} task={task} />
               ))}
             </div>
           ) : (
-            <p className="py-2 text-xs italic text-slate-400 text-center">Tasks not loaded or empty.</p>
+            <p className="py-2 text-xs italic text-slate-400 text-center">
+              Tasks not loaded or empty.
+            </p>
           )}
         </div>
       )}
@@ -272,26 +293,26 @@ function TaskRow({ task }: { task: EvalTask }) {
   
   return (
     <div className={`
-      group flex items-start gap-3 rounded-md border p-3 text-sm transition-colors
-      ${isPass ? 'border-emerald-100 bg-emerald-50/30' : ''}
-      ${isFail ? 'border-rose-100 bg-rose-50/30' : ''}
-      ${!isPass && !isFail ? 'border-slate-100 bg-slate-50' : ''}
+      group flex items-start gap-3 rounded-lg p-3 text-sm transition-all
+      ${isPass ? 'ring-1 ring-inset ring-emerald-300 bg-emerald-50/30' : ''}
+      ${isFail ? 'ring-1 ring-inset ring-rose-300 bg-rose-50/30' : ''}
+      ${!isPass && !isFail ? 'ring-1 ring-inset ring-slate-200 bg-white' : ''}
     `}>
-      <div className="mt-0.5">
-         <StatusBadge status={task.status} animate={false} className="bg-white shadow-sm border-opacity-50" />
+      <div className="mt-0.5 shrink-0">
+         <StatusBadge status={task.status} animate={false} className="bg-white shadow-sm ring-1 ring-slate-200" />
       </div>
-      <div className="flex-1 space-y-1">
-        <div className="flex justify-between items-start">
-           <p className="font-medium text-slate-900">
+      <div className="flex-1 min-w-0">
+        <div className="flex justify-between items-start gap-2">
+           <p className="font-semibold text-slate-900 truncate">
              {task.sequence}. {task.name}
            </p>
-           <span className="text-[10px] font-mono text-slate-400">{task.assertion_type}</span>
+           <span className="shrink-0 text-[10px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded ring-1 ring-slate-200">{task.assertion_type}</span>
         </div>
         
         {task.observed_summary && (
-          <p className={`text-xs ${isFail ? 'text-rose-700 font-medium' : 'text-slate-600'}`}>
+          <div className={`mt-1.5 text-xs p-2 rounded bg-white/50 ring-1 ring-black/5 leading-relaxed ${isFail ? 'text-rose-800' : 'text-slate-600'}`}>
             {task.observed_summary}
-          </p>
+          </div>
         )}
       </div>
     </div>
