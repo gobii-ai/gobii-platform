@@ -154,7 +154,7 @@ export function EvalsScreen() {
       )}
 
       <section className="card overflow-hidden" style={{ padding: 0 }}>
-        <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+        <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
           <div>
             <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Select Suites</h2>
             <p className="text-xs text-slate-500 mt-0.5">Choose which test suites to run against your agents.</p>
@@ -224,7 +224,7 @@ export function EvalsScreen() {
       </section>
 
       <section className="card overflow-hidden" style={{ padding: 0 }}>
-        <div className="bg-slate-50 border-b border-slate-200 px-6 py-4">
+        <div className="bg-white border-b border-slate-200 px-6 py-4">
           <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Recent Activity</h2>
         </div>
 
@@ -233,12 +233,12 @@ export function EvalsScreen() {
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-white text-left text-xs uppercase tracking-wider text-slate-500 font-bold">
                 <tr>
-                  <th className="px-6 py-4 bg-slate-50/50 border-b border-slate-100">Suite</th>
-                  <th className="px-6 py-4 bg-slate-50/50 border-b border-slate-100">Status</th>
-                  <th className="px-6 py-4 bg-slate-50/50 border-b border-slate-100">Progress</th>
-                  <th className="px-6 py-4 bg-slate-50/50 border-b border-slate-100">Started</th>
-                  <th className="px-6 py-4 bg-slate-50/50 border-b border-slate-100">Duration</th>
-                  <th className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 text-right"></th>
+                  <th className="px-6 py-4 bg-white border-b border-slate-100">Suite</th>
+                  <th className="px-6 py-4 bg-white border-b border-slate-100">Status</th>
+                  <th className="px-6 py-4 bg-white border-b border-slate-100">Progress</th>
+                  <th className="px-6 py-4 bg-white border-b border-slate-100">Started</th>
+                  <th className="px-6 py-4 bg-white border-b border-slate-100">Duration</th>
+                  <th className="px-6 py-4 bg-white border-b border-slate-100 text-right"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
