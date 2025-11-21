@@ -129,7 +129,7 @@ class TestEventProcessingLLMSelection(TestCase):
 
         self.assertEqual(mock_run_completion.call_count, 1)
         first_call = mock_run_completion.call_args_list[0]
-        self.assertEqual(first_call.kwargs["messages"], [])
+        self.assertEqual(first_call.kwargs["messages"], [{"role": "user", "content": ""}])
         self.assertIsNone(first_call.kwargs["tools"])
         self.assertEqual(
             first_call.kwargs["params"]["cached_content"],

@@ -637,6 +637,9 @@ def _completion_with_failover(
                         params.pop("tool_choice", None)
                         params.pop("parallel_tool_calls", None)
                         use_gemini_cache = True
+
+                        if not request_messages:
+                            request_messages = [{"role": "user", "content": ""}]
                     else:
                         params.pop("cached_content", None)
                 else:
