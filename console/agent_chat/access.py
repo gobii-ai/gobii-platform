@@ -8,7 +8,7 @@ from api.models import OrganizationMembership, PersistentAgent
 
 def agent_queryset_for(user, session) -> QuerySet:
     """Return queryset of agents visible to the user within the console context."""
-    qs = PersistentAgent.objects.select_related("browser_use_agent").all()
+    qs = PersistentAgent.objects.non_eval().select_related("browser_use_agent").all()
     context_type = (session or {}).get("context_type", "personal") if session is not None else "personal"
 
     if context_type == "organization":

@@ -301,6 +301,27 @@ class PersistentAgentAPITests(TestCase):
         self.assertEqual(PersistentAgent.objects.count(), 1)
         self.assertEqual(BrowserUseAgent.objects.count(), 1)
 
+    def test_list_excludes_eval_agents(self):
+        visible = self._create_agent_via_api({'name': 'Visible Agent'})
+
+        eval_browser = create_browser_agent_without_proxy(self.user, "eval-browser")
+        eval_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Eval Agent Should Hide",
+            charter="Eval-only agent",
+            browser_use_agent=eval_browser,
+            execution_environment="eval",
+        )
+
+        response = self.client.get(PERSISTENT_AGENT_BASE_URL)
+        self.assertEqual(response.status_code, 200, response.content)
+
+        results = response.json().get('results', [])
+        returned_ids = {row.get('id') for row in results}
+
+        self.assertIn(visible['id'], returned_ids)
+        self.assertNotIn(str(eval_agent.id), returned_ids)
+
     def test_create_agent_with_email_preferred_endpoint(self):
         payload = self._create_agent_via_api({'preferred_contact_endpoint': 'email'})
         agent = PersistentAgent.objects.get(id=payload['id'])

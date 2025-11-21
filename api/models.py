@@ -207,6 +207,15 @@ def get_default_execution_environment() -> str:
     """Return the default execution environment from GOBII_RELEASE_ENV."""
     return os.getenv("GOBII_RELEASE_ENV", "local")
 
+
+class PersistentAgentQuerySet(models.QuerySet):
+    """Custom queryset helpers for PersistentAgent."""
+
+    def non_eval(self):
+        """Exclude agents created for eval runs."""
+        return self.exclude(execution_environment="eval")
+
+
 class CommsChannel(models.TextChoices):
     EMAIL = "email", "Email"
     SMS = "sms", "SMS"
@@ -2860,6 +2869,7 @@ class PersistentAgent(models.Model):
     """
     A persistent agent that runs automatically on a schedule.
     """
+    objects = PersistentAgentQuerySet.as_manager()
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

@@ -454,6 +454,44 @@ class ConsoleViewsTest(TestCase):
         self.assertAlmostEqual(agent_data['last24hCreditBurn'], float(expected_last_24h_burn), places=2)
 
     @tag("batch_console_agents")
+    def test_eval_agents_hidden_from_listing(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        visible_browser = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Visible Browser',
+        )
+        visible_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Visible Agent',
+            charter='Visible charter',
+            browser_use_agent=visible_browser,
+        )
+
+        eval_browser = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Eval Browser',
+        )
+        PersistentAgent.objects.create(
+            user=self.user,
+            name='Eval Agent',
+            charter='Eval charter',
+            browser_use_agent=eval_browser,
+            execution_environment='eval',
+        )
+
+        response = self.client.get(reverse('agents'))
+        self.assertEqual(response.status_code, 200)
+        payload = self._get_agent_list_payload(response)
+
+        agents = payload.get('agents', [])
+        names = {agent['name'] for agent in agents}
+
+        self.assertIn(visible_agent.name, names)
+        self.assertNotIn('Eval Agent', names)
+        self.assertEqual(len(agents), 1)
+
+    @tag("batch_console_agents")
     @patch('console.views.AgentService.has_agents_available', return_value=True)
     @patch('console.views.AgentService.get_agents_available', return_value=5)
     def test_agent_list_payload_includes_available_capacity(self, mock_get_available, _mock_has_available):
