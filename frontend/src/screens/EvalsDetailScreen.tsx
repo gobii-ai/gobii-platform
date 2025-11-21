@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Beaker, Loader2, RefreshCcw } from 'lucide-react'
+import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft } from 'lucide-react'
 
 import { fetchSuiteRunDetail, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
@@ -102,27 +102,33 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   }, [suiteRunId])
 
   return (
-    <div className="app-shell space-y-8">
-      <div className="card">
-        <div className="card__body flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 sm:py-3">
-          <div className="flex items-center gap-4">
-            <div className="p-2 rounded-xl bg-blue-600 shadow-md text-white">
+    <div className="app-shell">
+      <div className="card card--header">
+        <div className="card__body card__body--header flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 sm:py-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-white/90 rounded-xl shadow-sm text-blue-700">
               <Beaker className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Eval Run Detail</h1>
-              <div className="flex items-center gap-3 mt-1.5 text-sm">
-                <span className="font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{suiteRunId}</span>
-                {suite && (
-                  <>
-                    <span className="text-slate-300">•</span>
-                    <StatusBadge status={suite.status || 'pending'} />
-                  </>
-                )}
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Eval Run Detail</h1>
+                {suite && <StatusBadge status={suite.status || 'pending'} />}
               </div>
+              <p className="text-slate-600 mt-1.5 flex items-center gap-2">
+                Inspect individual scenario runs and task assertions.
+                <span className="text-slate-300">•</span>
+                <span className="font-mono text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{suiteRunId}</span>
+              </p>
             </div>
           </div>
-          <div>
+          <div className="flex items-center gap-3">
+            <a
+              href="/console/evals/"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back
+            </a>
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
@@ -160,8 +166,11 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
 
       {suite && (
         <>
-          <section className="card">
-            <div className="card__body grid gap-6 sm:grid-cols-3">
+          <section className="card overflow-hidden" style={{ padding: 0 }}>
+            <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4">
+              <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Overview</h2>
+            </div>
+            <div className="p-6 grid gap-6 sm:grid-cols-3">
               <div className="flex flex-col justify-between space-y-2">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Suite Strategy</p>
@@ -172,7 +181,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                 </p>
               </div>
 
-              <div className="flex flex-col justify-between space-y-2 sm:pl-6">
+              <div className="flex flex-col justify-between space-y-2 sm:pl-6 sm:border-l sm:border-slate-100">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Timing</p>
                   <div className="space-y-1 mt-1">
@@ -188,7 +197,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                 </div>
               </div>
 
-              <div className="flex flex-col justify-between space-y-2 sm:pl-6">
+              <div className="flex flex-col justify-between space-y-2 sm:pl-6 sm:border-l sm:border-slate-100">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Completion</p>
                   <div className="flex items-baseline gap-2 mt-1">
@@ -241,16 +250,16 @@ function RunCard({ run }: { run: EvalRun }) {
   const isRunning = run.status === 'running'
   
   return (
-    <div className="bg-white transition-colors hover:bg-slate-50/50">
+    <div className="bg-white transition-colors hover:bg-slate-50 group">
       <div 
-        className="flex flex-wrap items-center justify-between gap-4 p-4 sm:px-6 cursor-pointer"
+        className="flex flex-wrap items-center justify-between gap-4 p-6 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-3">
-           <div className={`w-2.5 h-2.5 rounded-full shadow-sm shrink-0 ${isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`} />
+        <div className="flex items-center gap-4">
+           <div className={`w-3 h-3 rounded-full shadow-sm shrink-0 ${isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`} />
            <div>
-              <h3 className="text-sm font-bold text-slate-900">{run.scenario_slug}</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{run.scenario_slug}</h3>
+              <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
                 Agent: <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">{run.agent_id || 'ephemeral'}</span>
               </p>
            </div>
@@ -270,7 +279,7 @@ function RunCard({ run }: { run: EvalRun }) {
       </div>
       
       {expanded && (
-        <div className="bg-slate-50/50 border-t border-slate-100 px-4 py-4 sm:px-6">
+        <div className="bg-slate-50 border-t border-slate-100 px-6 py-6">
           {(run.tasks || []).length > 0 ? (
             <div className="space-y-3">
               {run.tasks?.map((task) => (
@@ -294,9 +303,9 @@ function TaskRow({ task }: { task: EvalTask }) {
   
   return (
     <div className={`
-      group flex items-start gap-3 rounded-lg p-3 text-sm transition-all
-      ${isPass ? 'ring-1 ring-inset ring-emerald-300 bg-emerald-50/30' : ''}
-      ${isFail ? 'ring-1 ring-inset ring-rose-300 bg-rose-50/30' : ''}
+      group flex items-start gap-3 rounded-lg p-4 text-sm transition-all
+      ${isPass ? 'ring-1 ring-inset ring-emerald-200 bg-emerald-50' : ''}
+      ${isFail ? 'ring-1 ring-inset ring-rose-200 bg-rose-50' : ''}
       ${!isPass && !isFail ? 'ring-1 ring-inset ring-slate-200 bg-white' : ''}
     `}>
       <div className="mt-0.5 shrink-0">
@@ -304,14 +313,15 @@ function TaskRow({ task }: { task: EvalTask }) {
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-start gap-2">
-           <p className="font-semibold text-slate-900 truncate">
-             {task.sequence}. {task.name}
+           <p className="font-semibold text-slate-900 break-words">
+             <span className="font-mono text-xs text-slate-400 mr-2">#{task.sequence}</span>
+             {task.name}
            </p>
-           <span className="shrink-0 text-[10px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded ring-1 ring-slate-200">{task.assertion_type}</span>
+           <span className="shrink-0 text-[10px] font-mono text-slate-500 bg-white/50 px-1.5 py-0.5 rounded ring-1 ring-slate-200/50">{task.assertion_type}</span>
         </div>
         
         {task.observed_summary && (
-          <div className={`mt-1.5 text-xs p-2 rounded bg-white/50 ring-1 ring-black/5 leading-relaxed ${isFail ? 'text-rose-800' : 'text-slate-600'}`}>
+          <div className={`mt-2 text-xs p-2.5 rounded bg-white/60 ring-1 ring-black/5 leading-relaxed font-mono ${isFail ? 'text-rose-800' : 'text-slate-600'}`}>
             {task.observed_summary}
           </div>
         )}
