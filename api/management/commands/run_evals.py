@@ -47,6 +47,21 @@ class Command(BaseCommand):
             action="store_true",
             help="Run synchronously (eager mode) for debugging.",
         )
+        parser.add_argument(
+            "--run-type",
+            type=str,
+            choices=[
+                EvalSuiteRun.RunType.ONE_OFF,
+                EvalSuiteRun.RunType.OFFICIAL,
+            ],
+            default=EvalSuiteRun.RunType.ONE_OFF,
+            help="Label runs as one_off (default) or official for long-term tracking.",
+        )
+        parser.add_argument(
+            "--official",
+            action="store_true",
+            help="Shortcut for --run-type official.",
+        )
 
     def handle(self, *args, **options):
         suites_requested = options["suites"] or []
@@ -54,6 +69,8 @@ class Command(BaseCommand):
         agent_id = options["agent_id"]
         agent_strategy = options["agent_strategy"]
         sync_mode = options["sync"]
+        run_type_option = options["run_type"]
+        run_type = EvalSuiteRun.RunType.OFFICIAL if options["official"] else run_type_option
 
         if sync_mode:
             from django.conf import settings
@@ -131,12 +148,13 @@ class Command(BaseCommand):
                 suite_slug=suite_slug,
                 initiated_by=user,
                 status=EvalSuiteRun.Status.RUNNING,
+                run_type=run_type,
                 agent_strategy=agent_strategy,
                 shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
                 started_at=timezone.now(),
             )
 
-            self.stdout.write(self.style.SUCCESS(f"Created suite run {suite_run.id} ({suite_slug})"))
+            self.stdout.write(self.style.SUCCESS(f"Created suite run {suite_run.id} ({suite_slug}) [{run_type}]"))
 
             created_for_suite = 0
             for scenario_slug in scenario_slugs:
@@ -157,6 +175,7 @@ class Command(BaseCommand):
                     agent=run_agent,
                     initiated_by=user,
                     status=EvalRun.Status.PENDING,
+                    run_type=run_type,
                 )
                 self.stdout.write(f"  Scheduling run {run.id} for scenario '{scenario.slug}'...")
 

@@ -3859,8 +3859,8 @@ class EvalRunTaskInline(admin.TabularInline):
 
 @admin.register(EvalRun)
 class EvalRunAdmin(admin.ModelAdmin):
-    list_display = ('scenario_slug', 'scenario_version', 'agent', 'status', 'started_at', 'finished_at', 'step_count')
-    list_filter = ('status', 'scenario_slug', 'started_at')
+    list_display = ('scenario_slug', 'scenario_version', 'agent', 'status', 'run_type', 'started_at', 'finished_at', 'step_count')
+    list_filter = ('status', 'run_type', 'scenario_slug', 'started_at')
     search_fields = ('scenario_slug', 'agent__name', 'id', 'budget_id')
     raw_id_fields = ('agent', 'initiated_by')
     readonly_fields = ('created_at', 'updated_at', 'tokens_used', 'credits_cost', 'completion_count', 'step_count')

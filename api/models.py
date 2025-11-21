@@ -6915,10 +6915,20 @@ class EvalSuiteRun(models.Model):
         EPHEMERAL_PER_SCENARIO = "ephemeral_per_scenario", "Ephemeral per scenario"
         REUSE_AGENT = "reuse_agent", "Reuse provided agent"
 
+    class RunType(models.TextChoices):
+        ONE_OFF = "one_off", "One-off"
+        OFFICIAL = "official", "Official"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     suite_slug = models.CharField(max_length=200)
     initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    run_type = models.CharField(
+        max_length=20,
+        choices=RunType.choices,
+        default=RunType.ONE_OFF,
+        help_text="One-off runs are ad-hoc; official runs are tracked over time.",
+    )
     agent_strategy = models.CharField(
         max_length=40,
         choices=AgentStrategy.choices,
@@ -6945,6 +6955,8 @@ class EvalSuiteRun(models.Model):
 
 
 class EvalRun(models.Model):
+    RunType = EvalSuiteRun.RunType
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         RUNNING = "running", "Running"
@@ -6964,6 +6976,12 @@ class EvalRun(models.Model):
     agent = models.ForeignKey(PersistentAgent, on_delete=models.CASCADE)
     initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    run_type = models.CharField(
+        max_length=20,
+        choices=RunType.choices,
+        default=RunType.ONE_OFF,
+        help_text="One-off runs are ad-hoc; official runs are tracked over time.",
+    )
     
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)

@@ -84,6 +84,7 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task
 from api.evals.runner import _update_suite_state
+from api.evals.realtime import broadcast_run_update, broadcast_suite_update
 from api.llm.utils import normalize_model_name
 from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
@@ -632,6 +633,7 @@ def _serialize_eval_run(run: EvalRun, *, include_tasks: bool = False) -> dict[st
         "scenario_slug": run.scenario_slug,
         "scenario_version": run.scenario_version,
         "status": run.status,
+        "run_type": run.run_type,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         "agent_id": str(run.agent_id) if run.agent_id else None,
@@ -659,6 +661,7 @@ def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, inc
         "id": str(suite.id),
         "suite_slug": suite.suite_slug,
         "status": suite.status,
+        "run_type": suite.run_type,
         "agent_strategy": suite.agent_strategy,
         "shared_agent_id": str(suite.shared_agent_id) if suite.shared_agent_id else None,
         "started_at": suite.started_at.isoformat() if suite.started_at else None,
@@ -2312,6 +2315,15 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("Invalid agent_strategy")
 
         shared_agent: PersistentAgent | None = None
+        run_type_raw = body.get("run_type") or EvalSuiteRun.RunType.ONE_OFF
+        if isinstance(body.get("official"), bool):
+            run_type_raw = EvalSuiteRun.RunType.OFFICIAL if body.get("official") else EvalSuiteRun.RunType.ONE_OFF
+        if isinstance(run_type_raw, str):
+            run_type_raw = run_type_raw.lower()
+        if run_type_raw not in dict(EvalSuiteRun.RunType.choices):
+            return HttpResponseBadRequest("Invalid run_type")
+        run_type: str = run_type_raw
+
         agent_id = body.get("agent_id")
         if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT:
             if not agent_id:
@@ -2345,6 +2357,7 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 suite_slug=suite_obj.slug,
                 initiated_by=request.user,
                 status=EvalSuiteRun.Status.RUNNING,
+                run_type=run_type,
                 agent_strategy=agent_strategy,
                 shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
                 started_at=timezone.now(),
@@ -2367,6 +2380,7 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                     agent=run_agent,
                     initiated_by=request.user,
                     status=EvalRun.Status.PENDING,
+                    run_type=run_type,
                 )
                 run_eval_task.delay(str(run.id))
                 created_runs.append(run)
@@ -2408,17 +2422,24 @@ class EvalSuiteRunListAPIView(SystemAdminAPIView):
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         status_filter = request.GET.get("status")
         suite_filter = request.GET.get("suite")
+        run_type_filter = request.GET.get("run_type")
         limit_raw = request.GET.get("limit") or "25"
         try:
             limit = max(1, min(100, int(limit_raw)))
         except ValueError:
             return HttpResponseBadRequest("limit must be an integer")
+        if run_type_filter:
+            run_type_filter = run_type_filter.lower()
+            if run_type_filter not in dict(EvalSuiteRun.RunType.choices):
+                return HttpResponseBadRequest("Invalid run_type")
 
         qs = EvalSuiteRun.objects.select_related("initiated_by", "shared_agent").prefetch_related("runs")
         if status_filter:
             qs = qs.filter(status=status_filter)
         if suite_filter:
             qs = qs.filter(suite_slug=suite_filter)
+        if run_type_filter:
+            qs = qs.filter(run_type=run_type_filter)
 
         suite_runs = list(qs.order_by("-created_at")[:limit])
         # Refresh stale aggregates so UI doesn't show stuck "running" rows
@@ -2445,6 +2466,44 @@ class EvalSuiteRunDetailAPIView(SystemAdminAPIView):
             EvalSuiteRun.objects.prefetch_related("runs__tasks", "runs__agent"),
             pk=suite_run_id,
         )
+        return JsonResponse({"suite_run": _serialize_suite_run(suite, include_runs=True, include_tasks=True)})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EvalSuiteRunRunTypeAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, suite_run_id: str, *args: Any, **kwargs: Any):
+        try:
+            body = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        run_type_raw = body.get("run_type")
+        if isinstance(body.get("official"), bool):
+            run_type_raw = EvalSuiteRun.RunType.OFFICIAL if body.get("official") else EvalSuiteRun.RunType.ONE_OFF
+        if isinstance(run_type_raw, str):
+            run_type_raw = run_type_raw.lower()
+        if run_type_raw not in dict(EvalSuiteRun.RunType.choices):
+            return HttpResponseBadRequest("Invalid run_type")
+
+        suite = get_object_or_404(
+            EvalSuiteRun.objects.prefetch_related("runs__tasks"),
+            pk=suite_run_id,
+        )
+
+        if suite.run_type != run_type_raw:
+            suite.run_type = run_type_raw
+            suite.save(update_fields=["run_type", "updated_at"])
+            now = timezone.now()
+            EvalRun.objects.filter(suite_run_id=suite.id).update(run_type=run_type_raw, updated_at=now)
+
+        suite = EvalSuiteRun.objects.prefetch_related("runs__tasks").get(pk=suite_run_id)
+
+        broadcast_suite_update(suite, include_runs=True)
+        for run in suite.runs.all():
+            broadcast_run_update(run, include_tasks=True)
+
         return JsonResponse({"suite_run": _serialize_suite_run(suite, include_runs=True, include_tasks=True)})
 
 

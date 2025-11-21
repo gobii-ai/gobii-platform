@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft } from 'lucide-react'
 
-import { fetchSuiteRunDetail, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
+import { fetchSuiteRunDetail, updateSuiteRunType, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
+import { RunTypeBadge } from '../components/common/RunTypeBadge'
 
 const formatTs = (value: string | null | undefined) => {
   if (!value) return '—'
@@ -18,6 +19,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   const [suite, setSuite] = useState<EvalSuiteRun | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [updatingRunType, setUpdatingRunType] = useState(false)
 
   const hasRuns = useMemo(() => Boolean(suite?.runs && suite.runs.length), [suite?.runs])
 
@@ -34,6 +36,23 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
       completed: suite.run_totals?.completed ?? 0,
     }
   }, [suite])
+
+  const toggleRunType = async (nextRunType: EvalSuiteRun['run_type']) => {
+    setUpdatingRunType(true)
+    setError(null)
+    try {
+      const result = await updateSuiteRunType(suiteRunId, {
+        run_type: nextRunType,
+        official: nextRunType === 'official',
+      })
+      setSuite(result.suite_run)
+    } catch (err) {
+      console.error(err)
+      setError('Unable to update run type right now.')
+    } finally {
+      setUpdatingRunType(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -127,6 +146,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Eval Run Detail</h1>
                 {suite && <StatusBadge status={suite.status || 'pending'} />}
+                {suite && <RunTypeBadge runType={suite.run_type} />}
               </div>
               <p className="text-slate-600 mt-1.5 flex items-center gap-2">
                 Inspect individual scenario runs and task assertions.
@@ -158,6 +178,17 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
               <RefreshCcw className="w-4 h-4" />
               Refresh
             </button>
+            {suite && (
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg shadow-sm hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => toggleRunType(suite.run_type === 'official' ? 'one_off' : 'official')}
+                disabled={updatingRunType}
+              >
+                {updatingRunType ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {suite.run_type === 'official' ? 'Mark as One-off' : 'Mark as Official'}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -193,6 +224,15 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                 <p className="text-sm text-slate-500">
                   Strategy: <span className="font-medium text-slate-700">{suite.agent_strategy}</span>
                 </p>
+                <div className="space-y-1">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Run Type</p>
+                  <div className="flex items-center gap-2">
+                    <RunTypeBadge runType={suite.run_type} />
+                    <span className="text-xs text-slate-500">
+                      {suite.run_type === 'official' ? 'Tracked for metrics' : 'Ad-hoc validation'}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <div className="flex flex-col justify-between space-y-2 sm:pl-6 sm:border-l sm:border-slate-100">
@@ -271,9 +311,13 @@ function RunCard({ run }: { run: EvalRun }) {
            <div className={`w-3 h-3 rounded-full shadow-sm shrink-0 ${isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`} />
            <div>
               <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{run.scenario_slug}</h3>
-              <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                Agent: <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">{run.agent_id || 'ephemeral'}</span>
-              </p>
+              <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-2">
+                <RunTypeBadge runType={run.run_type} dense />
+                <span className="flex items-center gap-1">
+                  Agent:
+                  <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">{run.agent_id || 'ephemeral'}</span>
+                </span>
+              </div>
            </div>
         </div>
         <div className="flex items-center gap-4">

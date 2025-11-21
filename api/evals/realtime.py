@@ -41,6 +41,7 @@ def _serialize_run(run: EvalRun, *, include_tasks: bool = False, tasks: Optional
         "scenario_slug": run.scenario_slug,
         "scenario_version": run.scenario_version,
         "status": run.status,
+        "run_type": run.run_type,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         "agent_id": str(run.agent_id) if run.agent_id else None,
@@ -58,6 +59,7 @@ def _serialize_suite(suite: EvalSuiteRun, *, include_runs: bool = False, runs: O
         "id": str(suite.id),
         "suite_slug": suite.suite_slug,
         "status": suite.status,
+        "run_type": suite.run_type,
         "agent_strategy": suite.agent_strategy,
         "shared_agent_id": str(suite.shared_agent_id) if suite.shared_agent_id else None,
         "started_at": suite.started_at.isoformat() if suite.started_at else None,
@@ -95,4 +97,3 @@ def broadcast_task_update(task: EvalRunTask) -> None:
 
     if task.run.suite_run_id:
         _send(f"eval-suite-{task.run.suite_run_id}", "task.update", payload)
-
