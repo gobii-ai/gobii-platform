@@ -149,7 +149,11 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
-@extend_schema(operation_id='ping', tags=['utils'], responses={200: serializers.DictField})
+@extend_schema(
+    operation_id='ping',
+    tags=['Utilities'],
+    responses={200: serializers.DictField}
+)
 def ping(request):
     """Test API connectivity with a simple ping endpoint"""
     Analytics.track_event(user_id=request.user.id, event=AnalyticsEvent.PING, source=AnalyticsSource.API)
@@ -660,12 +664,12 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
 
 
 @extend_schema_view(
-    list=extend_schema(operation_id='listPersistentAgents', tags=['persistent-agents']),
-    retrieve=extend_schema(operation_id='getPersistentAgent', tags=['persistent-agents']),
-    create=extend_schema(operation_id='createPersistentAgent', tags=['persistent-agents']),
-    update=extend_schema(operation_id='updatePersistentAgent', tags=['persistent-agents']),
-    partial_update=extend_schema(operation_id='partialUpdatePersistentAgent', tags=['persistent-agents']),
-    destroy=extend_schema(operation_id='deletePersistentAgent', tags=['persistent-agents'])
+    list=extend_schema(operation_id='listPersistentAgents', tags=['Agents']),
+    retrieve=extend_schema(operation_id='getPersistentAgent', tags=['Agents']),
+    create=extend_schema(operation_id='createPersistentAgent', tags=['Agents']),
+    update=extend_schema(operation_id='updatePersistentAgent', tags=['Agents']),
+    partial_update=extend_schema(operation_id='partialUpdatePersistentAgent', tags=['Agents']),
+    destroy=extend_schema(operation_id='deletePersistentAgent', tags=['Agents'])
 )
 class PersistentAgentViewSet(viewsets.ModelViewSet):
     queryset = PersistentAgent.objects.select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint')
@@ -781,6 +785,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         return endpoint.address
 
     @action(detail=True, methods=['get'], url_path='timeline')
+    @extend_schema(operation_id='getPersistentAgentTimeline', tags=['Agents'])
     def timeline(self, request, id=None):
         agent = self.get_object()
         direction = (request.query_params.get('direction') or 'initial').lower()
@@ -807,6 +812,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         return Response(payload)
 
     @action(detail=True, methods=['post'], url_path='messages')
+    @extend_schema(operation_id='sendPersistentAgentMessage', tags=['Agents'])
     def create_message(self, request, id=None):
         agent = self.get_object()
         serializer = PersistentAgentMessageCreateSerializer(data=request.data)
@@ -853,6 +859,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         return Response({'event': event}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='processing-status')
+    @extend_schema(operation_id='getPersistentAgentProcessingStatus', tags=['Agents'])
     def processing_status(self, request, id=None):
         agent = self.get_object()
         snapshot = build_processing_snapshot(agent)
@@ -862,6 +869,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         })
 
     @action(detail=True, methods=['post'], url_path='activate')
+    @extend_schema(operation_id='activatePersistentAgent', tags=['Agents'])
     def activate(self, request, id=None):
         agent = self.get_object()
         updates: set[str] = set()
@@ -877,6 +885,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         return Response({'status': 'activated', 'updated': bool(updates)})
 
     @action(detail=True, methods=['post'], url_path='deactivate')
+    @extend_schema(operation_id='deactivatePersistentAgent', tags=['Agents'])
     def deactivate(self, request, id=None):
         agent = self.get_object()
         updates = {}
@@ -889,6 +898,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         return Response({'status': 'deactivated', 'updated': bool(updates)})
 
     @action(detail=True, methods=['post'], url_path='schedule/preview')
+    @extend_schema(operation_id='previewPersistentAgentSchedule', tags=['Agents'])
     def schedule_preview(self, request, id=None):
         self.get_object()
         serializer = PersistentAgentSchedulePreviewSerializer(data=request.data)
@@ -907,6 +917,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         return Response({'valid': True, 'disabled': False, 'description': description})
 
     @action(detail=True, methods=['get'], url_path='web-tasks')
+    @extend_schema(operation_id='listWebTasks', tags=['Agents'])
     def web_tasks(self, request, id=None):
         agent = self.get_object()
         browser_agent = agent.browser_use_agent

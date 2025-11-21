@@ -1,9 +1,11 @@
 # gobii_platform/api/serializers.py
 import uuid
+from decimal import Decimal
 from urllib.parse import urlparse
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from drf_spectacular.utils import extend_schema_serializer, extend_schema_field
 from rest_framework import serializers
 from api.agent.short_description import build_listing_description, build_mini_description
 from .models import (
@@ -21,9 +23,7 @@ from util.analytics import AnalyticsSource
 class BrowserUseAgentListSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
     listing_description = serializers.SerializerMethodField()
-    listing_description_source = serializers.SerializerMethodField()
     mini_description = serializers.SerializerMethodField()
-    mini_description_source = serializers.SerializerMethodField()
 
     class Meta:
         model = BrowserUseAgent
@@ -32,9 +32,7 @@ class BrowserUseAgentListSerializer(serializers.ModelSerializer):
             'name',
             'created_at',
             'listing_description',
-            'listing_description_source',
             'mini_description',
-            'mini_description_source',
         ]
         ref_name = "AgentList" # Optional: for explicit component naming
 
@@ -44,13 +42,12 @@ class BrowserUseAgentListSerializer(serializers.ModelSerializer):
             return "Agent is initializing…", "placeholder"
         return build_listing_description(persistent, max_length=200)
 
+    @extend_schema_field(serializers.CharField(
+        help_text="Human-readable description of what the agent does."
+    ))
     def get_listing_description(self, obj):
         description, _ = self._get_listing_tuple(obj)
         return description
-
-    def get_listing_description_source(self, obj):
-        _, source = self._get_listing_tuple(obj)
-        return source
 
     def _get_mini_tuple(self, obj):
         persistent = getattr(obj, 'persistent_agent', None)
@@ -58,21 +55,18 @@ class BrowserUseAgentListSerializer(serializers.ModelSerializer):
             return "Agent", "placeholder"
         return build_mini_description(persistent)
 
+    @extend_schema_field(serializers.CharField(
+        help_text="Human-readable brief description of what the agent does."
+    ))
     def get_mini_description(self, obj):
         description, _ = self._get_mini_tuple(obj)
         return description
-
-    def get_mini_description_source(self, obj):
-        _, source = self._get_mini_tuple(obj)
-        return source
 
 class BrowserUseAgentSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
     user_email = serializers.ReadOnlyField(source='user.email')
     listing_description = serializers.SerializerMethodField()
-    listing_description_source = serializers.SerializerMethodField()
     mini_description = serializers.SerializerMethodField()
-    mini_description_source = serializers.SerializerMethodField()
 
     class Meta:
         model = BrowserUseAgent
@@ -83,9 +77,7 @@ class BrowserUseAgentSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'listing_description',
-            'listing_description_source',
             'mini_description',
-            'mini_description_source',
         ]
         read_only_fields = ('id', 'user_email', 'created_at', 'updated_at') # 'name' is now writable
         ref_name = "AgentDetail" # Optional: for explicit component naming
@@ -96,13 +88,12 @@ class BrowserUseAgentSerializer(serializers.ModelSerializer):
             return "Agent is initializing…", "placeholder"
         return build_listing_description(persistent, max_length=200)
 
+    @extend_schema_field(serializers.CharField(
+        help_text="Human-readable description of what the agent does."
+    ))
     def get_listing_description(self, obj):
         description, _ = self._get_listing_tuple(obj)
         return description
-
-    def get_listing_description_source(self, obj):
-        _, source = self._get_listing_tuple(obj)
-        return source
 
     def _get_mini_tuple(self, obj):
         persistent = getattr(obj, 'persistent_agent', None)
@@ -110,13 +101,12 @@ class BrowserUseAgentSerializer(serializers.ModelSerializer):
             return "Agent", "placeholder"
         return build_mini_description(persistent)
 
+    @extend_schema_field(serializers.CharField(
+        help_text="Human-readable brief description of what the agent does."
+    ))
     def get_mini_description(self, obj):
         description, _ = self._get_mini_tuple(obj)
         return description
-
-    def get_mini_description_source(self, obj):
-        _, source = self._get_mini_tuple(obj)
-        return source
 
 class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
@@ -128,24 +118,62 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
         allow_null=True,
         pk_field=serializers.UUIDField(format='hex_verbose'),
     )
-    agent_id = serializers.UUIDField(source='agent.id', read_only=True, format='hex_verbose')
-    organization_id = serializers.UUIDField(source='organization.id', read_only=True, format='hex_verbose')
-    wait = serializers.IntegerField(min_value=0, max_value=1350, required=False, write_only=True)
+
+    agent_id = serializers.UUIDField(
+        source='agent.id',
+        read_only=True,
+        format='hex_verbose',
+        help_text="ID of the browser-use agent to use for this task. If not specified, the task will be created for the authenticated user's agent."
+    )
+
+    organization_id = serializers.UUIDField(
+        source='organization.id',
+        read_only=True,
+        format='hex_verbose',
+        help_text="ID of the organization that owns the agent, if any."
+    )
+
+    wait = serializers.IntegerField(
+        min_value=0,
+        max_value=1350,
+        required=False,
+        write_only=True,
+        help_text="Number of seconds to wait for the task to complete before returning. Defaults to 0 (no wait). Providing a value will run the task synchronously."
+    )
     secrets = serializers.DictField(
         required=False,
         write_only=True,  # Never return secrets in responses
         help_text="Domain-specific secrets for the task. REQUIRED FORMAT: {'https://example.com': {'x_api_key': 'value', 'x_username': 'user'}}. Each domain can have multiple secrets. Secret keys will be available as placeholders in the prompt for the specified domains."
     )
-    credits_cost = serializers.DecimalField(max_digits=12, decimal_places=3, min_value="0.001", required=False, allow_null=True)
+    credits_cost = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        min_value=Decimal('0.001'),
+        required=False,
+        allow_null=True,
+        help_text="Number of task credits used during execution."
+    )
     webhook = serializers.URLField(
         source='webhook_url',
         required=False,
         allow_null=True,
         help_text="HTTP or HTTPS URL invoked when the task finishes.",
     )
-    webhook_last_called_at = serializers.DateTimeField(read_only=True)
-    webhook_last_status_code = serializers.IntegerField(read_only=True, allow_null=True)
-    webhook_last_error = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
+    webhook_last_called_at = serializers.DateTimeField(
+        read_only=True,
+        help_text="Timestamp of the last webhook invocation, if any.",
+    )
+    webhook_last_status_code = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+        help_text="HTTP status code of the last webhook invocation, if any.",
+    )
+    webhook_last_error = serializers.CharField(
+        read_only=True,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Error message of the last webhook invocation, if any.",
+    )
 
     class Meta:
         model = BrowserUseAgentTask
@@ -284,8 +312,18 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
 
 class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
-    agent_id = serializers.UUIDField(source='agent.id', read_only=True, format='hex_verbose')
-    webhook = serializers.URLField(source='webhook_url', read_only=True, allow_null=True)
+    agent_id = serializers.UUIDField(
+        source='agent.id',
+        read_only=True,
+        format='hex_verbose',
+        help_text="ID of the browser-use agent to use for this task."
+    )
+    webhook = serializers.URLField(
+        source='webhook_url',
+        read_only=True,
+        allow_null=True,
+        help_text="HTTP or HTTPS URL invoked when the task finishes.",
+    )
 
     class Meta:
         model = BrowserUseAgentTask
@@ -293,17 +331,35 @@ class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
         ref_name = "TaskList" # Optional: for explicit component naming
 
-
 class PersistentAgentListSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only=True, format='hex_verbose')
-    user_id = serializers.UUIDField(source='user.id', read_only=True, format='hex_verbose')
-    organization_id = serializers.UUIDField(read_only=True, allow_null=True, format='hex_verbose')
-    browser_use_agent_id = serializers.UUIDField(source='browser_use_agent.id', read_only=True, format='hex_verbose')
+    id = serializers.UUIDField(
+        read_only=True,
+        format='hex_verbose',
+        help_text="ID of the persistent agent."
+    )
+    user_id = serializers.IntegerField(
+        source='user.id',
+        read_only=True,
+        help_text="ID of the user that owns the agent."
+    )
+    organization_id = serializers.UUIDField(
+        read_only=True,
+        allow_null=True,
+        format='hex_verbose',
+        help_text="ID of the organization that owns the agent, if any."
+    )
+    browser_use_agent_id = serializers.UUIDField(
+        source='browser_use_agent.id',
+        read_only=True,
+        format='hex_verbose',
+        help_text="ID of the browser-use agent used by the agent."
+    )
     preferred_contact_endpoint_id = serializers.UUIDField(
         source='preferred_contact_endpoint.id',
         read_only=True,
         allow_null=True,
         format='hex_verbose',
+        help_text="ID of the preferred contact endpoint used by the agent."
     )
 
     class Meta:
@@ -329,7 +385,7 @@ class PersistentAgentListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
         ref_name = "PersistentAgentList"
 
-class PreferredEndpointInputField(serializers.Field):
+class PreferredEndpointInputField(serializers.CharField):
     default_error_messages = {
         'invalid_choice': 'preferred_contact_endpoint must be "email", "sms", or a valid endpoint id.',
         'does_not_exist': 'Contact endpoint does not exist: {value}.',
@@ -355,29 +411,54 @@ class PreferredEndpointInputField(serializers.Field):
     def to_representation(self, value):
         return None
 
-
 class PersistentAgentSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only=True, format='hex_verbose')
-    user_id = serializers.UUIDField(source='user.id', read_only=True, format='hex_verbose')
-    organization_id = serializers.UUIDField(read_only=True, allow_null=True, format='hex_verbose')
-    browser_use_agent_id = serializers.UUIDField(source='browser_use_agent.id', read_only=True, format='hex_verbose')
+    id = serializers.UUIDField(
+        read_only=True,
+        format='hex_verbose',
+        help_text="ID of the persistent agent."
+    )
+    user_id = serializers.IntegerField(
+        source='user.id',
+        read_only=True,
+        help_text="ID of the user that owns the agent."
+    )
+    organization_id = serializers.UUIDField(
+        read_only=True,
+        allow_null=True,
+        format='hex_verbose',
+        help_text="ID of the organization that owns the agent, if any."
+    )
+    browser_use_agent_id = serializers.UUIDField(
+        source='browser_use_agent.id',
+        read_only=True,
+        format='hex_verbose',
+        help_text="ID of the browser-use agent used by the agent."
+    )
     preferred_contact_endpoint_id = serializers.UUIDField(
         source='preferred_contact_endpoint.id',
         read_only=True,
         allow_null=True,
         format='hex_verbose',
+        help_text="ID of the preferred contact endpoint used by the agent."
     )
     preferred_contact_endpoint = PreferredEndpointInputField(
         required=False,
         allow_null=True,
         write_only=True,
+        help_text="Preferred contact endpoint to use for the agent. Must be either 'email' or 'sms' or a valid endpoint id.",
     )
-    template_code = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
+    template_code = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
     enabled_personal_server_ids = serializers.ListField(
         child=serializers.UUIDField(format='hex_verbose'),
         required=False,
         write_only=True,
         allow_empty=True,
+        help_text="List of enabled MCP servers to use for the agent.",
     )
     available_mcp_servers = serializers.SerializerMethodField(read_only=True)
     personal_mcp_server_ids = serializers.SerializerMethodField(read_only=True)
