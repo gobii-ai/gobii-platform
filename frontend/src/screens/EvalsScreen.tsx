@@ -169,57 +169,59 @@ export function EvalsScreen() {
             </button>
           )}
         </div>
-        <div className="p-6">
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {suites.map((suite) => {
-              const checked = selectedSuites.has(suite.slug)
-              return (
-                <div
-                  key={suite.slug}
-                  onClick={() => toggleSuiteSelection(suite.slug)}
-                  className={`
-                    group relative flex cursor-pointer flex-col gap-3 rounded-xl p-4 transition-all
-                    ${checked 
-                      ? 'bg-blue-50/50 shadow-md ring-2 ring-blue-500' 
-                      : 'bg-white shadow-sm hover:shadow-md ring-1 ring-slate-200'
-                    }
-                  `}
-                  role="checkbox"
-                  aria-checked={checked}
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      toggleSuiteSelection(suite.slug)
-                    }
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <span className={`font-semibold text-base break-all ${checked ? 'text-blue-900' : 'text-slate-900'}`}>
-                      {suite.slug}
-                    </span>
-                    <div className={`shrink-0 mt-0.5 transition-colors ${checked ? 'text-blue-600' : 'text-slate-300 group-hover:text-blue-400'}`}>
-                      {checked 
-                        ? <div className="bg-blue-600 text-white rounded-full p-0.5"><CheckSquare className="w-4 h-4" /></div>
-                        : <div className="rounded-full w-5 h-5 border-2 border-slate-300 group-hover:border-blue-400" />
+        <div className="divide-y divide-slate-100">
+          {suites.map((suite) => {
+            const checked = selectedSuites.has(suite.slug)
+            return (
+              <div
+                key={suite.slug}
+                onClick={() => toggleSuiteSelection(suite.slug)}
+                className="flex items-start gap-4 p-6 cursor-pointer group bg-white"
+                role="checkbox"
+                aria-checked={checked}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    toggleSuiteSelection(suite.slug)
+                  }
+                }}
+              >
+                <div className="pt-1">
+                  <div 
+                    className={`
+                      w-5 h-5 rounded border flex items-center justify-center transition-all
+                      ${checked 
+                        ? 'bg-blue-600 border-blue-600 text-white' 
+                        : 'bg-white border-slate-300 text-transparent group-hover:border-blue-400'
                       }
-                    </div>
-                  </div>
-                  <p className={`text-sm line-clamp-3 leading-relaxed ${checked ? 'text-blue-800' : 'text-slate-600'}`}>
-                    {suite.description || 'No description provided.'}
-                  </p>
-                  <div className="mt-auto pt-3 border-t border-dashed border-slate-200 flex items-center gap-2 text-xs uppercase tracking-wider text-slate-400 font-bold">
-                     {pluralize(suite.scenario_slugs.length, 'scenario')}
+                    `}
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" strokeWidth={3} />
                   </div>
                 </div>
-              )
-            })}
-            {!suites.length && (
-              <div className="col-span-full py-12 text-center rounded-xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200">
-                <p className="text-sm font-medium">No suites registered.</p>
+                
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className={`text-sm font-bold ${checked ? 'text-blue-900' : 'text-slate-900'}`}>
+                      {suite.slug}
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      {pluralize(suite.scenario_slugs.length, 'scenario')}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-500 leading-relaxed max-w-3xl">
+                    {suite.description || 'No description provided.'}
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
+            )
+          })}
+          {!suites.length && (
+            <div className="p-12 text-center text-slate-500">
+              <p className="text-sm font-medium">No suites registered.</p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -248,7 +250,7 @@ export function EvalsScreen() {
                     : '—'
                     
                   return (
-                    <tr key={suite.id} className="group hover:bg-slate-50 transition-colors">
+                    <tr key={suite.id} className="group">
                       <td className="px-6 py-4">
                         <div className="font-semibold text-slate-900">{suite.suite_slug}</div>
                         <div className="text-xs font-mono text-slate-400 mt-0.5">{suite.id.slice(0, 8)}</div>
