@@ -127,7 +127,7 @@ from console.views import (
 )
 from console.context_views import SwitchContextView
 from pages.views import PaidPlanLanding
-from api.views import LinkShortenerRedirectView
+from api.views import LinkShortenerRedirectView, PersistentAgentViewSet
 
 urlpatterns = [
     # Pages app includes homepage, health check, and documentation
@@ -167,6 +167,11 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
     path("console/api/agents/<uuid:agent_id>/messages/", AgentMessageCreateAPIView.as_view(), name="console_agent_message_create"),
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),
+    path(
+        "console/api/agents/<uuid:id>/",
+        PersistentAgentViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update'}),
+        name="console_agent_detail",
+    ),
     path("console/api/llm/overview/", ConsoleLLMOverviewAPIView.as_view(), name="console_llm_overview"),
     path("console/api/llm/providers/", LLMProviderListCreateAPIView.as_view(), name="console_llm_providers"),
     path("console/api/llm/providers/<uuid:provider_id>/", LLMProviderDetailAPIView.as_view(), name="console_llm_provider_detail"),

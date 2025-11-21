@@ -11,6 +11,7 @@ import os
 import logging
 import random
 from datetime import timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 from typing import Dict, List, Tuple, Any, Optional
 
@@ -27,6 +28,13 @@ from util.subscription_helper import get_owner_plan
 from constants.plans import PlanNames
 
 logger = logging.getLogger(__name__)
+
+_TIER_MULTIPLIER_CACHE_KEY = "persistent_llm_tier_multipliers:v1"
+_DEFAULT_TIER_MULTIPLIERS: Dict[str, Decimal] = {
+    "standard": Decimal("1.00"),
+    "premium": Decimal("2.00"),
+    "max": Decimal("5.00"),
+}
 
 # Certain models only support a single temperature. When we detect these models
 # we silently coerce the temperature to the required value so LiteLLM does not
@@ -62,7 +70,7 @@ def _apply_required_temperature(model: str, params: Dict[str, Any]) -> None:
 
 _PREMIUM_PLAN_IDS = {"pro", "org", PlanNames.SCALE, "startup", "org_team"}
 _PREMIUM_PLAN_NAMES = {"pro", "org", PlanNames.SCALE}
-_PREMIUM_ACCOUNT_AGE_DAYS = 30
+_NEW_ACCOUNT_PREMIUM_GRACE_DAYS = getattr(settings, "NEW_ACCOUNT_PREMIUM_GRACE_DAYS", 30)
 
 
 class AgentLLMTier(str, Enum):
@@ -73,6 +81,178 @@ class AgentLLMTier(str, Enum):
     MAX = "max"
 
 
+TIER_ORDER = {
+    AgentLLMTier.STANDARD: 0,
+    AgentLLMTier.PREMIUM: 1,
+    AgentLLMTier.MAX: 2,
+}
+
+
+def _plan_supports_premium(plan: Optional[dict[str, Any]]) -> bool:
+    if not plan:
+        return False
+    plan_id = str(plan.get("id", "")).lower()
+    plan_name = str(plan.get("name", "")).lower()
+    return plan_id in _PREMIUM_PLAN_IDS or plan_name in _PREMIUM_PLAN_NAMES
+
+
+def max_allowed_tier_for_plan(
+    plan: Optional[dict[str, Any]],
+    *,
+    is_organization: bool = False,
+) -> AgentLLMTier:
+    if is_organization:
+        return AgentLLMTier.MAX
+    if _plan_supports_premium(plan):
+        return AgentLLMTier.MAX
+    return AgentLLMTier.STANDARD
+
+
+def _clamp_tier(target: AgentLLMTier, max_allowed: AgentLLMTier) -> AgentLLMTier:
+    if TIER_ORDER[target] <= TIER_ORDER[max_allowed]:
+        return target
+    return max_allowed
+
+
+def default_preferred_tier_for_owner(owner: Any | None) -> AgentLLMTier:
+    """Return the default preferred tier for a given owner."""
+
+    if owner is None:
+        return AgentLLMTier.STANDARD
+
+    try:
+        plan = get_owner_plan(owner)
+    except Exception:
+        plan = None
+
+    owner_meta = getattr(owner, "_meta", None)
+    is_organization = bool(
+        owner_meta and owner_meta.app_label == "api" and owner_meta.model_name == "organization"
+    )
+    allowed = max_allowed_tier_for_plan(plan, is_organization=is_organization)
+    if allowed in (AgentLLMTier.PREMIUM, AgentLLMTier.MAX):
+        return AgentLLMTier.PREMIUM
+    return AgentLLMTier.STANDARD
+
+
+def get_llm_tier_multipliers(force_refresh: bool = False) -> Dict[str, Decimal]:
+    """Return cached credit multipliers per tier."""
+
+    cached = None if force_refresh else cache.get(_TIER_MULTIPLIER_CACHE_KEY)
+    if cached:
+        try:
+            return {key: Decimal(str(value)) for key, value in cached.items()}
+        except Exception:
+            logger.debug("Failed to deserialize cached tier multipliers", exc_info=True)
+
+    result: Dict[str, Decimal] = dict(_DEFAULT_TIER_MULTIPLIERS)
+    try:
+        PersistentLLMTier = apps.get_model("api", "PersistentLLMTier")
+        for tier in PersistentLLMTier.objects.all().only("is_max", "is_premium", "credit_multiplier"):
+            tier_key = "max" if tier.is_max else ("premium" if tier.is_premium else "standard")
+            multiplier = getattr(tier, "credit_multiplier", None) or Decimal("1.00")
+            try:
+                current = result.get(tier_key, Decimal("1.00"))
+                result[tier_key] = max(current, Decimal(multiplier))
+            except Exception:
+                logger.debug(
+                    "Invalid credit multiplier for tier %s (value=%s)",
+                    tier_key,
+                    multiplier,
+                    exc_info=True,
+                )
+    except Exception:
+        logger.debug("Failed to load persistent tier multipliers", exc_info=True)
+
+    cache.set(
+        _TIER_MULTIPLIER_CACHE_KEY,
+        {key: str(value) for key, value in result.items()},
+        timeout=300,
+    )
+    return result
+
+
+def invalidate_llm_tier_multiplier_cache() -> None:
+    cache.delete(_TIER_MULTIPLIER_CACHE_KEY)
+
+
+def _normalize_tier_value(tier: AgentLLMTier | str) -> AgentLLMTier:
+    if isinstance(tier, AgentLLMTier):
+        return tier
+    try:
+        return AgentLLMTier(str(tier))
+    except ValueError:
+        return AgentLLMTier.STANDARD
+
+
+def get_credit_multiplier_for_tier(tier: AgentLLMTier | str) -> Decimal:
+    tier_enum = _normalize_tier_value(tier)
+    multipliers = get_llm_tier_multipliers()
+    return multipliers.get(tier_enum.value, _DEFAULT_TIER_MULTIPLIERS[tier_enum.value])
+
+
+def apply_tier_credit_multiplier(agent: Any, amount: Optional[Decimal]) -> Optional[Decimal]:
+    """Return ``amount`` scaled by the agent's tier multiplier."""
+
+    if amount is None or agent is None:
+        return amount
+    try:
+        base_amount = amount if isinstance(amount, Decimal) else Decimal(str(amount))
+    except Exception:
+        logger.debug("Unable to normalize credit amount %s for agent %s", amount, getattr(agent, "id", None))
+        return amount
+
+    tier = get_agent_llm_tier(agent)
+    if tier is AgentLLMTier.PREMIUM and _is_trial_discount_eligible(agent):
+        tier = AgentLLMTier.STANDARD
+    multiplier = get_credit_multiplier_for_tier(tier)
+    scaled = base_amount * multiplier
+    return scaled.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+
+def _within_new_account_premium_window(owner: Any | None) -> bool:
+    """Return True when the owner is within the premium trial window."""
+
+    if owner is None:
+        return False
+    joined = getattr(owner, "date_joined", None)
+    if not joined:
+        return False
+    try:
+        joined_dt = joined
+        if timezone.is_naive(joined_dt):
+            joined_dt = timezone.make_aware(joined_dt, timezone.utc)
+    except Exception:
+        return False
+    try:
+        days = int(_NEW_ACCOUNT_PREMIUM_GRACE_DAYS)  # type: ignore[arg-type]
+    except Exception:
+        days = 0
+    if days <= 0:
+        return False
+    return (timezone.now() - joined_dt) <= timedelta(days=days)
+
+
+def _is_trial_discount_eligible(agent: Any | None) -> bool:
+    """Return True when an agent's premium tier comes from the new-account trial."""
+
+    if agent is None:
+        return False
+    if getattr(agent, "organization_id", None):
+        return False
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        return False
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    if owner is None:
+        return False
+    try:
+        plan = get_owner_plan(owner)
+    except Exception:
+        plan = None
+    allowed = max_allowed_tier_for_plan(plan, is_organization=False)
+    return allowed == AgentLLMTier.STANDARD and _within_new_account_premium_window(owner)
+
+
 def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> AgentLLMTier:
     """Return the highest LLM tier the provided agent is eligible to use."""
 
@@ -80,9 +260,6 @@ def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> Agen
         return AgentLLMTier.STANDARD
     if agent is None:
         return AgentLLMTier.STANDARD
-
-    if is_first_loop:
-        return AgentLLMTier.PREMIUM
 
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
     plan = None
@@ -95,26 +272,29 @@ def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> Agen
                 getattr(agent, "id", None),
                 exc_info=True,
             )
-    plan_id = str(plan.get("id", "")).lower() if plan else ""
-    plan_name = str(plan.get("name", "")).lower() if plan else ""
-    if plan_id in _PREMIUM_PLAN_IDS or plan_name in _PREMIUM_PLAN_NAMES:
+    is_org_owned = bool(getattr(agent, "organization_id", None))
+    trial_eligible = bool(not is_org_owned and _within_new_account_premium_window(owner))
+    allowed_tier = max_allowed_tier_for_plan(plan, is_organization=is_org_owned)
+    trial_boost_active = trial_eligible and allowed_tier == AgentLLMTier.STANDARD
+    if trial_boost_active:
+        allowed_tier = AgentLLMTier.PREMIUM
+
+    if is_first_loop:
         return AgentLLMTier.PREMIUM
 
-    user = getattr(agent, "user", None)
-    date_joined = getattr(user, "date_joined", None) if user is not None else None
-    if date_joined is not None:
+    preferred_value = getattr(agent, "preferred_llm_tier", None)
+    if preferred_value:
         try:
-            if date_joined >= timezone.now() - timedelta(days=_PREMIUM_ACCOUNT_AGE_DAYS):
-                return AgentLLMTier.PREMIUM
-        except Exception:
-            logger.debug(
-                "Unable to evaluate account age for agent %s",
-                getattr(agent, "id", None),
-                exc_info=True,
-            )
+            preferred = AgentLLMTier(preferred_value)
+        except ValueError:
+            preferred = default_preferred_tier_for_owner(owner)
+    else:
+        preferred = default_preferred_tier_for_owner(owner)
 
-    # Placeholder: once qualification criteria exist, return AgentLLMTier.MAX where appropriate.
-    return AgentLLMTier.STANDARD
+    if trial_boost_active and preferred == AgentLLMTier.STANDARD:
+        preferred = AgentLLMTier.PREMIUM
+
+    return _clamp_tier(preferred, allowed_tier)
 
 
 def should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) -> bool:

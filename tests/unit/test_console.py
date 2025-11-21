@@ -535,8 +535,20 @@ class ConsoleViewsTest(TestCase):
 
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'name="dedicated_proxy_id"')
-        self.assertContains(response, '198.51.100.12')
+        props = response.context.get('agent_detail_props') or {}
+        dedicated_ips = props.get('dedicatedIps') or {}
+        self.assertEqual(dedicated_ips.get('total'), 1)
+        self.assertEqual(dedicated_ips.get('available'), 1)
+        self.assertEqual(dedicated_ips.get('selectedId'), None)
+        options = dedicated_ips.get('options') or []
+        self.assertEqual(len(options), 1)
+        self.assertEqual(options[0], {
+            'id': str(proxy.id),
+            'label': '198.51.100.12',
+            'inUseElsewhere': False,
+            'disabled': False,
+            'assignedNames': [],
+        })
 
         response = self.client.post(url, {
             'name': agent.name,

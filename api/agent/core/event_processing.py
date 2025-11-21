@@ -63,6 +63,7 @@ from util.constants.task_constants import TASKS_UNLIMITED
 from .step_compaction import llm_summarise_steps, RAW_STEP_LIMIT
 from .llm_config import (
     AgentLLMTier,
+    apply_tier_credit_multiplier,
     get_agent_llm_tier,
     get_llm_config,
     get_llm_config_with_failover,
@@ -997,6 +998,9 @@ def _ensure_credit_for_tool(
         )
         # Fallback to default single-task cost when lookup fails
         cost = get_default_task_credit_cost()
+
+    if cost is not None:
+        cost = apply_tier_credit_multiplier(agent, cost)
 
     if credit_snapshot is not None and "available" in credit_snapshot:
         available = credit_snapshot.get("available")

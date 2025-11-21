@@ -5,6 +5,12 @@ from urllib.parse import urlparse
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
+from api.agent.core.llm_config import (
+    AgentLLMTier,
+    TIER_ORDER,
+    default_preferred_tier_for_owner,
+    max_allowed_tier_for_plan,
+)
 from api.agent.short_description import build_listing_description, build_mini_description
 from .models import (
     ApiKey,
@@ -15,6 +21,7 @@ from .models import (
     PersistentAgentCommsEndpoint,
 )
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
+from util.subscription_helper import get_owner_plan
 from util.analytics import AnalyticsSource
 
 # Serializer for Listing Agents (id, name, created_at)
@@ -402,6 +409,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'browser_use_agent_id',
             'preferred_contact_endpoint_id',
             'preferred_contact_endpoint',
+            'preferred_llm_tier',
             'proactive_opt_in',
             'proactive_last_trigger_at',
             'template_code',
@@ -445,19 +453,41 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
 
         return server_service.agent_enabled_personal_server_ids(obj)
 
-    def create(self, validated_data):
-        personal_servers = validated_data.pop('enabled_personal_server_ids', None)
-        agent = super().create(validated_data)
-        if personal_servers is not None:
-            self._apply_personal_servers(agent, personal_servers)
-        return agent
+    def _resolve_preference_owner(self, instance: PersistentAgent | None = None):
+        if instance is not None:
+            owner = instance.organization or instance.user
+            return owner, bool(getattr(instance, "organization_id", None))
 
-    def update(self, instance, validated_data):
-        personal_servers = validated_data.pop('enabled_personal_server_ids', None)
-        agent = super().update(instance, validated_data)
-        if personal_servers is not None:
-            self._apply_personal_servers(agent, personal_servers)
-        return agent
+        organization = self.context.get('organization')
+        if organization is not None:
+            return organization, True
+
+        request = self.context.get('request')
+        if request is not None:
+            return request.user, False
+
+        return None, False
+
+    def validate_preferred_llm_tier(self, value):
+        owner, is_org = self._resolve_preference_owner(getattr(self, "instance", None))
+        if value in (None, ""):
+            default_value = default_preferred_tier_for_owner(owner).value if owner else AgentLLMTier.STANDARD.value
+            return default_value
+        try:
+            tier = AgentLLMTier(value)
+        except ValueError:
+            raise serializers.ValidationError("Unsupported intelligence tier selection.")
+
+        plan = None
+        if owner is not None:
+            try:
+                plan = get_owner_plan(owner)
+            except Exception:
+                plan = None
+        allowed = max_allowed_tier_for_plan(plan, is_organization=is_org)
+        if TIER_ORDER[tier] > TIER_ORDER[allowed]:
+            raise serializers.ValidationError("Upgrade your plan to choose this intelligence tier.")
+        return tier.value
 
     def _apply_personal_servers(self, agent: PersistentAgent, server_ids):
         from .services import mcp_servers as server_service
@@ -536,9 +566,13 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         request = self.context['request']
         organization = self.context.get('organization')
         template_code = validated_data.pop('template_code', None)
+        personal_servers = validated_data.pop('enabled_personal_server_ids', None)
         preferred_input = validated_data.pop('preferred_contact_endpoint', None)
         preferred_endpoint = preferred_input if not isinstance(preferred_input, str) else None
         preferred_channel = preferred_input if isinstance(preferred_input, str) else None
+        preferred_tier = validated_data.get('preferred_llm_tier')
+        if not preferred_tier:
+            validated_data['preferred_llm_tier'] = default_preferred_tier_for_owner(organization or request.user).value
 
         with transaction.atomic():
             provision_kwargs = {
@@ -552,6 +586,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
                 'whitelist_policy': validated_data.get('whitelist_policy'),
                 'preferred_contact_endpoint': preferred_endpoint,
                 'template_code': template_code or None,
+                'preferred_llm_tier': validated_data.get('preferred_llm_tier'),
             }
 
             try:
@@ -585,6 +620,9 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages) from exc
                 agent.save(update_fields=list(post_create_updates.keys()))
 
+            if personal_servers is not None:
+                self._apply_personal_servers(agent, personal_servers)
+
             from api.agent.tasks import process_agent_events_task
 
             agent_id = str(agent.id)
@@ -593,6 +631,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         return agent
 
     def update(self, instance, validated_data):
+        personal_servers = validated_data.pop('enabled_personal_server_ids', None)
         preferred_input = validated_data.pop('preferred_contact_endpoint', serializers.empty)
         preferred_channel = None
         preferred_endpoint = preferred_input
@@ -622,4 +661,6 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
 
         update_fields = list(dirty_fields)
         instance.save(update_fields=update_fields or None)
+        if personal_servers is not None:
+            self._apply_personal_servers(instance, personal_servers)
         return instance

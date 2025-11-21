@@ -9,6 +9,7 @@ import './index.css'
 import './styles/consoleShell.css'
 
 const AgentChatPage = lazy(async () => ({ default: (await import('./screens/AgentChatPage')).AgentChatPage }))
+const AgentDetailScreen = lazy(async () => ({ default: (await import('./screens/AgentDetailScreen')).AgentDetailScreen }))
 const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/DiagnosticsScreen')).DiagnosticsScreen }))
 const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
 const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageScreen')).UsageScreen }))
@@ -54,6 +55,11 @@ switch (appName) {
       throw new Error('Agent identifier is required for the chat experience')
     }
     screen = <AgentChatPage agentId={agentId} agentName={agentName} agentColor={agentColor} />
+    break
+  case 'agent-detail':
+    const propsId = mountNode.dataset.propsJsonId
+    const initialData = readJsonScript<import('./screens/AgentDetailScreen').AgentDetailScreenProps['initialData']>(propsId)
+    screen = <AgentDetailScreen initialData={initialData} />
     break
   case 'diagnostics':
     screen = <DiagnosticsScreen />

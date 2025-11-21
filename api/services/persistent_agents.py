@@ -9,6 +9,7 @@ from django.db import IntegrityError, transaction
 from agent_namer import AgentNameGenerator
 from agents.services import PretrainedWorkerTemplateService, AgentService
 
+from api.agent.core.llm_config import default_preferred_tier_for_owner
 from api.agent.short_description import maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
 from api.models import BrowserUseAgent, PersistentAgent
@@ -68,6 +69,7 @@ class PersistentAgentProvisioningService:
         whitelist_policy: str | None = None,
         preferred_contact_endpoint=None,
         template_code: str | None = None,
+        preferred_llm_tier: str | None = None,
     ) -> ProvisioningResult:
         """Create a new persistent agent and its backing browser agent."""
         agent_name = name or cls.generate_unique_name(user)
@@ -101,6 +103,8 @@ class PersistentAgentProvisioningService:
                 if hasattr(browser_agent, "_agent_creation_organization"):
                     delattr(browser_agent, "_agent_creation_organization")
 
+            computed_tier = preferred_llm_tier or default_preferred_tier_for_owner(organization or user).value
+
             persistent_agent = PersistentAgent(
                 user=user,
                 organization=organization,
@@ -110,6 +114,7 @@ class PersistentAgentProvisioningService:
                 browser_use_agent=browser_agent,
                 is_active=is_active,
                 preferred_contact_endpoint=preferred_contact_endpoint,
+                preferred_llm_tier=computed_tier,
             )
 
             if life_state:
