@@ -105,7 +105,7 @@ Want to contribute to the browser automation layer? Check out [browser-use on Gi
 
 ## Developing
 - Start infrastructure locally with `docker compose -f docker-compose.dev.yaml up` (Postgres, Redis, MinIO).
-- Run Django via `uv run uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000` and the Celery worker with `uv run celery -A config worker -l info --pool solo`.
+- Run Django via `uv run uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000` and the Celery worker on macOS with `uv run celery -A config worker -l info --pool=threads --concurrency=4` (threads avoids recent fork restrictions).
 - Full local workflow, optional profiles, and testing steps live in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Contribute & Connect

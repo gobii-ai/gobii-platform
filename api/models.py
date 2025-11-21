@@ -207,6 +207,15 @@ def get_default_execution_environment() -> str:
     """Return the default execution environment from GOBII_RELEASE_ENV."""
     return os.getenv("GOBII_RELEASE_ENV", "local")
 
+
+class PersistentAgentQuerySet(models.QuerySet):
+    """Custom queryset helpers for PersistentAgent."""
+
+    def non_eval(self):
+        """Exclude agents created for eval runs."""
+        return self.exclude(execution_environment="eval")
+
+
 class CommsChannel(models.TextChoices):
     EMAIL = "email", "Email"
     SMS = "sms", "SMS"
@@ -2860,6 +2869,7 @@ class PersistentAgent(models.Model):
     """
     A persistent agent that runs automatically on a schedule.
     """
+    objects = PersistentAgentQuerySet.as_manager()
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -6840,6 +6850,46 @@ class OrganizationInvite(models.Model):
         return super().save(*args, **kwargs)
 
 
+class EvalSuiteRun(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        ERRORED = "errored", "Errored"
+
+    class AgentStrategy(models.TextChoices):
+        EPHEMERAL_PER_SCENARIO = "ephemeral_per_scenario", "Ephemeral per scenario"
+        REUSE_AGENT = "reuse_agent", "Reuse provided agent"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    suite_slug = models.CharField(max_length=200)
+    initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    agent_strategy = models.CharField(
+        max_length=40,
+        choices=AgentStrategy.choices,
+        default=AgentStrategy.EPHEMERAL_PER_SCENARIO,
+    )
+    shared_agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Agent reused across all scenarios if agent_strategy is reuse_agent.",
+    )
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.suite_slug} ({self.id})"
+
+
 class EvalRun(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -6848,6 +6898,13 @@ class EvalRun(models.Model):
         ERRORED = "errored", "Errored"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    suite_run = models.ForeignKey(
+        EvalSuiteRun,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="runs",
+    )
     scenario_slug = models.CharField(max_length=200)
     scenario_version = models.CharField(max_length=50, blank=True)
     agent = models.ForeignKey(PersistentAgent, on_delete=models.CASCADE)

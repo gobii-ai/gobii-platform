@@ -15,8 +15,10 @@ from api.models import (
 from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.core.llm_utils import run_completion
 from api.agent.events import AgentEventType, get_agent_event_stream
+from api.evals.realtime import broadcast_task_update
 from config.redis_client import get_redis_client
 from api.agent.core.llm_config import get_llm_config, LLMNotConfiguredError
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +198,24 @@ class ScenarioExecutionTools:
             task_obj.observed_summary = observed_summary
         if expected_summary:
             task_obj.expected_summary = expected_summary
+
+        now = timezone.now()
+        if task_obj.started_at is None and status in (
+            EvalRunTask.Status.RUNNING,
+            EvalRunTask.Status.PASSED,
+            EvalRunTask.Status.FAILED,
+            EvalRunTask.Status.ERRORED,
+            EvalRunTask.Status.SKIPPED,
+        ):
+            task_obj.started_at = now
+
+        if status in (
+            EvalRunTask.Status.PASSED,
+            EvalRunTask.Status.FAILED,
+            EvalRunTask.Status.ERRORED,
+            EvalRunTask.Status.SKIPPED,
+        ):
+            task_obj.finished_at = now
             
         # Link artifacts if provided
         if "message" in artifacts:
@@ -206,6 +226,12 @@ class ScenarioExecutionTools:
             task_obj.first_browser_task = artifacts["browser_task"]
             
         task_obj.save()
+
+        try:
+            broadcast_task_update(task_obj)
+        except Exception:
+            logger.debug("Broadcast task update failed", exc_info=True)
+
         return task_obj
 
     def llm_judge(

@@ -598,7 +598,7 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
                 # Task status for org-owned agents
                 from django.db.models import Count, Sum
                 pa_browser_ids = (
-                    PersistentAgent.objects.filter(organization_id=organization.id)
+                    PersistentAgent.objects.non_eval().filter(organization_id=organization.id)
                     .values_list('browser_use_agent_id', flat=True)
                 )
                 task_stats = (
@@ -1871,12 +1871,12 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         current_context = context.get('current_context', {})
         if current_context.get('type') == 'organization':
             # Show organization's agents
-            persistent_agents = PersistentAgent.objects.filter(
+            persistent_agents = PersistentAgent.objects.non_eval().filter(
                 organization_id=current_context.get('id')
             ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
-            persistent_agents = PersistentAgent.objects.filter(
+            persistent_agents = PersistentAgent.objects.non_eval().filter(
                 user=self.request.user,
                 organization__isnull=True  # Only personal agents
             ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
@@ -2406,7 +2406,11 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
     template_name = "console/agent_enable_sms.html"
 
     def dispatch(self, request, *args, **kwargs):
-        self.agent = get_object_or_404(PersistentAgent, pk=kwargs["pk"], user=request.user)
+        self.agent = get_object_or_404(
+            PersistentAgent.objects.non_eval(),
+            pk=kwargs["pk"],
+            user=request.user,
+        )
         return super().dispatch(request, *args, **kwargs)
 
     def get(self, request, *args, **kwargs):
@@ -2744,11 +2748,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         linked_agent_ids.discard(agent.id)
         if agent.organization_id:
-            candidate_qs = PersistentAgent.objects.filter(
+            candidate_qs = PersistentAgent.objects.non_eval().filter(
                 organization_id=agent.organization_id
             )
         else:
-            candidate_qs = PersistentAgent.objects.filter(
+            candidate_qs = PersistentAgent.objects.non_eval().filter(
                 user=agent.user,
                 organization__isnull=True,
             )
@@ -3120,7 +3124,12 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                             return JsonResponse({'success': False, 'error': 'You must be an organization owner or admin to assign agents to that organization.'}, status=403)
 
                         # Pre-check name uniqueness within target org
-                        if PersistentAgent.objects.filter(organization_id=target_org_id, name=agent.name).exclude(id=agent.id).exists():
+                        if (
+                            PersistentAgent.objects.non_eval()
+                            .filter(organization_id=target_org_id, name=agent.name)
+                            .exclude(id=agent.id)
+                            .exists()
+                        ):
                             return JsonResponse({'success': False, 'error': 'An agent with this name already exists in the selected organization. Please rename the agent first.'}, status=400)
 
                         # Assign; model-level validators will enforce seat availability
@@ -3154,7 +3163,12 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         })
                     else:
                         # Move to personal scope
-                        if PersistentAgent.objects.filter(user_id=agent.user_id, organization__isnull=True, name=agent.name).exclude(id=agent.id).exists():
+                        if (
+                            PersistentAgent.objects.non_eval()
+                            .filter(user_id=agent.user_id, organization__isnull=True, name=agent.name)
+                            .exclude(id=agent.id)
+                            .exists()
+                        ):
                             return JsonResponse({'success': False, 'error': 'You already have a personal agent with this name. Please rename the agent first.'}, status=400)
                         agent.organization = None
                         agent.save(update_fields=['organization'])
@@ -3629,7 +3643,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     return redirect_response
 
                 try:
-                    peer_agent = PersistentAgent.objects.get(id=peer_agent_id)
+                    peer_agent = PersistentAgent.objects.non_eval().get(id=peer_agent_id)
                 except PersistentAgent.DoesNotExist:
                     messages.error(request, 'Selected agent no longer exists.')
                     return redirect_response
@@ -3790,6 +3804,25 @@ class ConsoleLLMConfigView(SystemAdminRequiredMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
+class ConsoleEvalsView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "console/evals.html"
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - read-only shell
+        return HttpResponseNotAllowed(['GET'])
+
+
+class ConsoleEvalsDetailView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "console/evals_detail.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["suite_run_id"] = kwargs.get("suite_run_id")
+        return context
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - read-only shell
+        return HttpResponseNotAllowed(['GET'])
+
+
 class MCPServerOwnerMixin:
     """Shared owner resolution logic for MCP server management views."""
 
@@ -3863,7 +3896,12 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
 
     def _get_agent(self):
         pk = self.kwargs.get('pk')
-        agent = PersistentAgent.objects.filter(pk=pk).select_related('organization').first()
+        agent = (
+            PersistentAgent.objects.non_eval()
+            .filter(pk=pk)
+            .select_related('organization')
+            .first()
+        )
         if not agent:
             raise Http404
         if not self._can_manage(self.request.user, agent):
@@ -3957,7 +3995,7 @@ class AgentDeleteView(LoginRequiredMixin, View):
     @tracer.start_as_current_span("CONSOLE Agent Delete View - delete")
     def delete(self, request, *args, **kwargs):
         try:
-            agent = PersistentAgent.objects.get(
+            agent = PersistentAgent.objects.non_eval().get(
                 pk=self.kwargs['pk'],
                 user=request.user
             )
@@ -3978,7 +4016,7 @@ class AgentDeleteView(LoginRequiredMixin, View):
 
             # Delete the persistent agent using a queryset delete to avoid triggering
             # BrowserUseAgent lookups that can explode when historical data is missing.
-            deleted_count, _ = PersistentAgent.objects.filter(
+            deleted_count, _ = PersistentAgent.objects.non_eval().filter(
                 pk=agent.pk,
                 user=request.user,
             ).delete()
@@ -4883,7 +4921,11 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
 class AgentSecretRerequestView(LoginRequiredMixin, View):
     """Mark a fulfilled secret as requested again and clear its stored value."""
     def post(self, request, *args, **kwargs):
-        agent = get_object_or_404(PersistentAgent, pk=self.kwargs['pk'], user=request.user)
+        agent = get_object_or_404(
+            PersistentAgent.objects.non_eval(),
+            pk=self.kwargs['pk'],
+            user=request.user,
+        )
         secret_id = self.kwargs.get('secret_id')
         from api.models import PersistentAgentSecret
         try:
@@ -4909,7 +4951,7 @@ class AgentSecretsRequestThanksView(LoginRequiredMixin, TemplateView):
     def get_object(self):
         """Get the agent or raise 404."""
         return get_object_or_404(
-            PersistentAgent,
+            PersistentAgent.objects.non_eval(),
             pk=self.kwargs['pk'],
             user=self.request.user
         )
@@ -4975,7 +5017,12 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         """Return (agent, issue) where issue is one of: None, 'invalid', 'wrong_account'."""
         pk = self.kwargs['pk']
         current_span = trace.get_current_span()
-        agent = PersistentAgent.objects.filter(pk=pk).select_related('user').first()
+        agent = (
+            PersistentAgent.objects.non_eval()
+            .filter(pk=pk)
+            .select_related('user')
+            .first()
+        )
 
         if not agent:
             if current_span:
@@ -5244,13 +5291,17 @@ class AgentContactRequestsThanksView(LoginRequiredMixin, TemplateView):
     def _resolve_agent_or_issue(self):
         pk = self.kwargs['pk']
         current_span = trace.get_current_span()
-        exists = PersistentAgent.objects.filter(pk=pk).exists()
+        exists = PersistentAgent.objects.non_eval().filter(pk=pk).exists()
         if not exists:
             if current_span:
                 current_span.set_attribute("approval.issue", "invalid")
             logger.info("Agent contact-requests-thanks invalid agent id", extra={"agent_id": str(pk)})
             return None, 'invalid'
-        agent = PersistentAgent.objects.filter(pk=pk, user=self.request.user).first()
+        agent = (
+            PersistentAgent.objects.non_eval()
+            .filter(pk=pk, user=self.request.user)
+            .first()
+        )
         if not agent:
             if current_span:
                 current_span.set_attribute("approval.issue", "wrong_account")

@@ -668,7 +668,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
     destroy=extend_schema(operation_id='deletePersistentAgent', tags=['persistent-agents'])
 )
 class PersistentAgentViewSet(viewsets.ModelViewSet):
-    queryset = PersistentAgent.objects.select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint')
+    queryset = PersistentAgent.objects.non_eval().select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint')
     serializer_class = PersistentAgentSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination

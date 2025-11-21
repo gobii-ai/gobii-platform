@@ -1,0 +1,14 @@
+{% extends "console_page.html" %}
+{% load vite_tags %}
+
+{% block console_content %}
+<div id="gobii-frontend-root"
+     class="min-h-[50vh]"
+     data-app="evals">
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% vite_asset 'src/main.tsx' %}
+{% endblock %}

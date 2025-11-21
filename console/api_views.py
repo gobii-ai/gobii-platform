@@ -26,6 +26,7 @@ from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.models import (
     BrowserLLMPolicy,
+    BrowserUseAgent,
     BrowserLLMTier,
     BrowserModelEndpoint,
     BrowserTierEndpoint,
@@ -43,6 +44,9 @@ from api.models import (
     PersistentModelEndpoint,
     PersistentTierEndpoint,
     PersistentTokenRange,
+    EvalSuiteRun,
+    EvalRun,
+    EvalRunTask,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -75,6 +79,11 @@ import litellm
 
 from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
 from api.agent.core.llm_utils import run_completion
+from api.evals.tasks import gc_eval_runs_task
+from api.evals.registry import ScenarioRegistry
+from api.evals.suites import SuiteRegistry
+from api.evals.tasks import run_eval_task
+from api.evals.runner import _update_suite_state
 from api.llm.utils import normalize_model_name
 from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
@@ -587,6 +596,76 @@ class SystemAdminAPIView(LoginRequiredMixin, View):
         if not (request.user.is_staff or request.user.is_superuser):
             return JsonResponse({"error": "forbidden"}, status=403)
         return super().dispatch(request, *args, **kwargs)
+
+
+def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:
+    return {
+        "id": task.id,
+        "sequence": task.sequence,
+        "name": task.name,
+        "status": task.status,
+        "assertion_type": task.assertion_type,
+        "expected_summary": task.expected_summary,
+        "observed_summary": task.observed_summary,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "finished_at": task.finished_at.isoformat() if task.finished_at else None,
+    }
+
+
+def _task_counts(tasks: list[EvalRunTask]) -> dict[str, int]:
+    totals = {"total": len(tasks), "passed": 0, "failed": 0}
+    for task in tasks:
+        if task.status == EvalRunTask.Status.PASSED:
+            totals["passed"] += 1
+        elif task.status in (EvalRunTask.Status.FAILED, EvalRunTask.Status.ERRORED):
+            totals["failed"] += 1
+    return totals
+
+
+def _serialize_eval_run(run: EvalRun, *, include_tasks: bool = False) -> dict[str, Any]:
+    tasks = list(run.tasks.all()) if include_tasks else []
+    counts = _task_counts(tasks) if include_tasks else None
+
+    payload: dict[str, Any] = {
+        "id": str(run.id),
+        "suite_run_id": str(run.suite_run_id) if run.suite_run_id else None,
+        "scenario_slug": run.scenario_slug,
+        "scenario_version": run.scenario_version,
+        "status": run.status,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "agent_id": str(run.agent_id) if run.agent_id else None,
+    }
+
+    if include_tasks:
+        payload["tasks"] = [_serialize_eval_task(task) for task in tasks]
+        payload["task_totals"] = counts
+
+    return payload
+
+
+def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, include_tasks: bool = False) -> dict[str, Any]:
+    runs = list(suite.runs.all()) if include_runs else []
+    runs_payload = [_serialize_eval_run(run, include_tasks=include_tasks) for run in runs] if include_runs else []
+
+    aggregate_counts = {"total_runs": len(runs), "completed": 0, "errored": 0}
+    for run in runs:
+        if run.status == EvalRun.Status.COMPLETED:
+            aggregate_counts["completed"] += 1
+        elif run.status == EvalRun.Status.ERRORED:
+            aggregate_counts["errored"] += 1
+
+    return {
+        "id": str(suite.id),
+        "suite_slug": suite.suite_slug,
+        "status": suite.status,
+        "agent_strategy": suite.agent_strategy,
+        "shared_agent_id": str(suite.shared_agent_id) if suite.shared_agent_id else None,
+        "started_at": suite.started_at.isoformat() if suite.started_at else None,
+        "finished_at": suite.finished_at.isoformat() if suite.finished_at else None,
+        "runs": runs_payload if include_runs else None,
+        "run_totals": aggregate_counts if include_runs else None,
+    }
 
 
 def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2195,3 +2274,187 @@ class AgentWebSessionEndAPIView(ApiLoginRequiredMixin, View):
         )
 
         return _session_response(result)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EvalSuiteListAPIView(SystemAdminAPIView):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        suites = []
+        for suite in sorted(SuiteRegistry.list_all().values(), key=lambda s: s.slug):
+            suites.append(
+                {
+                    "slug": suite.slug,
+                    "description": suite.description,
+                    "scenario_slugs": list(suite.scenario_slugs),
+                }
+            )
+        return JsonResponse({"suites": suites})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            body = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        suite_slugs = body.get("suite_slugs") or ["all"]
+        if not isinstance(suite_slugs, list) or not suite_slugs:
+            return HttpResponseBadRequest("suite_slugs must be a non-empty list")
+
+        agent_strategy = body.get("agent_strategy") or EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO
+        if agent_strategy not in dict(EvalSuiteRun.AgentStrategy.choices):
+            return HttpResponseBadRequest("Invalid agent_strategy")
+
+        shared_agent: PersistentAgent | None = None
+        agent_id = body.get("agent_id")
+        if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT:
+            if not agent_id:
+                return HttpResponseBadRequest("agent_id is required when reusing an agent")
+            try:
+                shared_agent = PersistentAgent.objects.get(id=agent_id)
+            except PersistentAgent.DoesNotExist:
+                return HttpResponseBadRequest("Agent not found")
+
+        def create_ephemeral_agent(label_suffix: str) -> PersistentAgent:
+            unique_id = f"{label_suffix}-{uuid.uuid4().hex[:8]}" if label_suffix else uuid.uuid4().hex[:12]
+            browser_agent = BrowserUseAgent.objects.create(name=f"Eval Browser {unique_id}", user=request.user)
+            return PersistentAgent.objects.create(
+                name=f"Eval Agent {unique_id}",
+                user=request.user,
+                browser_use_agent=browser_agent,
+                execution_environment="eval",
+                charter="You are a test agent.",
+            )
+
+        created_suite_runs: list[EvalSuiteRun] = []
+        created_runs: list[EvalRun] = []
+
+        for suite_slug in suite_slugs:
+            suite_obj = SuiteRegistry.get(suite_slug)
+            if not suite_obj:
+                return HttpResponseBadRequest(f"Suite '{suite_slug}' not found")
+
+            scenario_slugs = list(dict.fromkeys(suite_obj.scenario_slugs))
+            suite_run = EvalSuiteRun.objects.create(
+                suite_slug=suite_obj.slug,
+                initiated_by=request.user,
+                status=EvalSuiteRun.Status.RUNNING,
+                agent_strategy=agent_strategy,
+                shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
+                started_at=timezone.now(),
+            )
+
+            created_for_suite = 0
+            for scenario_slug in scenario_slugs:
+                scenario = ScenarioRegistry.get(scenario_slug)
+                if not scenario:
+                    continue
+
+                run_agent = shared_agent
+                if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
+                    run_agent = create_ephemeral_agent(label_suffix=scenario.slug[:8])
+
+                run = EvalRun.objects.create(
+                    suite_run=suite_run,
+                    scenario_slug=scenario.slug,
+                    scenario_version=getattr(scenario, "version", "") or "",
+                    agent=run_agent,
+                    initiated_by=request.user,
+                    status=EvalRun.Status.PENDING,
+                )
+                run_eval_task.delay(str(run.id))
+                created_runs.append(run)
+                created_for_suite += 1
+
+            if created_for_suite == 0:
+                suite_run.status = EvalSuiteRun.Status.ERRORED
+                suite_run.finished_at = timezone.now()
+                suite_run.save(update_fields=["status", "finished_at", "updated_at"])
+            created_suite_runs.append(suite_run)
+
+        # Update suite aggregate state and return payload
+        response_suites = []
+        for suite_run in created_suite_runs:
+            _update_suite_state(suite_run.id)
+            suite_run.refresh_from_db()
+            response_suites.append(_serialize_suite_run(suite_run, include_runs=True, include_tasks=False))
+
+        # Trigger background GC to clean up any stale runs
+        try:
+            gc_eval_runs_task.delay()
+        except Exception:
+            logger.debug("Failed to enqueue eval GC task", exc_info=True)
+
+        return JsonResponse(
+            {
+                "suite_runs": response_suites,
+                "agent_strategy": agent_strategy,
+                "runs": [str(run.id) for run in created_runs],
+            },
+            status=201,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EvalSuiteRunListAPIView(SystemAdminAPIView):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        status_filter = request.GET.get("status")
+        suite_filter = request.GET.get("suite")
+        limit_raw = request.GET.get("limit") or "25"
+        try:
+            limit = max(1, min(100, int(limit_raw)))
+        except ValueError:
+            return HttpResponseBadRequest("limit must be an integer")
+
+        qs = EvalSuiteRun.objects.select_related("initiated_by", "shared_agent").prefetch_related("runs")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        if suite_filter:
+            qs = qs.filter(suite_slug=suite_filter)
+
+        suite_runs = list(qs.order_by("-created_at")[:limit])
+        # Refresh stale aggregates so UI doesn't show stuck "running" rows
+        for suite in suite_runs:
+            _update_suite_state(suite.id)
+
+        suite_runs = list(
+            EvalSuiteRun.objects.filter(id__in=[suite.id for suite in suite_runs])
+            .select_related("initiated_by", "shared_agent")
+            .prefetch_related("runs")
+            .order_by("-created_at")
+        )
+        payload = [_serialize_suite_run(suite, include_runs=True, include_tasks=False) for suite in suite_runs]
+        return JsonResponse({"suite_runs": payload})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EvalSuiteRunDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, suite_run_id: str, *args: Any, **kwargs: Any):
+        _update_suite_state(suite_run_id)
+        suite = get_object_or_404(
+            EvalSuiteRun.objects.prefetch_related("runs__tasks", "runs__agent"),
+            pk=suite_run_id,
+        )
+        return JsonResponse({"suite_run": _serialize_suite_run(suite, include_runs=True, include_tasks=True)})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EvalRunDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, run_id: str, *args: Any, **kwargs: Any):
+        run = get_object_or_404(
+            EvalRun.objects.prefetch_related("tasks"),
+            pk=run_id,
+        )
+        return JsonResponse({"run": _serialize_eval_run(run, include_tasks=True)})

@@ -89,9 +89,9 @@ class AgentService:
         PersistentAgent = apps.get_model("api", "PersistentAgent")
 
         if owner_type == "organization":
-            return PersistentAgent.objects.filter(organization_id=owner_id).count()
+            return PersistentAgent.objects.non_eval().filter(organization_id=owner_id).count()
 
-        return PersistentAgent.objects.filter(user_id=owner_id, organization__isnull=True).count()
+        return PersistentAgent.objects.non_eval().filter(user_id=owner_id, organization__isnull=True).count()
 
     @staticmethod
     @tracer.start_as_current_span("AGENT SERVICE: get_agents_in_use")
