@@ -418,19 +418,27 @@ class ConsoleViewsTest(TestCase):
             daily_credit_limit=1
         )
         last_24h_cost = Decimal('0.5')
+        today_usage_cost = Decimal('1.3')
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(
                 agent=agent,
                 description='Usage',
-                credits_cost=Decimal('1.3'),
+                credits_cost=today_usage_cost,
             )
             recent_step = PersistentAgentStep.objects.create(
                 agent=agent,
                 description='Yesterday Usage',
                 credits_cost=last_24h_cost,
             )
+            now = timezone.now()
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            hours_since_midnight = now - today_start
+            # Shift the record to before today's reset but still within the 24h lookback window.
+            delta_range = timedelta(hours=24) - hours_since_midnight
+            shift = delta_range / 2 if delta_range > timedelta(0) else timedelta(minutes=1)
+            shifted_timestamp = today_start - shift
             PersistentAgentStep.objects.filter(id=recent_step.id).update(
-                created_at=timezone.now() - timedelta(hours=6)
+                created_at=shifted_timestamp
             )
 
         response = self.client.get(reverse('agents'))
@@ -442,7 +450,8 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(agent_data['dailyCreditLow'])
         self.assertAlmostEqual(agent_data['dailyCreditRemaining'], 0.7, places=2)
         self.assertIn('last24hCreditBurn', agent_data)
-        self.assertAlmostEqual(agent_data['last24hCreditBurn'], float(last_24h_cost), places=2)
+        expected_last_24h_burn = today_usage_cost + last_24h_cost
+        self.assertAlmostEqual(agent_data['last24hCreditBurn'], float(expected_last_24h_burn), places=2)
 
     @tag("batch_console_agents")
     @patch('console.views.AgentService.has_agents_available', return_value=True)
