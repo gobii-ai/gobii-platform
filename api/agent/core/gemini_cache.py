@@ -19,20 +19,48 @@ from litellm.llms.vertex_ai.context_caching.transformation import (
 from litellm.llms.vertex_ai.vertex_llm_base import VertexBase
 
 from config.redis_client import get_redis_client
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 GEMINI_CACHE_BLOCKLIST: Set[Tuple[str, str]] = set()
+GEMINI_CACHE_CONTROL_TTL_SECONDS = int(getattr(settings, "GEMINI_CACHE_CONTROL_TTL", 3600))
+GEMINI_CACHE_BLOCKLIST_KEY = "agent:gemini_cache_blocklist:v1"
+_BLOCKLIST_REDIS: redis.Redis | None = None
 
 
 def _cache_key(provider: str | None, model: str | None) -> Tuple[str, str]:
     return ((provider or "").lower(), (model or "").lower())
 
 
+def _get_blocklist_redis() -> Optional[redis.Redis]:
+    global _BLOCKLIST_REDIS
+    if _BLOCKLIST_REDIS is not None:
+        return _BLOCKLIST_REDIS
+    try:
+        _BLOCKLIST_REDIS = get_redis_client()
+    except Exception:
+        logger.debug("Gemini cache: unable to connect to redis for blocklist", exc_info=True)
+        _BLOCKLIST_REDIS = None
+    return _BLOCKLIST_REDIS
+
+
+def _is_blocklisted(provider_key: str, model_key: str) -> bool:
+    redis_client = _get_blocklist_redis()
+    member = f"{provider_key}:{model_key}"
+    if redis_client:
+        try:
+            if redis_client.sismember(GEMINI_CACHE_BLOCKLIST_KEY, member):
+                return True
+        except Exception:
+            logger.debug("Gemini cache: redis blocklist check failed", exc_info=True)
+    return (provider_key, model_key) in GEMINI_CACHE_BLOCKLIST
+
+
 def should_use_gemini_cache(provider: str | None, model: str | None) -> bool:
     """Return True when the provider/model pair should use cached content."""
     provider_key, model_key = _cache_key(provider, model)
-    if (provider_key, model_key) in GEMINI_CACHE_BLOCKLIST:
+    if _is_blocklisted(provider_key, model_key):
         return False
     return "gemini" in provider_key or "gemini" in model_key
 
@@ -42,6 +70,13 @@ def disable_gemini_cache_for(provider: str | None, model: str | None) -> None:
     key = _cache_key(provider, model)
     if key not in GEMINI_CACHE_BLOCKLIST:
         GEMINI_CACHE_BLOCKLIST.add(key)
+        member = f"{key[0]}:{key[1]}"
+        redis_client = _get_blocklist_redis()
+        if redis_client:
+            try:
+                redis_client.sadd(GEMINI_CACHE_BLOCKLIST_KEY, member)
+            except Exception:
+                logger.debug("Gemini cache: failed to update redis blocklist", exc_info=True)
         logger.info(
             "Disabling Gemini cached prompts for provider=%s model=%s after API rejection",
             provider or "<unknown>",
@@ -71,14 +106,17 @@ def mark_messages_for_cache(messages: List[dict]) -> List[dict]:
             parts = []
             for part in content:
                 part_copy = dict(part)
-                part_copy.setdefault("cache_control", {"type": "ephemeral", "ttl": "3600s"})
+                part_copy.setdefault(
+                    "cache_control",
+                    {"type": "ephemeral", "ttl": f"{GEMINI_CACHE_CONTROL_TTL_SECONDS}s"},
+                )
                 parts.append(part_copy)
         elif isinstance(content, str):
             parts = [
                 {
                     "type": "text",
                     "text": content,
-                    "cache_control": {"type": "ephemeral", "ttl": "3600s"},
+                    "cache_control": {"type": "ephemeral", "ttl": f"{GEMINI_CACHE_CONTROL_TTL_SECONDS}s"},
                 }
             ]
         else:
@@ -87,7 +125,7 @@ def mark_messages_for_cache(messages: List[dict]) -> List[dict]:
                 {
                     "type": "text",
                     "text": serialized,
-                    "cache_control": {"type": "ephemeral", "ttl": "3600s"},
+                    "cache_control": {"type": "ephemeral", "ttl": f"{GEMINI_CACHE_CONTROL_TTL_SECONDS}s"},
                 }
             ]
 
@@ -238,7 +276,7 @@ class GeminiCachedContentManager:
             vertex_project=project,
             vertex_location=location,
         )
-        request_body.setdefault("ttl", f"{self.CACHE_TTL_SECONDS}s")
+        request_body.setdefault("ttl", f"{GEMINI_CACHE_CONTROL_TTL_SECONDS}s")
         request_body["model"] = self._vertex_model_resource(
             project=project,
             location=location,
