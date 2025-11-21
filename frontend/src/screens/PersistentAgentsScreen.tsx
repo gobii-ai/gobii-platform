@@ -68,15 +68,11 @@ type NormalizedAgent = AgentSummary & {
 }
 
 function formatCreditBurn(value: number | null): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
+  if (value == null || value <= 0 || Number.isNaN(value)) {
     return '0 credits/day'
   }
-  const normalized = value < 0 ? 0 : value
-  if (normalized === 0) {
-    return '0 credits/day'
-  }
-  const fractionDigits = normalized < 1 ? 2 : normalized < 10 ? 1 : 0
-  return `${normalized.toFixed(fractionDigits)} credits/day`
+  const fractionDigits = value < 1 ? 2 : value < 10 ? 1 : 0
+  return `${value.toFixed(fractionDigits)} credits/day`
 }
 
 export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenProps) {
