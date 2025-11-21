@@ -21,6 +21,20 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
 
   const hasRuns = useMemo(() => Boolean(suite?.runs && suite.runs.length), [suite?.runs])
 
+  const completionStats = useMemo(() => {
+    if (!suite) return { total: 0, completed: 0 }
+    if (suite.runs && suite.runs.length > 0) {
+      return {
+        total: suite.runs.length,
+        completed: suite.runs.filter((r) => r.status === 'completed').length,
+      }
+    }
+    return {
+      total: suite.run_totals?.total_runs ?? 0,
+      completed: suite.run_totals?.completed ?? 0,
+    }
+  }, [suite])
+
   useEffect(() => {
     let cancelled = false
     const load = async (background = false) => {
@@ -202,19 +216,17 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Completion</p>
                   <div className="flex items-baseline gap-2 mt-1">
                     <span className="text-3xl font-bold text-slate-900">
-                      {suite.run_totals
-                        ? suite.run_totals.completed
-                        : suite.runs?.filter((r) => r.status === 'completed').length ?? 0}
+                      {completionStats.completed}
                     </span>
                     <span className="text-sm font-medium text-slate-500">
-                      / {suite.run_totals ? suite.run_totals.total_runs : suite.runs?.length ?? 0} runs
+                      / {completionStats.total} runs
                     </span>
                   </div>
                 </div>
                 <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-blue-500 transition-all duration-700 ease-out"
-                    style={{ width: `${suite.run_totals ? (suite.run_totals.completed / suite.run_totals.total_runs) * 100 : 0}%` }}
+                    style={{ width: `${completionStats.total ? (completionStats.completed / completionStats.total) * 100 : 0}%` }}
                   />
                 </div>
               </div>
