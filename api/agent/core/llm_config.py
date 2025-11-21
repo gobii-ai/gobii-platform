@@ -482,7 +482,7 @@ def get_provider_config(provider: str) -> Tuple[str, dict]:
     params = {"temperature": 0.1}
     
     # Add provider-specific parameters
-    if provider == "google":
+    if "google" in provider:
         params.update({
             "vertex_project": os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714"),
             "vertex_location": os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4"),

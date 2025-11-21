@@ -179,7 +179,7 @@ def _score_embeddings_for_endpoint(
         params["api_base"] = api_base
         params["api_key"] = "sk-noauth" # Set api_key only if api_base is present
 
-    if provider is not None and getattr(provider, "key", "") == "google":
+    if provider is not None and "google" in getattr(provider, "key", ""):
         project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
         location = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
         params["vertex_project"] = project
