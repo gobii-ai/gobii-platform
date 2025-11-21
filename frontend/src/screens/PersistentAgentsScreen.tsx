@@ -1,9 +1,7 @@
 import {type ReactElement, useEffect, useMemo, useState} from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
-import { ArrowRight, Ban, Copy, Loader2, Lock, Mail, MessageCircle, MessageSquare, Phone, Plus, Search, Settings, Zap } from 'lucide-react'
-import { updateAgent } from '../api/agents'
-import { HttpError } from '../api/http'
+import { ArrowRight, Ban, Copy, Mail, MessageCircle, MessageSquare, Phone, Plus, Search, Settings, Zap } from 'lucide-react'
 
 declare global {
   interface Window {
