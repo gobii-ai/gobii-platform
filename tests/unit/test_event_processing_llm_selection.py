@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
+from api.agent.core import event_processing as event_processing_module
 from api.agent.core.event_processing import (
     _completion_with_failover,
     _get_recent_preferred_config,
@@ -32,6 +33,7 @@ class TestEventProcessingLLMSelection(TestCase):
             charter="Ensure LLM selection helper works.",
             browser_use_agent=self.browser_agent,
         )
+        event_processing_module._GEMINI_CACHE_BLOCKLIST.clear()
 
     @patch('api.agent.core.event_processing.get_llm_config_with_failover')
     @patch('api.agent.core.event_processing.litellm.completion')
@@ -96,6 +98,73 @@ class TestEventProcessingLLMSelection(TestCase):
         # drop_params helps avoid provider rejections
         self.assertIn('drop_params', kwargs)
         self.assertTrue(kwargs['drop_params'])
+
+    @patch('api.agent.core.event_processing.run_completion')
+    def test_gemini_cache_conflict_disables_cache_and_raises(self, mock_run_completion):
+        """Gemini cache conflicts should bubble and disable caching for the provider."""
+        cache_request = event_processing_module.GeminiCacheRequest(
+            messages=[],
+            cached_content="projects/demo/locations/us-central1/cachedContents/cache1",
+        )
+        mock_manager = Mock()
+        mock_manager.prepare_request.return_value = cache_request
+
+        conflict_error = Exception(
+            "CachedContent can not be used with GenerateContent request setting system_instruction, tools or tool_config."
+        )
+        mock_run_completion.side_effect = conflict_error
+
+        failover_configs = [("google", "vertex_ai/gemini-3-pro", {})]
+        with patch.object(event_processing_module, "_GEMINI_CACHE_MANAGER", mock_manager):
+            with self.assertRaises(Exception):
+                _completion_with_failover(
+                    [
+                        {"role": "system", "content": "sys"},
+                        {"role": "user", "content": "hello"},
+                    ],
+                    [],
+                    failover_configs=failover_configs,
+                    agent_id=str(self.agent.id),
+                )
+
+        self.assertEqual(mock_run_completion.call_count, 1)
+        first_call = mock_run_completion.call_args_list[0]
+        self.assertEqual(first_call.kwargs["messages"], [])
+        self.assertIsNone(first_call.kwargs["tools"])
+        self.assertEqual(
+            first_call.kwargs["params"]["cached_content"],
+            "projects/demo/locations/us-central1/cachedContents/cache1",
+        )
+        self.assertIn(
+            ("google", "vertex_ai/gemini-3-pro"),
+            event_processing_module._GEMINI_CACHE_BLOCKLIST,
+        )
+
+    @patch('api.agent.core.event_processing.run_completion')
+    def test_gemini_cache_blocklist_skips_future_attempts(self, mock_run_completion):
+        """Blocklisted providers should skip cache preparation."""
+        event_processing_module._GEMINI_CACHE_BLOCKLIST.add(
+            ("google", "vertex_ai/gemini-3-pro")
+        )
+        mock_response = Mock()
+        mock_response.model_extra = {"usage": None}
+        mock_run_completion.return_value = mock_response
+
+        mock_manager = Mock()
+
+        with patch.object(event_processing_module, "_GEMINI_CACHE_MANAGER", mock_manager):
+            _completion_with_failover(
+                [
+                    {"role": "system", "content": "sys"},
+                    {"role": "user", "content": "hello"},
+                ],
+                [],
+                failover_configs=[("google", "vertex_ai/gemini-3-pro", {})],
+                agent_id=str(self.agent.id),
+            )
+
+        mock_manager.prepare_request.assert_not_called()
+        mock_run_completion.assert_called_once()
 
     @patch('api.agent.core.event_processing.run_completion')
     def test_completion_with_failover_prefers_explicit_provider(self, mock_run_completion):

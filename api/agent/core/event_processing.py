@@ -19,11 +19,10 @@ from uuid import UUID, uuid4
 
 import litellm
 from litellm import token_counter
-import redis
 import zstandard as zstd
 from opentelemetry import baggage, trace
 from pottery import Redlock
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction, close_old_connections
 from django.db.models import Q, Prefetch, Sum
 from django.db.utils import OperationalError
@@ -105,11 +104,9 @@ from ..tools.webhook_sender import execute_send_webhook_event, get_send_webhook_
 from ...models import (
     AgentCommPeerState,
     AgentPeerLink,
-    BrowserUseAgent,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     CommsChannel,
-    DeliveryStatus,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentCommsSnapshot,
@@ -124,15 +121,22 @@ from ...models import (
     PersistentAgentSystemMessage,
     PersistentAgentEnabledTool,
 )
-from .schedule_parser import ScheduleParser
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from .gemini_cache import (
+    GEMINI_CACHE_BLOCKLIST,
+    GeminiCacheRequest,
+    GeminiCachedContentError,
+    GeminiCachedContentManager,
+    disable_gemini_cache_for,
+    is_gemini_cache_conflict_error,
+    should_use_gemini_cache,
+)
 
 logger = logging.getLogger(__name__)
 
 _COST_PRECISION = Decimal("0.000001")
-
 
 def _quantize_cost(value: Decimal) -> Decimal:
     return value.quantize(_COST_PRECISION)
@@ -501,37 +505,8 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     return max(min(estimated_tokens, 50000), 1000)  # Between 1k and 50k tokens
 
 
-def _should_use_gemini_cache(provider: str | None, model: str | None) -> bool:
-    """Return True when the current provider/model should use Gemini context caching."""
-    provider_key = (provider or "").lower()
-    model_key = (model or "").lower()
-    return "gemini" in provider_key or "gemini" in model_key
-
-
-def _with_gemini_cached_system_prompt(messages: List[dict], provider: str | None, model: str | None) -> List[dict]:
-    """
-    Return a copy of ``messages`` where the system prompt is marked for Gemini caching.
-
-    Gemini's context caching is enabled by adding a ``cache_control`` object
-    to the system instruction, which must be the first message in the request.
-    This function adds that metadata while leaving the rest of the message list
-    untouched for compatibility with other providers.
-    """
-    if not messages or not _should_use_gemini_cache(provider, model):
-        return messages
-
-    system_message = dict(messages[0])
-    content = system_message.get("content") or ""
-
-    system_message["content"] = [
-        {
-            "type": "text",
-            "text": content if isinstance(content, str) else str(content),
-            "cache_control": {"type": "ephemeral", "ttl": "3600s"},
-        }
-    ]
-
-    return [system_message, *messages[1:]]
+_GEMINI_CACHE_MANAGER = GeminiCachedContentManager()
+_GEMINI_CACHE_BLOCKLIST = GEMINI_CACHE_BLOCKLIST
 
 
 def _completion_with_failover(
@@ -562,6 +537,8 @@ def _completion_with_failover(
         Exception: If all providers in all tiers fail
     """
     last_exc: Exception | None = None
+    base_messages: List[dict] = list(messages or [])
+    base_tools: List[dict] = list(tools or [])
     
     ordered_configs: List[Tuple[str, str, dict]] = list(failover_configs)
     if preferred_config:
@@ -592,7 +569,7 @@ def _completion_with_failover(
                 agent_id or "unknown",
             )
 
-    for provider, model, params in ordered_configs:
+    for provider, model, params_with_hints in ordered_configs:
         logger.info(
             "Attempting provider %s for agent %s",
             provider,
@@ -605,6 +582,8 @@ def _completion_with_failover(
                     llm_span.set_attribute("persistent_agent.id", str(agent_id))
                 llm_span.set_attribute("llm.model", model)
                 llm_span.set_attribute("llm.provider", provider)
+                params_base = dict(params_with_hints or {})
+                params = dict(params_base)
 
                 # Extra diagnostics for OpenAI-compatible / custom bases
                 api_base = getattr(params, 'get', lambda *_: None)("api_base") if isinstance(params, dict) else None
@@ -628,16 +607,49 @@ def _completion_with_failover(
                     pass
 
                 # If OpenAI family, add safety_identifier hint when available
+                request_messages = base_messages
+                request_tools_payload: Optional[List[dict]] = list(base_tools) if base_tools else None
+                use_gemini_cache = False
+                if should_use_gemini_cache(provider, model):
+                    try:
+                        cache_request = _GEMINI_CACHE_MANAGER.prepare_request(
+                            messages=base_messages,
+                            tools=base_tools,
+                            provider=provider,
+                            model=model,
+                            params=params_base,
+                            agent_id=agent_id,
+                        )
+                    except GeminiCachedContentError as cache_exc:
+                        logger.warning(
+                            "Gemini cached content unavailable for provider %s/%s: %s",
+                            provider,
+                            model,
+                            cache_exc,
+                        )
+                        cache_request = None
+                    if cache_request:
+                        request_messages = (
+                            cache_request.messages if cache_request.messages is not None else base_messages
+                        )
+                        request_tools_payload = None
+                        params["cached_content"] = cache_request.cached_content
+                        params.pop("tool_choice", None)
+                        params.pop("parallel_tool_calls", None)
+                        use_gemini_cache = True
+                    else:
+                        params.pop("cached_content", None)
+                else:
+                    params.pop("cached_content", None)
+
                 if (provider.startswith("openai") or provider == "openai") and safety_identifier:
                     params["safety_identifier"] = str(safety_identifier)
 
-                messages = _with_gemini_cached_system_prompt(messages, provider, model)
-
                 response = run_completion(
                     model=model,
-                    messages=messages,
+                    messages=request_messages,
                     params=params,
-                    tools=tools,
+                    tools=request_tools_payload,
                     drop_params=True,
                 )
 
@@ -681,6 +693,8 @@ def _completion_with_failover(
                 return response, token_usage
                 
         except Exception as exc:
+            if use_gemini_cache and is_gemini_cache_conflict_error(exc):
+                disable_gemini_cache_for(provider, model)
             last_exc = exc
             current_span = trace.get_current_span()
             mark_span_failed_with_exception(current_span, exc, f"LLM completion failed with {provider}")
@@ -737,6 +751,7 @@ def _get_recent_preferred_config(
     streak_sample_size = max(1, max_streak_limit)
 
     try:
+        return None
         recent_completions = list(
             PersistentAgentCompletion.objects.filter(agent=agent)
             .only("created_at", "llm_model", "llm_provider")

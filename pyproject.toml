@@ -32,7 +32,7 @@ dependencies = [
   "gunicorn==23.0.0",
   "zstandard~=0.23.0",
   "json-schema-to-pydantic~=0.4.1",
-  "litellm~=1.73.7",
+  "litellm~=1.79.3",
   "markdown~=3.8",
   "psycopg[binary]~=3.1",
   "pyjwt~=2.10.1",
