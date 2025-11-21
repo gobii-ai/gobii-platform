@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft } from 'lucide-react'
 
-import { fetchSuiteRunDetail, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
+import { fetchSuiteRunDetail, updateSuiteRunType, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
 import { RunTypeBadge } from '../components/common/RunTypeBadge'
 
@@ -19,6 +19,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   const [suite, setSuite] = useState<EvalSuiteRun | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [updatingRunType, setUpdatingRunType] = useState(false)
 
   const hasRuns = useMemo(() => Boolean(suite?.runs && suite.runs.length), [suite?.runs])
 
@@ -35,6 +36,23 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
       completed: suite.run_totals?.completed ?? 0,
     }
   }, [suite])
+
+  const toggleRunType = async (nextRunType: EvalSuiteRun['run_type']) => {
+    setUpdatingRunType(true)
+    setError(null)
+    try {
+      const result = await updateSuiteRunType(suiteRunId, {
+        run_type: nextRunType,
+        official: nextRunType === 'official',
+      })
+      setSuite(result.suite_run)
+    } catch (err) {
+      console.error(err)
+      setError('Unable to update run type right now.')
+    } finally {
+      setUpdatingRunType(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -160,6 +178,17 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
               <RefreshCcw className="w-4 h-4" />
               Refresh
             </button>
+            {suite && (
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg shadow-sm hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => toggleRunType(suite.run_type === 'official' ? 'one_off' : 'official')}
+                disabled={updatingRunType}
+              >
+                {updatingRunType ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {suite.run_type === 'official' ? 'Mark as One-off' : 'Mark as Official'}
+              </button>
+            )}
           </div>
         </div>
       </div>

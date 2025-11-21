@@ -91,3 +91,14 @@ export function createSuiteRuns(payload: CreateSuiteRunPayload): Promise<{
     includeCsrf: true,
   })
 }
+
+export function updateSuiteRunType(
+  suiteRunId: string,
+  payload: { run_type?: EvalRunType; official?: boolean },
+): Promise<{ suite_run: EvalSuiteRun }> {
+  return jsonRequest(`/console/api/evals/suite-runs/${suiteRunId}/run-type/`, {
+    method: 'POST',
+    json: payload,
+    includeCsrf: true,
+  })
+}

@@ -5,7 +5,6 @@ import {
   createSuiteRuns,
   fetchSuiteRuns,
   fetchSuites,
-  type EvalRunType,
   type EvalSuite,
   type EvalSuiteRun,
 } from '../api/evals'
@@ -28,14 +27,13 @@ export function EvalsScreen() {
   const [suites, setSuites] = useState<EvalSuite[]>([])
   const [suiteRuns, setSuiteRuns] = useState<EvalSuiteRun[]>([])
   const [selectedSuites, setSelectedSuites] = useState<Set<string>>(new Set())
-  const [runType, setRunType] = useState<EvalRunType>('one_off')
-  const [runTypeFilter, setRunTypeFilter] = useState<'all' | EvalRunType>('all')
+  const [runTypeFilter, setRunTypeFilter] = useState<'all' | EvalSuiteRun['run_type']>('all')
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const listRefreshInFlight = useRef(false)
-  const runTypeFilterOptions: { value: 'all' | EvalRunType; label: string }[] = [
+  const runTypeFilterOptions: { value: 'all' | EvalSuiteRun['run_type']; label: string }[] = [
     { value: 'all', label: 'All runs' },
     { value: 'official', label: 'Official' },
     { value: 'one_off', label: 'One-off' },
@@ -103,8 +101,6 @@ export function EvalsScreen() {
       await createSuiteRuns({
         suite_slugs,
         agent_strategy: 'ephemeral_per_scenario',
-        run_type: runType,
-        official: runType === 'official',
       })
       await loadSuiteRuns()
     } catch (error) {
@@ -125,7 +121,7 @@ export function EvalsScreen() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Evals</h1>
-              <p className="text-slate-600 mt-1.5">Run suites concurrently, watch progress, and inspect tasks.</p>
+              <p className="text-slate-600 mt-1.5">Run suites concurrently, watch progress, and inspect tasks. Launches default to one-off; promote runs to official from their details.</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -147,44 +143,6 @@ export function EvalsScreen() {
               {launching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
               Launch
             </button>
-          </div>
-        </div>
-        <div className="px-4 pb-4 sm:px-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Run mode</span>
-              <div className="inline-flex rounded-lg bg-slate-100 p-1 shadow-inner ring-1 ring-slate-200/80">
-                <button
-                  type="button"
-                  onClick={() => setRunType('one_off')}
-                  className={`
-                    px-3 py-1.5 text-xs font-semibold rounded-md transition-all
-                    ${runType === 'one_off'
-                      ? 'bg-white text-blue-700 shadow-sm ring-1 ring-slate-200'
-                      : 'text-slate-600 hover:text-slate-900'
-                    }
-                  `}
-                >
-                  One-off
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRunType('official')}
-                  className={`
-                    px-3 py-1.5 text-xs font-semibold rounded-md transition-all
-                    ${runType === 'official'
-                      ? 'bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-200'
-                      : 'text-slate-600 hover:text-slate-900'
-                    }
-                  `}
-                >
-                  Official
-                </button>
-              </div>
-            </div>
-            <p className="text-xs leading-relaxed text-slate-600 sm:text-right">
-              One-off runs are for ad-hoc checks. Mark runs as official to keep them in long-term performance and cost tracking.
-            </p>
           </div>
         </div>
       </div>

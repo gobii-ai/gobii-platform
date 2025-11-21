@@ -50,6 +50,7 @@ from console.api_views import (
     EvalSuiteRunCreateAPIView,
     EvalSuiteRunDetailAPIView,
     EvalSuiteRunListAPIView,
+    EvalSuiteRunRunTypeAPIView,
     EvalRunDetailAPIView,
 )
 from console.usage_views import (
@@ -207,6 +208,7 @@ urlpatterns = [
     path("console/api/evals/suite-runs/", EvalSuiteRunListAPIView.as_view(), name="console_evals_suite_runs"),
     path("console/api/evals/suite-runs/create/", EvalSuiteRunCreateAPIView.as_view(), name="console_evals_suite_runs_create"),
     path("console/api/evals/suite-runs/<uuid:suite_run_id>/", EvalSuiteRunDetailAPIView.as_view(), name="console_evals_suite_run_detail"),
+    path("console/api/evals/suite-runs/<uuid:suite_run_id>/run-type/", EvalSuiteRunRunTypeAPIView.as_view(), name="console_evals_suite_run_run_type"),
     path("console/api/evals/runs/<uuid:run_id>/", EvalRunDetailAPIView.as_view(), name="console_evals_run_detail"),
     path("console/api/mcp/servers/", MCPServerListAPIView.as_view(), name="console-mcp-server-list"),
     path("console/api/mcp/servers/<uuid:server_id>/", MCPServerDetailAPIView.as_view(), name="console-mcp-server-detail"),
