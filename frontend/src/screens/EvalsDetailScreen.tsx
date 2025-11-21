@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { AlertTriangle, Beaker, CheckCircle2, Loader2, XCircle } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, Beaker, CheckCircle2, Loader2, RefreshCcw, XCircle } from 'lucide-react'
 
 import { fetchSuiteRunDetail, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
 
@@ -41,11 +41,15 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const hasRuns = useMemo(() => Boolean(suite?.runs && suite.runs.length), [suite?.runs])
+
   useEffect(() => {
     let cancelled = false
-    const load = async () => {
-      setLoading(true)
-      setError(null)
+    const load = async (background = false) => {
+      if (!background) {
+        setLoading(true)
+        setError(null)
+      }
       try {
         const result = await fetchSuiteRunDetail(suiteRunId)
         if (!cancelled) {
@@ -58,11 +62,59 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
         if (!cancelled) setLoading(false)
       }
     }
-    load()
+    load(false)
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const socket = new WebSocket(`${protocol}://${window.location.host}/ws/evals/suites/${suiteRunId}/`)
-    socket.onmessage = load
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        const payload = data?.payload
+        if (!payload) return
+
+        // If we got a full suite payload, replace state
+        if (payload.suite_slug) {
+          setSuite((prev) => {
+            // prefer incoming runs/tasks if present
+            if (!prev) return payload as EvalSuiteRun
+            return {
+              ...prev,
+              ...payload,
+            }
+          })
+          return
+        }
+
+        // If we got run/task updates, patch in-place to avoid re-fetches
+        setSuite((prev) => {
+          if (!prev) return prev
+          // Run update
+          if (payload.run_id || payload.scenario_slug || payload.status) {
+            const runId = payload.id || payload.run_id
+            const updatedRuns = (prev.runs || []).map((run) =>
+              run.id === runId ? { ...run, ...payload } : run,
+            )
+            return { ...prev, runs: updatedRuns }
+          }
+          // Task update
+          if (payload.sequence !== undefined && payload.run_id) {
+            const updatedRuns = (prev.runs || []).map((run) => {
+              if (run.id !== payload.run_id) return run
+              const tasks = run.tasks || []
+              const found = tasks.find((t) => t.id === payload.id)
+              const nextTasks = found
+                ? tasks.map((t) => (t.id === payload.id ? { ...t, ...payload } : t))
+                : [...tasks, payload as EvalTask]
+              return { ...run, tasks: nextTasks }
+            })
+            return { ...prev, runs: updatedRuns }
+          }
+          return prev
+        })
+      } catch (err) {
+        console.error('Failed to process eval websocket message', err)
+      }
+    }
     socket.onerror = () => socket.close()
 
     return () => {
@@ -73,71 +125,93 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
 
   return (
     <div className="app-shell">
-      <header className="app-header card card--header">
-        <div className="card__body card__body--header">
-          <div className="flex items-center gap-2">
-            <Beaker className="w-6 h-6 text-blue-600" />
-            <h1 className="app-title">Eval Run Detail</h1>
-          </div>
-          <p className="app-subtitle">Suite run {suiteRunId}</p>
-        </div>
-      </header>
-
-      {error && (
-        <div className="card border-rose-200 bg-rose-50 text-rose-700">
-          <div className="card__body flex items-start gap-2 text-sm">
-            <AlertTriangle className="w-4 h-4 mt-0.5" />
-            <div>{error}</div>
-          </div>
-        </div>
-      )}
-
-      {loading && (
-        <div className="flex items-center gap-2 text-sm text-slate-600">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          Loading…
-        </div>
-      )}
-
-      {suite && (
-        <section className="card space-y-4">
-          <div className="card__body flex flex-wrap items-center justify-between gap-3">
+      <div className="max-w-4xl mx-auto space-y-4 pb-10 px-4">
+        <header className="card card--header">
+          <div className="card__body card__body--header flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Suite</p>
-              <p className="text-base font-semibold text-slate-900">{suite.suite_slug}</p>
-              <p className="text-[11px] text-slate-500">Strategy: {suite.agent_strategy}</p>
+              <div className="flex items-center gap-2">
+                <Beaker className="w-6 h-6 text-blue-600" />
+                <h1 className="app-title">Eval Run Detail</h1>
+              </div>
+              <p className="app-subtitle">Suite run {suiteRunId}</p>
             </div>
-            <StatusPill status={(suite.status as Status) || 'pending'} />
-          </div>
-
-          <div className="card__body grid gap-3 sm:grid-cols-3">
-            <Stat label="Started" value={formatTs(suite.started_at)} />
-            <Stat label="Finished" value={formatTs(suite.finished_at)} />
-            <Stat
-              label="Runs completed"
-              value={
-                suite.run_totals
-                  ? `${suite.run_totals.completed}/${suite.run_totals.total_runs}`
-                  : suite.runs
-                    ? `${suite.runs.filter((r) => r.status === 'completed').length}/${suite.runs.length}`
-                    : '—'
-              }
-            />
-          </div>
-
-          <div className="card__body space-y-2">
-            <h2 className="text-sm font-semibold text-slate-800">Scenarios</h2>
-            <div className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-              {(suite.runs || []).map((run) => (
-                <RunRow key={run.id} run={run} />
-              ))}
-              {!suite.runs?.length && (
-                <div className="p-3 text-sm text-slate-500">No scenario runs available.</div>
-              )}
+            <div className="flex items-center gap-2">
+              {suite && <StatusPill status={(suite.status as Status) || 'pending'} />}
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                onClick={() => {
+                  fetchSuiteRunDetail(suiteRunId)
+                    .then((res) => setSuite(res.suite_run))
+                    .catch((err) => {
+                      console.error(err)
+                      setError('Unable to refresh right now.')
+                    })
+                }}
+              >
+                <RefreshCcw className="w-4 h-4" />
+                Refresh
+              </button>
             </div>
           </div>
-        </section>
-      )}
+        </header>
+
+        {error && (
+          <div className="card border-rose-200 bg-rose-50 text-rose-700">
+            <div className="card__body flex items-start gap-2 text-sm">
+              <AlertTriangle className="w-4 h-4 mt-0.5" />
+              <div>{error}</div>
+            </div>
+          </div>
+        )}
+
+        {loading && !suite && (
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading…
+          </div>
+        )}
+
+        {suite && (
+          <section className="card space-y-4">
+            <div className="card__body flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Suite</p>
+                <p className="text-base font-semibold text-slate-900">{suite.suite_slug}</p>
+                <p className="text-[11px] text-slate-500">Strategy: {suite.agent_strategy}</p>
+              </div>
+              <StatusPill status={(suite.status as Status) || 'pending'} />
+            </div>
+
+            <div className="card__body grid gap-3 sm:grid-cols-3">
+              <Stat label="Started" value={formatTs(suite.started_at)} />
+              <Stat label="Finished" value={formatTs(suite.finished_at)} />
+              <Stat
+                label="Runs completed"
+                value={
+                  suite.run_totals
+                    ? `${suite.run_totals.completed}/${suite.run_totals.total_runs}`
+                    : suite.runs
+                      ? `${suite.runs.filter((r) => r.status === 'completed').length}/${suite.runs.length}`
+                      : '—'
+                }
+              />
+            </div>
+
+            <div className="card__body space-y-2">
+              <h2 className="text-sm font-semibold text-slate-800">Scenarios</h2>
+              <div className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+                {(suite.runs || []).map((run) => (
+                  <RunRow key={run.id} run={run} />
+                ))}
+                {!hasRuns && (
+                  <div className="p-3 text-sm text-slate-500">No scenario runs available.</div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+      </div>
     </div>
   )
 }
