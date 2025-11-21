@@ -587,8 +587,6 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             "truncated_rows": any_truncated,
             "row_limit": row_limit,
         }
-        if status == "ok" and succeeded > 0 and only_write_ops:
-            response["auto_sleep_ok"] = True
         return response
     except Exception as outer:
         return {"status": "error", "message": f"SQLite batch failed: {outer}"}
