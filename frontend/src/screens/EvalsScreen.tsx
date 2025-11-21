@@ -3,13 +3,10 @@ import { AlertTriangle, Beaker, CircleDot, Loader2, Play, RefreshCcw, CheckCircl
 
 import {
   createSuiteRuns,
-  fetchSuiteRunDetail,
   fetchSuiteRuns,
   fetchSuites,
-  type EvalRun,
   type EvalSuite,
   type EvalSuiteRun,
-  type EvalTask,
 } from '../api/evals'
 
 type Status = 'pending' | 'running' | 'completed' | 'errored'
@@ -47,12 +44,10 @@ export function EvalsScreen() {
   const [suites, setSuites] = useState<EvalSuite[]>([])
   const [suiteRuns, setSuiteRuns] = useState<EvalSuiteRun[]>([])
   const [selectedSuites, setSelectedSuites] = useState<Set<string>>(new Set())
-  const [detail, setDetail] = useState<EvalSuiteRun | null>(null)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const detailRefreshInFlight = useRef(false)
   const listRefreshInFlight = useRef(false)
 
   const loadSuites = useCallback(async () => {
@@ -90,45 +85,10 @@ export function EvalsScreen() {
     }
   }, [])
 
-  const loadSuiteRunDetail = useCallback(
-    async (suiteRunId: string) => {
-      if (detailRefreshInFlight.current) return
-      detailRefreshInFlight.current = true
-      try {
-        const result = await fetchSuiteRunDetail(suiteRunId)
-        setDetail(result.suite_run)
-      } catch (error) {
-        console.error(error)
-        setErrorMessage('Unable to load eval run details.')
-      } finally {
-        detailRefreshInFlight.current = false
-      }
-    },
-    [],
-  )
-
   useEffect(() => {
     loadSuites()
     loadSuiteRuns()
   }, [loadSuites, loadSuiteRuns])
-
-  useEffect(() => {
-    if (!detail?.id) return
-    const suiteRunId = detail.id
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws/evals/suites/${suiteRunId}/`)
-
-    socket.onmessage = () => {
-      loadSuiteRunDetail(suiteRunId)
-      loadSuiteRuns()
-    }
-
-    socket.onerror = () => {
-      socket.close()
-    }
-
-    return () => socket.close()
-  }, [detail?.id, loadSuiteRunDetail, loadSuiteRuns])
 
   const toggleSuiteSelection = (slug: string) => {
     setSelectedSuites((prev) => {
@@ -147,13 +107,8 @@ export function EvalsScreen() {
     setErrorMessage(null)
     try {
       const suite_slugs = selectedSuites.size ? Array.from(selectedSuites) : ['all']
-      const result = await createSuiteRuns({ suite_slugs, agent_strategy: 'ephemeral_per_scenario' })
+      await createSuiteRuns({ suite_slugs, agent_strategy: 'ephemeral_per_scenario' })
       await loadSuiteRuns()
-      if (result.suite_runs.length) {
-        const firstId = result.suite_runs[0].id
-        setDetail(result.suite_runs[0])
-        await loadSuiteRunDetail(firstId)
-      }
     } catch (error) {
       console.error(error)
       setErrorMessage('Failed to launch evals.')
@@ -161,8 +116,6 @@ export function EvalsScreen() {
       setLaunching(false)
     }
   }
-
-  const detailRuns = useMemo(() => detail?.runs || [], [detail])
 
   return (
     <div className="app-shell">
@@ -278,12 +231,12 @@ export function EvalsScreen() {
                     <td className="px-3 py-2 text-slate-600">{formatTs(suite.started_at)}</td>
                     <td className="px-3 py-2 text-slate-600">{formatTs(suite.finished_at)}</td>
                     <td className="px-3 py-2">
-                      <button
+                      <a
                         className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                        onClick={() => loadSuiteRunDetail(suite.id)}
+                        href={`/console/evals/${suite.id}/`}
                       >
                         View
-                      </button>
+                      </a>
                     </td>
                   </tr>
                 ))}
@@ -300,98 +253,6 @@ export function EvalsScreen() {
         </div>
       </section>
 
-      {detail && (
-        <section className="card">
-          <div className="card__body space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-base font-semibold text-slate-800">Suite Run Detail</h2>
-                <p className="text-xs text-slate-500">
-                  {detail.suite_slug} · {detail.id}
-                </p>
-              </div>
-              <StatusBadge status={(detail.status as Status) || 'pending'} />
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-              <DetailStat label="Started" value={formatTs(detail.started_at)} />
-              <DetailStat label="Finished" value={formatTs(detail.finished_at)} />
-              <DetailStat
-                label="Runs completed"
-                value={
-                  detail.run_totals
-                    ? `${detail.run_totals.completed}/${detail.run_totals.total_runs}`
-                    : `${detailRuns.length} runs`
-                }
-              />
-            </div>
-
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-slate-800">Scenario runs</h3>
-              <div className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-                {detailRuns.map((run) => (
-                  <div key={run.id} className="p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{run.scenario_slug}</p>
-                        <p className="text-[11px] text-slate-500">
-                          Agent: {run.agent_id || 'ephemeral'} · Started {formatTs(run.started_at)}
-                        </p>
-                      </div>
-                      <StatusBadge status={(run.status as Status) || 'pending'} />
-                    </div>
-                    {run.tasks && run.tasks.length > 0 ? (
-                      <div className="mt-3 space-y-2">
-                        {run.tasks.map((task) => (
-                          <TaskRow key={task.id} task={task} />
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="mt-2 text-xs text-slate-500">Tasks not loaded yet.</p>
-                    )}
-                  </div>
-                ))}
-                {!detailRuns.length && (
-                  <div className="p-3 text-sm text-slate-500">No scenario runs available.</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-    </div>
-  )
-}
-
-function DetailStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-      <p className="text-[11px] uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="text-sm font-semibold text-slate-800">{value}</p>
-    </div>
-  )
-}
-
-function TaskRow({ task }: { task: EvalTask }) {
-  const isPass = task.status === 'passed'
-  const isFail = task.status === 'failed' || task.status === 'errored'
-  const statusColor = isPass ? 'text-emerald-700' : isFail ? 'text-rose-700' : 'text-slate-700'
-  return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-900">
-            {task.sequence}. {task.name}
-          </p>
-          <p className="text-[11px] text-slate-500">Assertion: {task.assertion_type}</p>
-        </div>
-        <span className={`text-xs font-semibold ${statusColor}`}>{task.status}</span>
-      </div>
-      {task.observed_summary && (
-        <p className="mt-1 text-xs text-slate-600">
-          {task.observed_summary}
-        </p>
-      )}
     </div>
   )
 }

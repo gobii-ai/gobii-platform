@@ -3797,6 +3797,18 @@ class ConsoleEvalsView(SystemAdminRequiredMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
+class ConsoleEvalsDetailView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "console/evals_detail.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["suite_run_id"] = kwargs.get("suite_run_id")
+        return context
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - read-only shell
+        return HttpResponseNotAllowed(['GET'])
+
+
 class MCPServerOwnerMixin:
     """Shared owner resolution logic for MCP server management views."""
 
