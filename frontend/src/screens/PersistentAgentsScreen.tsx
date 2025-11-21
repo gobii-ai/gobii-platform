@@ -36,6 +36,7 @@ type AgentSummary = {
   headerLinkHoverClass: string
   dailyCreditRemaining: number | null
   dailyCreditLow: boolean
+  last24hCreditBurn: number | null
 }
 
 type AgentListPayload = {
@@ -64,6 +65,14 @@ type TalkToAgentTarget = {
 type NormalizedAgent = AgentSummary & {
   searchBlob: string
   gradientStyle: CSSProperties
+}
+
+function formatCreditBurn(value: number | null): string {
+  if (value == null || value <= 0 || Number.isNaN(value)) {
+    return '0 credits/day'
+  }
+  const fractionDigits = value < 1 ? 2 : value < 10 ? 1 : 0
+  return `${value.toFixed(fractionDigits)} credits/day`
 }
 
 export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenProps) {
@@ -224,6 +233,7 @@ type AgentCardProps = {
 
 function AgentCard({ agent, onTalkToAgent }: AgentCardProps) {
   const creditsRemaining = agent.dailyCreditRemaining !== null ? agent.dailyCreditRemaining.toFixed(2) : null
+  const creditsBurnLast24h = formatCreditBurn(agent.last24hCreditBurn)
 
   return (
     <div className="gobii-card-hoverable group flex h-full flex-col">
@@ -255,9 +265,12 @@ function AgentCard({ agent, onTalkToAgent }: AgentCardProps) {
           </div>
         )}
 
-        <div className={`relative z-10 mt-2 flex items-center gap-2 ${agent.headerStatusClass}`}>
+        <div className={`relative z-10 mt-2 flex flex-wrap items-center gap-2 ${agent.headerStatusClass}`}>
           <span className={`size-2 rounded-full ${agent.isActive ? 'bg-green-300' : 'bg-gray-300'}`} />
           <span className="text-xs font-medium uppercase tracking-wide">{agent.isActive ? 'Active' : 'Paused'}</span>
+          <span className="inline-flex items-center rounded-full border border-white/60 bg-white/90 px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur">
+            {creditsBurnLast24h}
+          </span>
         </div>
 
         {agent.pendingTransfer && (
