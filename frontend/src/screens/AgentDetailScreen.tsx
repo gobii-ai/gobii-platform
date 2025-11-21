@@ -686,6 +686,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [selectedOrgId, setSelectedOrgId] = useState(initialData.reassignment.assignedOrg?.id ?? '')
   const [reassignError, setReassignError] = useState<string | null>(null)
   const [reassigning, setReassigning] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [modal, showModal] = useModal()
   const openConfirmAction = useCallback(
     (config: ConfirmActionConfig) => {
@@ -852,6 +853,40 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
     },
     [initialData.csrfToken, initialData.urls.detail],
   )
+
+  const deleteAgent = useCallback(async () => {
+    setDeleteError(null)
+    try {
+      const response = await fetch(initialData.urls.delete, {
+        method: 'DELETE',
+        headers: {
+          'X-CSRFToken': initialData.csrfToken,
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        credentials: 'same-origin',
+      })
+      if (!response.ok) {
+        const message = (await response.text())?.trim()
+        throw new Error(message || 'Failed to delete agent. Please try again.')
+      }
+      const redirectTarget = response.headers.get('HX-Redirect') || initialData.urls.list
+      window.location.assign(redirectTarget)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete agent. Please try again.'
+      setDeleteError(message)
+      throw error
+    }
+  }, [initialData.csrfToken, initialData.urls.delete, initialData.urls.list])
+
+  const confirmDeleteAgent = useCallback(() => {
+    openConfirmAction({
+      title: 'Delete agent',
+      body: 'Are you sure you want to delete this agent? This action cannot be undone and will permanently remove all agent data and stop any running tasks.',
+      confirmLabel: 'Delete agent',
+      tone: 'danger',
+      onConfirm: deleteAgent,
+    })
+  }, [deleteAgent, openConfirmAction])
 
   const openWebhookModal = useCallback(
     (mode: 'create' | 'edit', webhook: DisplayWebhook | null = null) => {
@@ -1241,6 +1276,8 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
         onReassign={handleReassign}
         reassignError={reassignError}
         reassigning={reassigning}
+        onDeleteAgent={confirmDeleteAgent}
+        deleteError={deleteError}
       />
 
       {modal}
@@ -2355,11 +2392,12 @@ type ActionsSectionProps = {
   onReassign: (targetOrgId: string | null) => Promise<void>
   reassignError: string | null
   reassigning: boolean
+  onDeleteAgent: () => void
+  deleteError: string | null
 }
 
 function ActionsSection({
   csrfToken,
-  urls,
   agent,
   features,
   reassignment,
@@ -2368,6 +2406,8 @@ function ActionsSection({
   onReassign,
   reassignError,
   reassigning,
+  onDeleteAgent,
+  deleteError,
 }: ActionsSectionProps) {
   return (
     <details className="gobii-card-base group" id="agent-ownership">
@@ -2506,17 +2546,14 @@ function ActionsSection({
                 <p className="text-sm text-red-700">Permanently delete this agent and all of its data. This action cannot be undone and will immediately stop any running tasks.</p>
               </div>
               <button
-                {...{
-                  'hx-delete': urls.delete,
-                  'hx-confirm': 'Are you sure you want to delete this agent? This action cannot be undone and will permanently remove all agent data and stop any running tasks.',
-                  'hx-target': 'body',
-                  'hx-swap': 'none',
-                }}
+                type="button"
+                onClick={onDeleteAgent}
                 className="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
               >
                 <Trash2 className="w-4 h-4" aria-hidden="true" />
                 Delete Agent
               </button>
+              {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
             </div>
           </div>
         </section>
