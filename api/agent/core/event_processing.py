@@ -610,40 +610,6 @@ def _completion_with_failover(
                 request_messages = base_messages
                 request_tools_payload: Optional[List[dict]] = list(base_tools) if base_tools else None
                 use_gemini_cache = False
-                if should_use_gemini_cache(provider, model):
-                    try:
-                        cache_request = _GEMINI_CACHE_MANAGER.prepare_request(
-                            messages=base_messages,
-                            tools=base_tools,
-                            provider=provider,
-                            model=model,
-                            params=params_base,
-                            agent_id=agent_id,
-                        )
-                    except GeminiCachedContentError as cache_exc:
-                        logger.warning(
-                            "Gemini cached content unavailable for provider %s/%s: %s",
-                            provider,
-                            model,
-                            cache_exc,
-                        )
-                        cache_request = None
-                    if cache_request:
-                        request_messages = (
-                            cache_request.messages if cache_request.messages is not None else base_messages
-                        )
-                        request_tools_payload = None
-                        params["cached_content"] = cache_request.cached_content
-                        params.pop("tool_choice", None)
-                        params.pop("parallel_tool_calls", None)
-                        use_gemini_cache = True
-
-                        if not request_messages:
-                            request_messages = [{"role": "user", "content": ""}]
-                    else:
-                        params.pop("cached_content", None)
-                else:
-                    params.pop("cached_content", None)
 
                 if (provider.startswith("openai") or provider == "openai") and safety_identifier:
                     params["safety_identifier"] = str(safety_identifier)
