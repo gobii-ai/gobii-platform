@@ -254,7 +254,7 @@ def ping(request):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "List Tasks",
+                    "sidebarTitle": "Tasks - List",
                 }
             }
         }
@@ -280,7 +280,7 @@ def ping(request):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Create Task",
+                    "sidebarTitle": "Task - Create",
                 }
             }
         }
@@ -291,7 +291,7 @@ def ping(request):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Get Task",
+                    "sidebarTitle": "Task - Get",
                 }
             }
         }
@@ -302,7 +302,7 @@ def ping(request):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Update Task",
+                    "sidebarTitle": "Task - Update",
                 }
             }
         }
@@ -313,7 +313,7 @@ def ping(request):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Delete Task",
+                    "sidebarTitle": "Task - Delete",
                 }
             }
         }
@@ -324,7 +324,7 @@ def ping(request):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Update Task",
+                    "sidebarTitle": "Task - Update",
                 }
             }
         }
@@ -427,7 +427,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "List Tasks",
+                    "sidebarTitle": "Tasks - List",
                 }
             }
         }
@@ -728,7 +728,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Get Task Result",
+                    "sidebarTitle": "Task Result - Get",
                 }
             }
         }
@@ -799,7 +799,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Cancel Task",
+                    "sidebarTitle": "Task - Cancel",
                 }
             }
         }
@@ -851,7 +851,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "List Agents"
+                    "sidebarTitle": "Agents - List"
                 }
             }
         }
@@ -862,7 +862,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Get Agent"
+                    "sidebarTitle": "Agent - Get"
                 }
             }
         }
@@ -874,7 +874,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Create Agent"
+                    "sidebarTitle": "Agent - Create"
                 }
             }
         }
@@ -885,7 +885,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Update Agent"
+                    "sidebarTitle": "Agent - Update"
                 }
             }
         }
@@ -898,7 +898,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Update Agent (Partial)"
+                    "sidebarTitle": "Agent - Update (Partial)"
                 }
             }
         }
@@ -909,7 +909,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Delete Agent"
+                    "sidebarTitle": "Agent - Delete"
                 }
             }
         }
@@ -1036,7 +1036,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Get Timeline"
+                    "sidebarTitle": "Timeline - Get"
                 }
             }
         }
@@ -1075,7 +1075,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Message Agent"
+                    "sidebarTitle": "Agent - Message"
                 }
             }
         }
@@ -1159,7 +1159,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Activate"
+                    "sidebarTitle": "Agent - Activate"
                 }
             }
         }
@@ -1186,7 +1186,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Deactivate"
+                    "sidebarTitle": "Agent - Deactivate"
                 }
             }
         }
@@ -1209,7 +1209,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "Preview Agent Schedule"
+                    "sidebarTitle": "Agent Schedule - Preview"
                 }
             }
         }
@@ -1238,7 +1238,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         extensions={
             "x-mint": {
                 "metadata": {
-                    "sidebarTitle": "List Web Tasks"
+                    "sidebarTitle": "Web Tasks - List"
                 }
             }
         }
