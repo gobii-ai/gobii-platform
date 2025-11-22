@@ -2860,11 +2860,17 @@ class PersistentAgent(models.Model):
     """
     A persistent agent that runs automatically on a schedule.
     """
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        help_text="Unique identifier for the agent."
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="persistent_agents",
+        help_text="The user who owns this agent."
     )
     organization = models.ForeignKey(
         'Organization',
@@ -2874,8 +2880,14 @@ class PersistentAgent(models.Model):
         related_name='persistent_agents',
         help_text="Owning organization, if any. If null, owned by the creating user."
     )
-    name = models.CharField(max_length=255)
-    charter = models.TextField(blank=True)
+    name = models.CharField(
+        max_length=255,
+        help_text="Human-readable name for this agent."
+    )
+    charter = models.TextField(
+        blank=True,
+        help_text="The assigned objectives of the agent.",
+    )
     short_description = models.CharField(
         max_length=280,
         blank=True,
@@ -2969,8 +2981,16 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="Snapshot of cron schedule for restoration."
     )
-    last_expired_at = models.DateTimeField(null=True, blank=True)
-    sleep_email_sent_at = models.DateTimeField(null=True, blank=True)
+    last_expired_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the last soft expiration event; may be null if never expired."
+    )
+    sleep_email_sent_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the last sleep email sent; may be null if never sent."
+    )
     sent_expiration_email = models.BooleanField(
         default=False,
         help_text="Whether a soft-expiration notification has been sent for the current inactivity period.",
@@ -3015,8 +3035,14 @@ class PersistentAgent(models.Model):
         help_text="Timestamp of the most recent proactive outreach trigger.",
     )
     # NOTE: Enabled MCP tools are now tracked in PersistentAgentEnabledTool.
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp of when this agent was created.",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Timestamp of when this agent was last updated.",
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -3690,6 +3716,7 @@ class MCPServerConfig(models.Model):
         null=True,
         blank=True,
         related_name="mcp_server_configs",
+        help_text="Organization to which this config applies, if any",
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -3697,13 +3724,35 @@ class MCPServerConfig(models.Model):
         null=True,
         blank=True,
         related_name="mcp_server_configs",
+        help_text="User to which this config applies, if any",
     )
-    name = models.SlugField(max_length=64)
-    display_name = models.CharField(max_length=128)
-    description = models.TextField(blank=True)
-    command = models.CharField(max_length=255, blank=True)
-    command_args = models.JSONField(default=list, blank=True)
-    url = models.CharField(max_length=512, blank=True)
+    name = models.SlugField(
+        max_length=64,
+        help_text="Name of this config",
+    )
+    display_name = models.CharField(
+        max_length=128,
+        help_text="Human-readable name of this config",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Description of this MCP server config",
+    )
+    command = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Command to execute on the MCP server",
+    )
+    command_args = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Arguments to pass to the command",
+    )
+    url = models.CharField(
+        max_length=512,
+        blank=True,
+        help_text="URL of the MCP server",
+    )
     auth_method = models.CharField(
         max_length=32,
         choices=AuthMethod.choices,
@@ -3883,18 +3932,28 @@ class PersistentAgentSystemMessage(models.Model):
 class PersistentAgentMCPServer(models.Model):
     """Explicit mapping for personal MCP servers enabled on an agent."""
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        help_text="Unique identifier for this association"
+    )
     agent = models.ForeignKey(
         "PersistentAgent",
         on_delete=models.CASCADE,
         related_name="personal_mcp_servers",
+        help_text="Agent to which this MCP server mapping applies.",
     )
     server_config = models.ForeignKey(
         MCPServerConfig,
         on_delete=models.CASCADE,
         related_name="agent_assignments",
+        help_text="MCP server configuration to use for this agent",
     )
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp when this association was created"
+    )
 
     class Meta:
         constraints = [
