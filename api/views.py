@@ -91,12 +91,75 @@ class PersistentAgentSchedulePreviewSerializer(serializers.Serializer):
     )
 
 @extend_schema_view(
-    list=extend_schema(operation_id='listAgents', tags=['browser-use Tasks API']),
-    create=extend_schema(operation_id='createAgent', tags=['browser-use Tasks API']),
-    retrieve=extend_schema(operation_id='getAgent', tags=['browser-use Tasks API']),
-    update=extend_schema(operation_id='updateAgent', tags=['browser-use Tasks API']),
-    # partial_update will also be inferred correctly if it uses the same serializer
-    destroy=extend_schema(operation_id='deleteAgent', tags=['browser-use Tasks API'])
+    list=extend_schema(
+        operation_id='listAgents',
+        tags=['browser-use Tasks API'],
+        summary='List browser-use Profiles',
+        description='List all browser-use profiles for the API key.',
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Profiles - List",
+                }
+            }
+        }
+    ),
+    create=extend_schema(
+        operation_id='createAgent',
+        tags=['browser-use Tasks API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Profile - Create",
+                }
+            }
+        }
+    ),
+    retrieve=extend_schema(
+        operation_id='getAgent',
+        tags=['browser-use Tasks API'],
+        summary='Get browser-use Profile',
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Profile - Get",
+                }
+            }
+        }
+    ),
+    update=extend_schema(
+        operation_id='updateAgent',
+        tags=['browser-use Tasks API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Profile - Update",
+                }
+            }
+        }
+    ),
+    partial_update=extend_schema(
+        operation_id='updateAgentStatusPartial',
+        tags=['browser-use Tasks API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Profile - Update (Partial)",
+                }
+            }
+        }
+    ),
+    destroy=extend_schema(
+        operation_id='deleteAgent',
+        tags=['browser-use Tasks API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Profile - Delete",
+                }
+            }
+        }
+    )
 )
 class BrowserUseAgentViewSet(viewsets.ModelViewSet):
     """
@@ -251,6 +314,17 @@ def ping(request):
             "x-mint": {
                 "metadata": {
                     "sidebarTitle": "Delete Task",
+                }
+            }
+        }
+    ),
+    partial_update=extend_schema(
+        operation_id='updateTaskStatusPartial',
+        tags=['browser-use Tasks API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Update Task",
                 }
             }
         }
