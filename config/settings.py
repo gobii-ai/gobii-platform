@@ -560,6 +560,7 @@ SPECTACULAR_SETTINGS = {
     "COMPONENT_SPLIT_PATCH": True,  # Creates separate components for PATCH endpoints
     "CAMELIZE_NAMES": True,  # Ensures consistent case in generated types
     "POSTPROCESSING_HOOKS": ["drf_spectacular.hooks.postprocess_schema_enums"],
+
     # Enum names are auto-detected
     # Override operationIds to use cleaner function names
     "OPERATION_ID_MAPPING": {
@@ -567,11 +568,9 @@ SPECTACULAR_SETTINGS = {
     },
     # Servers definition for default base URL in client
     "SERVERS": [{"url": "https://gobii.ai/api/v1", "description": "Production server"}],
+
     # Tags for API organization
-    "TAGS": [
-        {"name": "browser-use", "description": "Browser Use Agent operations and tasks"},
-        {"name": "utils", "description": "Utility operations"}
-    ]
+    "TAGS": []
 }
 
 # ────────── Redis ──────────

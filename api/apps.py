@@ -1,5 +1,8 @@
 from django.apps import AppConfig
+import api.spectacular_extensions
 
+
+# NOTE: See SPECTACULAR_SETTINGS in settings.py for lots of base configuration
 
 class ApiConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
