@@ -70,8 +70,14 @@ class StandardResultsSetPagination(PageNumberPagination):
 
 
 class PersistentAgentMessageCreateSerializer(serializers.Serializer):
-    channel = serializers.ChoiceField(choices=[(choice.value, choice.label) for choice in CommsChannel])
-    sender = serializers.CharField(max_length=512)
+    channel = serializers.ChoiceField(
+        choices=[(choice.value, choice.label) for choice in CommsChannel],
+        required=True,
+        help_text="The channel to send the message to."
+    )
+    sender = serializers.CharField(
+        max_length=512,
+    )
     recipient = serializers.CharField(max_length=512, required=False, allow_blank=True, allow_null=True)
     subject = serializers.CharField(max_length=512, required=False, allow_blank=True, allow_null=True)
     body = serializers.CharField()
@@ -79,15 +85,18 @@ class PersistentAgentMessageCreateSerializer(serializers.Serializer):
 
 
 class PersistentAgentSchedulePreviewSerializer(serializers.Serializer):
-    schedule = serializers.CharField(allow_blank=True)
+    schedule = serializers.CharField(
+        allow_blank=True,
+        help_text="A cron-like schedule expression for the agent's schedule"
+    )
 
 @extend_schema_view(
-    list=extend_schema(operation_id='listAgents', tags=['browser-use']),
-    create=extend_schema(operation_id='createAgent', tags=['browser-use']),
-    retrieve=extend_schema(operation_id='getAgent', tags=['browser-use']),
-    update=extend_schema(operation_id='updateAgent', tags=['browser-use']),
+    list=extend_schema(operation_id='listAgents', tags=['browser-use Tasks API']),
+    create=extend_schema(operation_id='createAgent', tags=['browser-use Tasks API']),
+    retrieve=extend_schema(operation_id='getAgent', tags=['browser-use Tasks API']),
+    update=extend_schema(operation_id='updateAgent', tags=['browser-use Tasks API']),
     # partial_update will also be inferred correctly if it uses the same serializer
-    destroy=extend_schema(operation_id='deleteAgent', tags=['browser-use'])
+    destroy=extend_schema(operation_id='deleteAgent', tags=['browser-use Tasks API'])
 )
 class BrowserUseAgentViewSet(viewsets.ModelViewSet):
     """
@@ -147,13 +156,28 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
             raise DRFValidationError(detail=e.message_dict if hasattr(e, 'message_dict') else e.messages)
 
 
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
+
+class PingResponseSerializer(serializers.Serializer):
+    pong = serializers.BooleanField()
+    user = serializers.EmailField()
+
+
 @extend_schema(
     operation_id='ping',
+    description='Test API connectivity with a simple ping endpoint',
     tags=['Utilities'],
-    responses={200: serializers.DictField}
+    responses={200: PingResponseSerializer},
+    summary='Ping API ',
+    extensions={
+        'x-mint': {
+            "metadata": {
+                "sidebarTitle": "Ping",
+            }
+        }
+    }
 )
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def ping(request):
     """Test API connectivity with a simple ping endpoint"""
     Analytics.track_event(user_id=request.user.id, event=AnalyticsEvent.PING, source=AnalyticsSource.API)
@@ -161,10 +185,20 @@ def ping(request):
 
 
 @extend_schema_view(
-    list=extend_schema(operation_id='listTasks', tags=['browser-use']),
+    list=extend_schema(
+        operation_id='listTasks',
+        tags=['browser-use Tasks API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "List Tasks",
+                }
+            }
+        }
+    ),
     create=extend_schema(
         operation_id='assignTask',
-        tags=['browser-use'],
+        tags=['browser-use Tasks API'],
         responses={
             201: BrowserUseAgentTaskSerializer,
             402: inline_serializer(
@@ -179,11 +213,48 @@ def ping(request):
                     'detail': serializers.CharField()
                 }
             )
+        },
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Create Task",
+                }
+            }
         }
     ),
-    retrieve=extend_schema(operation_id='getTask', tags=['browser-use']),
-    update=extend_schema(operation_id='updateTask', tags=['browser-use']),
-    destroy=extend_schema(operation_id='deleteTask', tags=['browser-use'])
+    retrieve=extend_schema(
+        operation_id='getTask',
+        tags=['browser-use Tasks API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Get Task",
+                }
+            }
+        }
+    ),
+    update=extend_schema(
+        operation_id='updateTask',
+        tags=['browser-use Tasks API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Update Task",
+                }
+            }
+        }
+    ),
+    destroy=extend_schema(
+        operation_id='deleteTask',
+        tags=['browser-use Tasks API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Delete Task",
+                }
+            }
+        }
+    )
 )
 class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                           mixins.RetrieveModelMixin,
@@ -274,7 +345,19 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
 
         return qs
 
-    @extend_schema(operation_id='listAllTasks', tags=['browser-use'])
+    @extend_schema(
+        operation_id='listAllTasks',
+        tags=['browser-use Tasks API'],
+        summary='List all browser-use tasks for profile',
+        description='List all browser-use tasks for the specified browser-use profile.',
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "List Tasks",
+                }
+            }
+        }
+    )
     @action(detail=False, methods=['get'])
     def list_all(self, request):
         with traced("GET tasks", user_id=self.request.user.id) as span:
@@ -564,7 +647,18 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                     properties=props.copy(),
                 )
 
-    @extend_schema(operation_id='getTaskResult', tags=['browser-use'], responses=BrowserUseAgentTaskSerializer)
+    @extend_schema(
+        operation_id='getTaskResult',
+        tags=['browser-use Tasks API'],
+        responses=BrowserUseAgentTaskSerializer,
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Get Task Result",
+                }
+            }
+        }
+    )
     @action(detail=True, methods=['get'])
     def result(self, request, id=None, agentId=None):
         task = self.get_object()
@@ -607,20 +701,33 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
 
     @extend_schema(
         operation_id='cancelTask',
-        tags=['browser-use'],
+        tags=['browser-use Tasks API'],
         request=None,
         responses={
             200: inline_serializer(
                 name='CancelTaskResponse',
                 fields={
-                    'status': serializers.CharField(),
-                    'message': serializers.CharField()
+                    'status': serializers.CharField(
+                        help_text='Status of the task after cancellation.'
+                    ),
+                    'message': serializers.CharField(
+                        help_text='Message indicating the result of the cancellation.'
+                    )
                 }
             ),
             409: inline_serializer(
                 name='CancelTaskConflictResponse',
-                fields={'detail': serializers.CharField()}
+                fields={'detail': serializers.CharField(
+                    help_text='Error message indicating that the task is not in a cancellable state.'
+                )}
             )
+        },
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Cancel Task",
+                }
+            }
         }
     )
     @action(detail=True, methods=['post'])
@@ -664,12 +771,75 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
 
 
 @extend_schema_view(
-    list=extend_schema(operation_id='listPersistentAgents', tags=['Agents']),
-    retrieve=extend_schema(operation_id='getPersistentAgent', tags=['Agents']),
-    create=extend_schema(operation_id='createPersistentAgent', tags=['Agents']),
-    update=extend_schema(operation_id='updatePersistentAgent', tags=['Agents']),
-    partial_update=extend_schema(operation_id='partialUpdatePersistentAgent', tags=['Agents']),
-    destroy=extend_schema(operation_id='deletePersistentAgent', tags=['Agents'])
+    list=extend_schema(
+        operation_id='listPersistentAgents',
+        tags=['Agents API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "List Agents"
+                }
+            }
+        }
+    ),
+    retrieve=extend_schema(
+        operation_id='getPersistentAgent',
+        tags=['Agents API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Get Agent"
+                }
+            }
+        }
+    ),
+    create=extend_schema(
+        operation_id='createPersistentAgent',
+        tags=['Agents API'],
+        summary='Create an Agent',
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Create Agent"
+                }
+            }
+        }
+    ),
+    update=extend_schema(
+        operation_id='updatePersistentAgent',
+        tags=['Agents API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Update Agent"
+                }
+            }
+        }
+    ),
+    partial_update=extend_schema(
+        operation_id='partialUpdatePersistentAgent',
+        tags=['Agents API'],
+        summary="Update an Agent",
+        description="Update an agent's configuration",
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Update Agent (Partial)"
+                }
+            }
+        }
+    ),
+    destroy=extend_schema(
+        operation_id='deletePersistentAgent',
+        tags=['Agents API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Delete Agent"
+                }
+            }
+        }
+    )
 )
 class PersistentAgentViewSet(viewsets.ModelViewSet):
     queryset = PersistentAgent.objects.select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint')
@@ -784,8 +954,20 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             raise DRFValidationError({'recipient': [f'Agent has no {channel.value} endpoint.']})
         return endpoint.address
 
+    @extend_schema(
+        operation_id='getPersistentAgentTimeline',
+        tags=['Agents API'],
+        summary="Get Agent Timeline",
+        description="Gets the agent's current timeline",
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Get Timeline"
+                }
+            }
+        }
+    )
     @action(detail=True, methods=['get'], url_path='timeline')
-    @extend_schema(operation_id='getPersistentAgentTimeline', tags=['Agents'])
     def timeline(self, request, id=None):
         agent = self.get_object()
         direction = (request.query_params.get('direction') or 'initial').lower()
@@ -811,8 +993,24 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         }
         return Response(payload)
 
-    @action(detail=True, methods=['post'], url_path='messages')
-    @extend_schema(operation_id='sendPersistentAgentMessage', tags=['Agents'])
+    @extend_schema(
+        operation_id='sendPersistentAgentMessage',
+        tags=['Agents API'],
+        summary="Message Agent",
+        description="Send a message to an agent. Messages can provide additional information, make requests, and so forth to an agent just as you would communicate with an agent outside of the API.",
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Message Agent"
+                }
+            }
+        }
+    )
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='messages'
+    )
     def create_message(self, request, id=None):
         agent = self.get_object()
         serializer = PersistentAgentMessageCreateSerializer(data=request.data)
@@ -858,8 +1056,20 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
 
         return Response({'event': event}, status=status.HTTP_201_CREATED)
 
+    @extend_schema(
+        operation_id='getPersistentAgentProcessingStatus',
+        tags=['Agents API'],
+        summary="Get Agent Processing Status",
+        description="Gets the processing status of an agent's current timeline",
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Processing Status"
+                }
+            }
+        }
+    )
     @action(detail=True, methods=['get'], url_path='processing-status')
-    @extend_schema(operation_id='getPersistentAgentProcessingStatus', tags=['Agents'])
     def processing_status(self, request, id=None):
         agent = self.get_object()
         snapshot = build_processing_snapshot(agent)
@@ -868,8 +1078,19 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             'processing_snapshot': serialize_processing_snapshot(snapshot),
         })
 
+    @extend_schema(
+        operation_id='activatePersistentAgent',
+        tags=['Agents API'],
+        description="Activates an agent processing.",
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Activate"
+                }
+            }
+        }
+    )
     @action(detail=True, methods=['post'], url_path='activate')
-    @extend_schema(operation_id='activatePersistentAgent', tags=['Agents'])
     def activate(self, request, id=None):
         agent = self.get_object()
         updates: set[str] = set()
@@ -884,8 +1105,19 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_UPDATED)
         return Response({'status': 'activated', 'updated': bool(updates)})
 
+    @extend_schema(
+        operation_id='deactivatePersistentAgent',
+        tags=['Agents API'],
+        description="Deactivates an agent from processing.",
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Deactivate"
+                }
+            }
+        }
+    )
     @action(detail=True, methods=['post'], url_path='deactivate')
-    @extend_schema(operation_id='deactivatePersistentAgent', tags=['Agents'])
     def deactivate(self, request, id=None):
         agent = self.get_object()
         updates = {}
@@ -897,8 +1129,18 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_UPDATED)
         return Response({'status': 'deactivated', 'updated': bool(updates)})
 
+    @extend_schema(
+        operation_id='previewPersistentAgentSchedule',
+        tags=['Agents API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "Preview Agent Schedule"
+                }
+            }
+        }
+    )
     @action(detail=True, methods=['post'], url_path='schedule/preview')
-    @extend_schema(operation_id='previewPersistentAgentSchedule', tags=['Agents'])
     def schedule_preview(self, request, id=None):
         self.get_object()
         serializer = PersistentAgentSchedulePreviewSerializer(data=request.data)
@@ -916,8 +1158,18 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         description = PretrainedWorkerTemplateService.describe_schedule(schedule)
         return Response({'valid': True, 'disabled': False, 'description': description})
 
+    @extend_schema(
+        operation_id='listWebTasks',
+        tags=['Agents API'],
+        extensions={
+            "x-mint": {
+                "metadata": {
+                    "sidebarTitle": "List Web Tasks"
+                }
+            }
+        }
+    )
     @action(detail=True, methods=['get'], url_path='web-tasks')
-    @extend_schema(operation_id='listWebTasks', tags=['Agents'])
     def web_tasks(self, request, id=None):
         agent = self.get_object()
         browser_agent = agent.browser_use_agent
