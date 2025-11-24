@@ -25,7 +25,7 @@ from util.payments_helper import PaymentsHelper
 from util.subscription_helper import (
     ensure_single_individual_subscription,
     get_or_create_stripe_customer,
-    get_user_plan,
+
 )
 from util.integrations import stripe_status, IntegrationDisabledError
 from constants.plans import PlanNames

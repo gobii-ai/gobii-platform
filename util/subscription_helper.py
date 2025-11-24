@@ -241,12 +241,15 @@ def ensure_single_individual_subscription(
         if product in plan_products or usage_type == "licensed":
             payload.update({"price": licensed_price_id, "quantity": item.get("quantity") or 1})
             base_found = True
-        elif metered_price_id and (price.get("id") == metered_price_id or usage_type == "metered"):
+        elif metered_price_id and price.get("id") == metered_price_id:
             payload.update({"price": metered_price_id})
             meter_found = True
         else:
-            if price.get("id"):
-                payload.update({"price": price.get("id")})
+            price_id = price.get("id")
+            if not price_id:
+                logger.warning("Subscription item %s has no price; skipping", item.get("id"))
+                continue
+            payload.update({"price": price_id})
             if item.get("quantity") is not None:
                 payload["quantity"] = item.get("quantity")
 
@@ -267,8 +270,11 @@ def ensure_single_individual_subscription(
         [item.get("price") for item in updated_items],
     )
 
+    sub_id = newest.get("id")
+    if not sub_id:
+        raise ValueError(f"Subscription missing ID: {newest}")
     updated_sub = stripe.Subscription.modify(  # type: ignore[attr-defined]
-        newest.get("id"),
+        sub_id,
         items=updated_items,
         metadata=merged_metadata,
         idempotency_key=idempotency_token,
