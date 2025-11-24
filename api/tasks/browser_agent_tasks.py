@@ -373,6 +373,10 @@ def _resolve_browser_provider_priority_from_db(*, prefer_premium: bool = False):
                     if not raw_model:
                         continue
 
+                    pricing_provider_hint = provider.key or None
+                    if provider.browser_backend == LLMProvider.BrowserBackend.GOOGLE:
+                        pricing_provider_hint = "vertex_ai"
+
                     entries.append({
                         'provider_key': provider.key,
                         'endpoint_key': endpoint.key,
@@ -385,6 +389,7 @@ def _resolve_browser_provider_priority_from_db(*, prefer_premium: bool = False):
                         'api_key': api_key,
                         'has_key': True,
                         'is_premium': is_premium,
+                        'pricing_provider_hint': pricing_provider_hint,
                     })
                 if entries:
                     tiers.append(entries)
@@ -597,6 +602,7 @@ async def _run_agent(
     provider_backend_override: Optional[str] = None,
     override_max_output_tokens: Optional[int] = None,
     supports_vision: bool = True,
+    pricing_provider_hint: Optional[str] = None,
     is_eval: bool = False,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """Execute the Browser‑Use agent for a single provider."""
@@ -923,6 +929,8 @@ async def _run_agent(
                     "model": llm_params.get("model"),
                     "provider": provider
                 }
+                if pricing_provider_hint:
+                    token_usage["pricing_provider_hint"] = pricing_provider_hint
 
                 if getattr(history, "usage", None):
                     usage_summary = history.usage
@@ -1208,6 +1216,7 @@ def _execute_agent_with_failover(
                     e.get('backend'),
                     e.get('supports_vision'),
                     e.get('max_output_tokens'),
+                    e.get('pricing_provider_hint'),
                 )
                 for e in tier
             ]  # type: ignore[index]
@@ -1263,6 +1272,7 @@ def _execute_agent_with_failover(
                     None,
                     DEFAULT_PROVIDER_VISION_SUPPORT.get(selected_provider, True),
                     None,
+                    None,
                 ))
                 remaining_providers = [p for p in remaining_providers if p[0] != selected_provider]
 
@@ -1275,6 +1285,7 @@ def _execute_agent_with_failover(
             backend,
             supports_vision,
             max_output_tokens,
+            pricing_provider_hint,
         ) in attempts:
             # Resolve API key
             llm_api_key = None
@@ -1320,6 +1331,7 @@ def _execute_agent_with_failover(
                         provider_backend_override=backend,
                         supports_vision=vision_enabled,
                         override_max_output_tokens=max_output_tokens,
+                        pricing_provider_hint=pricing_provider_hint,
                         is_eval=is_eval,
                     )
                 )

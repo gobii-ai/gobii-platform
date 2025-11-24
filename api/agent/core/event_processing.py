@@ -143,6 +143,7 @@ def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any
 
     model = token_usage.get("model")
     provider = token_usage.get("provider")
+    pricing_provider_hint = token_usage.get("pricing_provider_hint")
     if not model:
         return {}
 
@@ -167,6 +168,8 @@ def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any
         provider_from_model, stripped_model = model.split("/", 1)
         model_variants.append(stripped_model)
     provider_candidates: List[Optional[str]] = []
+    if pricing_provider_hint:
+        provider_candidates.append(pricing_provider_hint)
     if provider_from_model:
         provider_candidates.append(provider_from_model)
     if provider and provider not in provider_candidates:
@@ -423,7 +426,19 @@ def _completion_with_failover(
                     llm_span.set_attribute("persistent_agent.id", str(agent_id))
                 llm_span.set_attribute("llm.model", model)
                 llm_span.set_attribute("llm.provider", provider)
+
                 params_base = dict(params_with_hints or {})
+                pricing_provider_hint = params_base.pop("pricing_provider_hint", None)
+                endpoint_key = params_base.pop("endpoint_key", None)
+
+                if pricing_provider_hint and "custom_llm_provider" not in params_base:
+                    params_base["custom_llm_provider"] = pricing_provider_hint
+
+                if endpoint_key:
+                    llm_span.set_attribute("llm.endpoint_key", endpoint_key)
+                if pricing_provider_hint:
+                    llm_span.set_attribute("llm.pricing_provider_hint", pricing_provider_hint)
+
                 params = dict(params_base)
 
                 # Extra diagnostics for OpenAI-compatible / custom bases
@@ -474,6 +489,10 @@ def _completion_with_failover(
                     "model": model,
                     "provider": provider,
                 }
+                if pricing_provider_hint:
+                    token_usage["pricing_provider_hint"] = pricing_provider_hint
+                if endpoint_key:
+                    token_usage["endpoint_key"] = endpoint_key
                 usage = response.model_extra.get("usage", None)
                 if usage:
                     llm_span.set_attribute("llm.usage.prompt_tokens", usage.prompt_tokens)

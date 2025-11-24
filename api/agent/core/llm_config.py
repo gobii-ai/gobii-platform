@@ -626,13 +626,20 @@ def _collect_failover_configs(
             else:
                 params.pop("temperature", None)
 
+            pricing_provider_hint: str | None = provider.key or None
+            if provider.browser_backend == LLMProvider.BrowserBackend.GOOGLE:
+                pricing_provider_hint = "vertex_ai"
+
             params_with_hints = dict(params)
             params_with_hints["supports_temperature"] = supports_temperature
             params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
             params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
             params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
+            params_with_hints["endpoint_key"] = endpoint.key
+            if pricing_provider_hint:
+                params_with_hints["pricing_provider_hint"] = pricing_provider_hint
 
-            failover_configs.append((endpoint.key, effective_model, params_with_hints))
+            failover_configs.append((provider.key, effective_model, params_with_hints))
 
     return failover_configs
 

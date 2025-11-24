@@ -220,6 +220,51 @@ class TokenUsageTrackingTest(TestCase):
         self.assertIsNotNone(response)
         self.assertEqual(token_usage.get("total_cost"), Decimal("0.000000"))
 
+    @patch("api.agent.core.event_processing.litellm.completion")
+    @patch("api.agent.core.event_processing.litellm.get_model_info")
+    def test_pricing_hint_uses_custom_provider(self, mock_get_model_info, mock_completion):
+        """Ensure pricing hints (e.g., vertex_ai) drive LiteLLM pricing lookup."""
+
+        def _model_info_side_effect(model=None, custom_llm_provider=None, **_kwargs):
+            if custom_llm_provider == "vertex_ai":
+                return {
+                    "input_cost_per_token": 0.000001,
+                    "cache_read_input_token_cost": 0.0,
+                    "output_cost_per_token": 0.000002,
+                }
+            raise ValueError("unexpected provider")
+
+        mock_get_model_info.side_effect = _model_info_side_effect
+
+        usage_details = MagicMock(cached_tokens=None)
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock(content="Hinted cost")
+        mock_response.model_extra = {
+            "usage": MagicMock(
+                prompt_tokens=10,
+                completion_tokens=5,
+                total_tokens=15,
+                prompt_tokens_details=usage_details,
+            )
+        }
+        mock_completion.return_value = mock_response
+
+        _response, token_usage = _completion_with_failover(
+            messages=[{"role": "user", "content": "Hello"}],
+            tools=[],
+            failover_configs=[("endpoint-1", "gemini-1.5-pro", {"pricing_provider_hint": "vertex_ai"})],
+            agent_id=str(self.agent.id),
+        )
+
+        self.assertEqual(token_usage["total_cost"], Decimal("0.000020"))
+        self.assertEqual(token_usage.get("pricing_provider_hint"), "vertex_ai")
+        called_with_hint = any(
+            kwargs.get("custom_llm_provider") == "vertex_ai"
+            for _args, kwargs in mock_get_model_info.call_args_list
+        )
+        self.assertTrue(called_with_hint)
+
     def test_browser_task_cost_fields_persist(self):
         """Browser-use tasks should store the cost breakdown returned by the agent run."""
         from api.tasks.browser_agent_tasks import _process_browser_use_task_core
