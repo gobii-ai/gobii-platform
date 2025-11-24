@@ -18,12 +18,9 @@ logger = logging.getLogger(__name__)
 def _decimal_zero(output_digits: int = 20, output_places: int = 6) -> Value:
     return Value(Decimal("0"), output_field=DecimalField(max_digits=output_digits, decimal_places=output_places))
 
-def aggregate_task_metrics(task: EvalRunTask) -> None:
-    """
-    Aggregates usage and cost metrics for a single EvalRunTask based on its 
-    execution window (started_at -> finished_at).
-    """
-    if not (task.started_at and task.finished_at):
+def aggregate_task_metrics(task: EvalRunTask, *, window_start, window_end) -> None:
+    """Aggregates usage/cost metrics for a single EvalRunTask within a provided window."""
+    if window_start is None:
         return
 
     dec_zero = _decimal_zero()
@@ -31,8 +28,8 @@ def aggregate_task_metrics(task: EvalRunTask) -> None:
 
     window = {
         "eval_run_id": task.run_id,
-        "created_at__gte": task.started_at,
-        "created_at__lte": task.finished_at,
+        "created_at__gte": window_start,
+        "created_at__lte": window_end,
     }
 
     task_completion_qs = PersistentAgentCompletion.objects.filter(**window)
@@ -196,6 +193,21 @@ def aggregate_run_metrics(run: EvalRun) -> None:
         ]
     )
 
-    # Aggregate per-task windows
-    for task in run.tasks.all():
-        aggregate_task_metrics(task)
+    # Aggregate per-task windows using contiguous boundaries between task start times
+    ordered_tasks = list(run.tasks.all())
+    if not ordered_tasks:
+        return
+
+    # Build sorted tasks to derive boundaries
+    ordered_tasks.sort(key=lambda t: (t.sequence, t.started_at or timezone.datetime.min.replace(tzinfo=timezone.utc)))
+
+    now = timezone.now()
+    for idx, task in enumerate(ordered_tasks):
+        if not task.started_at:
+            continue
+        window_start = task.started_at
+        if idx + 1 < len(ordered_tasks):
+            window_end = ordered_tasks[idx + 1].started_at or run.finished_at or now
+        else:
+            window_end = run.finished_at or now
+        aggregate_task_metrics(task, window_start=window_start, window_end=window_end)

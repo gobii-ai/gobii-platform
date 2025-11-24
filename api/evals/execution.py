@@ -4,6 +4,7 @@ from typing import Any, Iterable, Optional, Tuple, Dict
 from uuid import UUID
 import json
 import time
+import contextvars
 
 from api.models import (
     PersistentAgent,
@@ -15,12 +16,26 @@ from api.models import (
 from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.core.llm_utils import run_completion
 from api.agent.events import AgentEventType, get_agent_event_stream
-from api.evals.realtime import broadcast_task_update
+from api.evals.realtime import broadcast_task_update, broadcast_run_update
+from api.evals.metrics import aggregate_task_metrics, aggregate_run_metrics
 from config.redis_client import get_redis_client
 from api.agent.core.llm_config import get_llm_config, LLMNotConfiguredError
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+_current_eval_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "eval_run_id", default=None
+)
+
+
+def set_current_eval_run_id(run_id: str | None) -> None:
+    _current_eval_run_id.set(run_id)
+
+
+def get_current_eval_run_id() -> str | None:
+    return _current_eval_run_id.get()
 
 class AgentEventListener:
     """
@@ -132,7 +147,7 @@ class ScenarioExecutionTools:
             sender_user_id=sender_user_id,
             attachments=attachments,
             trigger_processing=trigger_processing,
-            eval_run_id=eval_run_id,
+            eval_run_id=eval_run_id or get_current_eval_run_id(),
         )
         
         # Auto-whitelist the sender so the agent trusts this contact
@@ -158,7 +173,7 @@ class ScenarioExecutionTools:
         """
         # Import here to avoid circular imports at module level
         from api.agent.tasks import process_agent_events_task
-        process_agent_events_task.delay(str(agent_id), eval_run_id=eval_run_id)
+        process_agent_events_task.delay(str(agent_id), eval_run_id=eval_run_id or get_current_eval_run_id())
 
     def agent_event_listener(self, agent_id: str, *, start_time: Optional[float] = None) -> AgentEventListener:
         """
@@ -228,6 +243,17 @@ class ScenarioExecutionTools:
             task_obj.first_browser_task = artifacts["browser_task"]
             
         task_obj.save()
+
+        # Attempt to aggregate cost/usage metrics for this task and its parent run
+        # This ensures the UI receives live cost updates as tasks complete.
+        try:
+            aggregate_task_metrics(task_obj)
+            # If the task finished, also update the run-level totals so the top-level stats update
+            if status in (EvalRunTask.Status.PASSED, EvalRunTask.Status.FAILED, EvalRunTask.Status.ERRORED, EvalRunTask.Status.SKIPPED):
+                aggregate_run_metrics(task_obj.run)
+                broadcast_run_update(task_obj.run)
+        except Exception:
+            logger.debug("Failed to aggregate metrics during record_task_result", exc_info=True)
 
         try:
             broadcast_task_update(task_obj)
