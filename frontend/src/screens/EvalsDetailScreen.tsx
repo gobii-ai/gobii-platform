@@ -590,7 +590,10 @@ function TaskRow({ task }: { task: EvalTask }) {
           <span className="px-2 py-1 rounded-full bg-slate-100 font-semibold text-slate-700">{costChip}</span>
           <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold">{creditChip}</span>
           <span className="px-2 py-1 rounded-full bg-slate-50 text-slate-600 font-semibold">
-            {formatTokens(task.total_tokens)} tok · in {formatTokens(task.prompt_tokens)} ({formatTokens(task.cached_tokens)} cached) / out {formatTokens(task.completion_tokens)}
+            {formatTokens(task.total_tokens)} tok ·
+            Prompt {formatTokens(task.prompt_tokens)} <span className="text-slate-300 mx-1">|</span>
+            Cached {formatTokens(task.cached_tokens)} <span className="text-slate-300 mx-1">|</span>
+            Completion {formatTokens(task.completion_tokens)}
           </span>
         </div>
       </div>
