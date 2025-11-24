@@ -114,9 +114,9 @@ def aggregate_run_metrics(run: EvalRun) -> None:
     dec_zero = _decimal_zero()
     int_zero = Value(0)
 
-    completions_qs = PersistentAgentCompletion.objects.filter(eval_run_id=run.id)
-    steps_qs = PersistentAgentStep.objects.filter(eval_run_id=run.id)
-    browser_qs = BrowserUseAgentTask.objects.filter(eval_run_id=run.id)
+    completions_qs = PersistentAgentCompletion.objects.filter(eval_run_id=str(run.id))
+    steps_qs = PersistentAgentStep.objects.filter(eval_run_id=str(run.id))
+    browser_qs = BrowserUseAgentTask.objects.filter(eval_run_id=str(run.id))
 
     completion_agg = completions_qs.aggregate(
         prompt_tokens=Coalesce(Sum("prompt_tokens"), int_zero),
