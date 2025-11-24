@@ -64,6 +64,24 @@ def _individual_plan_product_ids() -> set[str]:
     }
 
 
+def _individual_plan_price_ids() -> set[str]:
+    """Return licensed price IDs for non-organization plans."""
+    try:
+        stripe_settings = get_stripe_settings()
+    except Exception:
+        logger.debug("Failed to load stripe settings for plan prices", exc_info=True)
+        return set()
+
+    price_ids: set[str] = set()
+    for price in (
+        getattr(stripe_settings, "startup_price_id", None),
+        getattr(stripe_settings, "scale_price_id", None),
+    ):
+        if price:
+            price_ids.add(str(price))
+    return price_ids
+
+
 def _normalize_stripe_object(obj):
     """Convert Stripe objects to plain dicts for easier inspection."""
     if hasattr(obj, "to_dict_recursive"):
@@ -87,8 +105,9 @@ def get_existing_individual_subscriptions(customer_id: str) -> list[dict[str, An
     _ensure_stripe_ready()
 
     plan_products = _individual_plan_product_ids()
-    if not plan_products:
-        logger.info("No individual plan products configured; skipping subscription lookup")
+    plan_price_ids = _individual_plan_price_ids()
+    if not plan_products and not plan_price_ids:
+        logger.info("No individual plan products or prices configured; skipping subscription lookup")
         return []
 
     subscriptions: list[dict[str, Any]] = []
@@ -97,7 +116,6 @@ def get_existing_individual_subscriptions(customer_id: str) -> list[dict[str, An
         iterator = stripe.Subscription.list(  # type: ignore[attr-defined]
             customer=customer_id,
             status="all",
-            expand=["data.items.data.price.product"],
             limit=100,
         ).auto_paging_iter()
     except Exception:
@@ -117,7 +135,9 @@ def get_existing_individual_subscriptions(customer_id: str) -> list[dict[str, An
             if isinstance(product, dict):
                 product = product.get("id")
 
-            if product and product in plan_products:
+            price_id = price.get("id")
+
+            if (product and product in plan_products) or (price_id and price_id in plan_price_ids):
                 subscriptions.append(sub_data)
                 break
 

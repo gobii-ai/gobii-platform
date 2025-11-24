@@ -43,6 +43,7 @@ from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
 from util.subscription_helper import (
     _individual_plan_product_ids,
+    _individual_plan_price_ids,
     ensure_single_individual_subscription,
     mark_owner_billing_with_plan,
     mark_user_billing_with_plan,
@@ -860,6 +861,7 @@ def handle_subscription_event(event, **kwargs):
                     items_data = ((source_data.get("items") or {}).get("data") or [])
 
                 plan_products = _individual_plan_product_ids()
+                plan_price_ids = _individual_plan_price_ids()
                 licensed_price_id = None
                 metered_price_id = None
 
@@ -871,7 +873,10 @@ def handle_subscription_event(event, **kwargs):
 
                     usage_type = price.get("usage_type") or (price.get("recurring") or {}).get("usage_type")
 
-                    if not licensed_price_id and product and product in plan_products:
+                    if not licensed_price_id and (
+                        (product and product in plan_products)
+                        or (price.get("id") and price.get("id") in plan_price_ids)
+                    ):
                         licensed_price_id = price.get("id")
                     elif not metered_price_id and usage_type == "metered":
                         metered_price_id = price.get("id")

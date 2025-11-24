@@ -429,9 +429,31 @@ class EnsureSingleIndividualSubscriptionTests(TestCase):
         self.assertEqual(addon_item.get("quantity"), 2)
 
     @patch("util.subscription_helper._ensure_stripe_ready")
-    @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})
+    @patch("util.subscription_helper._individual_plan_product_ids", return_value=set())
+    @patch("util.subscription_helper._individual_plan_price_ids", return_value={"price_base"})
     @patch("util.subscription_helper.stripe.Subscription.list")
-    def test_get_existing_filters_and_sorts(self, mock_list, _mock_plan_products, _mock_ready):
+    def test_get_existing_uses_price_match_when_product_missing(self, mock_list, _mock_price_ids, _mock_product_ids, _mock_ready):
+        mock_page = MagicMock()
+        mock_page.auto_paging_iter.return_value = [
+            {
+                "id": "sub_match_price",
+                "status": "active",
+                "created": 5,
+                "items": {"data": [{"price": {"product": "unknown", "id": "price_base"}}]},
+            },
+        ]
+        mock_list.return_value = mock_page
+
+        results = get_existing_individual_subscriptions("cus_price")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].get("id"), "sub_match_price")
+
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})
+    @patch("util.subscription_helper._individual_plan_price_ids", return_value={"price_base"})
+    @patch("util.subscription_helper.stripe.Subscription.list")
+    def test_get_existing_filters_and_sorts(self, mock_list, _mock_plan_price_ids, _mock_plan_products, _mock_ready):
         mock_page = MagicMock()
         mock_page.auto_paging_iter.return_value = [
             {"id": "sub_cancelled", "status": "canceled"},
@@ -439,7 +461,7 @@ class EnsureSingleIndividualSubscriptionTests(TestCase):
                 "id": "sub_match",
                 "status": "active",
                 "created": 10,
-                "items": {"data": [{"price": {"product": "prod_plan"}}]},
+                "items": {"data": [{"price": {"product": "prod_plan", "id": "price_base"}}]},
             },
             {
                 "id": "sub_other",
