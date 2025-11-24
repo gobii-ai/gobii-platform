@@ -17,6 +17,7 @@ from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
     DedicatedProxyAllocation,
+    PersistentAgent,
 )
 from api.proxy_selection import (
     proxy_has_recent_health_pass,
@@ -293,13 +294,13 @@ class PersistentAgentProxySelectionTests(TestCase):
             is_active=True
         )
         mock_select_proxy.return_value = override_proxy
-        
+
         result = select_proxy_for_persistent_agent(
             self.mock_persistent_agent,
             override_proxy=override_proxy,
             health_check_days=30
         )
-        
+
         mock_select_proxy.assert_called_once_with(
             preferred_proxy=self.proxy,
             override_proxy=override_proxy,
@@ -307,6 +308,37 @@ class PersistentAgentProxySelectionTests(TestCase):
             health_check_days=30
         )
         self.assertEqual(result, override_proxy)
+
+    def test_select_proxy_for_persistent_agent_prefers_browser_agent_setting(self):
+        """Ensure real persistent agents surface their browser preferred proxy."""
+        user = User.objects.create_user(username="persistent-proxy@example.com")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="BrowserProxy")
+        proxy = ProxyServer.objects.create(
+            name="Dedicated Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTP,
+            host="dedicated.proxy.com",
+            port=8080,
+            is_active=True,
+        )
+        browser_agent.preferred_proxy = proxy
+        browser_agent.save(update_fields=["preferred_proxy"])
+
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Persistent",
+            charter="test",
+            browser_use_agent=browser_agent,
+        )
+
+        with patch('api.proxy_selection.select_proxy') as mock_select:
+            mock_select.return_value = proxy
+            select_proxy_for_persistent_agent(agent)
+
+        mock_select.assert_called_once_with(
+            preferred_proxy=proxy,
+            override_proxy=None,
+            context_id=f"persistent_agent_{agent.id}"
+        )
 
 
 @tag("batch_proxy_selection")

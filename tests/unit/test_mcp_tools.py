@@ -15,6 +15,7 @@ from django.utils import timezone
 from api.models import (
     PersistentAgent,
     BrowserUseAgent,
+    ProxyServer,
     PersistentAgentEnabledTool,
     MCPServerConfig,
     MCPServerOAuthCredential,
@@ -264,6 +265,41 @@ class MCPToolManagerTests(TestCase):
         )
 
         return agent
+
+    def test_select_agent_proxy_url_uses_browser_preference(self):
+        """Agents with dedicated IPs should expose them to the MCP proxy selector."""
+        User = get_user_model()
+        user = User.objects.create_user(username='proxy-agent@example.com')
+        browser_agent = create_test_browser_agent(user)
+        proxy = ProxyServer.objects.create(
+            name="Dedicated",
+            proxy_type=ProxyServer.ProxyType.HTTP,
+            host="dedicated.proxy",
+            port=8080,
+            username="user",
+            password="pass",
+            is_active=True,
+        )
+        browser_agent.preferred_proxy = proxy
+        browser_agent.save(update_fields=["preferred_proxy"])
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="proxy-agent",
+            charter="Proxy",
+            browser_use_agent=browser_agent,
+        )
+
+        with patch('api.agent.tools.mcp_manager.select_proxy_for_persistent_agent') as mock_select:
+            def _side_effect(agent_obj, *args, **kwargs):
+                self.assertEqual(agent_obj.preferred_proxy, proxy)
+                return proxy
+
+            mock_select.side_effect = _side_effect
+            proxy_url, error = self.manager._select_agent_proxy_url(agent)
+
+        mock_select.assert_called_once()
+        self.assertEqual(proxy_url, proxy.proxy_url)
+        self.assertIsNone(error)
 
     def test_register_http_server_includes_oauth_header(self):
         runtime = MCPServerRuntime(
