@@ -19,7 +19,11 @@ class EchoResponseScenario(EvalScenario, ScenarioExecutionTools):
         
         # Use context manager to avoid race conditions
         with self.wait_for_agent_idle(agent_id, timeout=30):
-            msg = self.inject_message(agent_id, "Please reply with the word ORANGE.")
+            msg = self.inject_message(
+                agent_id, 
+                "Please reply with the word ORANGE.",
+                eval_run_id=run_id
+            )
             
         self.record_task_result(
             run_id, 1, EvalRunTask.Status.PASSED, 
