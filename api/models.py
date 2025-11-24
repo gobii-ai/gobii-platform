@@ -6943,6 +6943,11 @@ class EvalSuiteRun(models.Model):
         default=RunType.ONE_OFF,
         help_text="One-off runs are ad-hoc; official runs are tracked over time.",
     )
+    requested_runs = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1), MaxValueValidator(20)],
+        help_text="How many times to repeat each scenario for this suite run.",
+    )
     agent_strategy = models.CharField(
         max_length=40,
         choices=AgentStrategy.choices,

@@ -60,6 +60,7 @@ def _serialize_suite(suite: EvalSuiteRun, *, include_runs: bool = False, runs: O
         "suite_slug": suite.suite_slug,
         "status": suite.status,
         "run_type": suite.run_type,
+        "requested_runs": suite.requested_runs,
         "agent_strategy": suite.agent_strategy,
         "shared_agent_id": str(suite.shared_agent_id) if suite.shared_agent_id else None,
         "started_at": suite.started_at.isoformat() if suite.started_at else None,

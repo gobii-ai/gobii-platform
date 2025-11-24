@@ -15,6 +15,8 @@ const formatTs = (value: string | null | undefined) => {
   }
 }
 
+type PassStats = { passRate: number | null; completed: number; total: number }
+
 export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   const [suite, setSuite] = useState<EvalSuiteRun | null>(null)
   const [loading, setLoading] = useState(false)
@@ -22,6 +24,38 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   const [updatingRunType, setUpdatingRunType] = useState(false)
 
   const hasRuns = useMemo(() => Boolean(suite?.runs && suite.runs.length), [suite?.runs])
+  const passStats = useMemo<PassStats>(() => {
+    if (!suite) return { passRate: null, completed: 0, total: 0 }
+    const runs = suite.runs || []
+    const hasTaskData = runs.some((run) => (run.tasks || []).length > 0)
+    if (hasTaskData) {
+      let passed = 0
+      let completed = 0
+      let total = 0
+      runs.forEach((run) => {
+        const tasks = run.tasks || []
+        total += tasks.length
+        tasks.forEach((task) => {
+          if (['passed', 'failed', 'errored', 'skipped'].includes(task.status)) {
+            completed += 1
+          }
+          if (task.status === 'passed') {
+            passed += 1
+          }
+        })
+      })
+      return { passRate: completed ? passed / completed : null, completed, total }
+    }
+    const totals = suite.task_totals
+    if (totals) {
+      return {
+        passRate: totals.pass_rate ?? null,
+        completed: totals.completed ?? totals.total ?? 0,
+        total: totals.total ?? totals.completed ?? 0,
+      }
+    }
+    return { passRate: null, completed: 0, total: 0 }
+  }, [suite])
 
   const completionStats = useMemo(() => {
     if (!suite) return { total: 0, completed: 0 }
@@ -237,7 +271,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
 
               <div className="flex flex-col justify-between space-y-2 sm:pl-6 sm:border-l sm:border-slate-100">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Timing</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Execution</p>
                   <div className="space-y-1 mt-1">
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-500">Started:</span>
@@ -249,25 +283,33 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                     </div>
                   </div>
                 </div>
-              </div>
-
-              <div className="flex flex-col justify-between space-y-2 sm:pl-6 sm:border-l sm:border-slate-100">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Completion</p>
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-3xl font-bold text-slate-900">
-                      {completionStats.completed}
-                    </span>
-                    <span className="text-sm font-medium text-slate-500">
-                      / {completionStats.total} runs
+                <div className="pt-2 border-t border-slate-50 space-y-2">
+                  <div className="flex items-center justify-between text-sm text-slate-700">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Runs</span>
+                    <span className="text-xs text-slate-500">
+                      {completionStats.completed}/{completionStats.total} ({suite.requested_runs ?? 1}/scen.)
                     </span>
                   </div>
+                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-500 transition-all duration-700 ease-out"
+                      style={{ width: `${completionStats.total ? (completionStats.completed / completionStats.total) * 100 : 0}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 transition-all duration-700 ease-out"
-                    style={{ width: `${completionStats.total ? (completionStats.completed / completionStats.total) * 100 : 0}%` }}
-                  />
+              </div>
+
+              <div className="flex flex-col justify-between space-y-3 sm:pl-6 sm:border-l sm:border-slate-100">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Performance</p>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-3xl font-bold text-slate-900">
+                      {passStats.passRate != null ? `${Math.round(passStats.passRate * 100)}%` : '—'}
+                    </span>
+                    <span className="text-sm font-medium text-slate-500">
+                      avg pass · {passStats.completed}/{passStats.total || passStats.completed || 0} tasks
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

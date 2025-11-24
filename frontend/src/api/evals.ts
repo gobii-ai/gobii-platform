@@ -14,6 +14,14 @@ export type EvalTask = {
   finished_at: string | null
 }
 
+export type EvalTaskTotals = {
+  total: number
+  completed: number
+  passed: number
+  failed: number
+  pass_rate: number | null
+}
+
 export type EvalRun = {
   id: string
   suite_run_id: string | null
@@ -25,7 +33,7 @@ export type EvalRun = {
   finished_at: string | null
   agent_id: string | null
   tasks?: EvalTask[]
-  task_totals?: { total: number; passed: number; failed: number }
+  task_totals?: EvalTaskTotals
 }
 
 export type EvalSuiteRun = {
@@ -33,12 +41,14 @@ export type EvalSuiteRun = {
   suite_slug: string
   status: string
   run_type: EvalRunType
+  requested_runs?: number
   agent_strategy: string
   shared_agent_id: string | null
   started_at: string | null
   finished_at: string | null
   runs?: EvalRun[]
   run_totals?: { total_runs: number; completed: number; errored: number }
+  task_totals?: EvalTaskTotals | null
 }
 
 export type EvalSuite = {
@@ -78,6 +88,7 @@ export type CreateSuiteRunPayload = {
   agent_id?: string | null
   run_type?: EvalRunType
   official?: boolean
+  n_runs?: number
 }
 
 export function createSuiteRuns(payload: CreateSuiteRunPayload): Promise<{

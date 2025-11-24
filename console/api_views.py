@@ -613,13 +613,27 @@ def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:
     }
 
 
-def _task_counts(tasks: list[EvalRunTask]) -> dict[str, int]:
-    totals = {"total": len(tasks), "passed": 0, "failed": 0}
+def _task_counts(tasks: list[EvalRunTask]) -> dict[str, int | float | None]:
+    totals: dict[str, int | float | None] = {
+        "total": len(tasks),
+        "completed": 0,
+        "passed": 0,
+        "failed": 0,
+        "pass_rate": None,
+    }
     for task in tasks:
         if task.status == EvalRunTask.Status.PASSED:
             totals["passed"] += 1
-        elif task.status in (EvalRunTask.Status.FAILED, EvalRunTask.Status.ERRORED):
+            totals["completed"] += 1
+        elif task.status in (
+            EvalRunTask.Status.FAILED,
+            EvalRunTask.Status.ERRORED,
+            EvalRunTask.Status.SKIPPED,
+        ):
             totals["failed"] += 1
+            totals["completed"] += 1
+    if totals["completed"]:
+        totals["pass_rate"] = totals["passed"] / totals["completed"]
     return totals
 
 
@@ -650,6 +664,13 @@ def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, inc
     runs = list(suite.runs.all()) if include_runs else []
     runs_payload = [_serialize_eval_run(run, include_tasks=include_tasks) for run in runs] if include_runs else []
 
+    suite_task_totals = None
+    if include_runs:
+        all_tasks: list[EvalRunTask] = []
+        for run in runs:
+            all_tasks.extend(list(run.tasks.all()))
+        suite_task_totals = _task_counts(all_tasks)
+
     aggregate_counts = {"total_runs": len(runs), "completed": 0, "errored": 0}
     for run in runs:
         if run.status == EvalRun.Status.COMPLETED:
@@ -662,12 +683,14 @@ def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, inc
         "suite_slug": suite.suite_slug,
         "status": suite.status,
         "run_type": suite.run_type,
+        "requested_runs": suite.requested_runs,
         "agent_strategy": suite.agent_strategy,
         "shared_agent_id": str(suite.shared_agent_id) if suite.shared_agent_id else None,
         "started_at": suite.started_at.isoformat() if suite.started_at else None,
         "finished_at": suite.finished_at.isoformat() if suite.finished_at else None,
         "runs": runs_payload if include_runs else None,
         "run_totals": aggregate_counts if include_runs else None,
+        "task_totals": suite_task_totals if include_runs else None,
     }
 
 
@@ -2301,6 +2324,8 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        MAX_REQUESTED_RUNS = 10
+
         try:
             body = _parse_json_body(request)
         except ValueError as exc:
@@ -2323,6 +2348,17 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
         if run_type_raw not in dict(EvalSuiteRun.RunType.choices):
             return HttpResponseBadRequest("Invalid run_type")
         run_type: str = run_type_raw
+
+        n_runs_raw = body.get("n_runs") if "n_runs" in body else body.get("runs")
+        if n_runs_raw is None:
+            requested_runs = 3
+        else:
+            try:
+                requested_runs = int(n_runs_raw)
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest(f"n_runs must be an integer between 1 and {MAX_REQUESTED_RUNS}")
+        if requested_runs < 1 or requested_runs > MAX_REQUESTED_RUNS:
+            return HttpResponseBadRequest(f"n_runs must be between 1 and {MAX_REQUESTED_RUNS}")
 
         agent_id = body.get("agent_id")
         if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT:
@@ -2358,6 +2394,7 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 initiated_by=request.user,
                 status=EvalSuiteRun.Status.RUNNING,
                 run_type=run_type,
+                requested_runs=requested_runs,
                 agent_strategy=agent_strategy,
                 shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
                 started_at=timezone.now(),
@@ -2369,22 +2406,24 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 if not scenario:
                     continue
 
-                run_agent = shared_agent
-                if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
-                    run_agent = create_ephemeral_agent(label_suffix=scenario.slug[:8])
+                for iteration in range(requested_runs):
+                    run_agent = shared_agent
+                    if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
+                        suffix = f"{scenario.slug[:8]}-{iteration + 1}" if requested_runs > 1 else scenario.slug[:8]
+                        run_agent = create_ephemeral_agent(label_suffix=suffix)
 
-                run = EvalRun.objects.create(
-                    suite_run=suite_run,
-                    scenario_slug=scenario.slug,
-                    scenario_version=getattr(scenario, "version", "") or "",
-                    agent=run_agent,
-                    initiated_by=request.user,
-                    status=EvalRun.Status.PENDING,
-                    run_type=run_type,
-                )
-                run_eval_task.delay(str(run.id))
-                created_runs.append(run)
-                created_for_suite += 1
+                    run = EvalRun.objects.create(
+                        suite_run=suite_run,
+                        scenario_slug=scenario.slug,
+                        scenario_version=getattr(scenario, "version", "") or "",
+                        agent=run_agent,
+                        initiated_by=request.user,
+                        status=EvalRun.Status.PENDING,
+                        run_type=run_type,
+                    )
+                    run_eval_task.delay(str(run.id))
+                    created_runs.append(run)
+                    created_for_suite += 1
 
             if created_for_suite == 0:
                 suite_run.status = EvalSuiteRun.Status.ERRORED
@@ -2433,7 +2472,10 @@ class EvalSuiteRunListAPIView(SystemAdminAPIView):
             if run_type_filter not in dict(EvalSuiteRun.RunType.choices):
                 return HttpResponseBadRequest("Invalid run_type")
 
-        qs = EvalSuiteRun.objects.select_related("initiated_by", "shared_agent").prefetch_related("runs")
+        qs = (
+            EvalSuiteRun.objects.select_related("initiated_by", "shared_agent")
+            .prefetch_related("runs__tasks")
+        )
         if status_filter:
             qs = qs.filter(status=status_filter)
         if suite_filter:
@@ -2449,7 +2491,7 @@ class EvalSuiteRunListAPIView(SystemAdminAPIView):
         suite_runs = list(
             EvalSuiteRun.objects.filter(id__in=[suite.id for suite in suite_runs])
             .select_related("initiated_by", "shared_agent")
-            .prefetch_related("runs")
+            .prefetch_related("runs__tasks")
             .order_by("-created_at")
         )
         payload = [_serialize_suite_run(suite, include_runs=True, include_tasks=False) for suite in suite_runs]
