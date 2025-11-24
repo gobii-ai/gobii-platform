@@ -255,16 +255,15 @@ class ScenarioExecutionTools:
             
         task_obj.save()
 
-        # Attempt to aggregate cost/usage metrics for this task and its parent run
-        # This ensures the UI receives live cost updates as tasks complete.
+        # Attempt to aggregate cost/usage metrics for this task and its parent run.
+        # We call aggregate_run_metrics, which will:
+        # 1. Sum total costs for the run from all AgentCompletions/Steps.
+        # 2. Re-distribute those costs to tasks based on time windows.
         try:
-            aggregate_task_metrics(task_obj)
-            # If the task finished, also update the run-level totals so the top-level stats update
-            if status in (EvalRunTask.Status.PASSED, EvalRunTask.Status.FAILED, EvalRunTask.Status.ERRORED, EvalRunTask.Status.SKIPPED):
-                aggregate_run_metrics(task_obj.run)
-                broadcast_run_update(task_obj.run)
+            aggregate_run_metrics(task_obj.run)
+            broadcast_run_update(task_obj.run)
         except Exception:
-            logger.debug("Failed to aggregate metrics during record_task_result", exc_info=True)
+            logger.error("Failed to aggregate metrics during record_task_result", exc_info=True)
 
         try:
             broadcast_task_update(task_obj)
