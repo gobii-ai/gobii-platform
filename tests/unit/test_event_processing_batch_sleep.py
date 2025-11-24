@@ -45,7 +45,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"})
     @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "success"})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "queued"})
-    @patch('api.agent.core.event_processing._build_prompt_context')
+    @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
     def test_batch_of_tools_ignores_sleep_when_others_present(
         self,
@@ -101,7 +101,7 @@ class TestBatchToolCallsWithSleep(TestCase):
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ignored"})
-    @patch('api.agent.core.event_processing._build_prompt_context')
+    @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
     def test_sleep_only_batch_records_token_usage_once(
         self,
@@ -149,7 +149,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
     @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
-    @patch('api.agent.core.event_processing._build_prompt_context')
+    @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
     def test_successful_actions_short_circuit_to_sleep(
         self,
@@ -204,7 +204,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
     @patch('api.agent.core.event_processing.execute_spawn_web_task', return_value={"status": "pending", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "sent", "auto_sleep_ok": True})
-    @patch('api.agent.core.event_processing._build_prompt_context')
+    @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
     def test_auto_sleep_waits_for_all_tool_calls(
         self,
@@ -267,7 +267,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
     @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
-    @patch('api.agent.core.event_processing._build_prompt_context')
+    @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
     def test_auto_sleep_triggers_without_sleep_tool_call(self, mock_completion, mock_build_prompt, *_mocks):
         """Auto-sleep should trigger when all tool results allow it, even with no explicit sleep call."""

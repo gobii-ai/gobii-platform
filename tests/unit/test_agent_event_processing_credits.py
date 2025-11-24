@@ -19,8 +19,8 @@ import uuid
 from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.constants.task_constants import TASKS_UNLIMITED
 from api.agent.core.event_processing import (
-    _add_budget_awareness_sections,
-    _compute_burn_rate,
+    add_budget_awareness_sections,
+    compute_burn_rate,
     _ensure_credit_for_tool,
 )
 
@@ -204,7 +204,7 @@ class PersistentAgentCreditGateTests(TestCase):
 
         with override_settings(GOBII_PROPRIETARY_MODE=True), \
              patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
-             patch("api.agent.core.event_processing._get_agent_daily_credit_state", return_value=fake_state), \
+             patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=fake_state), \
              patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
             _process_agent_events_locked(self.agent.id, _DummySpan())
             loop_mock.assert_not_called()
@@ -512,7 +512,7 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(hard_limit_call["properties"].get("hard_limit_remaining"), '0.00')
 
     def test_compute_burn_rate_no_data_returns_zero(self):
-        metrics = _compute_burn_rate(self.agent, window_minutes=60)
+        metrics = compute_burn_rate(self.agent, window_minutes=60)
         self.assertEqual(metrics["burn_rate_per_hour"], Decimal("0"))
         self.assertEqual(metrics["window_total"], Decimal("0"))
 
@@ -526,7 +526,7 @@ class PersistentAgentToolCreditTests(TestCase):
         PersistentAgentStep.objects.filter(pk=step.pk).update(
             created_at=timezone.now() - timezone.timedelta(minutes=10)
         )
-        metrics = _compute_burn_rate(self.agent, window_minutes=60)
+        metrics = compute_burn_rate(self.agent, window_minutes=60)
         self.assertEqual(metrics["burn_rate_per_hour"], Decimal("3"))
         self.assertEqual(metrics["window_total"], Decimal("3"))
 
@@ -550,7 +550,7 @@ class PersistentAgentToolCreditTests(TestCase):
             "burn_rate_window_minutes": 60,
             "burn_rate_threshold_per_hour": Decimal("3"),
         }
-        result = _add_budget_awareness_sections(
+        result = add_budget_awareness_sections(
             critical_group,
             current_iteration=2,
             max_iterations=4,
@@ -586,7 +586,7 @@ class PersistentAgentToolCreditTests(TestCase):
             "burn_rate_threshold_per_hour": Decimal("3"),
         }
         with patch("api.agent.core.event_processing.Analytics.track_event") as track_mock:
-            _add_budget_awareness_sections(
+            add_budget_awareness_sections(
                 critical_group,
                 current_iteration=1,
                 max_iterations=2,
@@ -615,7 +615,7 @@ class PersistentAgentToolCreditTests(TestCase):
             "soft_target_remaining": None,
             "next_reset": timezone.now(),
         }
-        result = _add_budget_awareness_sections(
+        result = add_budget_awareness_sections(
             critical_group,
             current_iteration=1,
             max_iterations=0,
@@ -644,7 +644,7 @@ class PersistentAgentToolCreditTests(TestCase):
         )
 
         with override_settings(BROWSER_AGENT_DAILY_MAX_TASKS=2):
-            result = _add_budget_awareness_sections(
+            result = add_budget_awareness_sections(
                 critical_group,
                 current_iteration=1,
                 max_iterations=5,

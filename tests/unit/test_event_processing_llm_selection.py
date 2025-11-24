@@ -35,7 +35,7 @@ class TestEventProcessingLLMSelection(TestCase):
         )
         event_processing_module._GEMINI_CACHE_BLOCKLIST.clear()
 
-    @patch('api.agent.core.event_processing.get_llm_config_with_failover')
+    @patch('api.agent.core.prompt_context.get_llm_config_with_failover')
     @patch('api.agent.core.event_processing.litellm.completion')
     def test_completion_with_failover_uses_preselected_config(self, mock_completion, mock_get_config):
         """_completion_with_failover uses the failover_configs passed to it."""

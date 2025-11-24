@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
-from api.agent.core.event_processing import _run_agent_loop, _build_prompt_context
+from api.agent.core.event_processing import _run_agent_loop, build_prompt_context
 from api.agent.core.llm_config import get_llm_config_with_failover
 from tests.utils.llm_seed import seed_persistent_basic
 from api.models import PersistentAgent, BrowserUseAgent, UserQuota
@@ -54,8 +54,8 @@ class TestEventProcessingTokenCounting(TestCase):
             "GOOGLE_API_KEY": "google-key",
         }, clear=True):
             
-            # Mock _build_prompt_context to return specific fitted token count
-            with patch('api.agent.core.event_processing._build_prompt_context') as mock_build_prompt:
+            # Mock build_prompt_context to return specific fitted token count
+            with patch('api.agent.core.event_processing.build_prompt_context') as mock_build_prompt:
                 # Return a token count in the small range (< 10000)
                 mock_build_prompt.return_value = (
                     [
@@ -117,10 +117,10 @@ class TestEventProcessingTokenCounting(TestCase):
             "ANTHROPIC_API_KEY": "anthropic-key",
             "GOOGLE_API_KEY": "google-key",
         }, clear=True):
-            with patch('api.agent.core.event_processing.get_llm_config_with_failover') as mock_get_config:
+            with patch('api.agent.core.prompt_context.get_llm_config_with_failover') as mock_get_config:
                 mock_get_config.return_value = [("anthropic", "anthropic/claude-sonnet-4-20250514", {})]
 
-                messages, fitted_token_count, archive_id = _build_prompt_context(self.test_agent)
+                messages, fitted_token_count, archive_id = build_prompt_context(self.test_agent)
 
                 # Verify it was called with token_count=0 for model selection
                 mock_get_config.assert_called_with(
