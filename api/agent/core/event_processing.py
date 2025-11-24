@@ -1010,6 +1010,7 @@ def process_agent_events(
     budget_id: Optional[str] = None,
     branch_id: Optional[str] = None,
     depth: Optional[int] = None,
+    eval_run_id: Optional[str] = None,
 ) -> None:
     """Process all outstanding events for a persistent agent."""
     span = trace.get_current_span()
@@ -1089,6 +1090,7 @@ def process_agent_events(
         depth=int(depth),
         max_steps=int(max_steps),
         max_depth=int(max_depth),
+        eval_run_id=eval_run_id,
     )
     set_budget_context(ctx)
 
@@ -1202,6 +1204,7 @@ def process_agent_events(
                         budget_id=ctx.budget_id,
                         branch_id=ctx.branch_id,
                         depth=ctx.depth,
+                        eval_run_id=getattr(ctx, "eval_run_id", None),
                     )
             except Exception as e:
                 logger.error(
@@ -1489,6 +1492,7 @@ def _run_agent_loop(
 
     # Determine remaining steps from the shared budget (if any)
     budget_ctx = get_budget_context()
+    eval_run_id = getattr(budget_ctx, "eval_run_id", None) if budget_ctx is not None else None
     max_remaining = MAX_AGENT_LOOP_ITERATIONS
     if budget_ctx is not None:
         steps_used = AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
@@ -1642,6 +1646,7 @@ def _run_agent_loop(
                 if completion is None:
                     completion = PersistentAgentCompletion.objects.create(
                         agent=agent,
+                        eval_run_id=eval_run_id,
                         **token_usage_fields,
                     )
                 return completion

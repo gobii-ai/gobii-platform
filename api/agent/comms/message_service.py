@@ -526,6 +526,7 @@ def inject_internal_web_message(
     sender_user_id: int = -1,
     attachments: Iterable[Any] = (),
     trigger_processing: bool = True,
+    eval_run_id: str | None = None,
 ) -> Tuple[PersistentAgentMessage, PersistentAgentConversation]:
     """
     Inject a web message for testing/evals without going through the API adapters.
@@ -577,6 +578,6 @@ def inject_internal_web_message(
     # Trigger Processing
     if trigger_processing:
         from api.agent.tasks import process_agent_events_task
-        process_agent_events_task.delay(str(agent.id))
+        process_agent_events_task.delay(str(agent.id), eval_run_id=eval_run_id)
 
     return message, conv

@@ -27,7 +27,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
         
         # Send "Hello"
         with self.wait_for_agent_idle(agent_id):
-            self.inject_message(agent_id, "Hello there!", trigger_processing=True)
+            self.inject_message(agent_id, "Hello there!", trigger_processing=True, eval_run_id=run_id)
 
         self.record_task_result(
             run_id, None, EvalRunTask.Status.PASSED, task_name="inject_hello", 
@@ -58,7 +58,8 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
         msg = self.inject_message(
             agent_id, 
             "what's the current price of Bitcoin in USD?", 
-            trigger_processing=False # Will manually trigger processing with mocks
+            trigger_processing=False, # Will manually trigger processing with mocks
+            eval_run_id=run_id,
         )
         
         self.record_task_result(
@@ -114,7 +115,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             mock_enabled_tool.side_effect = enabled_tool_side_effect
 
             # Trigger processing synchronously
-            process_agent_events(agent_id)
+            process_agent_events(agent_id, eval_run_id=run_id)
 
         # Assertion for verify_efficient_tool_usage
         if mock_spawn.called:

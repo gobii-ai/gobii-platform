@@ -66,6 +66,7 @@ class BudgetContext:
     depth: int
     max_steps: int
     max_depth: int
+    eval_run_id: Optional[str] = None
 
 
 class AgentBudgetManager:

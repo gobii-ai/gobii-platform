@@ -31,7 +31,8 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
         msg = self.inject_message(
             agent_id, 
             "what's the weather in frederick md?", 
-            trigger_processing=False
+            trigger_processing=False,
+            eval_run_id=run_id,
         )
             
         self.record_task_result(
@@ -79,7 +80,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             mock_enabled_tool.side_effect = enabled_tool_side_effect
 
             # Trigger synchronous processing
-            process_agent_events(agent_id)
+            process_agent_events(agent_id, eval_run_id=run_id)
 
         # Task 2: Charter Update
         self.record_task_result(

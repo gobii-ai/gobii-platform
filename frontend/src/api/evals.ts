@@ -12,6 +12,16 @@ export type EvalTask = {
   observed_summary: string
   started_at: string | null
   finished_at: string | null
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cached_tokens: number
+  input_cost_total: number
+  input_cost_uncached: number
+  input_cost_cached: number
+  output_cost: number
+  total_cost: number
+  credits_cost: number
 }
 
 export type EvalTaskTotals = {
@@ -34,6 +44,18 @@ export type EvalRun = {
   agent_id: string | null
   tasks?: EvalTask[]
   task_totals?: EvalTaskTotals
+  prompt_tokens?: number
+  completion_tokens?: number
+  cached_tokens?: number
+  tokens_used?: number
+  input_cost_total?: number
+  input_cost_uncached?: number
+  input_cost_cached?: number
+  output_cost?: number
+  total_cost?: number
+  credits_cost?: number
+  completion_count?: number
+  step_count?: number
 }
 
 export type EvalSuiteRun = {
@@ -49,6 +71,18 @@ export type EvalSuiteRun = {
   runs?: EvalRun[]
   run_totals?: { total_runs: number; completed: number; errored: number }
   task_totals?: EvalTaskTotals | null
+  cost_totals?: {
+    prompt_tokens: number
+    completion_tokens: number
+    cached_tokens: number
+    tokens_used: number
+    input_cost_total: number
+    input_cost_uncached: number
+    input_cost_cached: number
+    output_cost: number
+    total_cost: number
+    credits_cost: number
+  } | null
 }
 
 export type EvalSuite = {

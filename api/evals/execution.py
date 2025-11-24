@@ -119,7 +119,8 @@ class ScenarioExecutionTools:
         body: str, 
         sender_user_id: int = -999, 
         attachments: Iterable[Any] = (),
-        trigger_processing: bool = True
+        trigger_processing: bool = True,
+        eval_run_id: str | None = None,
     ) -> PersistentAgentMessage:
         """
         Send a message to the agent as a web user.
@@ -130,7 +131,8 @@ class ScenarioExecutionTools:
             body=body,
             sender_user_id=sender_user_id,
             attachments=attachments,
-            trigger_processing=trigger_processing
+            trigger_processing=trigger_processing,
+            eval_run_id=eval_run_id,
         )
         
         # Auto-whitelist the sender so the agent trusts this contact
@@ -150,13 +152,13 @@ class ScenarioExecutionTools:
         
         return msg
 
-    def trigger_processing(self, agent_id: str) -> None:
+    def trigger_processing(self, agent_id: str, *, eval_run_id: str | None = None) -> None:
         """
         Manually trigger the agent's event processing loop.
         """
         # Import here to avoid circular imports at module level
         from api.agent.tasks import process_agent_events_task
-        process_agent_events_task.delay(str(agent_id))
+        process_agent_events_task.delay(str(agent_id), eval_run_id=eval_run_id)
 
     def agent_event_listener(self, agent_id: str, *, start_time: Optional[float] = None) -> AgentEventListener:
         """

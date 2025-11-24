@@ -610,6 +610,16 @@ def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:
         "observed_summary": task.observed_summary,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
+        "prompt_tokens": task.prompt_tokens,
+        "completion_tokens": task.completion_tokens,
+        "total_tokens": task.total_tokens,
+        "cached_tokens": task.cached_tokens,
+        "input_cost_total": float(task.input_cost_total),
+        "input_cost_uncached": float(task.input_cost_uncached),
+        "input_cost_cached": float(task.input_cost_cached),
+        "output_cost": float(task.output_cost),
+        "total_cost": float(task.total_cost),
+        "credits_cost": float(task.credits_cost),
     }
 
 
@@ -651,6 +661,18 @@ def _serialize_eval_run(run: EvalRun, *, include_tasks: bool = False) -> dict[st
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         "agent_id": str(run.agent_id) if run.agent_id else None,
+        "prompt_tokens": run.prompt_tokens,
+        "completion_tokens": run.completion_tokens,
+        "cached_tokens": run.cached_tokens,
+        "tokens_used": run.tokens_used,
+        "input_cost_total": float(run.input_cost_total),
+        "input_cost_uncached": float(run.input_cost_uncached),
+        "input_cost_cached": float(run.input_cost_cached),
+        "output_cost": float(run.output_cost),
+        "total_cost": float(run.total_cost),
+        "credits_cost": float(run.credits_cost),
+        "completion_count": run.completion_count,
+        "step_count": run.step_count,
     }
 
     if include_tasks:
@@ -678,6 +700,21 @@ def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, inc
         elif run.status == EvalRun.Status.ERRORED:
             aggregate_counts["errored"] += 1
 
+    cost_totals = None
+    if include_runs:
+        cost_totals = {
+            "prompt_tokens": sum(r.prompt_tokens for r in runs),
+            "completion_tokens": sum(r.completion_tokens for r in runs),
+            "cached_tokens": sum(r.cached_tokens for r in runs),
+            "tokens_used": sum(r.tokens_used for r in runs),
+            "input_cost_total": float(sum(r.input_cost_total for r in runs)),
+            "input_cost_uncached": float(sum(r.input_cost_uncached for r in runs)),
+            "input_cost_cached": float(sum(r.input_cost_cached for r in runs)),
+            "output_cost": float(sum(r.output_cost for r in runs)),
+            "total_cost": float(sum(r.total_cost for r in runs)),
+            "credits_cost": float(sum(r.credits_cost for r in runs)),
+        }
+
     return {
         "id": str(suite.id),
         "suite_slug": suite.suite_slug,
@@ -691,6 +728,7 @@ def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, inc
         "runs": runs_payload if include_runs else None,
         "run_totals": aggregate_counts if include_runs else None,
         "task_totals": suite_task_totals if include_runs else None,
+        "cost_totals": cost_totals if include_runs else None,
     }
 
 

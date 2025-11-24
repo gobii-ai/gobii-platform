@@ -5,6 +5,16 @@ import { fetchSuiteRunDetail, updateSuiteRunType, type EvalRun, type EvalSuiteRu
 import { StatusBadge } from '../components/common/StatusBadge'
 import { RunTypeBadge } from '../components/common/RunTypeBadge'
 
+const formatCurrency = (value?: number | null, digits = 4) => {
+  if (value == null) return '—'
+  return `$${value.toFixed(digits)}`
+}
+
+const formatTokens = (value?: number | null) => {
+  if (value == null) return '—'
+  return value.toLocaleString()
+}
+
 const formatTs = (value: string | null | undefined) => {
   if (!value) return '—'
   try {
@@ -85,6 +95,41 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
     }
     return { passRate: null, completed: 0, total: 0 }
   }, [suite])
+
+  const costTotals = useMemo(() => {
+    if (!suite) return null
+    const runs = suite.runs || []
+    const base = suite.cost_totals
+    if (base) return base
+    if (!runs.length) return null
+    return runs.reduce(
+      (acc, run) => {
+        acc.prompt_tokens += run.prompt_tokens || 0
+        acc.completion_tokens += run.completion_tokens || 0
+        acc.cached_tokens += run.cached_tokens || 0
+        acc.tokens_used += run.tokens_used || 0
+        acc.input_cost_total += run.input_cost_total || 0
+        acc.input_cost_uncached += run.input_cost_uncached || 0
+        acc.input_cost_cached += run.input_cost_cached || 0
+        acc.output_cost += run.output_cost || 0
+        acc.total_cost += run.total_cost || 0
+        acc.credits_cost += run.credits_cost || 0
+        return acc
+      },
+      {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        cached_tokens: 0,
+        tokens_used: 0,
+        input_cost_total: 0,
+        input_cost_uncached: 0,
+        input_cost_cached: 0,
+        output_cost: 0,
+        total_cost: 0,
+        credits_cost: 0,
+      },
+    )
+  }, [suite?.runs, suite?.cost_totals])
 
   const completionStats = useMemo(() => {
     if (!suite) return { total: 0, completed: 0 }
@@ -342,6 +387,28 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                 </div>
               </div>
             </div>
+
+            {costTotals && (
+              <div className="px-0 sm:px-2 pb-1">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total cost (USD)</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(costTotals.total_cost, 4)}</p>
+                    <p className="text-xs text-slate-500">Input {formatCurrency(costTotals.input_cost_total, 4)} · Output {formatCurrency(costTotals.output_cost, 4)}</p>
+                  </div>
+                  <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Credits burned</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(costTotals.credits_cost, 3)}</p>
+                    <p className="text-xs text-slate-500">Includes tool + browser charges</p>
+                  </div>
+                  <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Tokens</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatTokens(costTotals.tokens_used)}</p>
+                    <p className="text-xs text-slate-500">Prompt {formatTokens(costTotals.prompt_tokens)} · Completion {formatTokens(costTotals.completion_tokens)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Scenarios section */}
@@ -396,6 +463,8 @@ function ScenarioGroup({ scenarioSlug, run, index }: { scenarioSlug: string; run
   const isCompleted = run?.status === 'completed'
   const isRunning = run?.status === 'running'
   const isMissing = !run
+  const runCost = run?.total_cost ?? null
+  const runCredits = run?.credits_cost ?? null
 
   return (
     <div className="bg-white transition-colors hover:bg-slate-50 group">
@@ -423,11 +492,21 @@ function ScenarioGroup({ scenarioSlug, run, index }: { scenarioSlug: string; run
            </div>
         </div>
         <div className="flex items-center gap-4">
-           {run && (
-             <div className="text-right hidden sm:block">
-               <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Duration</div>
-               <div className="text-xs font-mono text-slate-700">
-                  {formatDuration(run.started_at, run.finished_at)}
+          {run && (
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <span className="px-2 py-1 rounded-full bg-slate-100 font-semibold text-slate-700">
+                {formatCurrency(runCost, 4)}
+              </span>
+              <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold">
+                {runCredits != null ? `${runCredits.toFixed(3)} credits` : '— credits'}
+              </span>
+            </div>
+          )}
+          {run && (
+            <div className="text-right hidden sm:block">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Duration</div>
+              <div className="text-xs font-mono text-slate-700">
+                 {formatDuration(run.started_at, run.finished_at)}
                </div>
              </div>
            )}
@@ -476,7 +555,9 @@ function ScenarioGroup({ scenarioSlug, run, index }: { scenarioSlug: string; run
 function TaskRow({ task }: { task: EvalTask }) {
   const isPass = task.status === 'passed'
   const isFail = task.status === 'failed' || task.status === 'errored'
-  
+  const costChip = task.total_cost != null ? formatCurrency(task.total_cost, 4) : '—'
+  const creditChip = task.credits_cost != null ? `${task.credits_cost.toFixed(3)} cr` : '0 cr'
+
   return (
     <div className={`
       group flex items-start gap-3 rounded-lg p-4 text-sm transition-all
@@ -501,6 +582,13 @@ function TaskRow({ task }: { task: EvalTask }) {
             {task.observed_summary}
           </div>
         )}
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500">
+          <span className="px-2 py-1 rounded-full bg-slate-100 font-semibold text-slate-700">{costChip}</span>
+          <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold">{creditChip}</span>
+          <span className="px-2 py-1 rounded-full bg-slate-50 text-slate-600 font-semibold">
+            {formatTokens(task.total_tokens)} tok · in {formatTokens(task.prompt_tokens)} / out {formatTokens(task.completion_tokens)}
+          </span>
+        </div>
       </div>
     </div>
   )

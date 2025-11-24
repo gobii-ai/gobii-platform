@@ -146,6 +146,7 @@ def _schedule_agent_follow_up(
                 budget_id=budget_id,
                 branch_id=branch_id,
                 depth=parent_depth,
+                eval_run_id=getattr(task_obj, "eval_run_id", None),
             )
             logger.info(
                 "Triggered agent event processing for persistent agent %s after task %s completion",
@@ -153,7 +154,7 @@ def _schedule_agent_follow_up(
                 task_obj.id,
             )
         else:
-            process_agent_events_task.delay(agent_id)
+            process_agent_events_task.delay(agent_id, eval_run_id=getattr(task_obj, "eval_run_id", None))
             logger.info(
                 "Triggered fresh agent event processing for persistent agent %s after task %s completion (status=%s active_id=%s ctx_id=%s)",
                 agent_id,

@@ -54,7 +54,7 @@ class ProcessAgentEventsTaskBase(Task):
 
 
 @shared_task(bind=True, base=ProcessAgentEventsTaskBase, name="api.agent.tasks.process_agent_events")
-def process_agent_events_task(self, persistent_agent_id: str, budget_id: str | None = None, branch_id: str | None = None, depth: int | None = None) -> None:  # noqa: D401, ANN001
+def process_agent_events_task(self, persistent_agent_id: str, budget_id: str | None = None, branch_id: str | None = None, depth: int | None = None, eval_run_id: str | None = None) -> None:  # noqa: D401, ANN001
     """Celery task that triggers event processing for one persistent agent."""
 
     # Get the Celery-provided span and rename it for clarity
@@ -67,7 +67,13 @@ def process_agent_events_task(self, persistent_agent_id: str, budget_id: str | N
 
     try:
         # Delegate to core logic
-        process_agent_events(persistent_agent_id, budget_id=budget_id, branch_id=branch_id, depth=depth)
+        process_agent_events(
+            persistent_agent_id,
+            budget_id=budget_id,
+            branch_id=branch_id,
+            depth=depth,
+            eval_run_id=eval_run_id,
+        )
     finally:
         # Ensure queued flag clears even if processing short-circuits
         clear_processing_queued_flag(persistent_agent_id)
