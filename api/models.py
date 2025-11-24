@@ -3002,6 +3002,26 @@ class PersistentAgent(models.Model):
         on_delete=models.CASCADE,
         related_name="persistent_agent"
     )
+
+    @property
+    def preferred_proxy(self):
+        """Return the proxy selected on the backing browser agent, if any."""
+        try:
+            browser_agent = self.browser_use_agent
+        except BrowserUseAgent.DoesNotExist:
+            return None
+        except AttributeError:
+            return None
+
+        if browser_agent is None:
+            return None
+        return getattr(browser_agent, "preferred_proxy", None)
+
+    @property
+    def preferred_proxy_id(self):
+        proxy = self.preferred_proxy
+        return getattr(proxy, "id", None)
+
     is_active = models.BooleanField(default=True, help_text="Whether this agent is currently active")
     daily_credit_limit = models.PositiveIntegerField(
         null=True,

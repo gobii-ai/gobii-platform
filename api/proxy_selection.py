@@ -12,6 +12,7 @@ from typing import Optional
 
 from django.conf import settings
 from django.utils import timezone
+from django.core.exceptions import ObjectDoesNotExist
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,6 @@ def select_proxy_for_persistent_agent(persistent_agent, override_proxy: Optional
     # Extract preferred proxy if the persistent agent has one
     # This assumes PersistentAgent might have a preferred_proxy field
     preferred_proxy = getattr(persistent_agent, 'preferred_proxy', None)
-    
     return select_proxy(
         preferred_proxy=preferred_proxy,
         override_proxy=override_proxy,

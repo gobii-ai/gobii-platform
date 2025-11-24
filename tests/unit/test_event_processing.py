@@ -27,6 +27,7 @@ from api.agent.tasks.process_events import process_agent_cron_trigger_task, _rem
 from api.models import (
     BrowserUseAgent,
     MCPServerConfig,
+    ProxyServer,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
@@ -1049,6 +1050,47 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         
         call_args = mock_request.call_args
         self.assertEqual(call_args[0][1], "https://api.secret.com/v2/endpoint")
+
+    @patch('requests.request')
+    @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
+    def test_http_request_uses_agent_preferred_proxy(self, mock_proxy_selector, mock_request):
+        """Preferred proxies assigned to the browser agent should be reused for HTTP requests."""
+        proxy = ProxyServer.objects.create(
+            name="Dedicated",
+            proxy_type=ProxyServer.ProxyType.HTTP,
+            host="dedicated.proxy",
+            port=8080,
+            username="user",
+            password="pass",
+            is_active=True,
+        )
+        self.browser_agent.preferred_proxy = proxy
+        self.browser_agent.save(update_fields=["preferred_proxy"])
+
+        def _selector(agent, *args, **kwargs):
+            self.assertEqual(agent.preferred_proxy, proxy)
+            return proxy
+
+        mock_proxy_selector.side_effect = _selector
+        mock_response = type('Response', (), {
+            'status_code': 200,
+            'headers': {'Content-Type': 'text/plain'},
+            'iter_content': lambda self, chunk_size: [b'ok'],
+            'close': lambda self: None,
+        })()
+        mock_request.return_value = mock_response
+
+        params = {
+            "method": "GET",
+            "url": "https://api.example.com/health",
+        }
+
+        result = _execute_http_request(self.agent, params)
+
+        self.assertEqual(result["status"], "ok")
+        mock_proxy_selector.assert_called_once()
+        proxies = mock_request.call_args[1]["proxies"]
+        self.assertEqual(proxies, {"http": proxy.proxy_url, "https": proxy.proxy_url})
 
     @patch('requests.request')
     @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
