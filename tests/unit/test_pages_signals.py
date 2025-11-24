@@ -297,10 +297,11 @@ class SubscriptionSignalTests(TestCase):
         payload_items = payload["items"]["data"]
         payload_items[0]["price"]["id"] = "price_base"
         payload_items[0]["price"]["usage_type"] = "licensed"
+        payload_items[0]["price"]["product"] = "prod_plan"
         payload_items.append(
             {
                 "plan": {"usage_type": "metered"},
-                "price": {"id": "price_meter", "usage_type": "metered"},
+                "price": {"id": "price_meter", "usage_type": "metered", "product": "prod_meter"},
                 "quantity": None,
             }
         )
@@ -312,13 +313,16 @@ class SubscriptionSignalTests(TestCase):
         sub.customer.id = "cus_test"
         sub.stripe_data = payload
 
+        plan_products = {"prod_plan"}
+
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
             patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
             patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
             patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
             patch("pages.signals.Analytics.identify"), \
-            patch("pages.signals.Analytics.track_event"):
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals._individual_plan_product_ids", return_value=plan_products):
 
             handle_subscription_event(event)
 
