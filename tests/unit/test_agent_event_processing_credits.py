@@ -531,7 +531,7 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(metrics["window_total"], Decimal("3"))
 
     @patch(
-        "api.agent.core.event_processing.get_tool_cost_overview",
+        "api.agent.core.prompt_context.get_tool_cost_overview",
         return_value=(Decimal("1"), {"send_email": Decimal("1.2"), "run_sql": Decimal("2.5")}),
     )
     def test_budget_sections_include_soft_target_and_burn_warning(self, _mock_costs):
@@ -567,7 +567,7 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertIn("send_email=1.2", tool_call.args[1])
 
     @patch(
-        "api.agent.core.event_processing.get_tool_cost_overview",
+        "api.agent.core.prompt_context.get_tool_cost_overview",
         return_value=(Decimal("1"), {}),
     )
     def test_budget_sections_emit_burn_rate_analytics_event(self, _mock_costs):

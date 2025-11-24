@@ -77,7 +77,7 @@ class PromptContextBuilderTests(TestCase):
         )
         self._storage_dir = tempfile.mkdtemp()
         self._storage = FileSystemStorage(location=self._storage_dir)
-        self._storage_patch = patch('api.agent.core.event_processing.default_storage', self._storage)
+        self._storage_patch = patch('api.agent.core.prompt_context.default_storage', self._storage)
         self._admin_storage_patch = patch('api.admin.default_storage', self._storage)
         self._print_patch = patch('api.agent.core.event_processing.print')
         self._storage_patch.start()
@@ -100,8 +100,8 @@ class PromptContextBuilderTests(TestCase):
             seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
         )
         # Build the prompt context
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, _ = build_prompt_context(self.agent)
 
         # Find the user message in the context
@@ -135,8 +135,8 @@ class PromptContextBuilderTests(TestCase):
             url="https://mcp.example.com",
         )
 
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -154,8 +154,8 @@ class PromptContextBuilderTests(TestCase):
             created_by=self.user,
         )
 
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
@@ -174,8 +174,8 @@ class PromptContextBuilderTests(TestCase):
         directive.refresh_from_db()
         self.assertIsNotNone(directive.delivered_at)
 
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             second_context, _, _ = build_prompt_context(self.agent)
 
         second_system = next((m for m in second_context if m['role'] == 'system'), None)
@@ -191,8 +191,8 @@ class PromptContextBuilderTests(TestCase):
 
     def test_prompt_archive_saved_to_storage(self):
         """Prompt archives should be written to object storage as compressed JSON."""
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, prompt_archive_id = build_prompt_context(self.agent)
 
         archive_dir = f"persistent_agents/{self.agent.id}/prompt_archives"
@@ -263,8 +263,8 @@ class PromptContextBuilderTests(TestCase):
             "cached_tokens": 0,
         }
 
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
              patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]):
             with patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)):
                 from api.agent.core import event_processing as ep
@@ -302,8 +302,8 @@ class PromptContextBuilderTests(TestCase):
             "provider": "mock-provider",
             "cached_tokens": 0,
         }
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
              patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
              patch('api.agent.core.event_processing._get_recent_preferred_config', return_value=("mock", "mock-model")) as mock_helper, \
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
@@ -328,8 +328,8 @@ class PromptContextBuilderTests(TestCase):
             "model": "mock-model",
             "provider": "mock-provider",
         }
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
              patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
              patch('api.agent.core.event_processing._get_recent_preferred_config', return_value=None) as mock_helper, \
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
@@ -356,8 +356,8 @@ class PromptContextBuilderTests(TestCase):
             "provider": "mock-provider",
         }
 
-        with patch('api.agent.core.event_processing.ensure_steps_compacted'), \
-             patch('api.agent.core.event_processing.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
              patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)):
             from api.agent.core import event_processing as ep
@@ -1448,16 +1448,17 @@ class PromptConfigFunctionTests(TestCase):
     def test_limits_follow_configuration(self):
         config = self._configure_limits()
 
-        self.assertEqual(get_prompt_token_budget(self.agent), config.standard_prompt_token_budget)
-        self.assertEqual(message_history_limit(self.agent), config.standard_message_history_limit)
-        self.assertEqual(tool_call_history_limit(self.agent), config.standard_tool_call_history_limit)
+        with patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.STANDARD):
+            self.assertEqual(get_prompt_token_budget(self.agent), config.standard_prompt_token_budget)
+            self.assertEqual(message_history_limit(self.agent), config.standard_message_history_limit)
+            self.assertEqual(tool_call_history_limit(self.agent), config.standard_tool_call_history_limit)
 
-        with patch("api.agent.core.event_processing.get_agent_llm_tier", return_value=AgentLLMTier.PREMIUM):
+        with patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.PREMIUM):
             self.assertEqual(get_prompt_token_budget(self.agent), config.premium_prompt_token_budget)
             self.assertEqual(message_history_limit(self.agent), config.premium_message_history_limit)
             self.assertEqual(tool_call_history_limit(self.agent), config.premium_tool_call_history_limit)
 
-        with patch("api.agent.core.event_processing.get_agent_llm_tier", return_value=AgentLLMTier.MAX):
+        with patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.MAX):
             self.assertEqual(get_prompt_token_budget(self.agent), config.max_prompt_token_budget)
             self.assertEqual(message_history_limit(self.agent), config.max_message_history_limit)
             self.assertEqual(tool_call_history_limit(self.agent), config.max_tool_call_history_limit)

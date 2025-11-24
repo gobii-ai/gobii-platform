@@ -16,7 +16,7 @@ from api.models import (
     PersistentAgentSecret,
     BrowserUseAgent,
 )
-from api.agent.core.event_processing import _get_secrets_block
+from api.agent.core.prompt_context import _get_secrets_block
 from api.agent.tools.secure_credentials_request import (
     execute_secure_credentials_request,
     get_secure_credentials_request_tool,
