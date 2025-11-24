@@ -368,6 +368,67 @@ class EnsureSingleIndividualSubscriptionTests(TestCase):
         mock_create.assert_not_called()
 
     @patch("util.subscription_helper._ensure_stripe_ready")
+    @patch("util.subscription_helper.stripe.Subscription.modify")
+    @patch("util.subscription_helper.stripe.Subscription.delete")
+    @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})
+    @patch("util.subscription_helper.get_existing_individual_subscriptions")
+    def test_preserves_other_licensed_addons(
+        self,
+        mock_existing,
+        _mock_plan_products,
+        mock_delete,
+        mock_modify,
+        _mock_ready,
+    ):
+        mock_existing.return_value = [
+            {
+                "id": "sub_existing",
+                "items": {
+                    "data": [
+                        {
+                            "id": "si_base",
+                            "quantity": 1,
+                            "price": {
+                                "id": "price_old",
+                                "product": "prod_plan",
+                                "usage_type": "licensed",
+                            },
+                        },
+                        {
+                            "id": "si_addon",
+                            "quantity": 2,
+                            "price": {
+                                "id": "price_addon",
+                                "product": "prod_addon",
+                                "usage_type": "licensed",
+                            },
+                        },
+                    ]
+                },
+            }
+        ]
+
+        mock_modify.return_value = {"id": "sub_existing"}
+
+        ensure_single_individual_subscription(
+            "cus_123",
+            licensed_price_id="price_new",
+            metered_price_id=None,
+            metadata=None,
+            idempotency_key="idem-addons",
+        )
+
+        mock_delete.assert_not_called()
+        mock_modify.assert_called_once()
+        items = mock_modify.call_args.kwargs.get("items") or []
+        base_item = next((i for i in items if i.get("id") == "si_base"), None)
+        addon_item = next((i for i in items if i.get("id") == "si_addon"), None)
+        self.assertEqual(base_item.get("price"), "price_new")
+        self.assertEqual(base_item.get("quantity"), 1)
+        self.assertEqual(addon_item.get("price"), "price_addon")
+        self.assertEqual(addon_item.get("quantity"), 2)
+
+    @patch("util.subscription_helper._ensure_stripe_ready")
     @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})
     @patch("util.subscription_helper.stripe.Subscription.list")
     def test_get_existing_filters_and_sorts(self, mock_list, _mock_plan_products, _mock_ready):
