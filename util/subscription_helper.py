@@ -15,6 +15,7 @@ from django.utils import timezone
 import logging
 import os
 from typing import Literal, Tuple, Any
+import uuid
 
 from django.conf import settings
 from observability import traced, trace
@@ -40,6 +41,241 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 BillingOwnerType = Literal["user", "organization"]
+
+
+def _individual_plan_product_ids() -> set[str]:
+    """Return product IDs for non-organization plans.
+
+    This keeps the helper resilient to config churn by refreshing products
+    before collecting the IDs.
+    """
+    try:
+        from config import plans as plans_module
+
+        plans_module._refresh_plan_products()
+    except Exception:
+        # Best-effort; if refresh fails we still try with current config values
+        logger.debug("Failed to refresh plan products; using in-memory PLAN_CONFIG", exc_info=True)
+
+    return {
+        str(cfg.get("product_id"))
+        for cfg in PLAN_CONFIG.values()
+        if not cfg.get("org") and cfg.get("product_id")
+    }
+
+
+def _normalize_stripe_object(obj):
+    """Convert Stripe objects to plain dicts for easier inspection."""
+    if hasattr(obj, "to_dict_recursive"):
+        try:
+            return obj.to_dict_recursive()
+        except Exception:
+            logger.debug("Failed to normalize Stripe object; returning raw", exc_info=True)
+    return obj
+
+
+def get_existing_individual_subscriptions(customer_id: str) -> list[dict[str, Any]]:
+    """Return all non-org subscriptions for a customer, newest first.
+
+    A subscription is included when *any* item maps to a plan in PLAN_CONFIG
+    with org == False. Cancelled/expired subscriptions are ignored so callers
+    can focus on active/reattemptable states (trialing, active, incomplete, etc.).
+    """
+    if not customer_id:
+        raise ValueError("customer_id is required")
+
+    _ensure_stripe_ready()
+
+    plan_products = _individual_plan_product_ids()
+    if not plan_products:
+        logger.info("No individual plan products configured; skipping subscription lookup")
+        return []
+
+    subscriptions: list[dict[str, Any]] = []
+
+    try:
+        iterator = stripe.Subscription.list(  # type: ignore[attr-defined]
+            customer=customer_id,
+            status="all",
+            expand=["data.items.data.price.product"],
+            limit=100,
+        ).auto_paging_iter()
+    except Exception:
+        logger.exception("Failed to list subscriptions for customer %s", customer_id)
+        return []
+
+    for sub in iterator:
+        sub_data = _normalize_stripe_object(sub) or {}
+        status = sub_data.get("status") or ""
+        if status in ("canceled", "incomplete_expired"):
+            continue
+
+        items = (sub_data.get("items") or {}).get("data", []) or []
+        for item in items:
+            price = _normalize_stripe_object(item.get("price") or {}) or {}
+            product = price.get("product")
+            if isinstance(product, dict):
+                product = product.get("id")
+
+            if product and product in plan_products:
+                subscriptions.append(sub_data)
+                break
+
+    subscriptions.sort(key=lambda s: s.get("created") or 0, reverse=True)
+
+    logger.info(
+        "Found %s individual subscriptions for customer %s (plan products=%s)",
+        len(subscriptions),
+        customer_id,
+        sorted(plan_products),
+    )
+
+    return subscriptions
+
+
+def ensure_single_individual_subscription(
+    customer_id: str,
+    *,
+    licensed_price_id: str,
+    metered_price_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
+    create_if_missing: bool = True,
+) -> tuple[Any | None, str]:
+    """Ensure exactly one active individual subscription for a customer.
+
+    Guardrails:
+    - De-dupes any existing individual plan subscriptions by keeping the newest
+      and immediately cancelling the rest.
+    - Upgrades/downgrades reuse the existing subscription via Subscription.modify
+      so we never spawn parallel subscriptions for the same customer.
+    - Only creates a new subscription (base + optional metered item) when none exist.
+
+    Returns (subscription, action) where action is "created", "updated",
+    or "absent" (when create_if_missing is False and none exist).
+    """
+
+    if not customer_id:
+        raise ValueError("customer_id is required")
+    if not licensed_price_id:
+        raise ValueError("licensed_price_id is required")
+
+    _ensure_stripe_ready()
+
+    metadata = metadata.copy() if metadata else {}
+    idempotency_token = idempotency_key or f"ind-plan-{customer_id}-{licensed_price_id}-{uuid.uuid4()}"
+
+    existing = get_existing_individual_subscriptions(customer_id)
+    plan_products = _individual_plan_product_ids()
+
+    # No existing subscription: optionally create one with the base + metered price
+    if not existing:
+        if not create_if_missing:
+            logger.info(
+                "No individual subscriptions found for customer %s; skipping creation (create_if_missing=False)",
+                customer_id,
+            )
+            return None, "absent"
+
+        items = [
+            {"price": licensed_price_id, "quantity": 1},
+        ]
+        if metered_price_id:
+            items.append({"price": metered_price_id})
+
+        logger.info(
+            "Creating new individual subscription for customer %s with items=%s",
+            customer_id,
+            [item.get("price") for item in items],
+        )
+
+        subscription = stripe.Subscription.create(  # type: ignore[attr-defined]
+            customer=customer_id,
+            items=items,
+            metadata=metadata,
+            idempotency_key=idempotency_token,
+            expand=["items.data.price"],
+        )
+
+        return subscription, "created"
+
+    newest = existing[0]
+    stale = existing[1:]
+
+    # Cancel duplicates immediately (no cancel-at-period-end queueing)
+    for duplicate in stale:
+        dup_id = duplicate.get("id")
+        if not dup_id:
+            continue
+        try:
+            logger.info(
+                "Cancelling duplicate individual subscription %s for customer %s",
+                dup_id,
+                customer_id,
+            )
+            stripe.Subscription.delete(dup_id, prorate=True)  # type: ignore[attr-defined]
+        except Exception:
+            logger.warning(
+                "Failed to cancel duplicate subscription %s for customer %s",
+                dup_id,
+                customer_id,
+                exc_info=True,
+            )
+
+    # Build item updates while preserving unrelated add-ons
+    existing_items = (newest.get("items") or {}).get("data", []) or []
+    updated_items: list[dict[str, Any]] = []
+    base_found = False
+    meter_found = False
+
+    for item in existing_items:
+        price = _normalize_stripe_object(item.get("price") or {}) or {}
+        product = price.get("product")
+        if isinstance(product, dict):
+            product = product.get("id")
+
+        usage_type = price.get("usage_type") or (price.get("recurring") or {}).get("usage_type")
+
+        payload: dict[str, Any] = {"id": item.get("id")}
+
+        if product in plan_products or usage_type == "licensed":
+            payload.update({"price": licensed_price_id, "quantity": item.get("quantity") or 1})
+            base_found = True
+        elif metered_price_id and (price.get("id") == metered_price_id or usage_type == "metered"):
+            payload.update({"price": metered_price_id})
+            meter_found = True
+        else:
+            if price.get("id"):
+                payload.update({"price": price.get("id")})
+            if item.get("quantity") is not None:
+                payload["quantity"] = item.get("quantity")
+
+        updated_items.append(payload)
+
+    if not base_found:
+        updated_items.append({"price": licensed_price_id, "quantity": 1})
+
+    if metered_price_id and not meter_found:
+        updated_items.append({"price": metered_price_id})
+
+    merged_metadata = {**(newest.get("metadata") or {}), **metadata}
+
+    logger.info(
+        "Updating existing individual subscription %s for customer %s (items=%s)",
+        newest.get("id"),
+        customer_id,
+        [item.get("price") for item in updated_items],
+    )
+
+    updated_sub = stripe.Subscription.modify(  # type: ignore[attr-defined]
+        newest.get("id"),
+        items=updated_items,
+        metadata=merged_metadata,
+        idempotency_key=idempotency_token,
+        expand=["items.data.price"],
+    )
+
+    return updated_sub, "updated"
 
 
 def _ensure_stripe_ready() -> None:

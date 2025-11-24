@@ -3,7 +3,7 @@ from datetime import datetime, timezone as datetime_timezone
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from api.models import (
     BrowserUseAgent,
@@ -20,6 +20,8 @@ from util.subscription_helper import (
     mark_organization_billing_with_plan,
     downgrade_organization_to_free_plan,
     get_users_due_for_monthly_grant,
+    ensure_single_individual_subscription,
+    get_existing_individual_subscriptions,
 )
 
 
@@ -225,6 +227,169 @@ class GetUsersDueForMonthlyGrantTests(TestCase):
 
             with patch("util.subscription_helper.timezone.now") as mock_now:
                 mock_now.return_value = datetime(2025, 11, 6, tzinfo=datetime_timezone.utc)
-                results = get_users_due_for_monthly_grant()
+        results = get_users_due_for_monthly_grant()
 
         self.assertNotIn(self.other, results)
+
+
+@tag("batch_subscription")
+class EnsureSingleIndividualSubscriptionTests(TestCase):
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    @patch("util.subscription_helper.stripe.Subscription.create")
+    @patch("util.subscription_helper.get_existing_individual_subscriptions", return_value=[])
+    def test_creates_subscription_when_missing(self, mock_existing, mock_create, _mock_ready):
+        mock_create.return_value = {"id": "sub_new"}
+
+        subscription, action = ensure_single_individual_subscription(
+            "cus_123",
+            licensed_price_id="price_base",
+            metered_price_id="price_meter",
+            metadata={"foo": "bar"},
+            idempotency_key="idem-123",
+        )
+
+        self.assertEqual(action, "created")
+        self.assertEqual(subscription, {"id": "sub_new"})
+        mock_create.assert_called_once()
+        create_kwargs = mock_create.call_args.kwargs
+        self.assertIn({"price": "price_base", "quantity": 1}, create_kwargs.get("items") or [])
+        self.assertIn({"price": "price_meter"}, create_kwargs.get("items") or [])
+        self.assertEqual(create_kwargs.get("metadata"), {"foo": "bar"})
+        self.assertEqual(create_kwargs.get("idempotency_key"), "idem-123")
+
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    @patch("util.subscription_helper.stripe.Subscription.modify")
+    @patch("util.subscription_helper.stripe.Subscription.delete")
+    @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})
+    @patch("util.subscription_helper.get_existing_individual_subscriptions")
+    def test_updates_existing_subscription_and_keeps_metered_item(
+        self,
+        mock_existing,
+        mock_plan_products,
+        mock_delete,
+        mock_modify,
+        _mock_ready,
+    ):
+        mock_existing.return_value = [
+            {
+                "id": "sub_existing",
+                "metadata": {"foo": "bar"},
+                "items": {
+                    "data": [
+                        {
+                            "id": "si_base",
+                            "quantity": 1,
+                            "price": {
+                                "id": "price_old",
+                                "product": "prod_plan",
+                                "usage_type": "licensed",
+                            },
+                        },
+                        {
+                            "id": "si_meter",
+                            "price": {"id": "price_meter_old", "usage_type": "metered"},
+                        },
+                    ]
+                },
+            }
+        ]
+
+        mock_modify.return_value = {"id": "sub_existing"}
+
+        subscription, action = ensure_single_individual_subscription(
+            "cus_123",
+            licensed_price_id="price_new",
+            metered_price_id="price_meter_new",
+            metadata={"baz": "qux"},
+            idempotency_key="idem-456",
+        )
+
+        self.assertEqual(action, "updated")
+        self.assertEqual(subscription, {"id": "sub_existing"})
+        mock_delete.assert_not_called()
+        mock_modify.assert_called_once()
+        modify_kwargs = mock_modify.call_args.kwargs
+        items = modify_kwargs.get("items") or []
+        base_item = next((i for i in items if i.get("price") == "price_new"), None)
+        meter_item = next((i for i in items if i.get("price") == "price_meter_new"), None)
+        self.assertIsNotNone(base_item)
+        self.assertEqual(base_item.get("quantity"), 1)
+        self.assertIsNotNone(meter_item)
+        self.assertEqual(modify_kwargs.get("metadata"), {"foo": "bar", "baz": "qux"})
+        self.assertEqual(modify_kwargs.get("idempotency_key"), "idem-456")
+
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    @patch("util.subscription_helper.stripe.Subscription.modify")
+    @patch("util.subscription_helper.stripe.Subscription.delete")
+    @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})
+    @patch("util.subscription_helper.get_existing_individual_subscriptions")
+    def test_cancels_duplicates_and_updates_newest(
+        self,
+        mock_existing,
+        _mock_plan_products,
+        mock_delete,
+        mock_modify,
+        _mock_ready,
+    ):
+        mock_existing.return_value = [
+            {"id": "sub_new", "created": 200, "items": {"data": [{"id": "si_new", "price": {"id": "price_old", "product": "prod_plan", "usage_type": "licensed"}}]}},
+            {"id": "sub_old", "created": 100, "items": {"data": [{"id": "si_old", "price": {"id": "price_old", "product": "prod_plan", "usage_type": "licensed"}}]}},
+        ]
+
+        ensure_single_individual_subscription(
+            "cus_123",
+            licensed_price_id="price_new",
+            metered_price_id=None,
+            metadata=None,
+            idempotency_key="idem-789",
+        )
+
+        mock_delete.assert_called_once_with("sub_old", prorate=True)
+        mock_modify.assert_called_once()
+        self.assertEqual(mock_modify.call_args.kwargs.get("idempotency_key"), "idem-789")
+        self.assertEqual(mock_modify.call_args.kwargs.get("items"), [{"id": "si_new", "price": "price_new", "quantity": 1}])
+
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    @patch("util.subscription_helper.stripe.Subscription.create")
+    @patch("util.subscription_helper.get_existing_individual_subscriptions", return_value=[])
+    def test_create_skipped_when_disabled(self, mock_existing, mock_create, _mock_ready):
+        subscription, action = ensure_single_individual_subscription(
+            "cus_none",
+            licensed_price_id="price_base",
+            metered_price_id=None,
+            metadata=None,
+            idempotency_key="idem-no-create",
+            create_if_missing=False,
+        )
+
+        self.assertIsNone(subscription)
+        self.assertEqual(action, "absent")
+        mock_existing.assert_called_once_with("cus_none")
+        mock_create.assert_not_called()
+
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})
+    @patch("util.subscription_helper.stripe.Subscription.list")
+    def test_get_existing_filters_and_sorts(self, mock_list, _mock_plan_products, _mock_ready):
+        mock_page = MagicMock()
+        mock_page.auto_paging_iter.return_value = [
+            {"id": "sub_cancelled", "status": "canceled"},
+            {
+                "id": "sub_match",
+                "status": "active",
+                "created": 10,
+                "items": {"data": [{"price": {"product": "prod_plan"}}]},
+            },
+            {
+                "id": "sub_other",
+                "status": "active",
+                "created": 5,
+                "items": {"data": [{"price": {"product": "prod_other"}}]},
+            },
+        ]
+        mock_list.return_value = mock_page
+
+        results = get_existing_individual_subscriptions("cus_321")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].get("id"), "sub_match")
