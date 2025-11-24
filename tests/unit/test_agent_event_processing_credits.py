@@ -18,10 +18,10 @@ from unittest.mock import MagicMock, patch
 import uuid
 from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.constants.task_constants import TASKS_UNLIMITED
-from api.agent.core.event_processing import (
+from api.agent.core.event_processing import _ensure_credit_for_tool
+from api.agent.core.prompt_context import (
     add_budget_awareness_sections,
     compute_burn_rate,
-    _ensure_credit_for_tool,
 )
 
 

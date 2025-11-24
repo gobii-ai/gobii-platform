@@ -15,9 +15,11 @@ from api.agent.core.event_processing import (
     build_prompt_context,
     _get_completed_process_run_count,
     _run_agent_loop,
+)
+from api.agent.core.prompt_context import (
+    get_prompt_token_budget,
     message_history_limit,
     tool_call_history_limit,
-    get_prompt_token_budget,
 )
 from api.admin import PersistentAgentPromptArchiveAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
@@ -79,7 +81,7 @@ class PromptContextBuilderTests(TestCase):
         self._storage = FileSystemStorage(location=self._storage_dir)
         self._storage_patch = patch('api.agent.core.prompt_context.default_storage', self._storage)
         self._admin_storage_patch = patch('api.admin.default_storage', self._storage)
-        self._print_patch = patch('api.agent.core.event_processing.print')
+        self._print_patch = patch('api.agent.core.prompt_context.print')
         self._storage_patch.start()
         self._admin_storage_patch.start()
         self._print_patch.start()

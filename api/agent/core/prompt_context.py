@@ -1,5 +1,4 @@
 """Prompt and context building helpers for persistent agent event processing."""
-from __future__ import annotations
 
 import json
 import logging
@@ -87,7 +86,18 @@ from .step_compaction import llm_summarise_steps
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
-MAX_AGENT_LOOP_ITERATIONS = 100
+DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
+
+__all__ = [
+    "tool_call_history_limit",
+    "message_history_limit",
+    "get_prompt_token_budget",
+    "get_agent_daily_credit_state",
+    "compute_burn_rate",
+    "build_prompt_context",
+    "add_budget_awareness_sections",
+    "get_agent_tools",
+]
 
 _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
 try:
@@ -320,6 +330,25 @@ def _create_token_estimator(model: str) -> callable:
     return token_estimator
 
 
+def _resolve_max_iterations(max_iterations: Optional[int]) -> int:
+    """Derive the iteration ceiling, falling back to event_processing defaults."""
+
+    if max_iterations is not None:
+        return max_iterations
+
+    try:
+        # Imported lazily to avoid circular imports when event_processing loads us.
+        from api.agent.core import event_processing as event_processing_module  # noqa: WPS433
+
+        return getattr(
+            event_processing_module,
+            "MAX_AGENT_LOOP_ITERATIONS",
+            DEFAULT_MAX_AGENT_LOOP_ITERATIONS,
+        )
+    except Exception:
+        return DEFAULT_MAX_AGENT_LOOP_ITERATIONS
+
+
 # --------------------------------------------------------------------------- #
 #  Prompt‑building helpers
 # --------------------------------------------------------------------------- #
@@ -397,7 +426,7 @@ def _get_recent_proactive_context(agent: PersistentAgent) -> dict | None:
 def build_prompt_context(
     agent: PersistentAgent,
     current_iteration: int = 1,
-    max_iterations: int = MAX_AGENT_LOOP_ITERATIONS,
+    max_iterations: Optional[int] = None,
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
@@ -418,6 +447,8 @@ def build_prompt_context(
         accurate LLM selection and prompt_archive_id references the metadata row
         for the stored prompt archive (or ``None`` if archiving failed).
     """
+    max_iterations = _resolve_max_iterations(max_iterations)
+
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     safety_id = agent.user.id if agent.user else None
