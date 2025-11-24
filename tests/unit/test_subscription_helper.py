@@ -227,7 +227,7 @@ class GetUsersDueForMonthlyGrantTests(TestCase):
 
             with patch("util.subscription_helper.timezone.now") as mock_now:
                 mock_now.return_value = datetime(2025, 11, 6, tzinfo=datetime_timezone.utc)
-        results = get_users_due_for_monthly_grant()
+                results = get_users_due_for_monthly_grant()
 
         self.assertNotIn(self.other, results)
 
