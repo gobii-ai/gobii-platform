@@ -238,7 +238,11 @@ def ensure_single_individual_subscription(
 
         payload: dict[str, Any] = {"id": item.get("id")}
 
-        if product in plan_products or usage_type == "licensed":
+        is_plan_product = product in plan_products
+        is_plan_price = price.get("id") == licensed_price_id
+        is_metered = usage_type == "metered"
+
+        if is_plan_product or is_plan_price:
             payload.update({"price": licensed_price_id, "quantity": item.get("quantity") or 1})
             base_found = True
         elif metered_price_id and price.get("id") == metered_price_id:
