@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, CheckCircle2, XCircle, Clock, HelpCircle } from 'lucide-react'
+import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle } from 'lucide-react'
 
 import { fetchSuiteRunDetail, updateSuiteRunType, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
@@ -404,7 +404,11 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                   <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Tokens</p>
                     <p className="text-2xl font-bold text-slate-900 mt-1">{formatTokens(costTotals.tokens_used)}</p>
-                    <p className="text-xs text-slate-500">Prompt {formatTokens(costTotals.prompt_tokens)} · Completion {formatTokens(costTotals.completion_tokens)}</p>
+                    <p className="text-xs text-slate-500">
+                      Prompt {formatTokens(costTotals.prompt_tokens)} <span className="text-slate-300 mx-1">|</span> 
+                      Cached {formatTokens(costTotals.cached_tokens)} <span className="text-slate-300 mx-1">|</span>
+                      Completion {formatTokens(costTotals.completion_tokens)}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -586,7 +590,7 @@ function TaskRow({ task }: { task: EvalTask }) {
           <span className="px-2 py-1 rounded-full bg-slate-100 font-semibold text-slate-700">{costChip}</span>
           <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold">{creditChip}</span>
           <span className="px-2 py-1 rounded-full bg-slate-50 text-slate-600 font-semibold">
-            {formatTokens(task.total_tokens)} tok · in {formatTokens(task.prompt_tokens)} / out {formatTokens(task.completion_tokens)}
+            {formatTokens(task.total_tokens)} tok · in {formatTokens(task.prompt_tokens)} ({formatTokens(task.cached_tokens)} cached) / out {formatTokens(task.completion_tokens)}
           </span>
         </div>
       </div>
