@@ -10,6 +10,11 @@ const formatCurrency = (value?: number | null, digits = 4) => {
   return `$${value.toFixed(digits)}`
 }
 
+const formatCredits = (value?: number | null, digits = 3) => {
+  if (value == null) return '—'
+  return value.toFixed(digits)
+}
+
 const formatTokens = (value?: number | null) => {
   if (value == null) return '—'
   return value.toLocaleString()
@@ -99,37 +104,37 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   const costTotals = useMemo(() => {
     if (!suite) return null
     const runs = suite.runs || []
-    const base = suite.cost_totals
-    if (base) return base
-    if (!runs.length) return null
-    
-    return runs.reduce(
-      (acc, run) => {
-        acc.prompt_tokens += run.prompt_tokens || 0
-        acc.completion_tokens += run.completion_tokens || 0
-        acc.cached_tokens += run.cached_tokens || 0
-        acc.tokens_used += run.tokens_used || 0
-        acc.input_cost_total += run.input_cost_total || 0
-        acc.input_cost_uncached += run.input_cost_uncached || 0
-        acc.input_cost_cached += run.input_cost_cached || 0
-        acc.output_cost += run.output_cost || 0
-        acc.total_cost += run.total_cost || 0
-        acc.credits_cost += run.credits_cost || 0
-        return acc
-      },
-      {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        cached_tokens: 0,
-        tokens_used: 0,
-        input_cost_total: 0,
-        input_cost_uncached: 0,
-        input_cost_cached: 0,
-        output_cost: 0,
-        total_cost: 0,
-        credits_cost: 0,
-      },
-    )
+    if (runs.length) {
+      return runs.reduce(
+        (acc, run) => {
+          acc.prompt_tokens += run.prompt_tokens || 0
+          acc.completion_tokens += run.completion_tokens || 0
+          acc.cached_tokens += run.cached_tokens || 0
+          acc.tokens_used += run.tokens_used || 0
+          acc.input_cost_total += run.input_cost_total || 0
+          acc.input_cost_uncached += run.input_cost_uncached || 0
+          acc.input_cost_cached += run.input_cost_cached || 0
+          acc.output_cost += run.output_cost || 0
+          acc.total_cost += run.total_cost || 0
+          acc.credits_cost += run.credits_cost || 0
+          return acc
+        },
+        {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          cached_tokens: 0,
+          tokens_used: 0,
+          input_cost_total: 0,
+          input_cost_uncached: 0,
+          input_cost_cached: 0,
+          output_cost: 0,
+          total_cost: 0,
+          credits_cost: 0,
+        },
+      )
+    }
+
+    return suite.cost_totals || null
   }, [suite?.runs, suite?.cost_totals])
 
   const completionStats = useMemo(() => {
@@ -406,7 +411,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                   </div>
                   <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Credits burned</p>
-                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(costTotals.credits_cost, 3)}</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatCredits(costTotals.credits_cost, 3)}</p>
                     <p className="text-xs text-slate-500">Includes tool + browser charges</p>
                   </div>
                   <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
