@@ -42,6 +42,7 @@ from api.services.dedicated_proxy_service import (
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
 from util.subscription_helper import (
+    ensure_single_individual_subscription,
     mark_owner_billing_with_plan,
     mark_user_billing_with_plan,
     downgrade_owner_to_free_plan,
@@ -848,6 +849,41 @@ def handle_subscription_event(event, **kwargs):
             event_type = ""
 
         span.set_attribute('subscription.event_type', event_type)
+
+        # Guardrail: when Stripe fires a new individual (non-org) subscription, ensure we reuse one subscription
+        # per customer and cancel any older duplicates. This preserves add-ons (e.g., dedicated IPs/meters) on the newest sub.
+        try:
+            if event_type == "customer.subscription.created" and owner_type == "user":
+                items_data = []
+                if isinstance(source_data, Mapping):
+                    items_data = ((source_data.get("items") or {}).get("data") or [])
+
+                licensed_price_id = None
+                metered_price_id = None
+                for item in items_data:
+                    price = item.get("price") or {}
+                    usage_type = price.get("usage_type") or (price.get("recurring") or {}).get("usage_type")
+                    if usage_type == "licensed" and licensed_price_id is None:
+                        licensed_price_id = price.get("id")
+                    elif usage_type == "metered" and metered_price_id is None:
+                        metered_price_id = price.get("id")
+
+                customer_id = getattr(customer, "id", None)
+                if licensed_price_id and customer_id:
+                    ensure_single_individual_subscription(
+                        customer_id=str(customer_id),
+                        licensed_price_id=licensed_price_id,
+                        metered_price_id=metered_price_id,
+                        metadata=source_data.get("metadata") if isinstance(source_data, Mapping) else {},
+                        idempotency_key=f"sub-webhook-upsert-{payload.get('id', '')}",
+                        create_if_missing=False,
+                    )
+        except Exception:
+            logger.warning(
+                "Failed to ensure single individual subscription for customer %s during webhook",
+                getattr(customer, "id", None),
+                exc_info=True,
+            )
 
         if event_type == "customer.subscription.deleted" or getattr(sub, "status", "") == "canceled":
             downgrade_owner_to_free_plan(owner)

@@ -291,6 +291,47 @@ class SubscriptionSignalTests(TestCase):
         self.assertTrue(context.get("consent"))
 
     @tag("batch_pages")
+    @patch("pages.signals.ensure_single_individual_subscription")
+    def test_subscription_created_dedupes_individual_plan(self, mock_ensure):
+        payload = _build_event_payload(billing_reason="subscription_create")
+        payload_items = payload["items"]["data"]
+        payload_items[0]["price"]["id"] = "price_base"
+        payload_items[0]["price"]["usage_type"] = "licensed"
+        payload_items.append(
+            {
+                "plan": {"usage_type": "metered"},
+                "price": {"id": "price_meter", "usage_type": "metered"},
+                "quantity": None,
+            }
+        )
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(subscriber=fresh_user, current_period_day=12)
+        sub.stripe_data["billing_reason"] = "subscription_create"
+        sub.customer.id = "cus_test"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        mock_ensure.assert_called_once_with(
+            customer_id="cus_test",
+            licensed_price_id="price_base",
+            metered_price_id="price_meter",
+            metadata=payload.get("metadata"),
+            idempotency_key=f"sub-webhook-upsert-{payload.get('id', '')}",
+            create_if_missing=False,
+        )
+
+    @tag("batch_pages")
     def test_subscription_event_includes_client_ip_from_attribution(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_create")
