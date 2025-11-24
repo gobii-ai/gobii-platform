@@ -141,13 +141,14 @@ class ScenarioExecutionTools:
         Send a message to the agent as a web user.
         Automatically whitelists the sender to ensure the agent can reply.
         """
+        current_run_id = eval_run_id or get_current_eval_run_id()
         msg, _ = inject_internal_web_message(
             agent_id=agent_id,
             body=body,
             sender_user_id=sender_user_id,
             attachments=attachments,
-            trigger_processing=trigger_processing,
-            eval_run_id=eval_run_id or get_current_eval_run_id(),
+            trigger_processing=False,  # handle processing explicitly below
+            eval_run_id=current_run_id,
         )
         
         # Auto-whitelist the sender so the agent trusts this contact
@@ -167,13 +168,34 @@ class ScenarioExecutionTools:
         
         return msg
 
+        if trigger_processing:
+            try:
+                # Prefer synchronous processing in eval context to avoid missing completions when workers are idle
+                if current_run_id:
+                    from api.agent.core.event_processing import process_agent_events
+                    process_agent_events(agent_id, eval_run_id=current_run_id)
+                else:
+                    from api.agent.tasks import process_agent_events_task
+                    process_agent_events_task.delay(str(agent_id))
+            except Exception:
+                logger.exception("Failed to trigger processing for agent %s", agent_id)
+
+        return msg
+
     def trigger_processing(self, agent_id: str, *, eval_run_id: str | None = None) -> None:
         """
         Manually trigger the agent's event processing loop.
         """
-        # Import here to avoid circular imports at module level
-        from api.agent.tasks import process_agent_events_task
-        process_agent_events_task.delay(str(agent_id), eval_run_id=eval_run_id or get_current_eval_run_id())
+        current_run_id = eval_run_id or get_current_eval_run_id()
+        try:
+            if current_run_id:
+                from api.agent.core.event_processing import process_agent_events
+                process_agent_events(agent_id, eval_run_id=current_run_id)
+            else:
+                from api.agent.tasks import process_agent_events_task
+                process_agent_events_task.delay(str(agent_id))
+        except Exception:
+            logger.exception("Failed to trigger processing for agent %s", agent_id)
 
     def agent_event_listener(self, agent_id: str, *, start_time: Optional[float] = None) -> AgentEventListener:
         """
