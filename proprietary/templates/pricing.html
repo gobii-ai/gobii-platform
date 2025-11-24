@@ -59,7 +59,7 @@
             <li>{{ feature }}</li>
             {% endfor %}
           </ul>
-          {% if plan.disabled %}
+          {% if plan.disabled or plan.cta_disabled or plan.current_plan %}
             <span class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg bg-slate-200 text-slate-500 cursor-not-allowed select-none">{{ plan.cta }}</span>
           {% else %}
             <a href="{{ plan.cta_url }}" 

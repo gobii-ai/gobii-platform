@@ -22,8 +22,13 @@ import stripe
 from djstripe.models import Customer, Subscription, Price
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.payments_helper import PaymentsHelper
-from util.subscription_helper import get_or_create_stripe_customer, get_user_plan
+from util.subscription_helper import (
+    ensure_single_individual_subscription,
+    get_or_create_stripe_customer,
+
+)
 from util.integrations import stripe_status, IntegrationDisabledError
+from constants.plans import PlanNames
 from .utils_markdown import (
     load_page,
     get_prev_next,
@@ -660,6 +665,47 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         if additional_price_id:
             line_items.append({"price": additional_price_id})
 
+        metadata = {
+            "gobii_event_id": event_id,
+            "plan": PlanNames.STARTUP,
+        }
+
+        try:
+            # Reuse/modify existing subscription when present; keep checkout for first purchase.
+            subscription, action = ensure_single_individual_subscription(
+                customer_id=customer.id,
+                licensed_price_id=price_id,
+                metered_price_id=additional_price_id,
+                metadata=metadata,
+                idempotency_key=f"startup-individual-{customer.id}-{event_id}",
+                create_if_missing=False,
+            )
+
+            if action != "absent" and subscription is not None:
+                try:
+                    Subscription.sync_from_stripe_data(subscription)
+                except Exception:
+                    logger.warning(
+                        "Failed to sync Stripe subscription %s after %s",
+                        getattr(subscription, "id", None)
+                        or (subscription.get("id") if isinstance(subscription, dict) else ""),
+                        action,
+                        exc_info=True,
+                    )
+
+                return redirect(success_url)
+        except stripe.error.InvalidRequestError as ensure_exc:
+            logger.info(
+                "Subscription ensure fell back to checkout for customer %s: %s",
+                customer.id,
+                ensure_exc,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to ensure single subscription for customer %s", customer.id,
+            )
+            raise
+
         # 2️⃣  Kick off Checkout with the *existing* customer
         session = stripe.checkout.Session.create(
             customer=customer.id,                       # <-- key line
@@ -669,11 +715,10 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             mode="subscription",
             allow_promotion_codes=True,
             subscription_data={
-                "metadata": {
-                    "gobii_event_id": event_id,
-                }
+                "metadata": metadata,
             },
             line_items=line_items,
+            idempotency_key=f"checkout-startup-{customer.id}-{event_id}",
         )
 
         # 3️⃣  No need to sync anything here.  The webhook events
@@ -728,6 +773,46 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         if additional_price_id:
             line_items.append({"price": additional_price_id})
 
+        metadata = {
+            "gobii_event_id": event_id,
+            "plan": PlanNames.SCALE,
+        }
+
+        try:
+            subscription, action = ensure_single_individual_subscription(
+                customer_id=customer.id,
+                licensed_price_id=price_id,
+                metered_price_id=additional_price_id,
+                metadata=metadata,
+                idempotency_key=f"scale-individual-{customer.id}-{event_id}",
+                create_if_missing=False,
+            )
+
+            if action != "absent" and subscription is not None:
+                try:
+                    Subscription.sync_from_stripe_data(subscription)
+                except Exception:
+                    logger.warning(
+                        "Failed to sync Stripe subscription %s after %s",
+                        getattr(subscription, "id", None)
+                        or (subscription.get("id") if isinstance(subscription, dict) else ""),
+                        action,
+                        exc_info=True,
+                    )
+
+                return redirect(success_url)
+        except stripe.error.InvalidRequestError as ensure_exc:
+            logger.info(
+                "Subscription ensure fell back to checkout for customer %s: %s",
+                customer.id,
+                ensure_exc,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to ensure single subscription for customer %s", customer.id,
+            )
+            raise
+
         session = stripe.checkout.Session.create(
             customer=customer.id,
             api_key=stripe.api_key,
@@ -736,11 +821,10 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             mode="subscription",
             allow_promotion_codes=True,
             subscription_data={
-                "metadata": {
-                    "gobii_event_id": event_id,
-                }
+                "metadata": metadata,
             },
             line_items=line_items,
+            idempotency_key=f"checkout-scale-{customer.id}-{event_id}",
         )
 
         return redirect(session.url)

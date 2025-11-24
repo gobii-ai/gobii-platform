@@ -38,6 +38,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         # When true, we'll say Upgrade for Startup plan
         startup_cta_text = "Choose Pro"
         scale_cta_text = "Choose Scale"
+        startup_cta_disabled = False
+        scale_cta_disabled = False
+        startup_current = False
+        scale_current = False
 
         if authenticated:
             # Check if the user has an active subscription
@@ -51,9 +55,13 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 elif plan_id == PlanNames.STARTUP:
                     startup_cta_text = "Current Plan"
                     scale_cta_text = "Upgrade to Scale"
+                    startup_cta_disabled = True
+                    startup_current = True
                 elif plan_id == PlanNames.SCALE:
                     startup_cta_text = "Switch to Pro"
                     scale_cta_text = "Current Plan"
+                    scale_cta_disabled = True
+                    scale_current = True
             except Exception:
                 logger.exception("Error checking user plan; defaulting to standard Startup CTA")
                 pass
@@ -90,6 +98,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "highlight": False,
                 "badge": "Most teams",
                 "disabled": False,
+                "cta_disabled": startup_cta_disabled,
+                "current_plan": startup_current,
                 "features": [
                     "Unlimited always-on agents",
                     "No time limit for always-on agents",
@@ -98,7 +108,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                     "Higher rate limits",
                 ],
                 "cta": startup_cta_text,
-                "cta_url": reverse("proprietary:startup_checkout"),
+                "cta_url": reverse("proprietary:startup_checkout") if not startup_cta_disabled else "",
             },
             {
                 "name": "Scale",
@@ -109,6 +119,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "pricing_model": "Billed monthly",
                 "highlight": True,
                 "badge": "Best value",
+                "cta_disabled": scale_cta_disabled,
+                "current_plan": scale_current,
                 "features": [
                     "Unlimited always-on agents",
                     "Dedicated onboarding specialist",
@@ -117,7 +129,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                     "1,500 requests/min API throughput",
                 ],
                 "cta": scale_cta_text,
-                "cta_url": reverse("proprietary:scale_checkout"),
+                "cta_url": reverse("proprietary:scale_checkout") if not scale_cta_disabled else "",
                 "disabled": False,
             },
         ]
