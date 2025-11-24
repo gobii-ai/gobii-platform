@@ -3007,15 +3007,9 @@ class PersistentAgent(models.Model):
     def preferred_proxy(self):
         """Return the proxy selected on the backing browser agent, if any."""
         try:
-            browser_agent = self.browser_use_agent
-        except BrowserUseAgent.DoesNotExist:
+            return self.browser_use_agent.preferred_proxy
+        except (BrowserUseAgent.DoesNotExist, AttributeError):
             return None
-        except AttributeError:
-            return None
-
-        if browser_agent is None:
-            return None
-        return getattr(browser_agent, "preferred_proxy", None)
 
     @property
     def preferred_proxy_id(self):
