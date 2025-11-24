@@ -102,6 +102,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
     const base = suite.cost_totals
     if (base) return base
     if (!runs.length) return null
+    
     return runs.reduce(
       (acc, run) => {
         acc.prompt_tokens += run.prompt_tokens || 0
@@ -390,11 +391,18 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
 
             {costTotals && (
               <div className="px-0 sm:px-2 pb-1">
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-4">
                   <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total cost (USD)</p>
                     <p className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(costTotals.total_cost, 4)}</p>
                     <p className="text-xs text-slate-500">Input {formatCurrency(costTotals.input_cost_total, 4)} · Output {formatCurrency(costTotals.output_cost, 4)}</p>
+                  </div>
+                  <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Average / Run</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">
+                      {formatCurrency(costTotals.total_cost / (completionStats.completed || 1), 4)}
+                    </p>
+                    <p className="text-xs text-slate-500">{completionStats.completed} runs included</p>
                   </div>
                   <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Credits burned</p>
