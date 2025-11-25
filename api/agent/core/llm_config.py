@@ -446,11 +446,12 @@ def get_llm_config() -> Tuple[str, dict]:
         )
 
     _provider_key, model, params = configs[0]
-    # Remove any internal-only hints that shouldn't be passed to litellm
+    # Remove any internal-only hints that shouldn't be passed to litellm.
+    # Note: supports_temperature is kept so run_completion() can drop temperature if needed.
     params = {
         k: v
         for k, v in params.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_temperature")
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision")
     }
     return model, params
 
