@@ -159,7 +159,8 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
         int(limit_map.get(tier, prompt_settings.standard_unified_history_limit)),
         int(hyst_map.get(tier, prompt_settings.standard_unified_history_hysteresis)),
     )
-
+    unified_fetch_span_offset = 5
+    unified_fetch_span = unified_limit + unified_hysteresis + unified_fetch_span_offset
 
 def _archive_rendered_prompt(
     agent: PersistentAgent,
