@@ -23,6 +23,7 @@ import {
   Check,
   ChevronRight,
   Settings2,
+  Pencil,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -1549,6 +1550,9 @@ export function LlmConfigScreen() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
   const [newProfileName, setNewProfileName] = useState('')
+  const [editProfileModalOpen, setEditProfileModalOpen] = useState(false)
+  const [editProfileDisplayName, setEditProfileDisplayName] = useState('')
+  const [editProfileDescription, setEditProfileDescription] = useState('')
 
   // Fetch list of routing profiles
   const profilesQuery = useQuery({
@@ -2737,6 +2741,26 @@ export function LlmConfigScreen() {
                       <button
                         type="button"
                         className={button.secondary}
+                        onClick={() => {
+                          setEditProfileDisplayName(selectedProfile.display_name || selectedProfile.name)
+                          setEditProfileDescription(selectedProfile.description || '')
+                          setEditProfileModalOpen(true)
+                        }}
+                        disabled={isBusy(actionKey('profile', selectedProfile.id, 'update'))}
+                        title="Edit this profile"
+                      >
+                        {isBusy(actionKey('profile', selectedProfile.id, 'update')) ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                          <Pencil className="size-4" />
+                        )}
+                        Edit
+                      </button>
+                    )}
+                    {selectedProfile && (
+                      <button
+                        type="button"
+                        className={button.secondary}
                         onClick={() => handleCloneProfile(selectedProfile.id)}
                         disabled={isBusy(actionKey('profile', selectedProfile.id, 'clone'))}
                         title="Clone this profile"
@@ -3082,6 +3106,95 @@ export function LlmConfigScreen() {
                         </>
                       ) : (
                         'Create Profile'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </ModalPortal>
+        )}
+        {editProfileModalOpen && selectedProfile && (
+          <ModalPortal>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                  <h3 className="text-lg font-semibold text-slate-900">Edit Routing Profile</h3>
+                  <button
+                    type="button"
+                    className={button.icon}
+                    onClick={() => {
+                      setEditProfileModalOpen(false)
+                      setEditProfileDisplayName('')
+                      setEditProfileDescription('')
+                    }}
+                  >
+                    <X className="size-5" />
+                  </button>
+                </div>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault()
+                    if (!editProfileDisplayName.trim()) return
+                    try {
+                      await handleUpdateProfile(selectedProfile.id, {
+                        display_name: editProfileDisplayName.trim(),
+                        description: editProfileDescription.trim(),
+                      })
+                      setEditProfileModalOpen(false)
+                      setEditProfileDisplayName('')
+                      setEditProfileDescription('')
+                    } catch {
+                      // Error handled by runWithFeedback
+                    }
+                  }}
+                  className="p-6 space-y-4"
+                >
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
+                    <input
+                      type="text"
+                      value={editProfileDisplayName}
+                      onChange={(e) => setEditProfileDisplayName(e.target.value)}
+                      placeholder="e.g., Production, Staging, Eval A"
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                    <textarea
+                      value={editProfileDescription}
+                      onChange={(e) => setEditProfileDescription(e.target.value)}
+                      placeholder="Optional description for this profile"
+                      rows={3}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      className={button.secondary}
+                      onClick={() => {
+                        setEditProfileModalOpen(false)
+                        setEditProfileDisplayName('')
+                        setEditProfileDescription('')
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className={button.primary}
+                      disabled={!editProfileDisplayName.trim() || isBusy(actionKey('profile', selectedProfile.id, 'update'))}
+                    >
+                      {isBusy(actionKey('profile', selectedProfile.id, 'update')) ? (
+                        <>
+                          <LoaderCircle className="size-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        'Save Changes'
                       )}
                     </button>
                   </div>
