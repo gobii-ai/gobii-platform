@@ -96,7 +96,7 @@ class PersistentAgentCreditGateTests(TestCase):
     def test_proprietary_mode_out_of_credits_exits_early(self):
         # Force the credit check to report 0 available
         with patch("config.settings.GOBII_PROPRIETARY_MODE", True), patch(
-            "api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available",
+            "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
             return_value=0,
         ):
             # Patch the heavy loop to ensure it would raise if called
@@ -220,7 +220,7 @@ class PersistentAgentCreditGateTests(TestCase):
     def test_proprietary_mode_unlimited_allows_processing(self):
         # In proprietary mode, if availability is unlimited (-1), we should proceed
         with patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
-             patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=TASKS_UNLIMITED), \
+             patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=TASKS_UNLIMITED), \
              patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
             # Return empty dict for token usage
             loop_mock.return_value = {}
@@ -288,8 +288,8 @@ class PersistentAgentToolCreditTests(TestCase):
         PersistentAgentSystemStep.objects.filter(step__agent=self.agent).delete()
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
-    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
-    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available")
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner")
     @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.8"))
     def test_mid_loop_insufficient_when_cost_exceeds_available(
         self,
@@ -318,8 +318,8 @@ class PersistentAgentToolCreditTests(TestCase):
         span.set_attribute.assert_any_call("credit_check.tool_cost", 0.8)
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
-    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
-    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=Decimal("1.2"))
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=Decimal("1.2"))
     @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.8"))
     def test_mid_loop_consumption_exception_records_error(
         self,
@@ -348,11 +348,11 @@ class PersistentAgentToolCreditTests(TestCase):
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit",
+        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
         return_value={"success": True, "credit": None},
     )
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available",
+        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
         return_value=Decimal("10"),
     )
     @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("1"))
@@ -382,11 +382,11 @@ class PersistentAgentToolCreditTests(TestCase):
     @patch("api.agent.core.event_processing.Analytics.track_event")
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit",
+        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
         return_value={"success": True, "credit": None},
     )
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available",
+        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
         return_value=Decimal("10"),
     )
     @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("1"))
@@ -415,8 +415,8 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(kwargs["properties"].get("agent_id"), str(self.agent.id))
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
-    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
-    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=TASKS_UNLIMITED)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=TASKS_UNLIMITED)
     @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.8"))
     def test_unlimited_skips_fractional_gate(
         self,
@@ -434,8 +434,8 @@ class PersistentAgentToolCreditTests(TestCase):
         span.set_attribute.assert_any_call("credit_check.consumed_in_loop", True)
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
-    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
-    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=Decimal("5"))
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=Decimal("5"))
     @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.5"))
     def test_mid_loop_daily_limit_blocks_tool(
         self,
@@ -470,8 +470,8 @@ class PersistentAgentToolCreditTests(TestCase):
 
     @patch("api.agent.core.event_processing.Analytics.track_event")
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
-    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit")
-    @patch("api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available", return_value=Decimal("5"))
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=Decimal("5"))
     @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.5"))
     def test_mid_loop_daily_limit_blocks_tool_emits_analytics(
         self,
