@@ -1,11 +1,10 @@
-from unittest.mock import patch, MagicMock
 import json
 
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
 from api.models import EvalRunTask, PersistentAgentMessage, PersistentAgentStep
-from api.agent.core.event_processing import process_agent_events
+
 
 @register_scenario
 class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
@@ -21,76 +20,60 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
     def run(self, run_id: str, agent_id: str) -> None:
         # Task 1: Inject Prompt
         self.record_task_result(
-            run_id, 
-            None, # sequence
-            EvalRunTask.Status.RUNNING, 
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
             task_name="inject_prompt"
         )
-        
-        # Inject without triggering async processing so we can run synchronously with mocks
-        msg = self.inject_message(
-            agent_id, 
-            "what's the weather in frederick md?", 
-            trigger_processing=False,
-            eval_run_id=run_id,
-        )
-            
+
+        # Mock config - passed directly to Celery worker via task args
+        mock_config = {
+            "spawn_web_task": {
+                "status": "error",
+                "message": "spawn_web_task disabled for this eval - use http_request"
+            },
+            "search_web": {
+                "status": "ok",
+                "result": (
+                    "Found free weather API: https://api.weather.gov/gridpoints/LWX/96,70/forecast "
+                    "provides forecast for Frederick, MD. Also available: "
+                    "https://api.openweathermap.org/data/2.5/weather?q=Frederick,MD,US&appid=demo"
+                )
+            },
+            "http_request": {
+                "status": "ok",
+                "content": '{"current_weather": "72F, Sunny"}',
+                "status_code": 200
+            },
+        }
+
+        # Inject message with async processing via Celery
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            msg = self.inject_message(
+                agent_id,
+                "what's the weather in frederick md?",
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+            )
+
         self.record_task_result(
-            run_id, 
+            run_id,
             None,
-            EvalRunTask.Status.PASSED, 
+            EvalRunTask.Status.PASSED,
             task_name="inject_prompt",
-            observed_summary="Message injected (processing paused for mocking)", 
+            observed_summary="Message injected and processed via Celery",
             artifacts={"message": msg}
         )
 
-        # Setup Mocks
-        # We patch execute_enabled_tool because http_request is dispatched through it
-        with patch('api.agent.core.event_processing.execute_spawn_web_task') as mock_spawn, \
-             patch('api.agent.core.event_processing.execute_search_web') as mock_search, \
-             patch('api.agent.core.event_processing.execute_enabled_tool') as mock_enabled_tool:
-            
-            # Configure mocks
-            mock_spawn.return_value = {
-                "status": "ok",
-                "result": "Web task simulated success"
-            }
-            # Return a result that points to a "free" API so the agent chooses http_request
-            mock_search.return_value = {
-                "status": "ok",
-                "result": "Found free weather API: https://api.weather.gov/gridpoints/LWX/96,70/forecast provides forecast for Frederick, MD. Also available: https://api.openweathermap.org/data/2.5/weather?q=Frederick,MD,US&appid=demo"
-            }
-            
-            def enabled_tool_side_effect(agent, tool_name, params):
-                if tool_name == 'http_request':
-                     return {
-                        "status": "ok", 
-                        "content": '{"current_weather": "72F, Sunny"}', 
-                        "status_code": 200
-                    }
-                if tool_name == 'search_web':
-                    query = params.get('query', '').lower()
-                    if 'weather' in query:
-                        return {
-                            "status": "ok",
-                            "result": "Found free weather API: https://api.weather.gov/gridpoints/LWX/96,70/forecast provides forecast for Frederick, MD. Also available: https://api.openweathermap.org/data/2.5/weather?q=Frederick,MD,US&appid=demo"
-                        }
-                return {"status": "ok", "message": "Mock tool success"}
-            
-            mock_enabled_tool.side_effect = enabled_tool_side_effect
-
-            # Trigger synchronous processing
-            process_agent_events(agent_id, eval_run_id=run_id)
-
         # Task 2: Charter Update
         self.record_task_result(
-            run_id, 
+            run_id,
             None,
-            EvalRunTask.Status.RUNNING, 
+            EvalRunTask.Status.RUNNING,
             task_name="verify_charter_update"
         )
-        
-        # Query ToolCall directly for robustness
+
         from api.models import PersistentAgentToolCall
         charter_updates = PersistentAgentToolCall.objects.filter(
             step__agent_id=agent_id,
@@ -99,8 +82,8 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
         )
 
         if charter_updates.exists():
-             self.record_task_result(
-                run_id, 
+            self.record_task_result(
+                run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_charter_update",
@@ -109,7 +92,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             )
         else:
             self.record_task_result(
-                run_id, 
+                run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_charter_update",
@@ -118,46 +101,51 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
 
         # Task 3: Verify HTTP Request (Judge)
         self.record_task_result(
-            run_id, 
+            run_id,
             None,
-            EvalRunTask.Status.RUNNING, 
+            EvalRunTask.Status.RUNNING,
             task_name="verify_http_request"
         )
 
-        # Find the http_request call in the mock calls
-        http_call_args = None
-        for call in mock_enabled_tool.call_args_list:
-            # call.args is (agent, tool_name, params)
-            args, _ = call
-            if len(args) >= 2 and args[1] == 'http_request':
-                http_call_args = args
-                break
+        http_calls = PersistentAgentToolCall.objects.filter(
+            step__agent_id=agent_id,
+            step__created_at__gte=msg.timestamp,
+            tool_name='http_request'
+        )
 
-        if mock_spawn.called:
+        spawn_calls = PersistentAgentToolCall.objects.filter(
+            step__agent_id=agent_id,
+            step__created_at__gte=msg.timestamp,
+            tool_name='spawn_web_task'
+        )
+
+        if spawn_calls.exists():
             self.record_task_result(
-                run_id, 
+                run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_http_request",
-                observed_summary="Agent used 'spawn_web_task', which is forbidden for this test. We want the agent to use a direct API request.",
+                observed_summary="Agent used 'spawn_web_task', which is forbidden. We want direct API request.",
             )
-        elif http_call_args:
-            params = http_call_args[2] if len(http_call_args) > 2 else {}
-            
-            # Run LLM Judge
-            judge_prompt = f"Analyze this HTTP request parameters: {json.dumps(params)}. " \
-                           f"Is this a request to a free/open weather API (like wttr.in, open-meteo, weather.gov, etc.) " \
-                           f"that retrieves weather for Frederick, MD?"
-            
+        elif http_calls.exists():
+            http_call = http_calls.first()
+            params = http_call.params or {}
+
+            judge_prompt = (
+                f"Analyze this HTTP request parameters: {json.dumps(params)}. "
+                f"Is this a request to a free/open weather API (like wttr.in, open-meteo, weather.gov, etc.) "
+                f"that retrieves weather for Frederick, MD?"
+            )
+
             choice, reasoning = self.llm_judge(
                 question=judge_prompt,
-                context=f"User asked: 'what's the weather in frederick md?'. Agent made this request.",
+                context="User asked: 'what's the weather in frederick md?'. Agent made this request.",
                 options=["Yes", "No"]
             )
 
             if choice == "Yes":
                 self.record_task_result(
-                    run_id, 
+                    run_id,
                     None,
                     EvalRunTask.Status.PASSED,
                     task_name="verify_http_request",
@@ -166,7 +154,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                 )
             else:
                 self.record_task_result(
-                    run_id, 
+                    run_id,
                     None,
                     EvalRunTask.Status.FAILED,
                     task_name="verify_http_request",
@@ -174,8 +162,8 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                     artifacts={"params": params}
                 )
         else:
-             self.record_task_result(
-                run_id, 
+            self.record_task_result(
+                run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_http_request",
@@ -184,12 +172,12 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
 
         # Task 4: Verify Response
         self.record_task_result(
-            run_id, 
+            run_id,
             None,
-            EvalRunTask.Status.RUNNING, 
+            EvalRunTask.Status.RUNNING,
             task_name="verify_response"
         )
-        
+
         last_outbound = PersistentAgentMessage.objects.filter(
             owner_agent_id=agent_id,
             is_outbound=True,
@@ -197,8 +185,8 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
         ).order_by('timestamp').last()
 
         if last_outbound:
-             self.record_task_result(
-                run_id, 
+            self.record_task_result(
+                run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_response",
@@ -207,7 +195,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             )
         else:
             self.record_task_result(
-                run_id, 
+                run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_response",

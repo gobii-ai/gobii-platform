@@ -7,7 +7,7 @@ business logic to the event processing module.
 """
 
 import logging
-from typing import Any, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from celery import Task, shared_task
 from opentelemetry import baggage, trace
@@ -54,7 +54,15 @@ class ProcessAgentEventsTaskBase(Task):
 
 
 @shared_task(bind=True, base=ProcessAgentEventsTaskBase, name="api.agent.tasks.process_agent_events")
-def process_agent_events_task(self, persistent_agent_id: str, budget_id: str | None = None, branch_id: str | None = None, depth: int | None = None, eval_run_id: str | None = None) -> None:  # noqa: D401, ANN001
+def process_agent_events_task(
+    self,
+    persistent_agent_id: str,
+    budget_id: str | None = None,
+    branch_id: str | None = None,
+    depth: int | None = None,
+    eval_run_id: str | None = None,
+    mock_config: Optional[Dict[str, Any]] = None,
+) -> None:  # noqa: D401, ANN001
     """Celery task that triggers event processing for one persistent agent."""
 
     # Get the Celery-provided span and rename it for clarity
@@ -73,6 +81,7 @@ def process_agent_events_task(self, persistent_agent_id: str, budget_id: str | N
             branch_id=branch_id,
             depth=depth,
             eval_run_id=eval_run_id,
+            mock_config=mock_config,
         )
     finally:
         # Ensure queued flag clears even if processing short-circuits

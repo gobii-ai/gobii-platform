@@ -27,7 +27,7 @@ def aggregate_task_metrics(task: EvalRunTask, *, window_start, window_end) -> No
     int_zero = Value(0)
 
     window = {
-        "eval_run_id": task.run_id,
+        "eval_run_id": str(task.run_id),
         "created_at__gte": window_start,
         "created_at__lte": window_end,
     }

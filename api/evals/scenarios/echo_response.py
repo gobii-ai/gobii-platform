@@ -4,6 +4,7 @@ from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
 from api.models import EvalRunTask, PersistentAgentMessage
 
+
 @register_scenario
 class EchoResponseScenario(EvalScenario, ScenarioExecutionTools):
     slug = "echo_response"
@@ -16,30 +17,30 @@ class EchoResponseScenario(EvalScenario, ScenarioExecutionTools):
     def run(self, run_id: str, agent_id: str) -> None:
         # Task 1: Send message
         self.record_task_result(run_id, 1, EvalRunTask.Status.RUNNING)
-        
-        # Use context manager to avoid race conditions
-        with self.wait_for_agent_idle(agent_id, timeout=30):
+
+        # Use context manager to wait for async processing to complete
+        # Processing MUST go through Celery (trigger_processing=True) for scalability
+        with self.wait_for_agent_idle(agent_id, timeout=120):
             msg = self.inject_message(
-                agent_id, 
+                agent_id,
                 "Please reply with the word ORANGE.",
                 eval_run_id=run_id
             )
-            
+
         self.record_task_result(
-            run_id, 1, EvalRunTask.Status.PASSED, 
-            observed_summary="Message injected", 
+            run_id, 1, EvalRunTask.Status.PASSED,
+            observed_summary="Message injected",
             artifacts={"message": msg}
         )
 
         # Task 2: Verify response
         self.record_task_result(run_id, 2, EvalRunTask.Status.RUNNING)
-        
-        # We already waited for idle above, so we can proceed to assertion immediately.
 
-        # Check the last outbound message
+        # Check for outbound messages after our injected message
         last_message = PersistentAgentMessage.objects.filter(
             owner_agent_id=agent_id,
-            is_outbound=True
+            is_outbound=True,
+            timestamp__gt=msg.timestamp
         ).order_by('timestamp').last()
 
         if not last_message:

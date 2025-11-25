@@ -1011,6 +1011,7 @@ def process_agent_events(
     branch_id: Optional[str] = None,
     depth: Optional[int] = None,
     eval_run_id: Optional[str] = None,
+    mock_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Process all outstanding events for a persistent agent."""
     span = trace.get_current_span()
@@ -1091,6 +1092,7 @@ def process_agent_events(
         max_steps=int(max_steps),
         max_depth=int(max_depth),
         eval_run_id=eval_run_id,
+        mock_config=mock_config,
     )
     set_budget_context(ctx)
 
@@ -1859,7 +1861,14 @@ def _run_agent_loop(
                     close_old_connections()
 
                     logger.info("Agent %s: executing %s now", agent.id, tool_name)
-                    if tool_name == "spawn_web_task":
+
+                    # Check for eval mock before real execution (mock_config passed via BudgetContext)
+                    mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
+                    mock_result = mock_config.get(tool_name) if mock_config else None
+                    if mock_result is not None:
+                        logger.info("Agent %s: using mock for %s (eval_run_id=%s)", agent.id, tool_name, eval_run_id)
+                        result = mock_result
+                    elif tool_name == "spawn_web_task":
                         # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
                         result = execute_spawn_web_task(agent, tool_params)
                     elif tool_name == "send_email":

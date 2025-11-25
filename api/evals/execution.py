@@ -129,17 +129,22 @@ class ScenarioExecutionTools:
         return EvalRun.objects.get(id=run_id)
 
     def inject_message(
-        self, 
-        agent_id: str, 
-        body: str, 
-        sender_user_id: int = -999, 
+        self,
+        agent_id: str,
+        body: str,
+        sender_user_id: int = -999,
         attachments: Iterable[Any] = (),
         trigger_processing: bool = True,
         eval_run_id: str | None = None,
+        mock_config: dict | None = None,
     ) -> PersistentAgentMessage:
         """
         Send a message to the agent as a web user.
         Automatically whitelists the sender to ensure the agent can reply.
+
+        Args:
+            mock_config: Optional dict mapping tool_name -> mock response.
+                         Passed to Celery worker for eval mocking.
         """
         current_run_id = eval_run_id or get_current_eval_run_id()
         msg, _ = inject_internal_web_message(
@@ -150,7 +155,7 @@ class ScenarioExecutionTools:
             trigger_processing=False,  # handle processing explicitly below
             eval_run_id=current_run_id,
         )
-        
+
         # Auto-whitelist the sender so the agent trusts this contact
         CommsAllowlistEntry.objects.get_or_create(
             agent_id=agent_id,
@@ -160,29 +165,43 @@ class ScenarioExecutionTools:
                 "is_active": True,
             }
         )
-        
+
         # Update agent's preferred contact to this new user so "Welcome" prompts target them
         agent = PersistentAgent.objects.get(id=agent_id)
         agent.preferred_contact_endpoint = msg.from_endpoint
         agent.save(update_fields=["preferred_contact_endpoint"])
-        
+
         if trigger_processing:
             try:
                 from api.agent.tasks import process_agent_events_task
-                process_agent_events_task.delay(str(agent_id), eval_run_id=current_run_id)
+                process_agent_events_task.delay(
+                    str(agent_id),
+                    eval_run_id=current_run_id,
+                    mock_config=mock_config,
+                )
             except Exception:
                 logger.exception("Failed to trigger processing for agent %s", agent_id)
 
         return msg
 
-    def trigger_processing(self, agent_id: str, *, eval_run_id: str | None = None) -> None:
+    def trigger_processing(
+        self,
+        agent_id: str,
+        *,
+        eval_run_id: str | None = None,
+        mock_config: dict | None = None,
+    ) -> None:
         """
         Manually trigger the agent's event processing loop.
         """
         current_run_id = eval_run_id or get_current_eval_run_id()
         try:
             from api.agent.tasks import process_agent_events_task
-            process_agent_events_task.delay(str(agent_id), eval_run_id=current_run_id)
+            process_agent_events_task.delay(
+                str(agent_id),
+                eval_run_id=current_run_id,
+                mock_config=mock_config,
+            )
         except Exception:
             logger.exception("Failed to trigger processing for agent %s", agent_id)
 
