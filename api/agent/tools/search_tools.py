@@ -17,7 +17,7 @@ from ...models import PersistentAgent, PersistentAgentCompletion
 from ...evals.execution import get_current_eval_routing_profile
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
-from ..core.token_usage import completion_kwargs_from_usage, extract_token_usage
+from ..core.token_usage import extract_token_usage, log_agent_completion, set_usage_span_attributes
 from .mcp_manager import get_mcp_manager
 from .tool_manager import (
     enable_tools,
@@ -223,26 +223,12 @@ def _search_with_llm(
                     model=model,
                     provider=provider,
                 )
-                if usage:
-                    span = trace.get_current_span()
-                    span.set_attribute("llm.usage.prompt_tokens", getattr(usage, "prompt_tokens", None))
-                    span.set_attribute("llm.usage.completion_tokens", getattr(usage, "completion_tokens", None))
-                    span.set_attribute("llm.usage.total_tokens", getattr(usage, "total_tokens", None))
-                try:
-                    PersistentAgentCompletion.objects.create(
-                        agent=agent,
-                        **completion_kwargs_from_usage(
-                            token_usage,
-                            completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
-                        ),
-                    )
-                except Exception:
-                    logger.debug(
-                        "search_tools.%s: failed to persist completion for agent %s",
-                        provider_name,
-                        getattr(agent, "id", None),
-                        exc_info=True,
-                    )
+                set_usage_span_attributes(trace.get_current_span(), usage)
+                log_agent_completion(
+                    agent,
+                    token_usage,
+                    completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
+                )
 
                 message = response.choices[0].message
                 content_text = getattr(message, "content", None) or ""

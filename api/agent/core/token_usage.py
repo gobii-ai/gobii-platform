@@ -6,6 +6,9 @@ from numbers import Number
 from typing import Any, Optional, Tuple
 
 import litellm
+from opentelemetry import trace
+
+tracer = trace.get_tracer("gobii.utils")
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +212,41 @@ def completion_kwargs_from_usage(token_usage: Optional[dict], *, completion_type
         "output_cost": token_usage.get("output_cost"),
         "total_cost": token_usage.get("total_cost"),
     }
+
+
+def set_usage_span_attributes(span, usage: Any) -> None:
+    if not span or not usage:
+        return
+    try:
+        span.set_attribute("llm.usage.prompt_tokens", coerce_int(usage_attribute(usage, "prompt_tokens")))
+        span.set_attribute("llm.usage.completion_tokens", coerce_int(usage_attribute(usage, "completion_tokens")))
+        span.set_attribute("llm.usage.total_tokens", coerce_int(usage_attribute(usage, "total_tokens")))
+        details = usage_attribute(usage, "prompt_tokens_details")
+        if details:
+            span.set_attribute("llm.usage.cached_tokens", coerce_int(usage_attribute(details, "cached_tokens")))
+    except Exception:
+        logger.debug("Failed to set usage span attributes", exc_info=True)
+
+
+def log_agent_completion(agent: Any, token_usage: Optional[dict], *, completion_type: str) -> None:
+    if agent is None:
+        return
+    if not token_usage:
+        token_usage = {"model": None, "provider": None}
+    try:
+        from ...models import PersistentAgentCompletion  # local import to avoid cycles
+
+        PersistentAgentCompletion.objects.create(
+            agent=agent,
+            **completion_kwargs_from_usage(token_usage, completion_type=completion_type),
+        )
+    except Exception:
+        logger.debug(
+            "Failed to persist completion (type=%s) for agent %s",
+            completion_type,
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
 
 
 __all__ = [

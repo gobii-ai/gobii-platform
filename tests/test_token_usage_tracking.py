@@ -18,6 +18,7 @@ from api.agent.tasks.agent_tags import _generate_via_llm as generate_tags_via_ll
 from api.agent.tasks.short_description import _generate_via_llm as generate_short_desc_via_llm
 from api.agent.tasks.mini_description import _generate_via_llm as generate_mini_desc_via_llm
 from api.agent.tools.search_tools import _search_with_llm
+from tests.utils.token_usage import make_completion_response
 
 User = get_user_model()
 
@@ -47,30 +48,6 @@ class TokenUsageTrackingTest(TestCase):
             name="Test Agent",
             charter="Test charter"
         )
-
-    def _mock_completion_response(
-        self,
-        content: str = "Result",
-        prompt_tokens: int = 10,
-        completion_tokens: int = 5,
-        cached_tokens: int = 2,
-        tool_calls: list | None = None,
-    ):
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message = MagicMock(content=content)
-        if tool_calls is not None:
-            response.choices[0].message.tool_calls = tool_calls
-        usage_details = MagicMock(cached_tokens=cached_tokens)
-        response.model_extra = {
-            "usage": MagicMock(
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens,
-                prompt_tokens_details=usage_details,
-            )
-        }
-        return response
     
     def test_completion_with_failover_returns_token_usage(self):
         """Test that _completion_with_failover returns token usage data."""
@@ -334,7 +311,7 @@ class TokenUsageTrackingTest(TestCase):
     @patch("api.agent.core.compaction.get_summarization_llm_config")
     def test_compaction_llm_completion_logged(self, mock_config, mock_run_completion):
         mock_config.return_value = ("provider-key", "model-name", {})
-        mock_run_completion.return_value = self._mock_completion_response()
+        mock_run_completion.return_value = make_completion_response()
 
         summary = llm_summarise_comms("", [], agent=self.agent)
 
@@ -350,7 +327,7 @@ class TokenUsageTrackingTest(TestCase):
     @patch("api.agent.tasks.agent_tags.get_summarization_llm_config")
     def test_tag_generation_completion_logged(self, mock_config, mock_run_completion):
         mock_config.return_value = ("provider-key", "tag-model", {})
-        mock_run_completion.return_value = self._mock_completion_response(
+        mock_run_completion.return_value = make_completion_response(
             content='["Alpha","Beta"]',
             prompt_tokens=8,
             completion_tokens=2,
@@ -371,7 +348,7 @@ class TokenUsageTrackingTest(TestCase):
     @patch("api.agent.tasks.short_description.get_summarization_llm_config")
     def test_short_description_completion_logged(self, mock_config, mock_run_completion):
         mock_config.return_value = ("provider-key", "short-model", {})
-        mock_run_completion.return_value = self._mock_completion_response(
+        mock_run_completion.return_value = make_completion_response(
             content="Short summary",
             prompt_tokens=6,
             completion_tokens=3,
@@ -392,7 +369,7 @@ class TokenUsageTrackingTest(TestCase):
     @patch("api.agent.tasks.mini_description.get_summarization_llm_config")
     def test_mini_description_completion_logged(self, mock_config, mock_run_completion):
         mock_config.return_value = ("provider-key", "mini-model", {})
-        mock_run_completion.return_value = self._mock_completion_response(
+        mock_run_completion.return_value = make_completion_response(
             content="Mini label",
             prompt_tokens=4,
             completion_tokens=2,
@@ -413,20 +390,12 @@ class TokenUsageTrackingTest(TestCase):
     @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
     def test_tool_search_completion_logged(self, mock_failover, mock_run_completion):
         mock_failover.return_value = [("provider-key", "search-model", {})]
-        tool_call_args = json.dumps({"tool_names": ["http_request"]})
-        mock_run_completion.return_value = self._mock_completion_response(
+        mock_run_completion.return_value = make_completion_response(
             content="Enabled",
             prompt_tokens=12,
             completion_tokens=6,
             cached_tokens=3,
-            tool_calls=[
-                {
-                    "function": {
-                        "name": "enable_tools",
-                        "arguments": tool_call_args,
-                    }
-                }
-            ],
+            tool_names=["http_request"],
         )
 
         def _enable(agent, names):
