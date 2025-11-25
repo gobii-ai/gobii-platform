@@ -44,6 +44,8 @@ from api.services.prompt_settings import (
     DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
     DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT,
     DEFAULT_MAX_ENABLED_TOOL_LIMIT,
+    DEFAULT_UNIFIED_HISTORY_LIMIT,
+    DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
 )
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
@@ -712,6 +714,36 @@ class PromptConfig(models.Model):
         default=DEFAULT_MAX_ENABLED_TOOL_LIMIT,
         validators=[MinValueValidator(1)],
         help_text="Number of concurrently enabled tools allowed for max tier agents.",
+    )
+    standard_unified_history_limit = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history event limit for standard tier agents.",
+    )
+    premium_unified_history_limit = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history event limit for premium tier agents.",
+    )
+    max_unified_history_limit = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history event limit for max tier agents.",
+    )
+    standard_unified_history_hysteresis = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history hysteresis for standard tier agents.",
+    )
+    premium_unified_history_hysteresis = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history hysteresis for premium tier agents.",
+    )
+    max_unified_history_hysteresis = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history hysteresis for max tier agents.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
