@@ -700,10 +700,18 @@ def _ensure_credit_for_tool(
     if tool_name == "send_chat_message":
         return True
 
-    if not settings.GOBII_PROPRIETARY_MODE or not getattr(agent, "user_id", None):
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    owner_is_org = TaskCreditService._is_organization_owner(owner) if owner is not None else False
+    owner_user = getattr(agent, "user", None)
+    owner_label = (
+        f"organization {getattr(owner, 'id', 'unknown')}"
+        if owner_is_org
+        else f"user {getattr(owner_user, 'id', 'unknown')}"
+    )
+
+    if not settings.GOBII_PROPRIETARY_MODE or owner is None:
         return True
 
-    owner_user = agent.user
     cost: Decimal | None = None
     consumed: dict | None = None
 
@@ -725,12 +733,12 @@ def _ensure_credit_for_tool(
         available = credit_snapshot.get("available")
     else:
         try:
-            available = TaskCreditService.get_user_task_credits_available(owner_user)
+            available = TaskCreditService.calculate_available_tasks_for_owner(owner)
         except Exception as e:
             logger.error(
-                "Credit availability check (in-loop) failed for agent %s (user %s): %s",
+                "Credit availability check (in-loop) failed for agent %s (%s): %s",
                 agent.id,
-                owner_user.id,
+                owner_label,
                 str(e),
             )
             available = None
@@ -801,6 +809,17 @@ def _ensure_credit_for_tool(
             )
         except Exception as e:
             logger.debug("Failed to set soft target span attributes: %s", e)
+        try:
+            span.set_attribute(
+                "credit_check.owner_type",
+                "organization" if owner_is_org else "user",
+            )
+            if owner_is_org:
+                span.set_attribute("credit_check.organization_id", str(getattr(owner, "id", None)))
+            if owner_user is not None:
+                span.set_attribute("credit_check.user_id", str(owner_user.id))
+        except Exception as e:
+            logger.debug("Failed to set owner span attributes: %s", e)
         try:
             span.set_attribute(
                 "credit_check.tool_cost",
@@ -932,12 +951,12 @@ def _ensure_credit_for_tool(
 
     try:
         with transaction.atomic():
-            consumed = TaskCreditService.check_and_consume_credit(owner_user, amount=cost)
+            consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
     except Exception as e:
         logger.error(
-            "Credit consumption (in-loop) failed for agent %s (user %s): %s",
+            "Credit consumption (in-loop) failed for agent %s (%s): %s",
             agent.id,
-            owner_user.id,
+            owner_label,
             str(e),
         )
         if span is not None:
@@ -1301,29 +1320,45 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
             )
 
         if settings.GOBII_PROPRIETARY_MODE:
+            owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
             owner_user = getattr(agent, "user", None)
-            if owner_user is not None:
+            owner_is_org = TaskCreditService._is_organization_owner(owner) if owner is not None else False
+            if owner is not None:
+                owner_label = (
+                    f"organization {getattr(owner, 'id', 'unknown')}"
+                    if owner_is_org
+                    else f"user {getattr(owner_user, 'id', 'unknown')}"
+                )
                 try:
-                    available = TaskCreditService.get_user_task_credits_available(owner_user)
+                    available = TaskCreditService.calculate_available_tasks_for_owner(owner)
                 except Exception as e:
                     # Defensive: if availability calc fails, log and proceed (do not block agent)
                     logger.error(
-                        "Credit availability check failed for agent %s (user %s): %s",
+                        "Credit availability check failed for agent %s (%s): %s",
                         persistent_agent_id,
-                        owner_user.id,
+                        owner_label,
                         str(e),
                     )
                     available = None
 
                 span.set_attribute("credit_check.available", int(available) if available is not None else 0)
                 span.set_attribute("credit_check.proprietary_mode", True)
+                span.set_attribute("credit_check.owner_type", "organization" if owner_is_org else "user")
+                if owner_is_org:
+                    span.set_attribute("credit_check.organization_id", str(getattr(owner, "id", None)))
+                if owner_user is not None:
+                    span.set_attribute("credit_check.user_id", owner_user.id)
 
-                if available is not None and available != TASKS_UNLIMITED and available <= 0:
+                if (
+                    available is not None
+                    and available != TASKS_UNLIMITED
+                    and Decimal(available) <= Decimal("0")
+                ):
                     msg = f"Skipped processing due to insufficient credits (proprietary mode)."
                     logger.warning(
-                        "Persistent agent %s not processed – user %s has no remaining task credits.",
+                        "Persistent agent %s not processed – %s has no remaining task credits.",
                         persistent_agent_id,
-                        owner_user.id,
+                        owner_label,
                     )
 
                     step = PersistentAgentStep.objects.create(
@@ -1384,7 +1419,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
                     return agent
             else:
                 # Agents without a linked user (system/automation) are not gated
-                span.add_event("Agent has no linked user; skipping credit gate")
+                span.add_event("Agent has no owner; skipping credit gate")
         else:
             # Non-proprietary mode: do not gate on credits
             span.add_event("Proprietary mode disabled; skipping credit gate")
