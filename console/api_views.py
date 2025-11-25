@@ -3115,6 +3115,16 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
         if requested_runs < 1 or requested_runs > MAX_REQUESTED_RUNS:
             return HttpResponseBadRequest(f"n_runs must be between 1 and {MAX_REQUESTED_RUNS}")
 
+        # Optional LLM routing profile for the eval
+        from api.models import LLMRoutingProfile
+        llm_routing_profile = None
+        llm_routing_profile_id = body.get("llm_routing_profile_id")
+        if llm_routing_profile_id:
+            try:
+                llm_routing_profile = LLMRoutingProfile.objects.get(id=llm_routing_profile_id)
+            except LLMRoutingProfile.DoesNotExist:
+                return HttpResponseBadRequest("LLM routing profile not found")
+
         agent_id = body.get("agent_id")
         if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT:
             if not agent_id:
@@ -3153,6 +3163,7 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 agent_strategy=agent_strategy,
                 shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
                 started_at=timezone.now(),
+                llm_routing_profile=llm_routing_profile,
             )
 
             created_for_suite = 0

@@ -123,6 +123,7 @@ export type CreateSuiteRunPayload = {
   run_type?: EvalRunType
   official?: boolean
   n_runs?: number
+  llm_routing_profile_id?: string | null
 }
 
 export function createSuiteRuns(payload: CreateSuiteRunPayload): Promise<{
