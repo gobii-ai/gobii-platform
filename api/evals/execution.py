@@ -19,7 +19,6 @@ from api.agent.events import AgentEventType, get_agent_event_stream
 from api.evals.realtime import broadcast_task_update, broadcast_run_update
 from api.evals.metrics import aggregate_task_metrics, aggregate_run_metrics
 from config.redis_client import get_redis_client
-from api.agent.core.llm_config import get_llm_config, LLMNotConfiguredError
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -292,9 +291,9 @@ class ScenarioExecutionTools:
         return task_obj
 
     def llm_judge(
-        self, 
-        question: str, 
-        context: str, 
+        self,
+        question: str,
+        context: str,
         options: Iterable[str] = ("Yes", "No"),
         model: Optional[str] = None,
         params: Optional[Dict[str, Any]] = None,
@@ -303,20 +302,22 @@ class ScenarioExecutionTools:
         Ask an LLM to judge a context based on a question and a set of options.
         Uses tool calling to ensure structured output. Automatically falls back to
         the configured failover tier to pick the first available model when none
-        (or only a model name) is provided. 
-        
+        (or only a model name) is provided.
+
         Args:
             question: The specific question to answer.
             context: The context text to evaluate.
             options: A list of valid answer options (default: ["Yes", "No"]).
             model: Optional LLM model to use. If omitted, the configured default is used.
             params: Optional LLM parameters. If omitted, the configured default params are used.
-            
+
         Returns:
             A tuple of (choice, reasoning). choice will be one of the strings in `options`.
         """
+        from api.agent.core.llm_config import get_llm_config, LLMNotConfiguredError
+
         options_list = list(options)
-        
+
         tool_definition = {
             "type": "function",
             "function": {
@@ -339,7 +340,7 @@ class ScenarioExecutionTools:
                 }
             }
         }
-        
+
         prompt = [
             {"role": "system", "content": "You are an impartial judge. Evaluate the context and answer the question by calling the `submit_judgment` tool."},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}\n\nValid Options: {', '.join(options_list)}"}
@@ -366,24 +367,28 @@ class ScenarioExecutionTools:
         # Default to deterministic temperature unless the endpoint requires its own value.
         if safe_params.get("temperature") is None:
             safe_params["temperature"] = 0.0
-        
+
         try:
             response = run_completion(
                 model=effective_model,
                 messages=prompt,
                 tools=[tool_definition],
-                tool_choice={"type": "function", "function": {"name": "submit_judgment"}},
+                # Use "auto" instead of forcing - some models (like glm-4.6) return empty args with forced tool_choice
                 params=safe_params
             )
-            
+
             tool_calls = response.choices[0].message.tool_calls
             if not tool_calls:
                  return "Error", "LLM did not call the judgment tool."
-                 
-            # We expect exactly one tool call since we forced it
-            args = json.loads(tool_calls[0].function.arguments)
-            return args.get("choice"), args.get("reasoning")
-            
+
+            # Find the submit_judgment call
+            for tc in tool_calls:
+                if tc.function.name == "submit_judgment":
+                    args = json.loads(tc.function.arguments)
+                    return args.get("choice"), args.get("reasoning")
+
+            return "Error", "LLM did not call submit_judgment tool."
+
         except Exception as e:
             logger.error(f"LLM judge failed: {e}")
             return "Error", f"Exception during judgment: {str(e)}"
