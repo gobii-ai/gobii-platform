@@ -33,7 +33,7 @@ class TestParallelToolCallsExecution(TestCase):
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
     @patch('api.agent.core.event_processing.execute_send_sms', return_value={"status": "success"})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"})
-    @patch('api.agent.core.event_processing._build_prompt_context')
+    @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
     def test_executes_all_tool_calls_in_one_turn(
         self,

@@ -9,7 +9,7 @@ from django.test import TestCase, tag
 from django.utils import timezone
 from unittest.mock import patch
 
-from api.agent.core.event_processing import _archive_rendered_prompt, get_prompt_token_budget
+from api.agent.core.prompt_context import _archive_rendered_prompt, get_prompt_token_budget
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentPromptArchive
 from api.maintenance.prompt_archives import prune_prompt_archives_for_cutoff
 
@@ -33,7 +33,7 @@ class PromptArchivePruningTests(TestCase):
         )
         self.storage_dir = tempfile.mkdtemp()
         self.storage = FileSystemStorage(location=self.storage_dir)
-        self.storage_patch = patch('api.agent.core.event_processing.default_storage', self.storage)
+        self.storage_patch = patch('api.agent.core.prompt_context.default_storage', self.storage)
         self.models_storage_patch = patch('api.models.default_storage', self.storage)
         self.storage_patch.start()
         self.models_storage_patch.start()

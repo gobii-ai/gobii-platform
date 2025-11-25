@@ -50,9 +50,9 @@ class EnableDatabaseToolTests(TestCase):
         )
 
     def test_enable_database_tool_removed_once_sqlite_enabled(self):
-        """_get_agent_tools should hide enable_database after sqlite_batch is enabled."""
+        """get_agent_tools should hide enable_database after sqlite_batch is enabled."""
 
-        tools_before = ep._get_agent_tools(self.agent)
+        tools_before = ep.get_agent_tools(self.agent)
         tool_names_before = [
             entry.get("function", {}).get("name")
             for entry in tools_before
@@ -62,7 +62,7 @@ class EnableDatabaseToolTests(TestCase):
 
         execute_enable_database(self.agent, {})
 
-        tools_after = ep._get_agent_tools(self.agent)
+        tools_after = ep.get_agent_tools(self.agent)
         tool_names_after = [
             entry.get("function", {}).get("name")
             for entry in tools_after
