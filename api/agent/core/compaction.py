@@ -21,6 +21,7 @@ from ...models import (
     PersistentAgent,
     PersistentAgentMessage,
     PersistentAgentCommsSnapshot,
+    PersistentAgentCompletion,
 )
 
 import logging
@@ -29,6 +30,7 @@ from opentelemetry import trace
 
 from .llm_config import get_summarization_llm_config
 from .llm_utils import run_completion
+from .token_usage import completion_kwargs_from_usage, extract_token_usage
 
 # --------------------------------------------------------------------------- #
 #  Tunables – can be overridden via Django settings for easy experimentation  #
@@ -37,6 +39,7 @@ RAW_MSG_LIMIT: int = getattr(settings, "PA_RAW_MSG_LIMIT", 20)
 
 # Tracer shared across backend codebase
 tracer = trace.get_tracer("gobii.utils")
+logger = logging.getLogger(__name__)
 
 __all__ = ["ensure_comms_compacted", "RAW_MSG_LIMIT", "ensure_steps_compacted", "llm_summarise_comms"]
 
@@ -251,7 +254,7 @@ def llm_summarise_comms(
     ]
 
     try:
-        model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
+        provider, model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
 
         if model.startswith("openai"):
             # GPT-4.1 is currently the only model supporting the `safety_identifier`
@@ -260,6 +263,30 @@ def llm_summarise_comms(
                 params["safety_identifier"] = str(safety_identifier)
 
         response = run_completion(model=model, messages=prompt, params=params)
+        token_usage, usage = extract_token_usage(
+            response,
+            model=model,
+            provider=provider,
+        )
+
+        if usage:
+            span = trace.get_current_span()
+            span.set_attribute("llm.usage.prompt_tokens", getattr(usage, "prompt_tokens", None))
+            span.set_attribute("llm.usage.completion_tokens", getattr(usage, "completion_tokens", None))
+            span.set_attribute("llm.usage.total_tokens", getattr(usage, "total_tokens", None))
+
+        if agent is not None:
+            try:
+                PersistentAgentCompletion.objects.create(
+                    agent=agent,
+                    **completion_kwargs_from_usage(
+                        token_usage,
+                        completion_type=PersistentAgentCompletion.CompletionType.COMPACTION,
+                    ),
+                )
+            except Exception:
+                logger.debug("Failed to persist compaction completion for agent %s", getattr(agent, "id", None), exc_info=True)
+
         return response.choices[0].message.content.strip()
     except Exception:
         # Log and fall back to deterministic fallback so callers are not

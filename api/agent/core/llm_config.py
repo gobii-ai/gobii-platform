@@ -950,7 +950,7 @@ def get_summarization_llm_config(
     agent: Any | None = None,
     agent_id: str | None = None,
     routing_profile: Any | None = None,
-) -> Tuple[str, dict]:
+) -> Tuple[str, str, dict]:
     """
     Get LiteLLM configuration specifically for summarization tasks.
 
@@ -964,7 +964,7 @@ def get_summarization_llm_config(
             uses this profile's configuration instead of the active profile.
 
     Returns:
-        Tuple of (model_name, litellm_params)
+        Tuple of (provider_key, model_name, litellm_params)
     """
     # DB-only: pick primary config and adjust temperature for summarisation
     if agent_id is None and agent is not None:
@@ -978,7 +978,7 @@ def get_summarization_llm_config(
         agent=agent,
         routing_profile=routing_profile,
     )
-    _provider_key, model, params_with_hints = configs[0]
+    provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm
     supports_temperature = bool(params_with_hints.get("supports_temperature", True))
     params = {
@@ -998,7 +998,7 @@ def get_summarization_llm_config(
     else:
         params.pop("temperature", None)
 
-    return model, params
+    return provider_key, model, params
 
 
 def _cache_bootstrap_status(is_required: bool) -> None:

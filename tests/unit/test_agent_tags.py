@@ -120,7 +120,7 @@ class AgentTagGenerationTests(TestCase):
             choices=[SimpleNamespace(message=SimpleNamespace(content='["Ops","Support","Insights"]'))]
         )
 
-        with patch("api.agent.tasks.agent_tags.get_summarization_llm_config", return_value=("model", {})) as mocked_config, patch(
+        with patch("api.agent.tasks.agent_tags.get_summarization_llm_config", return_value=("provider", "model", {})) as mocked_config, patch(
             "api.agent.tasks.agent_tags.run_completion", return_value=response
         ):
             tags = _generate_via_llm(agent, agent.charter)

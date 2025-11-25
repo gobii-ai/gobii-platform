@@ -6015,6 +6015,15 @@ class PersistentAgentWebSession(models.Model):
 class PersistentAgentCompletion(models.Model):
     """Represents a single LLM completion within a persistent agent run."""
 
+    class CompletionType(models.TextChoices):
+        ORCHESTRATOR = ("orchestrator", "Orchestrator")
+        COMPACTION = ("compaction", "Comms Compaction")
+        STEP_COMPACTION = ("step_compaction", "Step Compaction")
+        TAG = ("tag", "Tag Generation")
+        SHORT_DESCRIPTION = ("short_description", "Short Description")
+        MINI_DESCRIPTION = ("mini_description", "Mini Description")
+        OTHER = ("other", "Other")
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
         "PersistentAgent",
@@ -6031,6 +6040,12 @@ class PersistentAgentCompletion(models.Model):
         help_text="Eval run context for this completion, when applicable.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    completion_type = models.CharField(
+        max_length=64,
+        choices=CompletionType.choices,
+        default=CompletionType.ORCHESTRATOR,
+        help_text="Origin of the completion (orchestrator loop, compaction, tag generation, etc.).",
+    )
 
     prompt_tokens = models.IntegerField(null=True, blank=True)
     completion_tokens = models.IntegerField(null=True, blank=True)
@@ -6091,7 +6106,7 @@ class PersistentAgentCompletion(models.Model):
         ]
 
     def __str__(self):
-        return f"Completion {self.llm_model or 'unknown'} @ {self.created_at}"
+        return f"Completion[{self.completion_type}] {self.llm_model or 'unknown'} @ {self.created_at}"
 
 
 class PersistentAgentStep(models.Model):
