@@ -159,8 +159,6 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
         int(limit_map.get(tier, prompt_settings.standard_unified_history_limit)),
         int(hyst_map.get(tier, prompt_settings.standard_unified_history_hysteresis)),
     )
-    unified_fetch_span_offset = 5
-    unified_fetch_span = unified_limit + unified_hysteresis + unified_fetch_span_offset
 
 def _archive_rendered_prompt(
     agent: PersistentAgent,
@@ -1610,7 +1608,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
     configured_tool_limit = tool_call_history_limit(agent)
     configured_msg_limit = message_history_limit(agent)
-    unified_fetch_span = unified_limit + unified_hysteresis + 5
+    unified_fetch_span_offset = 5
+    unified_fetch_span = unified_limit + unified_hysteresis + unified_fetch_span_offset
     limit_tool_history = max(configured_tool_limit, unified_fetch_span)
     limit_msg_history = max(configured_msg_limit, unified_fetch_span)
 
