@@ -17,7 +17,7 @@ from django.utils.text import get_valid_filename
 from django.db.utils import OperationalError, ProgrammingError
 
 from django.contrib.auth import get_user_model
-from django.db.models.signals import post_save, pre_delete, pre_save
+from django.db.models.signals import post_save, post_delete, pre_delete, pre_save
 
 from django.dispatch import receiver
 
@@ -7500,3 +7500,60 @@ class EvalRunTask(models.Model):
 
     def __str__(self):
         return f"{self.run.scenario_slug} - {self.name} ({self.status})"
+
+
+# =============================================================================
+# Signals to touch LLMRoutingProfile when child models change
+# This invalidates the "preferred provider" cache for agents
+# =============================================================================
+
+def _touch_routing_profile(profile):
+    """Touch the profile's updated_at to invalidate preferred provider cache."""
+    if profile:
+        LLMRoutingProfile.objects.filter(pk=profile.pk).update(updated_at=timezone.now())
+
+
+@receiver(post_save, sender=ProfileTokenRange)
+@receiver(post_delete, sender=ProfileTokenRange)
+def touch_profile_on_token_range_change(sender, instance, **kwargs):
+    _touch_routing_profile(instance.profile)
+
+
+@receiver(post_save, sender=ProfilePersistentTier)
+@receiver(post_delete, sender=ProfilePersistentTier)
+def touch_profile_on_persistent_tier_change(sender, instance, **kwargs):
+    profile = instance.token_range.profile if instance.token_range else None
+    _touch_routing_profile(profile)
+
+
+@receiver(post_save, sender=ProfilePersistentTierEndpoint)
+@receiver(post_delete, sender=ProfilePersistentTierEndpoint)
+def touch_profile_on_persistent_tier_endpoint_change(sender, instance, **kwargs):
+    profile = instance.tier.token_range.profile if instance.tier and instance.tier.token_range else None
+    _touch_routing_profile(profile)
+
+
+@receiver(post_save, sender=ProfileBrowserTier)
+@receiver(post_delete, sender=ProfileBrowserTier)
+def touch_profile_on_browser_tier_change(sender, instance, **kwargs):
+    _touch_routing_profile(instance.profile)
+
+
+@receiver(post_save, sender=ProfileBrowserTierEndpoint)
+@receiver(post_delete, sender=ProfileBrowserTierEndpoint)
+def touch_profile_on_browser_tier_endpoint_change(sender, instance, **kwargs):
+    profile = instance.tier.profile if instance.tier else None
+    _touch_routing_profile(profile)
+
+
+@receiver(post_save, sender=ProfileEmbeddingsTier)
+@receiver(post_delete, sender=ProfileEmbeddingsTier)
+def touch_profile_on_embeddings_tier_change(sender, instance, **kwargs):
+    _touch_routing_profile(instance.profile)
+
+
+@receiver(post_save, sender=ProfileEmbeddingsTierEndpoint)
+@receiver(post_delete, sender=ProfileEmbeddingsTierEndpoint)
+def touch_profile_on_embeddings_tier_endpoint_change(sender, instance, **kwargs):
+    profile = instance.tier.profile if instance.tier else None
+    _touch_routing_profile(profile)

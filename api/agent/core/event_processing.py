@@ -18,6 +18,7 @@ from uuid import UUID
 import litellm
 from opentelemetry import baggage, trace
 from pottery import Redlock
+from django.apps import apps
 from django.db import transaction, close_old_connections
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
@@ -591,6 +592,25 @@ def _get_recent_preferred_config(
             created_at,
         )
         return None
+
+    # Invalidate preferred provider if LLM config has changed since last completion
+    try:
+        LLMRoutingProfile = apps.get_model("api", "LLMRoutingProfile")
+        active_profile = LLMRoutingProfile.objects.filter(is_active=True).only("updated_at").first()
+        if active_profile and active_profile.updated_at and created_at < active_profile.updated_at:
+            logger.info(
+                "Agent %s preferred provider stale due to config change (completion=%s, config_updated=%s)",
+                agent_id,
+                created_at,
+                active_profile.updated_at,
+            )
+            return None
+    except Exception:
+        logger.debug(
+            "Unable to check LLM config staleness for agent %s",
+            agent_id,
+            exc_info=True,
+        )
 
     if last_model and last_provider:
         streak = 0
