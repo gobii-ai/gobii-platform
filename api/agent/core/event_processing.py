@@ -817,9 +817,9 @@ def _ensure_credit_for_tool(
             if owner_is_org:
                 span.set_attribute("credit_check.organization_id", str(getattr(owner, "id", None)))
             if owner_user is not None:
-                span.set_attribute("credit_check.user_id", owner_user.id)
-        except Exception:
-            pass
+                span.set_attribute("credit_check.user_id", str(owner_user.id))
+        except Exception as e:
+            logger.debug("Failed to set owner span attributes: %s", e)
         try:
             span.set_attribute(
                 "credit_check.tool_cost",
