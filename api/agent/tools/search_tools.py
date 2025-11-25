@@ -14,6 +14,7 @@ import litellm  # re-exported for tests that patch LiteLLM directly
 from opentelemetry import trace
 
 from ...models import PersistentAgent
+from ...evals.execution import get_current_eval_routing_profile
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from .mcp_manager import get_mcp_manager
@@ -154,7 +155,10 @@ def _search_with_llm(
     )
 
     try:
-        failover_configs = get_llm_config_with_failover(agent=agent)
+        failover_configs = get_llm_config_with_failover(
+            agent=agent,
+            routing_profile=get_current_eval_routing_profile(),
+        )
         last_exc: Optional[Exception] = None
         for idx, (provider, model, params) in enumerate(failover_configs):
             try:

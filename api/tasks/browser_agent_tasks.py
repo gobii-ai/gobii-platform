@@ -1621,8 +1621,23 @@ def _process_browser_use_task_core(
                 if prefer_premium:
                     agent_span.set_attribute("browser_tier.prefer_premium", True)
 
+                # Look up routing profile from eval_run if this is an eval task
+                eval_routing_profile = None
+                if task_obj.eval_run_id:
+                    try:
+                        from api.models import EvalRun
+                        eval_run = EvalRun.objects.select_related("llm_routing_profile").get(id=task_obj.eval_run_id)
+                        eval_routing_profile = eval_run.llm_routing_profile
+                        if eval_routing_profile:
+                            agent_span.set_attribute("browser_tier.routing_profile", eval_routing_profile.name)
+                    except EvalRun.DoesNotExist:
+                        pass
+
                 # Resolve provider priority from DB only (no legacy fallback)
-                db_priority = _resolve_browser_provider_priority_from_db(prefer_premium=prefer_premium)
+                db_priority = _resolve_browser_provider_priority_from_db(
+                    prefer_premium=prefer_premium,
+                    routing_profile=eval_routing_profile,
+                )
                 if not db_priority:
                     # Allow tests that patch _execute_agent_with_failover to proceed
                     # by passing a no-op DB-shaped tier. In production, this path

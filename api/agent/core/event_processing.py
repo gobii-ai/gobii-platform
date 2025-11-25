@@ -57,6 +57,7 @@ from .llm_config import (
     is_llm_bootstrap_required,
 )
 from api.agent.events import publish_agent_event, AgentEventType
+from api.evals.execution import get_current_eval_routing_profile
 from .prompt_context import (
     build_prompt_context,
     get_agent_daily_credit_state,
@@ -1594,6 +1595,7 @@ def _run_agent_loop(
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
                 daily_credit_state=credit_snapshot["daily_state"] if credit_snapshot else None,
+                routing_profile=get_current_eval_routing_profile(),
             )
             prompt_archive_attached = False
 
@@ -1649,6 +1651,7 @@ def _run_agent_loop(
                     token_count=fitted_token_count,
                     agent=agent,
                     is_first_loop=is_first_run,
+                    routing_profile=get_current_eval_routing_profile(),
                 )
             except LLMNotConfiguredError:
                 logger.warning(

@@ -397,11 +397,19 @@ def llm_summarise_steps(
     safety_identifier: str | None = None,
     *,
     agent: Optional[PersistentAgent] = None,
+    routing_profile=None,
 ) -> str:
     """Summarise *previous* + *steps* via LiteLLM.
 
     This is the primary summarisation function used in production.  Unit-tests
     can inject the deterministic placeholder instead.  Failure gracefully falls back.
+
+    Args:
+        previous: Previous summary text to extend.
+        steps: New steps to incorporate.
+        safety_identifier: Optional safety identifier for API calls.
+        agent: Optional agent instance for config lookup.
+        routing_profile: Optional LLMRoutingProfile for eval routing.
     """
 
     # Convert structured dataclasses to concise text lines.
@@ -428,7 +436,7 @@ def llm_summarise_steps(
     ]
 
     try:
-        model, params = get_summarization_llm_config(agent=agent)
+        model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
 
         if model.startswith("openai"):
             if safety_identifier:

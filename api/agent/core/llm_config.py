@@ -949,12 +949,19 @@ def get_summarization_llm_config(
     *,
     agent: Any | None = None,
     agent_id: str | None = None,
+    routing_profile: Any | None = None,
 ) -> Tuple[str, dict]:
     """
     Get LiteLLM configuration specifically for summarization tasks.
 
     Uses the same provider priority as get_llm_config() but with
     temperature=0 for deterministic summarization.
+
+    Args:
+        agent: Optional agent instance.
+        agent_id: Optional agent ID.
+        routing_profile: Optional LLMRoutingProfile instance. When provided,
+            uses this profile's configuration instead of the active profile.
 
     Returns:
         Tuple of (model_name, litellm_params)
@@ -969,6 +976,7 @@ def get_summarization_llm_config(
         agent_id=agent_id,
         token_count=0,
         agent=agent,
+        routing_profile=routing_profile,
     )
     _provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm
