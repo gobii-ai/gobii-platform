@@ -4,6 +4,7 @@ Running unit tests:
 - Prefer to run using `uv run python manage.py test --settings=config.test_settings --parallel auto`,
   Or fall back to `python manage.py test --settings=config.test_settings`.
 - Typically, run only the test(s) you need, then at the end run the full suite.
+- Use `uv run` for almost everything python related
 
 Writing unit tests:
 - Ensure the test is tagged with a batch tag, e.g. `@tag('my_feature_batch')`
