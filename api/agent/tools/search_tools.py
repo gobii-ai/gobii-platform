@@ -13,10 +13,11 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 import litellm  # re-exported for tests that patch LiteLLM directly
 from opentelemetry import trace
 
-from ...models import PersistentAgent
+from ...models import PersistentAgent, PersistentAgentCompletion
 from ...evals.execution import get_current_eval_routing_profile
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
+from ..core.token_usage import completion_kwargs_from_usage, extract_token_usage
 from .mcp_manager import get_mcp_manager
 from .tool_manager import (
     enable_tools,
@@ -216,6 +217,32 @@ def _search_with_llm(
                     tools=[enable_tools_def],
                     **run_kwargs,
                 )
+
+                token_usage, usage = extract_token_usage(
+                    response,
+                    model=model,
+                    provider=provider,
+                )
+                if usage:
+                    span = trace.get_current_span()
+                    span.set_attribute("llm.usage.prompt_tokens", getattr(usage, "prompt_tokens", None))
+                    span.set_attribute("llm.usage.completion_tokens", getattr(usage, "completion_tokens", None))
+                    span.set_attribute("llm.usage.total_tokens", getattr(usage, "total_tokens", None))
+                try:
+                    PersistentAgentCompletion.objects.create(
+                        agent=agent,
+                        **completion_kwargs_from_usage(
+                            token_usage,
+                            completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
+                        ),
+                    )
+                except Exception:
+                    logger.debug(
+                        "search_tools.%s: failed to persist completion for agent %s",
+                        provider_name,
+                        getattr(agent, "id", None),
+                        exc_info=True,
+                    )
 
                 message = response.choices[0].message
                 content_text = getattr(message, "content", None) or ""

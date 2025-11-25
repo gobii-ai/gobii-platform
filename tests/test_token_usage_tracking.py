@@ -17,6 +17,7 @@ from api.agent.core.compaction import llm_summarise_comms
 from api.agent.tasks.agent_tags import _generate_via_llm as generate_tags_via_llm
 from api.agent.tasks.short_description import _generate_via_llm as generate_short_desc_via_llm
 from api.agent.tasks.mini_description import _generate_via_llm as generate_mini_desc_via_llm
+from api.agent.tools.search_tools import _search_with_llm
 
 User = get_user_model()
 
@@ -53,10 +54,13 @@ class TokenUsageTrackingTest(TestCase):
         prompt_tokens: int = 10,
         completion_tokens: int = 5,
         cached_tokens: int = 2,
+        tool_calls: list | None = None,
     ):
         response = MagicMock()
         response.choices = [MagicMock()]
         response.choices[0].message = MagicMock(content=content)
+        if tool_calls is not None:
+            response.choices[0].message.tool_calls = tool_calls
         usage_details = MagicMock(cached_tokens=cached_tokens)
         response.model_extra = {
             "usage": MagicMock(
@@ -404,6 +408,47 @@ class TokenUsageTrackingTest(TestCase):
         ).latest("created_at")
         self.assertEqual(completion.prompt_tokens, 4)
         self.assertEqual(completion.completion_tokens, 2)
+
+    @patch("api.agent.tools.search_tools.run_completion")
+    @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
+    def test_tool_search_completion_logged(self, mock_failover, mock_run_completion):
+        mock_failover.return_value = [("provider-key", "search-model", {})]
+        tool_call_args = json.dumps({"tool_names": ["http_request"]})
+        mock_run_completion.return_value = self._mock_completion_response(
+            content="Enabled",
+            prompt_tokens=12,
+            completion_tokens=6,
+            cached_tokens=3,
+            tool_calls=[
+                {
+                    "function": {
+                        "name": "enable_tools",
+                        "arguments": tool_call_args,
+                    }
+                }
+            ],
+        )
+
+        def _enable(agent, names):
+            return {"status": "success", "enabled": names, "already_enabled": [], "evicted": [], "invalid": []}
+
+        catalog = [{"full_name": "http_request", "description": "HTTP calls", "parameters": {}}]
+        result = _search_with_llm(
+            agent=self.agent,
+            query="Use HTTP",
+            provider_name="test",
+            catalog=catalog,
+            enable_callback=_enable,
+            empty_message="",
+        )
+
+        self.assertEqual(result["status"], "success")
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_model, "search-model")
+        self.assertEqual(completion.total_tokens, 18)
 
 
 if __name__ == '__main__':

@@ -19,6 +19,7 @@ class Migration(migrations.Migration):
                     ("tag", "Tag Generation"),
                     ("short_description", "Short Description"),
                     ("mini_description", "Mini Description"),
+                    ("tool_search", "Tool Search"),
                     ("other", "Other"),
                 ],
                 default="orchestrator",

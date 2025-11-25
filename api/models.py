@@ -6022,6 +6022,7 @@ class PersistentAgentCompletion(models.Model):
         TAG = ("tag", "Tag Generation")
         SHORT_DESCRIPTION = ("short_description", "Short Description")
         MINI_DESCRIPTION = ("mini_description", "Mini Description")
+        TOOL_SEARCH = ("tool_search", "Tool Search")
         OTHER = ("other", "Other")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
