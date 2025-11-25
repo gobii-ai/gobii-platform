@@ -1029,6 +1029,8 @@ def process_agent_events(
     budget_id: Optional[str] = None,
     branch_id: Optional[str] = None,
     depth: Optional[int] = None,
+    eval_run_id: Optional[str] = None,
+    mock_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Process all outstanding events for a persistent agent."""
     span = trace.get_current_span()
@@ -1108,6 +1110,8 @@ def process_agent_events(
         depth=int(depth),
         max_steps=int(max_steps),
         max_depth=int(max_depth),
+        eval_run_id=eval_run_id,
+        mock_config=mock_config,
     )
     set_budget_context(ctx)
 
@@ -1221,6 +1225,7 @@ def process_agent_events(
                         budget_id=ctx.budget_id,
                         branch_id=ctx.branch_id,
                         depth=ctx.depth,
+                        eval_run_id=getattr(ctx, "eval_run_id", None),
                     )
             except Exception as e:
                 logger.error(
@@ -1524,6 +1529,7 @@ def _run_agent_loop(
 
     # Determine remaining steps from the shared budget (if any)
     budget_ctx = get_budget_context()
+    eval_run_id = getattr(budget_ctx, "eval_run_id", None) if budget_ctx is not None else None
     max_remaining = MAX_AGENT_LOOP_ITERATIONS
     if budget_ctx is not None:
         steps_used = AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
@@ -1677,6 +1683,7 @@ def _run_agent_loop(
                 if completion is None:
                     completion = PersistentAgentCompletion.objects.create(
                         agent=agent,
+                        eval_run_id=eval_run_id,
                         **token_usage_fields,
                     )
                 return completion
@@ -1889,7 +1896,14 @@ def _run_agent_loop(
                     close_old_connections()
 
                     logger.info("Agent %s: executing %s now", agent.id, tool_name)
-                    if tool_name == "spawn_web_task":
+
+                    # Check for eval mock before real execution (mock_config passed via BudgetContext)
+                    mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
+                    mock_result = mock_config.get(tool_name) if mock_config else None
+                    if mock_result is not None:
+                        logger.info("Agent %s: using mock for %s (eval_run_id=%s)", agent.id, tool_name, eval_run_id)
+                        result = mock_result
+                    elif tool_name == "spawn_web_task":
                         # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
                         result = execute_spawn_web_task(agent, tool_params)
                     elif tool_name == "send_email":

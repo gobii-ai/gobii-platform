@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Beaker, Loader2, Play, RefreshCcw, CheckSquare } from 'lucide-react'
+import { AlertTriangle, Beaker, Loader2, Play, RefreshCcw, CheckSquare, Minus, Plus } from 'lucide-react'
 
 import {
   createSuiteRuns,
@@ -22,12 +22,17 @@ const formatTs = (value: string | null | undefined) => {
 }
 
 const pluralize = (count: number, word: string) => `${count} ${count === 1 ? word : `${word}s`}`
+const formatPassRate = (taskTotals: EvalSuiteRun['task_totals'] | null | undefined) => {
+  if (!taskTotals || taskTotals.pass_rate == null) return '—'
+  return `${Math.round(taskTotals.pass_rate * 100)}%`
+}
 
 export function EvalsScreen() {
   const [suites, setSuites] = useState<EvalSuite[]>([])
   const [suiteRuns, setSuiteRuns] = useState<EvalSuiteRun[]>([])
   const [selectedSuites, setSelectedSuites] = useState<Set<string>>(new Set())
   const [runTypeFilter, setRunTypeFilter] = useState<'all' | EvalSuiteRun['run_type']>('all')
+  const [runCount, setRunCount] = useState<number>(3)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -38,6 +43,7 @@ export function EvalsScreen() {
     { value: 'official', label: 'Official' },
     { value: 'one_off', label: 'One-off' },
   ]
+  const clampRunCount = useCallback((value: number) => Math.max(1, Math.min(10, value)), [])
 
   const loadSuites = useCallback(async () => {
     try {
@@ -101,6 +107,7 @@ export function EvalsScreen() {
       await createSuiteRuns({
         suite_slugs,
         agent_strategy: 'ephemeral_per_scenario',
+        n_runs: clampRunCount(runCount),
       })
       await loadSuiteRuns()
     } catch (error) {
@@ -121,26 +128,54 @@ export function EvalsScreen() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Evals</h1>
-              <p className="text-slate-600 mt-1.5">Run suites concurrently, watch progress, and inspect tasks. Launches default to one-off; promote runs to official from their details.</p>
+              <p className="text-slate-600 font-medium">
+                Validate agent performance with concurrent test suites.
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
+              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
               onClick={loadSuiteRuns}
               disabled={loadingRuns}
+              title="Refresh list"
             >
-              <RefreshCcw className={`w-4 h-4 ${loadingRuns ? 'animate-spin' : ''}`} />
-              Refresh
+              <RefreshCcw className={`w-5 h-5 ${loadingRuns ? 'animate-spin' : ''}`} />
             </button>
+
+            <div className="h-6 w-px bg-slate-200 mx-1" />
+
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-2">Runs</span>
+              <button
+                type="button"
+                className="w-6 h-6 flex items-center justify-center rounded bg-white text-slate-600 shadow-sm hover:text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                onClick={() => setRunCount((prev) => clampRunCount(prev - 1))}
+                disabled={runCount <= 1}
+              >
+                <Minus className="w-3 h-3" strokeWidth={3} />
+              </button>
+              <div className="w-6 text-center text-sm font-bold text-slate-700 tabular-nums">
+                {runCount}
+              </div>
+              <button
+                type="button"
+                className="w-6 h-6 flex items-center justify-center rounded bg-white text-slate-600 shadow-sm hover:text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                onClick={() => setRunCount((prev) => clampRunCount(prev + 1))}
+                disabled={runCount >= 10}
+              >
+                <Plus className="w-3 h-3" strokeWidth={3} />
+              </button>
+            </div>
+
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleLaunch}
               disabled={launching || (selectedSuites.size === 0 && suites.length > 0)}
             >
-              {launching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              {launching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
               Launch
             </button>
           </div>
@@ -263,6 +298,7 @@ export function EvalsScreen() {
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Type</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Status</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Progress</th>
+                  <th className="px-6 py-4 bg-white border-b border-slate-100">Avg Pass</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Started</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Duration</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100 text-right"></th>
@@ -295,6 +331,16 @@ export function EvalsScreen() {
                            </div>
                          ) : '—'}
                       </td>
+                      <td className="px-6 py-4 text-slate-700">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-slate-900">{formatPassRate(suite.task_totals || null)}</span>
+                          {suite.task_totals ? (
+                            <span className="text-xs text-slate-500">
+                              {(suite.task_totals.passed ?? 0)}/{suite.task_totals.completed ?? suite.task_totals.total}
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 text-slate-600 whitespace-nowrap">{formatTs(suite.started_at)}</td>
                       <td className="px-6 py-4 text-slate-600 font-mono text-xs">{duration}</td>
                       <td className="px-6 py-4 text-right">
@@ -310,7 +356,7 @@ export function EvalsScreen() {
                 })}
                 {!suiteRuns.length && (
                   <tr>
-                    <td className="px-6 py-12 text-sm text-slate-500 text-center" colSpan={7}>
+                    <td className="px-6 py-12 text-sm text-slate-500 text-center" colSpan={8}>
                       No historical runs yet. Launch one above!
                     </td>
                   </tr>

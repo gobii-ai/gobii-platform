@@ -183,6 +183,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             agent=browser_use_agent,
             user=agent.user,
             prompt=prompt,
+            eval_run_id=getattr(budget_ctx, "eval_run_id", None),
         )
 
         # Copy secrets from persistent agent to browser task (exclude requested secrets)

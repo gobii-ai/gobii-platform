@@ -62,6 +62,12 @@ class Command(BaseCommand):
             action="store_true",
             help="Shortcut for --run-type official.",
         )
+        parser.add_argument(
+            "--n-runs",
+            type=int,
+            default=3,
+            help="How many times to repeat each scenario (default: 3).",
+        )
 
     def handle(self, *args, **options):
         suites_requested = options["suites"] or []
@@ -71,6 +77,7 @@ class Command(BaseCommand):
         sync_mode = options["sync"]
         run_type_option = options["run_type"]
         run_type = EvalSuiteRun.RunType.OFFICIAL if options["official"] else run_type_option
+        requested_runs = max(1, min(10, int(options.get("n_runs") or 1)))
 
         if sync_mode:
             from django.conf import settings
@@ -149,6 +156,7 @@ class Command(BaseCommand):
                 initiated_by=user,
                 status=EvalSuiteRun.Status.RUNNING,
                 run_type=run_type,
+                requested_runs=requested_runs,
                 agent_strategy=agent_strategy,
                 shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
                 started_at=timezone.now(),
@@ -163,25 +171,26 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.ERROR(f"Scenario '{scenario_slug}' missing; skipping."))
                     continue
 
-                run_agent = shared_agent
-                if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
-                    run_agent = _create_ephemeral_agent(label_suffix=scenario.slug[:8])
-                    self.stdout.write(f"  Created ephemeral agent for {scenario.slug}: {run_agent.id}")
+                for iteration in range(requested_runs):
+                    run_agent = shared_agent
+                    if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
+                        run_agent = _create_ephemeral_agent(label_suffix=f"{scenario.slug[:8]}-{iteration + 1}")
+                        self.stdout.write(f"  Created ephemeral agent for {scenario.slug}: {run_agent.id}")
 
-                run = EvalRun.objects.create(
-                    suite_run=suite_run,
-                    scenario_slug=scenario.slug,
-                    scenario_version=getattr(scenario, "version", "") or "",
-                    agent=run_agent,
-                    initiated_by=user,
-                    status=EvalRun.Status.PENDING,
-                    run_type=run_type,
-                )
-                self.stdout.write(f"  Scheduling run {run.id} for scenario '{scenario.slug}'...")
+                    run = EvalRun.objects.create(
+                        suite_run=suite_run,
+                        scenario_slug=scenario.slug,
+                        scenario_version=getattr(scenario, "version", "") or "",
+                        agent=run_agent,
+                        initiated_by=user,
+                        status=EvalRun.Status.PENDING,
+                        run_type=run_type,
+                    )
+                    self.stdout.write(f"  Scheduling run {run.id} for scenario '{scenario.slug}' (iteration {iteration + 1}/{requested_runs})...")
 
-                run_eval_task.delay(str(run.id))
-                run_ids.append(run)
-                created_for_suite += 1
+                    run_eval_task.delay(str(run.id))
+                    run_ids.append(run)
+                    created_for_suite += 1
 
             suite_runs.append(suite_run)
             if created_for_suite == 0:

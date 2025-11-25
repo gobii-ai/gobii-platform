@@ -24,7 +24,7 @@ Keys
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from django.conf import settings
 
@@ -66,6 +66,8 @@ class BudgetContext:
     depth: int
     max_steps: int
     max_depth: int
+    eval_run_id: Optional[str] = None
+    mock_config: Optional[Dict[str, Any]] = None  # Tool mocks for evals
 
 
 class AgentBudgetManager:

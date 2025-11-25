@@ -1,10 +1,17 @@
 import logging
 import traceback
+
 from django.utils import timezone
 
-from api.models import EvalRun, EvalRunTask, EvalSuiteRun, PersistentAgent
+from api.models import (
+    EvalRun,
+    EvalRunTask,
+    EvalSuiteRun,
+)
 from api.evals.registry import ScenarioRegistry
 from api.evals.realtime import broadcast_run_update, broadcast_suite_update, broadcast_task_update
+from api.evals.metrics import aggregate_run_metrics
+from api.evals.execution import set_current_eval_run_id
 import api.evals.loader # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -113,7 +120,11 @@ class EvalRunner:
                 )
 
             # Run the scenario logic
-            self.scenario.run(str(self.run.id), str(self.run.agent_id))
+            set_current_eval_run_id(str(self.run.id))
+            try:
+                self.scenario.run(str(self.run.id), str(self.run.agent_id))
+            finally:
+                set_current_eval_run_id(None)
 
             # Mark completion
             self.run.status = EvalRun.Status.COMPLETED
@@ -127,6 +138,11 @@ class EvalRunner:
             _finalize_pending_tasks(self.run, self.run.status)
             self.run.finished_at = timezone.now()
             self.run.save()
+            try:
+                aggregate_run_metrics(self.run)
+                self.run.refresh_from_db()
+            except Exception:
+                logger.exception("Failed to aggregate eval run metrics for %s", self.run.id)
             logger.info(f"Finished eval run {self.run.id} with status {self.run.status}")
             broadcast_run_update(self.run, include_tasks=True)
             _update_suite_state(self.run.suite_run_id)

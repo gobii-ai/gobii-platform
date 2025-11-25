@@ -12,6 +12,24 @@ export type EvalTask = {
   observed_summary: string
   started_at: string | null
   finished_at: string | null
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cached_tokens: number
+  input_cost_total: number
+  input_cost_uncached: number
+  input_cost_cached: number
+  output_cost: number
+  total_cost: number
+  credits_cost: number
+}
+
+export type EvalTaskTotals = {
+  total: number
+  completed: number
+  passed: number
+  failed: number
+  pass_rate: number | null
 }
 
 export type EvalRun = {
@@ -25,7 +43,19 @@ export type EvalRun = {
   finished_at: string | null
   agent_id: string | null
   tasks?: EvalTask[]
-  task_totals?: { total: number; passed: number; failed: number }
+  task_totals?: EvalTaskTotals
+  prompt_tokens?: number
+  completion_tokens?: number
+  cached_tokens?: number
+  tokens_used?: number
+  input_cost_total?: number
+  input_cost_uncached?: number
+  input_cost_cached?: number
+  output_cost?: number
+  total_cost?: number
+  credits_cost?: number
+  completion_count?: number
+  step_count?: number
 }
 
 export type EvalSuiteRun = {
@@ -33,12 +63,26 @@ export type EvalSuiteRun = {
   suite_slug: string
   status: string
   run_type: EvalRunType
+  requested_runs?: number
   agent_strategy: string
   shared_agent_id: string | null
   started_at: string | null
   finished_at: string | null
   runs?: EvalRun[]
   run_totals?: { total_runs: number; completed: number; errored: number }
+  task_totals?: EvalTaskTotals | null
+  cost_totals?: {
+    prompt_tokens: number
+    completion_tokens: number
+    cached_tokens: number
+    tokens_used: number
+    input_cost_total: number
+    input_cost_uncached: number
+    input_cost_cached: number
+    output_cost: number
+    total_cost: number
+    credits_cost: number
+  } | null
 }
 
 export type EvalSuite = {
@@ -78,6 +122,7 @@ export type CreateSuiteRunPayload = {
   agent_id?: string | null
   run_type?: EvalRunType
   official?: boolean
+  n_runs?: number
 }
 
 export function createSuiteRuns(payload: CreateSuiteRunPayload): Promise<{

@@ -975,6 +975,15 @@ class BrowserUseAgentTask(models.Model):
         blank=True,
     )
 
+    eval_run = models.ForeignKey(
+        "EvalRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="browser_tasks",
+        help_text="Eval run that spawned this browser task, if any.",
+    )
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agent_tasks", null=True, blank=True)
     organization = models.ForeignKey(
         'Organization',
@@ -5679,6 +5688,14 @@ class PersistentAgentCompletion(models.Model):
         related_name="completions",
         help_text="Agent that triggered this LLM completion.",
     )
+    eval_run = models.ForeignKey(
+        "EvalRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="agent_completions",
+        help_text="Eval run context for this completion, when applicable.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     prompt_tokens = models.IntegerField(null=True, blank=True)
@@ -5764,6 +5781,15 @@ class PersistentAgentStep(models.Model):
         help_text="LLM completion that produced this step (if applicable).",
     )
 
+    eval_run = models.ForeignKey(
+        "EvalRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="agent_steps",
+        help_text="Eval run context for this step, when applicable.",
+    )
+
     # Credit used for this step
     task_credit = models.ForeignKey(
         "TaskCredit",
@@ -5810,6 +5836,11 @@ class PersistentAgentStep(models.Model):
     def save(self, *args, **kwargs):
         completion_to_mark = None
         completion_mark_amount = None
+
+        if self.eval_run_id is None:
+            completion_obj = getattr(self, "completion", None) if self.completion_id else None
+            if completion_obj and completion_obj.eval_run_id:
+                self.eval_run_id = completion_obj.eval_run_id
 
         # On creation, optionally consume credits for chargeable steps only.
         if self._state.adding:
@@ -6975,6 +7006,11 @@ class EvalSuiteRun(models.Model):
         default=RunType.ONE_OFF,
         help_text="One-off runs are ad-hoc; official runs are tracked over time.",
     )
+    requested_runs = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1), MaxValueValidator(20)],
+        help_text="How many times to repeat each scenario for this suite run.",
+    )
     agent_strategy = models.CharField(
         max_length=40,
         choices=AgentStrategy.choices,
@@ -7042,6 +7078,14 @@ class EvalRun(models.Model):
     credits_cost = models.DecimalField(max_digits=20, decimal_places=6, default=Decimal("0"))
     completion_count = models.IntegerField(default=0)
     step_count = models.IntegerField(default=0)
+    prompt_tokens = models.IntegerField(default=0)
+    completion_tokens = models.IntegerField(default=0)
+    cached_tokens = models.IntegerField(default=0)
+    input_cost_total = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+    input_cost_uncached = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+    input_cost_cached = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+    output_cost = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+    total_cost = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -7071,7 +7115,7 @@ class EvalRunTask(models.Model):
     # Summaries
     expected_summary = models.TextField(blank=True)
     observed_summary = models.TextField(blank=True)
-    
+
     # Artifact links
     first_step = models.ForeignKey(PersistentAgentStep, on_delete=models.SET_NULL, null=True, blank=True)
     first_message = models.ForeignKey(PersistentAgentMessage, on_delete=models.SET_NULL, null=True, blank=True)
@@ -7086,6 +7130,18 @@ class EvalRunTask(models.Model):
     llm_question = models.TextField(blank=True)
     llm_answer = models.TextField(blank=True)
     llm_model = models.CharField(max_length=100, blank=True)
+
+    # Aggregated usage/cost for this task window
+    prompt_tokens = models.IntegerField(default=0)
+    completion_tokens = models.IntegerField(default=0)
+    total_tokens = models.IntegerField(default=0)
+    cached_tokens = models.IntegerField(default=0)
+    input_cost_total = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+    input_cost_uncached = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+    input_cost_cached = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+    output_cost = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+    total_cost = models.DecimalField(max_digits=12, decimal_places=6, default=Decimal("0"))
+    credits_cost = models.DecimalField(max_digits=20, decimal_places=6, default=Decimal("0"))
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

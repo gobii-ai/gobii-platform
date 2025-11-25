@@ -1,9 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft } from 'lucide-react'
+import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle } from 'lucide-react'
 
 import { fetchSuiteRunDetail, updateSuiteRunType, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
 import { RunTypeBadge } from '../components/common/RunTypeBadge'
+
+const formatCurrency = (value?: number | null, digits = 4) => {
+  if (value == null) return '—'
+  return `$${value.toFixed(digits)}`
+}
+
+const formatCredits = (value?: number | null, digits = 3) => {
+  if (value == null) return '—'
+  return value.toFixed(digits)
+}
+
+const formatTokens = (value?: number | null) => {
+  if (value == null) return '—'
+  return value.toLocaleString()
+}
 
 const formatTs = (value: string | null | undefined) => {
   if (!value) return '—'
@@ -15,13 +30,112 @@ const formatTs = (value: string | null | undefined) => {
   }
 }
 
+const formatDuration = (start: string | null, end: string | null) => {
+  if (!start || !end) return '—'
+  const ms = new Date(end).getTime() - new Date(start).getTime()
+  return (ms / 1000).toFixed(1) + 's'
+}
+
+type PassStats = { passRate: number | null; completed: number; total: number }
+
 export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   const [suite, setSuite] = useState<EvalSuiteRun | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [updatingRunType, setUpdatingRunType] = useState(false)
+  const [viewRunIndex, setViewRunIndex] = useState(0)
 
   const hasRuns = useMemo(() => Boolean(suite?.runs && suite.runs.length), [suite?.runs])
+  
+  const groupedRuns = useMemo(() => {
+    if (!suite?.runs) return {}
+    const groups: Record<string, EvalRun[]> = {}
+    suite.runs.forEach((run) => {
+      if (!groups[run.scenario_slug]) {
+        groups[run.scenario_slug] = []
+      }
+      groups[run.scenario_slug].push(run)
+    })
+    // Sort runs within groups by started_at
+    Object.keys(groups).forEach(slug => {
+      groups[slug].sort((a, b) => (a.started_at || '').localeCompare(b.started_at || ''))
+    })
+    return groups
+  }, [suite?.runs])
+
+  const maxRunCount = useMemo(() => {
+    if (Object.keys(groupedRuns).length === 0) return 1
+    return Math.max(...Object.values(groupedRuns).map((r) => r.length))
+  }, [groupedRuns])
+
+  const passStats = useMemo<PassStats>(() => {
+    if (!suite) return { passRate: null, completed: 0, total: 0 }
+    const runs = suite.runs || []
+    const hasTaskData = runs.some((run) => (run.tasks || []).length > 0)
+    if (hasTaskData) {
+      let passed = 0
+      let completed = 0
+      let total = 0
+      runs.forEach((run) => {
+        const tasks = run.tasks || []
+        total += tasks.length
+        tasks.forEach((task) => {
+          if (['passed', 'failed', 'errored', 'skipped'].includes(task.status)) {
+            completed += 1
+          }
+          if (task.status === 'passed') {
+            passed += 1
+          }
+        })
+      })
+      return { passRate: completed ? passed / completed : null, completed, total }
+    }
+    const totals = suite.task_totals
+    if (totals) {
+      return {
+        passRate: totals.pass_rate ?? null,
+        completed: totals.completed ?? totals.total ?? 0,
+        total: totals.total ?? totals.completed ?? 0,
+      }
+    }
+    return { passRate: null, completed: 0, total: 0 }
+  }, [suite])
+
+  const costTotals = useMemo(() => {
+    if (!suite) return null
+    const runs = suite.runs || []
+    if (runs.length) {
+      return runs.reduce(
+        (acc, run) => {
+          acc.prompt_tokens += run.prompt_tokens || 0
+          acc.completion_tokens += run.completion_tokens || 0
+          acc.cached_tokens += run.cached_tokens || 0
+          acc.tokens_used += run.tokens_used || 0
+          acc.input_cost_total += run.input_cost_total || 0
+          acc.input_cost_uncached += run.input_cost_uncached || 0
+          acc.input_cost_cached += run.input_cost_cached || 0
+          acc.output_cost += run.output_cost || 0
+          acc.total_cost += run.total_cost || 0
+          acc.credits_cost += run.credits_cost || 0
+          return acc
+        },
+        {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          cached_tokens: 0,
+          tokens_used: 0,
+          input_cost_total: 0,
+          input_cost_uncached: 0,
+          input_cost_cached: 0,
+          output_cost: 0,
+          total_cost: 0,
+          credits_cost: 0,
+        },
+      )
+    }
+
+    return suite.cost_totals || null
+  }, [suite?.runs, suite?.cost_totals])
 
   const completionStats = useMemo(() => {
     if (!suite) return { total: 0, completed: 0 }
@@ -237,7 +351,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
 
               <div className="flex flex-col justify-between space-y-2 sm:pl-6 sm:border-l sm:border-slate-100">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Timing</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Execution</p>
                   <div className="space-y-1 mt-1">
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-500">Started:</span>
@@ -249,38 +363,103 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                     </div>
                   </div>
                 </div>
+                <div className="pt-2 border-t border-slate-50 space-y-2">
+                  <div className="flex items-center justify-between text-sm text-slate-700">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Runs</span>
+                    <span className="text-xs text-slate-500">
+                      {completionStats.completed}/{completionStats.total} ({suite.requested_runs ?? 1}/scen.)
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-500 transition-all duration-700 ease-out"
+                      style={{ width: `${completionStats.total ? (completionStats.completed / completionStats.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="flex flex-col justify-between space-y-2 sm:pl-6 sm:border-l sm:border-slate-100">
+              <div className="flex flex-col justify-between space-y-3 sm:pl-6 sm:border-l sm:border-slate-100">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Completion</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Performance</p>
                   <div className="flex items-baseline gap-2 mt-1">
                     <span className="text-3xl font-bold text-slate-900">
-                      {completionStats.completed}
+                      {passStats.passRate != null ? `${Math.round(passStats.passRate * 100)}%` : '—'}
                     </span>
                     <span className="text-sm font-medium text-slate-500">
-                      / {completionStats.total} runs
+                      avg pass · {passStats.completed}/{passStats.total || passStats.completed || 0} tasks
                     </span>
                   </div>
                 </div>
-                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 transition-all duration-700 ease-out"
-                    style={{ width: `${completionStats.total ? (completionStats.completed / completionStats.total) * 100 : 0}%` }}
-                  />
-                </div>
               </div>
             </div>
+
+            {costTotals && (
+              <div className="px-0 sm:px-2 pb-1">
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total cost (USD)</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatCurrency(costTotals.total_cost, 4)}</p>
+                    <p className="text-xs text-slate-500">Input {formatCurrency(costTotals.input_cost_total, 4)} · Output {formatCurrency(costTotals.output_cost, 4)}</p>
+                  </div>
+                  <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Average / Run</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">
+                      {formatCurrency(costTotals.total_cost / (completionStats.completed || 1), 4)}
+                    </p>
+                    <p className="text-xs text-slate-500">{completionStats.completed} runs included</p>
+                  </div>
+                  <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Credits burned</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatCredits(costTotals.credits_cost, 3)}</p>
+                    <p className="text-xs text-slate-500">Includes tool + browser charges</p>
+                  </div>
+                  <div className="rounded-lg bg-white ring-1 ring-slate-100 shadow-sm p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Tokens</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-1">{formatTokens(costTotals.tokens_used)}</p>
+                    <p className="text-xs text-slate-500">
+                      Prompt {formatTokens(costTotals.prompt_tokens)} <span className="text-slate-300 mx-1">|</span> 
+                      Cached {formatTokens(costTotals.cached_tokens)} <span className="text-slate-300 mx-1">|</span>
+                      Completion {formatTokens(costTotals.completion_tokens)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Scenarios section */}
           <section className="card overflow-hidden" style={{ padding: 0 }}>
-            <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4">
+            <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4 flex items-center justify-between">
               <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Scenarios</h2>
+              
+              {/* Global Run Switcher */}
+              {maxRunCount > 1 && (
+                <div className="flex items-center gap-1 bg-white rounded-lg p-1 shadow-sm border border-blue-100">
+                  {Array.from({ length: maxRunCount }).map((_, idx) => {
+                    const isSelected = idx === viewRunIndex
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => setViewRunIndex(idx)}
+                        className={`
+                          px-3 py-1 text-xs font-bold uppercase tracking-wide rounded transition-all
+                          ${isSelected 
+                            ? 'bg-blue-600 text-white shadow-sm' 
+                            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                          }
+                        `}
+                      >
+                        Run {idx + 1}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
             <div className="divide-y divide-slate-100">
-              {(suite.runs || []).map((run) => (
-                <RunCard key={run.id} run={run} />
+              {Object.entries(groupedRuns).map(([slug, runs]) => (
+                <ScenarioGroup key={slug} scenarioSlug={slug} run={runs[viewRunIndex]} index={viewRunIndex} />
               ))}
               {!hasRuns && (
                 <div className="p-12 text-center text-slate-500 font-medium">
@@ -295,57 +474,94 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   )
 }
 
-function RunCard({ run }: { run: EvalRun }) {
+function ScenarioGroup({ scenarioSlug, run, index }: { scenarioSlug: string; run?: EvalRun, index: number }) {
   const [expanded, setExpanded] = useState(true)
   
-  const isCompleted = run.status === 'completed'
-  const isRunning = run.status === 'running'
-  
+  const isCompleted = run?.status === 'completed'
+  const isRunning = run?.status === 'running'
+  const isMissing = !run
+  const runCost = run?.total_cost ?? null
+  const runCredits = run?.credits_cost ?? null
+
   return (
     <div className="bg-white transition-colors hover:bg-slate-50 group">
-      <div 
+       <div 
         className="flex flex-wrap items-center justify-between gap-4 p-6 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-4">
-           <div className={`w-3 h-3 rounded-full shadow-sm shrink-0 ${isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`} />
+           <div className={`w-3 h-3 rounded-full shadow-sm shrink-0 
+             ${isMissing ? 'bg-slate-200' : isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`} 
+           />
            <div>
-              <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{run.scenario_slug}</h3>
+              <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{scenarioSlug}</h3>
               <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-2">
-                <RunTypeBadge runType={run.run_type} dense />
-                <span className="flex items-center gap-1">
-                  Agent:
-                  <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">{run.agent_id || 'ephemeral'}</span>
+                <span className="bg-white px-1.5 py-0.5 rounded border border-slate-200 font-medium text-slate-600">
+                  Run #{index + 1}
                 </span>
+                {run && (
+                   <span className="flex items-center gap-1">
+                     Agent:
+                     <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">{run.agent_id || 'ephemeral'}</span>
+                   </span>
+                )}
               </div>
            </div>
         </div>
         <div className="flex items-center gap-4">
-           <div className="text-right hidden sm:block">
-             <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Duration</div>
-             <div className="text-xs font-mono text-slate-700">
-                {run.finished_at && run.started_at 
-                  ? ((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000).toFixed(1) + 's'
-                  : '—'
-                }
+          {run && (
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <span className="px-2 py-1 rounded-full bg-slate-100 font-semibold text-slate-700">
+                {formatCurrency(runCost, 4)}
+              </span>
+              <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold">
+                {runCredits != null ? `${runCredits.toFixed(3)} credits` : '— credits'}
+              </span>
+            </div>
+          )}
+          {run && (
+            <div className="text-right hidden sm:block">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Duration</div>
+              <div className="text-xs font-mono text-slate-700">
+                 {formatDuration(run.started_at, run.finished_at)}
+               </div>
              </div>
-           </div>
-           <StatusBadge status={run.status || 'pending'} />
+           )}
+           {run ? <StatusBadge status={run.status || 'pending'} /> : <span className="text-xs text-slate-400 italic px-2">Not run</span>}
         </div>
       </div>
-      
+
       {expanded && (
-        <div className="bg-slate-50 border-t border-slate-100 px-6 py-6">
-          {(run.tasks || []).length > 0 ? (
-            <div className="space-y-3">
-              {run.tasks?.map((task) => (
-                <TaskRow key={task.id} task={task} />
-              ))}
-            </div>
+        <div className="border-t border-slate-100 px-6 py-6">
+          {!run ? (
+             <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2">
+               <HelpCircle className="w-8 h-8 text-slate-200" />
+               <p className="text-sm">No data available for run #{index + 1} of this scenario.</p>
+             </div>
           ) : (
-            <p className="py-2 text-xs italic text-slate-400 text-center">
-              Tasks not loaded or empty.
-            </p>
+            <div className="space-y-4">
+               <div className="flex items-center justify-between text-xs text-slate-500 border-b border-slate-100 pb-3 mb-4">
+                 <div className="flex items-center gap-4">
+                    <span className="flex items-center gap-1.5">
+                       <Clock className="w-3.5 h-3.5 text-slate-400" />
+                       <span>Started: {formatTs(run.started_at)}</span>
+                    </span>
+                 </div>
+                 <RunTypeBadge runType={run.run_type} dense />
+               </div>
+
+              {(run.tasks || []).length > 0 ? (
+                <div className="space-y-3">
+                  {run.tasks?.map((task) => (
+                    <TaskRow key={task.id} task={task} />
+                  ))}
+                </div>
+              ) : (
+                <p className="py-8 text-center text-sm text-slate-400 border border-slate-100 border-dashed rounded-lg">
+                  No tasks recorded for this run.
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -356,12 +572,14 @@ function RunCard({ run }: { run: EvalRun }) {
 function TaskRow({ task }: { task: EvalTask }) {
   const isPass = task.status === 'passed'
   const isFail = task.status === 'failed' || task.status === 'errored'
-  
+  const costChip = task.total_cost != null ? formatCurrency(task.total_cost, 4) : '—'
+  const creditChip = task.credits_cost != null ? `${task.credits_cost.toFixed(3)} cr` : '0 cr'
+
   return (
     <div className={`
       group flex items-start gap-3 rounded-lg p-4 text-sm transition-all
-      ${isPass ? 'ring-1 ring-inset ring-emerald-200 bg-emerald-50' : ''}
-      ${isFail ? 'ring-1 ring-inset ring-rose-200 bg-rose-50' : ''}
+      ${isPass ? 'ring-1 ring-inset ring-emerald-200 bg-white' : ''}
+      ${isFail ? 'ring-1 ring-inset ring-rose-200 bg-white' : ''}
       ${!isPass && !isFail ? 'ring-1 ring-inset ring-slate-200 bg-white' : ''}
     `}>
       <div className="mt-0.5 shrink-0">
@@ -373,14 +591,24 @@ function TaskRow({ task }: { task: EvalTask }) {
              <span className="font-mono text-xs text-slate-400 mr-2">#{task.sequence}</span>
              {task.name}
            </p>
-           <span className="shrink-0 text-[10px] font-mono text-slate-500 bg-white/50 px-1.5 py-0.5 rounded ring-1 ring-slate-200/50">{task.assertion_type}</span>
+           <span className="shrink-0 text-[10px] font-mono text-slate-500 bg-white px-1.5 py-0.5 rounded ring-1 ring-slate-200">{task.assertion_type}</span>
         </div>
         
         {task.observed_summary && (
-          <div className={`mt-2 text-xs p-2.5 rounded bg-white/60 ring-1 ring-black/5 leading-relaxed font-mono ${isFail ? 'text-rose-800' : 'text-slate-600'}`}>
+          <div className={`mt-2 text-xs p-2.5 rounded ring-1 ring-slate-100 leading-relaxed font-mono bg-white ${isFail ? 'text-rose-800 bg-rose-50/30' : 'text-slate-600'}`}>
             {task.observed_summary}
           </div>
         )}
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500">
+          <span className="px-2 py-1 rounded-full bg-slate-100 font-semibold text-slate-700">{costChip}</span>
+          <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold">{creditChip}</span>
+          <span className="px-2 py-1 rounded-full bg-slate-50 text-slate-600 font-semibold">
+            {formatTokens(task.total_tokens)} tok ·
+            Prompt {formatTokens(task.prompt_tokens)} <span className="text-slate-300 mx-1">|</span>
+            Cached {formatTokens(task.cached_tokens)} <span className="text-slate-300 mx-1">|</span>
+            Completion {formatTokens(task.completion_tokens)}
+          </span>
+        </div>
       </div>
     </div>
   )

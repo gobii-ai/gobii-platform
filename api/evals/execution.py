@@ -4,6 +4,7 @@ from typing import Any, Iterable, Optional, Tuple, Dict
 from uuid import UUID
 import json
 import time
+import contextvars
 
 from api.models import (
     PersistentAgent,
@@ -15,12 +16,25 @@ from api.models import (
 from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.core.llm_utils import run_completion
 from api.agent.events import AgentEventType, get_agent_event_stream
-from api.evals.realtime import broadcast_task_update
+from api.evals.realtime import broadcast_task_update, broadcast_run_update
+from api.evals.metrics import aggregate_task_metrics, aggregate_run_metrics
 from config.redis_client import get_redis_client
-from api.agent.core.llm_config import get_llm_config, LLMNotConfiguredError
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+_current_eval_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "eval_run_id", default=None
+)
+
+
+def set_current_eval_run_id(run_id: str | None) -> None:
+    _current_eval_run_id.set(run_id)
+
+
+def get_current_eval_run_id() -> str | None:
+    return _current_eval_run_id.get()
 
 class AgentEventListener:
     """
@@ -114,25 +128,33 @@ class ScenarioExecutionTools:
         return EvalRun.objects.get(id=run_id)
 
     def inject_message(
-        self, 
-        agent_id: str, 
-        body: str, 
-        sender_user_id: int = -999, 
+        self,
+        agent_id: str,
+        body: str,
+        sender_user_id: int = -999,
         attachments: Iterable[Any] = (),
-        trigger_processing: bool = True
+        trigger_processing: bool = True,
+        eval_run_id: str | None = None,
+        mock_config: dict | None = None,
     ) -> PersistentAgentMessage:
         """
         Send a message to the agent as a web user.
         Automatically whitelists the sender to ensure the agent can reply.
+
+        Args:
+            mock_config: Optional dict mapping tool_name -> mock response.
+                         Passed to Celery worker for eval mocking.
         """
+        current_run_id = eval_run_id or get_current_eval_run_id()
         msg, _ = inject_internal_web_message(
             agent_id=agent_id,
             body=body,
             sender_user_id=sender_user_id,
             attachments=attachments,
-            trigger_processing=trigger_processing
+            trigger_processing=False,  # handle processing explicitly below
+            eval_run_id=current_run_id,
         )
-        
+
         # Auto-whitelist the sender so the agent trusts this contact
         CommsAllowlistEntry.objects.get_or_create(
             agent_id=agent_id,
@@ -142,21 +164,45 @@ class ScenarioExecutionTools:
                 "is_active": True,
             }
         )
-        
+
         # Update agent's preferred contact to this new user so "Welcome" prompts target them
         agent = PersistentAgent.objects.get(id=agent_id)
         agent.preferred_contact_endpoint = msg.from_endpoint
         agent.save(update_fields=["preferred_contact_endpoint"])
-        
+
+        if trigger_processing:
+            try:
+                from api.agent.tasks import process_agent_events_task
+                process_agent_events_task.delay(
+                    str(agent_id),
+                    eval_run_id=current_run_id,
+                    mock_config=mock_config,
+                )
+            except Exception:
+                logger.exception("Failed to trigger processing for agent %s", agent_id)
+
         return msg
 
-    def trigger_processing(self, agent_id: str) -> None:
+    def trigger_processing(
+        self,
+        agent_id: str,
+        *,
+        eval_run_id: str | None = None,
+        mock_config: dict | None = None,
+    ) -> None:
         """
         Manually trigger the agent's event processing loop.
         """
-        # Import here to avoid circular imports at module level
-        from api.agent.tasks import process_agent_events_task
-        process_agent_events_task.delay(str(agent_id))
+        current_run_id = eval_run_id or get_current_eval_run_id()
+        try:
+            from api.agent.tasks import process_agent_events_task
+            process_agent_events_task.delay(
+                str(agent_id),
+                eval_run_id=current_run_id,
+                mock_config=mock_config,
+            )
+        except Exception:
+            logger.exception("Failed to trigger processing for agent %s", agent_id)
 
     def agent_event_listener(self, agent_id: str, *, start_time: Optional[float] = None) -> AgentEventListener:
         """
@@ -227,6 +273,16 @@ class ScenarioExecutionTools:
             
         task_obj.save()
 
+        # Attempt to aggregate cost/usage metrics for this task and its parent run.
+        # We call aggregate_run_metrics, which will:
+        # 1. Sum total costs for the run from all AgentCompletions/Steps.
+        # 2. Re-distribute those costs to tasks based on time windows.
+        try:
+            aggregate_run_metrics(task_obj.run)
+            broadcast_run_update(task_obj.run)
+        except Exception:
+            logger.error("Failed to aggregate metrics during record_task_result", exc_info=True)
+
         try:
             broadcast_task_update(task_obj)
         except Exception:
@@ -235,9 +291,9 @@ class ScenarioExecutionTools:
         return task_obj
 
     def llm_judge(
-        self, 
-        question: str, 
-        context: str, 
+        self,
+        question: str,
+        context: str,
         options: Iterable[str] = ("Yes", "No"),
         model: Optional[str] = None,
         params: Optional[Dict[str, Any]] = None,
@@ -246,20 +302,22 @@ class ScenarioExecutionTools:
         Ask an LLM to judge a context based on a question and a set of options.
         Uses tool calling to ensure structured output. Automatically falls back to
         the configured failover tier to pick the first available model when none
-        (or only a model name) is provided. 
-        
+        (or only a model name) is provided.
+
         Args:
             question: The specific question to answer.
             context: The context text to evaluate.
             options: A list of valid answer options (default: ["Yes", "No"]).
             model: Optional LLM model to use. If omitted, the configured default is used.
             params: Optional LLM parameters. If omitted, the configured default params are used.
-            
+
         Returns:
             A tuple of (choice, reasoning). choice will be one of the strings in `options`.
         """
+        from api.agent.core.llm_config import get_llm_config, LLMNotConfiguredError
+
         options_list = list(options)
-        
+
         tool_definition = {
             "type": "function",
             "function": {
@@ -282,7 +340,7 @@ class ScenarioExecutionTools:
                 }
             }
         }
-        
+
         prompt = [
             {"role": "system", "content": "You are an impartial judge. Evaluate the context and answer the question by calling the `submit_judgment` tool."},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}\n\nValid Options: {', '.join(options_list)}"}
@@ -309,24 +367,28 @@ class ScenarioExecutionTools:
         # Default to deterministic temperature unless the endpoint requires its own value.
         if safe_params.get("temperature") is None:
             safe_params["temperature"] = 0.0
-        
+
         try:
             response = run_completion(
                 model=effective_model,
                 messages=prompt,
                 tools=[tool_definition],
-                tool_choice={"type": "function", "function": {"name": "submit_judgment"}},
+                # Use "auto" instead of forcing - some models (like glm-4.6) return empty args with forced tool_choice
                 params=safe_params
             )
-            
+
             tool_calls = response.choices[0].message.tool_calls
             if not tool_calls:
                  return "Error", "LLM did not call the judgment tool."
-                 
-            # We expect exactly one tool call since we forced it
-            args = json.loads(tool_calls[0].function.arguments)
-            return args.get("choice"), args.get("reasoning")
-            
+
+            # Find the submit_judgment call
+            for tc in tool_calls:
+                if tc.function.name == "submit_judgment":
+                    args = json.loads(tc.function.arguments)
+                    return args.get("choice"), args.get("reasoning")
+
+            return "Error", "LLM did not call submit_judgment tool."
+
         except Exception as e:
             logger.error(f"LLM judge failed: {e}")
             return "Error", f"Exception during judgment: {str(e)}"
