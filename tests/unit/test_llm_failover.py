@@ -119,6 +119,22 @@ class TestLLMFailover(TestCase):
             with self.assertRaises(LLMNotConfiguredError):
                 get_llm_config()
 
+    def test_get_llm_config_strips_internal_hints(self):
+        seed_persistent_basic(include_openrouter=True)
+        with mock.patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "anthropic-key",
+            "GOOGLE_API_KEY": "google-key",
+            "OPENROUTER_API_KEY": "openrouter-key",
+        }, clear=True):
+            _model, params = get_llm_config()
+
+        self.assertNotIn("endpoint_key", params)
+        self.assertNotIn("pricing_provider_hint", params)
+        self.assertNotIn("supports_tool_choice", params)
+        self.assertNotIn("use_parallel_tool_calls", params)
+        self.assertNotIn("supports_vision", params)
+        self.assertNotIn("supports_temperature", params)
+
     def test_failover_config_includes_all_tier_endpoints(self):
         seed_persistent_basic(include_openrouter=True)
         with mock.patch.dict(os.environ, {

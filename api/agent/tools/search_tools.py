@@ -14,7 +14,11 @@ import litellm  # re-exported for tests that patch LiteLLM directly
 from opentelemetry import trace
 
 from ...models import PersistentAgent
-from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
+from ..core.llm_config import (
+    LLMNotConfiguredError,
+    get_llm_config_with_failover,
+    strip_internal_llm_hints,
+)
 from ..core.llm_utils import run_completion
 from .mcp_manager import get_mcp_manager
 from .tool_manager import (
@@ -156,7 +160,7 @@ def _search_with_llm(
     try:
         failover_configs = get_llm_config_with_failover(agent=agent)
         last_exc: Optional[Exception] = None
-        for idx, (provider, model, params) in enumerate(failover_configs):
+        for idx, (provider, model, params_with_hints) in enumerate(failover_configs):
             try:
                 logger.info(
                     "search_tools.%s: invoking provider %s/%s: provider=%s model=%s",
@@ -202,13 +206,14 @@ def _search_with_llm(
                 ):
                     run_kwargs["safety_identifier"] = str(safety_value)
 
+                safe_params = strip_internal_llm_hints(params_with_hints)
                 response = run_completion(
                     model=model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    params=params,
+                    params=safe_params,
                     tools=[enable_tools_def],
                     **run_kwargs,
                 )

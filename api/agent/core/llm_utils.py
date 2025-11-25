@@ -25,6 +25,11 @@ def run_completion(
     """
     params = dict(params or {})
 
+    pricing_provider_hint = params.pop("pricing_provider_hint", None)
+    params.pop("endpoint_key", None)
+    if pricing_provider_hint and "custom_llm_provider" not in params:
+        params["custom_llm_provider"] = pricing_provider_hint
+
     supports_temperature = params.pop("supports_temperature", True)
     if not supports_temperature:
         params.pop("temperature", None)

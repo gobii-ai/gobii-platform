@@ -43,6 +43,15 @@ _MODEL_TEMPERATURE_REQUIREMENTS: Tuple[Tuple[str, float], ...] = (
     ("openai/gpt-5", 1.0),
 )
 
+_INTERNAL_LLM_HINT_KEYS = {
+    "supports_tool_choice",
+    "use_parallel_tool_calls",
+    "supports_vision",
+    "supports_temperature",
+    "endpoint_key",
+    "pricing_provider_hint",
+}
+
 
 def get_required_temperature_for_model(model: str) -> Optional[float]:
     """Return the fixed temperature required by a given LiteLLM model."""
@@ -51,6 +60,12 @@ def get_required_temperature_for_model(model: str) -> Optional[float]:
         if model.startswith(prefix):
             return temperature
     return None
+
+
+def strip_internal_llm_hints(params_with_hints: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of params without Gobii-only hint fields."""
+
+    return {k: v for k, v in (params_with_hints or {}).items() if k not in _INTERNAL_LLM_HINT_KEYS}
 
 
 def _apply_required_temperature(model: str, params: Dict[str, Any]) -> None:
@@ -447,11 +462,7 @@ def get_llm_config() -> Tuple[str, dict]:
 
     _provider_key, model, params = configs[0]
     # Remove any internal-only hints that shouldn't be passed to litellm
-    params = {
-        k: v
-        for k, v in params.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_temperature")
-    }
+    params = strip_internal_llm_hints(params)
     return model, params
 
 
@@ -535,6 +546,10 @@ def _collect_failover_configs(
     """Build failover configurations from the provided tier queryset."""
 
     failover_configs: List[Tuple[str, str, dict]] = []
+    try:
+        LLMProvider = apps.get_model("api", "LLMProvider")
+    except Exception:
+        LLMProvider = None
     for tier in tiers:
         endpoints_with_weights = []
         for te in tier.tier_endpoints.select_related("endpoint__provider").all():
@@ -627,7 +642,10 @@ def _collect_failover_configs(
                 params.pop("temperature", None)
 
             pricing_provider_hint: str | None = provider.key or None
-            if provider.browser_backend == LLMProvider.BrowserBackend.GOOGLE:
+            if LLMProvider:
+                if provider.browser_backend == LLMProvider.BrowserBackend.GOOGLE:
+                    pricing_provider_hint = "vertex_ai"
+            elif str(getattr(provider, "browser_backend", "")).upper() == "GOOGLE":
                 pricing_provider_hint = "vertex_ai"
 
             params_with_hints = dict(params)
@@ -813,10 +831,7 @@ def get_summarization_llm_config(
     _provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm
     supports_temperature = bool(params_with_hints.get("supports_temperature", True))
-    params = {
-        k: v for k, v in params_with_hints.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_temperature")
-    }
+    params = strip_internal_llm_hints(params_with_hints)
 
     # Default to deterministic temperature unless the endpoint already
     # specifies a requirement (e.g., GPT-5 must run at temperature=1).
@@ -876,4 +891,5 @@ __all__ = [
     "LLMNotConfiguredError",
     "invalidate_llm_bootstrap_cache",
     "is_llm_bootstrap_required",
+    "strip_internal_llm_hints",
 ]
