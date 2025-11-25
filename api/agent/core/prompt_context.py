@@ -87,7 +87,6 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
-
 __all__ = [
     "tool_call_history_limit",
     "message_history_limit",
@@ -143,6 +142,23 @@ def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
     }
     return limit_map.get(tier, settings.standard_prompt_token_budget)
 
+
+def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
+    """Return (limit, hysteresis) for unified history using prompt settings."""
+    prompt_settings = get_prompt_settings()
+    tier = get_agent_llm_tier(agent)
+    limit_map = {
+        AgentLLMTier.MAX: prompt_settings.max_unified_history_limit,
+        AgentLLMTier.PREMIUM: prompt_settings.premium_unified_history_limit,
+    }
+    hyst_map = {
+        AgentLLMTier.MAX: prompt_settings.max_unified_history_hysteresis,
+        AgentLLMTier.PREMIUM: prompt_settings.premium_unified_history_hysteresis,
+    }
+    return (
+        int(limit_map.get(tier, prompt_settings.standard_unified_history_limit)),
+        int(hyst_map.get(tier, prompt_settings.standard_unified_history_hysteresis)),
+    )
 
 def _archive_rendered_prompt(
     agent: PersistentAgent,
@@ -498,8 +514,9 @@ def build_prompt_context(
         proactive_context=proactive_context,
     )
     
-    # Build the user content sections using promptree
-    # Group sections by priority for better weight distribution
+    # Unified history first (order within user prompt: unified_history -> important -> critical)
+    unified_history_group = prompt.group("unified_history", weight=3)
+    _get_unified_history_prompt(agent, unified_history_group)
 
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
@@ -577,11 +594,6 @@ def build_prompt_context(
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
     
-    # Unified history - most likely to be large, benefits from HMT shrinking
-    # Create a subgroup for unified history content
-    unified_history_group = variable_group.group("unified_history", weight=3)
-    _get_unified_history_prompt(agent, unified_history_group)
-
     # Browser tasks - each task gets its own section for better token management
     _build_browser_tasks_sections(agent, variable_group)
     
@@ -1593,8 +1605,13 @@ def _get_sms_prompt_addendum(agent: PersistentAgent) -> str:
 def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    limit_tool_history = tool_call_history_limit(agent)
-    limit_msg_history = message_history_limit(agent)
+    unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
+    configured_tool_limit = tool_call_history_limit(agent)
+    configured_msg_limit = message_history_limit(agent)
+    unified_fetch_span_offset = 5
+    unified_fetch_span = unified_limit + unified_hysteresis + unified_fetch_span_offset
+    limit_tool_history = max(configured_tool_limit, unified_fetch_span)
+    limit_msg_history = max(configured_msg_limit, unified_fetch_span)
 
     # ---- summaries (keep unchanged as requested) ----------------------- #
     step_snap = (
@@ -1780,6 +1797,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     # Create structured promptree groups for each event
     if structured_events:
         structured_events.sort(key=lambda e: e[0])  # chronological order
+
+        if len(structured_events) > unified_limit + unified_hysteresis:
+            extra = len(structured_events) - unified_limit
+            drop_chunks = extra // unified_hysteresis
+            keep = len(structured_events) - (drop_chunks * unified_hysteresis)
+            structured_events = structured_events[-keep:]
 
         # Pre‑compute constants for exponential decay
         now = structured_events[-1][0]

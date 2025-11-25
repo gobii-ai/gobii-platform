@@ -691,6 +691,12 @@ class PromptConfigAdmin(admin.ModelAdmin):
         "standard_enabled_tool_limit",
         "premium_enabled_tool_limit",
         "max_enabled_tool_limit",
+        "standard_unified_history_limit",
+        "premium_unified_history_limit",
+        "max_unified_history_limit",
+        "standard_unified_history_hysteresis",
+        "premium_unified_history_hysteresis",
+        "max_unified_history_hysteresis",
         "updated_at",
     )
     readonly_fields = ("singleton_id", "created_at", "updated_at")
@@ -710,6 +716,26 @@ class PromptConfigAdmin(admin.ModelAdmin):
         (
             "Enabled tool limits",
             {"fields": ("standard_enabled_tool_limit", "premium_enabled_tool_limit", "max_enabled_tool_limit")},
+        ),
+        (
+            "Unified history limits",
+            {
+                "fields": (
+                    "standard_unified_history_limit",
+                    "premium_unified_history_limit",
+                    "max_unified_history_limit",
+                )
+            },
+        ),
+        (
+            "Unified history hysteresis",
+            {
+                "fields": (
+                    "standard_unified_history_hysteresis",
+                    "premium_unified_history_hysteresis",
+                    "max_unified_history_hysteresis",
+                )
+            },
         ),
         ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
     )

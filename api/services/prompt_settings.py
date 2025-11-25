@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from django.core.cache import cache
+from django.conf import settings
 
 
 DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET = 120000
@@ -16,6 +17,8 @@ DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT = 20
 DEFAULT_STANDARD_ENABLED_TOOL_LIMIT = 40
 DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT = 40
 DEFAULT_MAX_ENABLED_TOOL_LIMIT = 40
+DEFAULT_UNIFIED_HISTORY_LIMIT = getattr(settings, "PA_RAW_MSG_LIMIT", 20) + getattr(settings, "PA_RAW_STEP_LIMIT", 100)
+DEFAULT_UNIFIED_HISTORY_HYSTERESIS = getattr(settings, "PA_RAW_MSG_LIMIT", 20)
 
 _CACHE_KEY = "prompt_settings:v3"
 _CACHE_TTL_SECONDS = 300
@@ -35,6 +38,12 @@ class PromptSettings:
     standard_enabled_tool_limit: int
     premium_enabled_tool_limit: int
     max_enabled_tool_limit: int
+    standard_unified_history_limit: int
+    premium_unified_history_limit: int
+    max_unified_history_limit: int
+    standard_unified_history_hysteresis: int
+    premium_unified_history_hysteresis: int
+    max_unified_history_hysteresis: int
 
 
 def _serialise(config) -> dict:
@@ -51,6 +60,12 @@ def _serialise(config) -> dict:
         "standard_enabled_tool_limit": config.standard_enabled_tool_limit,
         "premium_enabled_tool_limit": config.premium_enabled_tool_limit,
         "max_enabled_tool_limit": config.max_enabled_tool_limit,
+        "standard_unified_history_limit": config.standard_unified_history_limit,
+        "premium_unified_history_limit": config.premium_unified_history_limit,
+        "max_unified_history_limit": config.max_unified_history_limit,
+        "standard_unified_history_hysteresis": config.standard_unified_history_hysteresis,
+        "premium_unified_history_hysteresis": config.premium_unified_history_hysteresis,
+        "max_unified_history_hysteresis": config.max_unified_history_hysteresis,
     }
 
 
@@ -81,6 +96,12 @@ def get_prompt_settings() -> PromptSettings:
             standard_enabled_tool_limit=DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
             premium_enabled_tool_limit=DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT,
             max_enabled_tool_limit=DEFAULT_MAX_ENABLED_TOOL_LIMIT,
+            standard_unified_history_limit=DEFAULT_UNIFIED_HISTORY_LIMIT,
+            premium_unified_history_limit=DEFAULT_UNIFIED_HISTORY_LIMIT,
+            max_unified_history_limit=DEFAULT_UNIFIED_HISTORY_LIMIT,
+            standard_unified_history_hysteresis=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+            premium_unified_history_hysteresis=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+            max_unified_history_hysteresis=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
         )
 
     data = _serialise(config)
