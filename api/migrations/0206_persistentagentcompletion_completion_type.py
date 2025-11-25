@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0203_promptconfig_max_unified_history_hysteresis_and_more"),
+        ("api", "0205_merge_20251125_1840"),
     ]
 
     operations = [

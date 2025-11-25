@@ -11,9 +11,12 @@ from api.models import (
     PersistentAgentToolCall,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    EvalRun,
 )
+from api.agent.core.budget import BudgetContext, set_current_context
 from api.agent.core.event_processing import _completion_with_failover
 from api.agent.core.compaction import llm_summarise_comms
+from api.agent.core.token_usage import log_agent_completion
 from api.agent.tasks.agent_tags import _generate_via_llm as generate_tags_via_llm
 from api.agent.tasks.short_description import _generate_via_llm as generate_short_desc_via_llm
 from api.agent.tasks.mini_description import _generate_via_llm as generate_mini_desc_via_llm
@@ -48,6 +51,18 @@ class TokenUsageTrackingTest(TestCase):
             name="Test Agent",
             charter="Test charter"
         )
+
+        self.eval_run = EvalRun.objects.create(
+            suite_run=None,
+            scenario_slug="scenario",
+            scenario_version="",
+            agent=self.agent,
+            initiated_by=self.user,
+        )
+
+    def tearDown(self):
+        set_current_context(None)
+        return super().tearDown()
     
     def test_completion_with_failover_returns_token_usage(self):
         """Test that _completion_with_failover returns token usage data."""
@@ -385,6 +400,43 @@ class TokenUsageTrackingTest(TestCase):
         ).latest("created_at")
         self.assertEqual(completion.prompt_tokens, 4)
         self.assertEqual(completion.completion_tokens, 2)
+
+    def test_log_agent_completion_uses_eval_run_from_budget_context(self):
+        ctx = BudgetContext(
+            agent_id=str(self.agent.id),
+            budget_id="budget",
+            branch_id="branch",
+            depth=0,
+            max_steps=10,
+            max_depth=5,
+            eval_run_id=str(self.eval_run.id),
+        )
+        set_current_context(ctx)
+
+        token_usage = {"model": "test-model", "provider": "test-provider", "prompt_tokens": 3}
+        log_agent_completion(
+            self.agent,
+            token_usage,
+            completion_type=PersistentAgentCompletion.CompletionType.TAG,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.TAG,
+        ).latest("created_at")
+        self.assertEqual(str(completion.eval_run_id), str(self.eval_run.id))
+        self.assertEqual(completion.prompt_tokens, 3)
+
+    @patch("api.models.PersistentAgentCompletion.objects.create", side_effect=RuntimeError("db down"))
+    def test_log_agent_completion_warns_on_failure(self, mock_create):
+        with self.assertLogs("api.agent.core.token_usage", level="WARNING") as captured:
+            log_agent_completion(
+                self.agent,
+                {"model": "m", "provider": "p"},
+                completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+            )
+
+        self.assertTrue(any("Failed to persist completion" in msg for msg in captured.output))
 
     @patch("api.agent.tools.search_tools.run_completion")
     @patch("api.agent.tools.search_tools.get_llm_config_with_failover")

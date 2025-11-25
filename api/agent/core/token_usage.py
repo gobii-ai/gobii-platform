@@ -12,6 +12,18 @@ tracer = trace.get_tracer("gobii.utils")
 
 logger = logging.getLogger(__name__)
 
+# Lazy import to avoid cycles: budget context is only needed when persisting
+# completions and should not be loaded at module import time.
+def _get_budget_eval_run_id() -> Optional[str]:
+    try:
+        from .budget import get_current_context
+
+        ctx = get_current_context()
+        return getattr(ctx, "eval_run_id", None) if ctx else None
+    except Exception:
+        logger.debug("Unable to read budget context for eval_run_id", exc_info=True)
+        return None
+
 _COST_PRECISION = Decimal("0.000001")
 
 
@@ -228,23 +240,33 @@ def set_usage_span_attributes(span, usage: Any) -> None:
         logger.debug("Failed to set usage span attributes", exc_info=True)
 
 
-def log_agent_completion(agent: Any, token_usage: Optional[dict], *, completion_type: str) -> None:
+def log_agent_completion(
+    agent: Any,
+    token_usage: Optional[dict],
+    *,
+    completion_type: str,
+    eval_run_id: Optional[str] = None,
+) -> None:
     if agent is None:
         return
     if not token_usage:
         token_usage = {"model": None, "provider": None}
+
+    resolved_eval_run_id = eval_run_id or _get_budget_eval_run_id()
     try:
         from ...models import PersistentAgentCompletion  # local import to avoid cycles
 
         PersistentAgentCompletion.objects.create(
             agent=agent,
+            eval_run_id=resolved_eval_run_id,
             **completion_kwargs_from_usage(token_usage, completion_type=completion_type),
         )
-    except Exception:
-        logger.debug(
-            "Failed to persist completion (type=%s) for agent %s",
+    except Exception as exc:
+        logger.warning(
+            "Failed to persist completion (type=%s) for agent %s: %s",
             completion_type,
             getattr(agent, "id", None),
+            exc,
             exc_info=True,
         )
 
