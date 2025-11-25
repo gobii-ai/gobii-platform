@@ -63,6 +63,7 @@ class BrowserTaskFollowUpTests(TestCase):
             budget_id="budget-123",
             branch_id="branch-1",
             depth=1,
+            eval_run_id=None,
         )
 
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
@@ -84,5 +85,5 @@ class BrowserTaskFollowUpTests(TestCase):
             depth=2,
         )
 
-        mock_delay.assert_called_once_with(str(self.persistent_agent.id))
+        mock_delay.assert_called_once_with(str(self.persistent_agent.id), eval_run_id=None)
 
