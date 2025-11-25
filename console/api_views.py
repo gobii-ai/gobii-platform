@@ -1943,21 +1943,21 @@ class ProfilePersistentTierListCreateAPIView(SystemAdminAPIView):
         order = payload.get("order", 0)
         is_premium = _coerce_bool(payload.get("is_premium", False))
         is_max = _coerce_bool(payload.get("is_max", False))
-        credit_multiplier = None
+
+        create_kwargs: dict[str, Any] = {
+            "token_range": token_range,
+            "order": order,
+            "description": (payload.get("description") or "").strip(),
+            "is_premium": is_premium,
+            "is_max": is_max,
+        }
         if payload.get("credit_multiplier"):
             try:
-                credit_multiplier = Decimal(str(payload.get("credit_multiplier")))
+                create_kwargs["credit_multiplier"] = Decimal(str(payload.get("credit_multiplier")))
             except InvalidOperation:
                 return HttpResponseBadRequest("credit_multiplier must be a valid decimal")
 
-        tier = ProfilePersistentTier.objects.create(
-            token_range=token_range,
-            order=order,
-            description=(payload.get("description") or "").strip(),
-            is_premium=is_premium,
-            is_max=is_max,
-            credit_multiplier=credit_multiplier,
-        )
+        tier = ProfilePersistentTier.objects.create(**create_kwargs)
         return _json_ok(tier_id=str(tier.id))
 
 
