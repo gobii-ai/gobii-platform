@@ -2040,6 +2040,15 @@ class LLMRoutingProfile(models.Model):
         help_text="Source profile this was cloned from, if any.",
     )
 
+    eval_judge_endpoint = models.ForeignKey(
+        "PersistentModelEndpoint",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="eval_judge_profiles",
+        help_text="Endpoint used for eval judging/grading. If null, uses default from tier config.",
+    )
+
     class Meta:
         ordering = ["-is_active", "display_name"]
         indexes = [

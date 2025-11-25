@@ -303,6 +303,11 @@ def build_llm_overview() -> dict[str, Any]:
 
 def serialize_routing_profile_list_item(profile: LLMRoutingProfile) -> dict[str, Any]:
     """Serialize a profile for list views (minimal details)."""
+    eval_judge = None
+    if profile.eval_judge_endpoint_id:
+        eval_judge = {
+            "endpoint_id": str(profile.eval_judge_endpoint_id),
+        }
     return {
         "id": str(profile.id),
         "name": profile.name,
@@ -312,6 +317,7 @@ def serialize_routing_profile_list_item(profile: LLMRoutingProfile) -> dict[str,
         "created_at": profile.created_at.isoformat() if profile.created_at else None,
         "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
         "cloned_from_id": str(profile.cloned_from_id) if profile.cloned_from_id else None,
+        "eval_judge_endpoint_id": str(profile.eval_judge_endpoint_id) if profile.eval_judge_endpoint_id else None,
     }
 
 
@@ -394,6 +400,18 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
             "endpoints": tier_endpoints,
         })
 
+    # Eval judge endpoint info
+    eval_judge_endpoint = None
+    if profile.eval_judge_endpoint:
+        ep = profile.eval_judge_endpoint
+        provider_name = ep.provider.display_name if ep.provider else "Unlinked"
+        eval_judge_endpoint = {
+            "endpoint_id": str(ep.id),
+            "endpoint_key": ep.key,
+            "label": f"{provider_name} · {ep.litellm_model}",
+            "model": ep.litellm_model,
+        }
+
     return {
         "id": str(profile.id),
         "name": profile.name,
@@ -403,6 +421,7 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
         "created_at": profile.created_at.isoformat() if profile.created_at else None,
         "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
         "cloned_from_id": str(profile.cloned_from_id) if profile.cloned_from_id else None,
+        "eval_judge_endpoint": eval_judge_endpoint,
         "persistent": {"ranges": persistent_ranges},
         "browser": {"tiers": browser_tiers},
         "embeddings": {"tiers": embedding_tiers},
@@ -453,7 +472,9 @@ def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
         queryset=ProfileEmbeddingsTier.objects.prefetch_related(embedding_tier_endpoint_prefetch).order_by("order"),
     )
 
-    return LLMRoutingProfile.objects.prefetch_related(
+    return LLMRoutingProfile.objects.select_related(
+        "eval_judge_endpoint__provider",
+    ).prefetch_related(
         persistent_range_prefetch,
         browser_tier_prefetch,
         embedding_tier_prefetch,

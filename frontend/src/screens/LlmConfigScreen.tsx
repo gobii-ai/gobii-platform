@@ -24,6 +24,7 @@ import {
   ChevronRight,
   Settings2,
   Pencil,
+  Scale,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -2265,7 +2266,7 @@ export function LlmConfigScreen() {
       },
     })
 
-  const handleUpdateProfile = async (profileId: string, payload: { display_name?: string; description?: string }) => {
+  const handleUpdateProfile = async (profileId: string, payload: { display_name?: string; description?: string; eval_judge_endpoint_id?: string | null }) => {
     return runWithFeedback(
       async () => {
         await llmApi.updateRoutingProfile(profileId, payload)
@@ -2277,6 +2278,23 @@ export function LlmConfigScreen() {
         label: 'Updating profile…',
         busyKey: actionKey('profile', profileId, 'update'),
         context: 'Routing profile',
+      },
+    )
+  }
+
+  const handleUpdateEvalJudge = async (endpointId: string | null) => {
+    if (!selectedProfileId) return
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateRoutingProfile(selectedProfileId, { eval_judge_endpoint_id: endpointId })
+        await invalidateProfiles()
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: endpointId ? 'Eval judge updated' : 'Eval judge cleared',
+        label: 'Updating eval judge…',
+        busyKey: actionKey('profile', selectedProfileId, 'eval-judge'),
+        context: 'Eval judge',
       },
     )
   }
@@ -2977,6 +2995,45 @@ export function LlmConfigScreen() {
                 </div>
               </div>
             </div>
+            {selectedProfile && (
+              <div className="bg-amber-50/50 p-4 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <Scale className="size-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-slate-900/90">Eval Judge</h4>
+                    <p className="text-sm text-slate-600 mb-3">Endpoint used for evaluation judging/grading in this profile.</p>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                        value={selectedProfile.eval_judge_endpoint?.endpoint_id ?? ''}
+                        onChange={(e) => handleUpdateEvalJudge(e.target.value || null)}
+                        disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge'))}
+                      >
+                        <option value="">— Use default tier fallback —</option>
+                        {endpointChoices.persistent_endpoints.map((ep) => (
+                          <option key={ep.id} value={ep.id}>
+                            {ep.label} ({ep.model})
+                          </option>
+                        ))}
+                      </select>
+                      {selectedProfile.eval_judge_endpoint && (
+                        <button
+                          type="button"
+                          className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => handleUpdateEvalJudge(null)}
+                          disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge'))}
+                        >
+                          <X className="size-4" />
+                        </button>
+                      )}
+                      {isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge')) && (
+                        <Loader2 className="size-4 text-amber-600 animate-spin flex-shrink-0" />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
               <div className="flex items-center justify-between">
                 <div className="flex items-start gap-3">

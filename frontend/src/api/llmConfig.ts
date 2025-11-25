@@ -263,6 +263,14 @@ export type RoutingProfileListItem = {
   created_at: string | null
   updated_at: string | null
   cloned_from_id: string | null
+  eval_judge_endpoint_id: string | null
+}
+
+export type EvalJudgeEndpoint = {
+  endpoint_id: string
+  endpoint_key: string
+  label: string
+  model: string
 }
 
 export type ProfilePersistentTier = {
@@ -307,6 +315,7 @@ export type RoutingProfileDetail = {
   created_at: string | null
   updated_at: string | null
   cloned_from_id: string | null
+  eval_judge_endpoint: EvalJudgeEndpoint | null
   persistent: { ranges: ProfileTokenRange[] }
   browser: { tiers: ProfileBrowserTier[] }
   embeddings: { tiers: ProfileEmbeddingTier[] }

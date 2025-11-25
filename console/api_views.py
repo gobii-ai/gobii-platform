@@ -1683,7 +1683,7 @@ class LLMRoutingProfileDetailAPIView(SystemAdminAPIView):
         return JsonResponse({"profile": serialize_routing_profile_detail(profile)})
 
     def patch(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
-        from api.models import LLMRoutingProfile
+        from api.models import LLMRoutingProfile, PersistentModelEndpoint
         profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
         try:
             payload = _parse_json_body(request)
@@ -1702,6 +1702,18 @@ class LLMRoutingProfileDetailAPIView(SystemAdminAPIView):
                 if LLMRoutingProfile.objects.filter(name=new_name).exclude(pk=profile.id).exists():
                     return HttpResponseBadRequest("A profile with that name already exists")
                 profile.name = new_name
+
+        # Eval judge endpoint update
+        if "eval_judge_endpoint_id" in payload:
+            endpoint_id = payload.get("eval_judge_endpoint_id")
+            if endpoint_id is None or endpoint_id == "":
+                profile.eval_judge_endpoint = None
+            else:
+                try:
+                    endpoint = PersistentModelEndpoint.objects.get(pk=endpoint_id)
+                    profile.eval_judge_endpoint = endpoint
+                except PersistentModelEndpoint.DoesNotExist:
+                    return HttpResponseBadRequest("Invalid eval judge endpoint ID")
 
         profile.save()
         return _json_ok(profile_id=str(profile.id))
@@ -1784,6 +1796,7 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
                 is_active=False,
                 created_by=request.user,
                 cloned_from=source,
+                eval_judge_endpoint=source.eval_judge_endpoint,
             )
 
             # Clone persistent config: token ranges -> tiers -> endpoints
