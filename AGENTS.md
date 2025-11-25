@@ -26,6 +26,7 @@ Design/UX:
 - Avoid stacked shadows
 
 Code quality:
-- Leave the codebase in a better state than when you started. If you can do light refactoring, cleanup, have a net negative lines of code, that is encouraged.
 - Pay careful attention to code organization and structure, where files go, etc. Fit the existing structure.
+- Break things into multiple files, smaller testable components.
 - Do things the right way.
+- Leave the codebase in a better state than when you started. If you can do light refactoring, cleanup, have a net negative lines of code, that is encouraged.
