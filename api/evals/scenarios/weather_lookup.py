@@ -129,7 +129,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             )
         elif http_calls.exists():
             http_call = http_calls.first()
-            params = http_call.params or {}
+            params = http_call.tool_params or {}
 
             judge_prompt = (
                 f"Analyze this HTTP request parameters: {json.dumps(params)}. "

@@ -141,7 +141,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
                 )
         else:
             first_search = search_calls.first()
-            first_query = (first_search.params or {}).get('query', '')
+            first_query = (first_search.tool_params or {}).get('query', '')
 
             judge_prompt = (
                 f"Analyze the following search query: '{first_query}'. "
@@ -178,7 +178,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
 
         expected_api_url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
         http_request_to_expected_api = any(
-            (call.params or {}).get('url', '') == expected_api_url
+            (call.tool_params or {}).get('url', '') == expected_api_url
             for call in http_calls
         )
 

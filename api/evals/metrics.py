@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone as dt_timezone
 from decimal import Decimal
 
 from django.db.models import DecimalField, Sum, Value
@@ -199,7 +200,7 @@ def aggregate_run_metrics(run: EvalRun) -> None:
         return
 
     # Build sorted tasks to derive boundaries
-    ordered_tasks.sort(key=lambda t: (t.sequence, t.started_at or timezone.datetime.min.replace(tzinfo=timezone.utc)))
+    ordered_tasks.sort(key=lambda t: (t.sequence, t.started_at or datetime.min.replace(tzinfo=dt_timezone.utc)))
 
     now = timezone.now()
     for idx, task in enumerate(ordered_tasks):
