@@ -1629,6 +1629,710 @@ class EmbeddingTierEndpointDetailAPIView(SystemAdminAPIView):
         return _json_ok()
 
 
+# =============================================================================
+# LLM Routing Profile APIs
+# =============================================================================
+
+class LLMRoutingProfileListCreateAPIView(SystemAdminAPIView):
+    """List all routing profiles or create a new one."""
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        from console.llm_serializers import build_routing_profiles_list
+        profiles = build_routing_profiles_list()
+        return JsonResponse({"profiles": profiles})
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        name = (payload.get("name") or "").strip()
+        display_name = (payload.get("display_name") or "").strip()
+        if not name:
+            return HttpResponseBadRequest("name is required")
+        if not display_name:
+            display_name = name
+
+        if LLMRoutingProfile.objects.filter(name=name).exists():
+            return HttpResponseBadRequest("A profile with that name already exists")
+
+        profile = LLMRoutingProfile.objects.create(
+            name=name,
+            display_name=display_name,
+            description=(payload.get("description") or "").strip(),
+            is_active=False,  # Never create as active by default
+            created_by=request.user,
+        )
+        return _json_ok(profile_id=str(profile.id))
+
+
+class LLMRoutingProfileDetailAPIView(SystemAdminAPIView):
+    """Get, update, or delete a specific routing profile."""
+    http_method_names = ["get", "patch", "delete"]
+
+    def get(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile
+        from console.llm_serializers import get_routing_profile_with_prefetch, serialize_routing_profile_detail
+        try:
+            profile = get_routing_profile_with_prefetch(profile_id)
+        except LLMRoutingProfile.DoesNotExist:
+            return JsonResponse({"error": "Profile not found"}, status=404)
+        return JsonResponse({"profile": serialize_routing_profile_detail(profile)})
+
+    def patch(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile
+        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "display_name" in payload:
+            profile.display_name = (payload.get("display_name") or "").strip()
+        if "description" in payload:
+            profile.description = (payload.get("description") or "").strip()
+
+        # Name changes require uniqueness check
+        if "name" in payload:
+            new_name = (payload.get("name") or "").strip()
+            if new_name and new_name != profile.name:
+                if LLMRoutingProfile.objects.filter(name=new_name).exclude(pk=profile.id).exists():
+                    return HttpResponseBadRequest("A profile with that name already exists")
+                profile.name = new_name
+
+        profile.save()
+        return _json_ok(profile_id=str(profile.id))
+
+    def delete(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile
+        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
+        if profile.is_active:
+            return HttpResponseBadRequest("Cannot delete the active routing profile")
+        profile.delete()
+        return _json_ok()
+
+
+class LLMRoutingProfileActivateAPIView(SystemAdminAPIView):
+    """Activate a specific routing profile (deactivates others)."""
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile
+        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
+
+        with transaction.atomic():
+            # Deactivate all other profiles
+            LLMRoutingProfile.objects.exclude(pk=profile.id).update(is_active=False)
+            # Activate this one
+            profile.is_active = True
+            profile.save(update_fields=["is_active", "updated_at"])
+
+        invalidate_llm_bootstrap_cache()
+        return _json_ok(profile_id=str(profile.id))
+
+
+class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
+    """Clone a routing profile with all its nested configuration."""
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import (
+            LLMRoutingProfile,
+            ProfileTokenRange,
+            ProfilePersistentTier,
+            ProfilePersistentTierEndpoint,
+            ProfileBrowserTier,
+            ProfileBrowserTierEndpoint,
+            ProfileEmbeddingsTier,
+            ProfileEmbeddingsTierEndpoint,
+        )
+        from console.llm_serializers import get_routing_profile_with_prefetch
+
+        try:
+            source = get_routing_profile_with_prefetch(profile_id)
+        except LLMRoutingProfile.DoesNotExist:
+            return JsonResponse({"error": "Profile not found"}, status=404)
+
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        # Generate a unique name for the clone
+        base_name = (payload.get("name") or "").strip()
+        if not base_name:
+            base_name = f"{source.name}-copy"
+        name = base_name
+        counter = 1
+        while LLMRoutingProfile.objects.filter(name=name).exists():
+            counter += 1
+            name = f"{base_name}-{counter}"
+
+        display_name = (payload.get("display_name") or "").strip()
+        if not display_name:
+            display_name = f"{source.display_name} (Copy)"
+
+        with transaction.atomic():
+            # Create the new profile
+            clone = LLMRoutingProfile.objects.create(
+                name=name,
+                display_name=display_name,
+                description=payload.get("description") or source.description,
+                is_active=False,
+                created_by=request.user,
+                cloned_from=source,
+            )
+
+            # Clone persistent config: token ranges -> tiers -> endpoints
+            for src_range in source.persistent_token_ranges.all():
+                new_range = ProfileTokenRange.objects.create(
+                    profile=clone,
+                    name=src_range.name,
+                    min_tokens=src_range.min_tokens,
+                    max_tokens=src_range.max_tokens,
+                )
+                for src_tier in src_range.tiers.all():
+                    new_tier = ProfilePersistentTier.objects.create(
+                        token_range=new_range,
+                        order=src_tier.order,
+                        description=src_tier.description,
+                        is_premium=src_tier.is_premium,
+                        is_max=src_tier.is_max,
+                        credit_multiplier=src_tier.credit_multiplier,
+                    )
+                    for src_te in src_tier.tier_endpoints.all():
+                        ProfilePersistentTierEndpoint.objects.create(
+                            tier=new_tier,
+                            endpoint=src_te.endpoint,
+                            weight=src_te.weight,
+                        )
+
+            # Clone browser config: tiers -> endpoints
+            for src_tier in source.browser_tiers.all():
+                new_tier = ProfileBrowserTier.objects.create(
+                    profile=clone,
+                    order=src_tier.order,
+                    description=src_tier.description,
+                    is_premium=src_tier.is_premium,
+                )
+                for src_te in src_tier.tier_endpoints.all():
+                    ProfileBrowserTierEndpoint.objects.create(
+                        tier=new_tier,
+                        endpoint=src_te.endpoint,
+                        weight=src_te.weight,
+                    )
+
+            # Clone embeddings config: tiers -> endpoints
+            for src_tier in source.embeddings_tiers.all():
+                new_tier = ProfileEmbeddingsTier.objects.create(
+                    profile=clone,
+                    order=src_tier.order,
+                    description=src_tier.description,
+                )
+                for src_te in src_tier.tier_endpoints.all():
+                    ProfileEmbeddingsTierEndpoint.objects.create(
+                        tier=new_tier,
+                        endpoint=src_te.endpoint,
+                        weight=src_te.weight,
+                    )
+
+        return _json_ok(profile_id=str(clone.id), name=clone.name)
+
+
+# Profile nested config management (token ranges, tiers, tier endpoints)
+
+class ProfileTokenRangeListCreateAPIView(SystemAdminAPIView):
+    """List or create token ranges for a profile."""
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile, ProfileTokenRange
+        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
+        ranges = ProfileTokenRange.objects.filter(profile=profile).order_by("min_tokens")
+        payload = [{
+            "id": str(r.id),
+            "name": r.name,
+            "min_tokens": r.min_tokens,
+            "max_tokens": r.max_tokens,
+        } for r in ranges]
+        return JsonResponse({"ranges": payload})
+
+    def post(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile, ProfileTokenRange
+        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        name = (payload.get("name") or "").strip()
+        min_tokens = payload.get("min_tokens", 0)
+        max_tokens = payload.get("max_tokens")
+
+        if not name:
+            return HttpResponseBadRequest("name is required")
+
+        token_range = ProfileTokenRange.objects.create(
+            profile=profile,
+            name=name,
+            min_tokens=min_tokens,
+            max_tokens=max_tokens,
+        )
+        return _json_ok(range_id=str(token_range.id))
+
+
+class ProfileTokenRangeDetailAPIView(SystemAdminAPIView):
+    """Update or delete a profile token range."""
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileTokenRange
+        token_range = get_object_or_404(ProfileTokenRange, pk=range_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "name" in payload:
+            token_range.name = (payload.get("name") or "").strip()
+        if "min_tokens" in payload:
+            token_range.min_tokens = payload.get("min_tokens", 0)
+        if "max_tokens" in payload:
+            token_range.max_tokens = payload.get("max_tokens")
+
+        token_range.save()
+        return _json_ok(range_id=str(token_range.id))
+
+    def delete(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileTokenRange
+        token_range = get_object_or_404(ProfileTokenRange, pk=range_id)
+        token_range.delete()
+        return _json_ok()
+
+
+class ProfilePersistentTierListCreateAPIView(SystemAdminAPIView):
+    """List or create tiers for a profile token range."""
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileTokenRange, ProfilePersistentTier
+        token_range = get_object_or_404(ProfileTokenRange, pk=range_id)
+        tiers = ProfilePersistentTier.objects.filter(token_range=token_range).order_by("is_premium", "is_max", "order")
+        payload = [{
+            "id": str(t.id),
+            "order": t.order,
+            "description": t.description,
+            "is_premium": t.is_premium,
+            "is_max": t.is_max,
+            "credit_multiplier": str(t.credit_multiplier) if t.credit_multiplier else None,
+        } for t in tiers]
+        return JsonResponse({"tiers": payload})
+
+    def post(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileTokenRange, ProfilePersistentTier
+        from decimal import Decimal, InvalidOperation
+        token_range = get_object_or_404(ProfileTokenRange, pk=range_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        order = payload.get("order", 0)
+        is_premium = _coerce_bool(payload.get("is_premium", False))
+        is_max = _coerce_bool(payload.get("is_max", False))
+        credit_multiplier = None
+        if payload.get("credit_multiplier"):
+            try:
+                credit_multiplier = Decimal(str(payload.get("credit_multiplier")))
+            except InvalidOperation:
+                return HttpResponseBadRequest("credit_multiplier must be a valid decimal")
+
+        tier = ProfilePersistentTier.objects.create(
+            token_range=token_range,
+            order=order,
+            description=(payload.get("description") or "").strip(),
+            is_premium=is_premium,
+            is_max=is_max,
+            credit_multiplier=credit_multiplier,
+        )
+        return _json_ok(tier_id=str(tier.id))
+
+
+class ProfilePersistentTierDetailAPIView(SystemAdminAPIView):
+    """Update or delete a profile persistent tier."""
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfilePersistentTier
+        from decimal import Decimal, InvalidOperation
+        tier = get_object_or_404(ProfilePersistentTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "order" in payload:
+            tier.order = payload.get("order", 0)
+        if "description" in payload:
+            tier.description = (payload.get("description") or "").strip()
+        if "is_premium" in payload:
+            tier.is_premium = _coerce_bool(payload.get("is_premium"))
+        if "is_max" in payload:
+            tier.is_max = _coerce_bool(payload.get("is_max"))
+        if "credit_multiplier" in payload:
+            if payload.get("credit_multiplier"):
+                try:
+                    tier.credit_multiplier = Decimal(str(payload.get("credit_multiplier")))
+                except InvalidOperation:
+                    return HttpResponseBadRequest("credit_multiplier must be a valid decimal")
+            else:
+                tier.credit_multiplier = None
+
+        tier.save()
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfilePersistentTier
+        tier = get_object_or_404(ProfilePersistentTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class ProfilePersistentTierEndpointListCreateAPIView(SystemAdminAPIView):
+    """List or create endpoints for a profile persistent tier."""
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfilePersistentTier, ProfilePersistentTierEndpoint
+        tier = get_object_or_404(ProfilePersistentTier, pk=tier_id)
+        endpoints = ProfilePersistentTierEndpoint.objects.filter(tier=tier).select_related("endpoint__provider")
+        payload = [{
+            "id": str(te.id),
+            "endpoint_id": str(te.endpoint_id),
+            "label": f"{te.endpoint.provider.display_name} · {te.endpoint.litellm_model}",
+            "weight": float(te.weight),
+        } for te in endpoints]
+        return JsonResponse({"endpoints": payload})
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfilePersistentTier, ProfilePersistentTierEndpoint
+        tier = get_object_or_404(ProfilePersistentTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        endpoint_id = payload.get("endpoint_id")
+        if not endpoint_id:
+            return HttpResponseBadRequest("endpoint_id is required")
+        endpoint = get_object_or_404(PersistentModelEndpoint, pk=endpoint_id)
+
+        try:
+            weight = float(payload.get("weight", 1.0))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("weight must be numeric")
+        if weight <= 0:
+            return HttpResponseBadRequest("weight must be greater than zero")
+
+        te = ProfilePersistentTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class ProfilePersistentTierEndpointDetailAPIView(SystemAdminAPIView):
+    """Update or delete a profile persistent tier endpoint."""
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfilePersistentTierEndpoint
+        te = get_object_or_404(ProfilePersistentTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "weight" in payload:
+            try:
+                weight = float(payload.get("weight"))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("weight must be numeric")
+            if weight <= 0:
+                return HttpResponseBadRequest("weight must be greater than zero")
+            te.weight = weight
+        te.save()
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfilePersistentTierEndpoint
+        te = get_object_or_404(ProfilePersistentTierEndpoint, pk=tier_endpoint_id)
+        te.delete()
+        return _json_ok()
+
+
+# Profile browser tier management
+
+class ProfileBrowserTierListCreateAPIView(SystemAdminAPIView):
+    """List or create browser tiers for a profile."""
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile, ProfileBrowserTier
+        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
+        tiers = ProfileBrowserTier.objects.filter(profile=profile).order_by("is_premium", "order")
+        payload = [{
+            "id": str(t.id),
+            "order": t.order,
+            "description": t.description,
+            "is_premium": t.is_premium,
+        } for t in tiers]
+        return JsonResponse({"tiers": payload})
+
+    def post(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile, ProfileBrowserTier
+        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        tier = ProfileBrowserTier.objects.create(
+            profile=profile,
+            order=payload.get("order", 0),
+            description=(payload.get("description") or "").strip(),
+            is_premium=_coerce_bool(payload.get("is_premium", False)),
+        )
+        return _json_ok(tier_id=str(tier.id))
+
+
+class ProfileBrowserTierDetailAPIView(SystemAdminAPIView):
+    """Update or delete a profile browser tier."""
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileBrowserTier
+        tier = get_object_or_404(ProfileBrowserTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "order" in payload:
+            tier.order = payload.get("order", 0)
+        if "description" in payload:
+            tier.description = (payload.get("description") or "").strip()
+        if "is_premium" in payload:
+            tier.is_premium = _coerce_bool(payload.get("is_premium"))
+        tier.save()
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileBrowserTier
+        tier = get_object_or_404(ProfileBrowserTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class ProfileBrowserTierEndpointListCreateAPIView(SystemAdminAPIView):
+    """List or create endpoints for a profile browser tier."""
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileBrowserTier, ProfileBrowserTierEndpoint
+        tier = get_object_or_404(ProfileBrowserTier, pk=tier_id)
+        endpoints = ProfileBrowserTierEndpoint.objects.filter(tier=tier).select_related("endpoint__provider")
+        payload = [{
+            "id": str(te.id),
+            "endpoint_id": str(te.endpoint_id),
+            "label": f"{te.endpoint.provider.display_name} · {te.endpoint.browser_model}",
+            "weight": float(te.weight),
+        } for te in endpoints]
+        return JsonResponse({"endpoints": payload})
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileBrowserTier, ProfileBrowserTierEndpoint
+        tier = get_object_or_404(ProfileBrowserTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        endpoint_id = payload.get("endpoint_id")
+        if not endpoint_id:
+            return HttpResponseBadRequest("endpoint_id is required")
+        endpoint = get_object_or_404(BrowserModelEndpoint, pk=endpoint_id)
+
+        try:
+            weight = float(payload.get("weight", 1.0))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("weight must be numeric")
+        if weight <= 0:
+            return HttpResponseBadRequest("weight must be greater than zero")
+
+        te = ProfileBrowserTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class ProfileBrowserTierEndpointDetailAPIView(SystemAdminAPIView):
+    """Update or delete a profile browser tier endpoint."""
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileBrowserTierEndpoint
+        te = get_object_or_404(ProfileBrowserTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "weight" in payload:
+            try:
+                weight = float(payload.get("weight"))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("weight must be numeric")
+            if weight <= 0:
+                return HttpResponseBadRequest("weight must be greater than zero")
+            te.weight = weight
+        te.save()
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileBrowserTierEndpoint
+        te = get_object_or_404(ProfileBrowserTierEndpoint, pk=tier_endpoint_id)
+        te.delete()
+        return _json_ok()
+
+
+# Profile embeddings tier management
+
+class ProfileEmbeddingsTierListCreateAPIView(SystemAdminAPIView):
+    """List or create embeddings tiers for a profile."""
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile, ProfileEmbeddingsTier
+        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
+        tiers = ProfileEmbeddingsTier.objects.filter(profile=profile).order_by("order")
+        payload = [{
+            "id": str(t.id),
+            "order": t.order,
+            "description": t.description,
+        } for t in tiers]
+        return JsonResponse({"tiers": payload})
+
+    def post(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
+        from api.models import LLMRoutingProfile, ProfileEmbeddingsTier
+        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        tier = ProfileEmbeddingsTier.objects.create(
+            profile=profile,
+            order=payload.get("order", 0),
+            description=(payload.get("description") or "").strip(),
+        )
+        return _json_ok(tier_id=str(tier.id))
+
+
+class ProfileEmbeddingsTierDetailAPIView(SystemAdminAPIView):
+    """Update or delete a profile embeddings tier."""
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileEmbeddingsTier
+        tier = get_object_or_404(ProfileEmbeddingsTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "order" in payload:
+            tier.order = payload.get("order", 0)
+        if "description" in payload:
+            tier.description = (payload.get("description") or "").strip()
+        tier.save()
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileEmbeddingsTier
+        tier = get_object_or_404(ProfileEmbeddingsTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class ProfileEmbeddingsTierEndpointListCreateAPIView(SystemAdminAPIView):
+    """List or create endpoints for a profile embeddings tier."""
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint
+        tier = get_object_or_404(ProfileEmbeddingsTier, pk=tier_id)
+        endpoints = ProfileEmbeddingsTierEndpoint.objects.filter(tier=tier).select_related("endpoint__provider")
+        payload = [{
+            "id": str(te.id),
+            "endpoint_id": str(te.endpoint_id),
+            "label": f"{te.endpoint.provider.display_name if te.endpoint.provider else 'Unlinked'} · {te.endpoint.litellm_model}",
+            "weight": float(te.weight),
+        } for te in endpoints]
+        return JsonResponse({"endpoints": payload})
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint
+        tier = get_object_or_404(ProfileEmbeddingsTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        endpoint_id = payload.get("endpoint_id")
+        if not endpoint_id:
+            return HttpResponseBadRequest("endpoint_id is required")
+        endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
+
+        try:
+            weight = float(payload.get("weight", 1.0))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("weight must be numeric")
+        if weight <= 0:
+            return HttpResponseBadRequest("weight must be greater than zero")
+
+        te = ProfileEmbeddingsTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class ProfileEmbeddingsTierEndpointDetailAPIView(SystemAdminAPIView):
+    """Update or delete a profile embeddings tier endpoint."""
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileEmbeddingsTierEndpoint
+        te = get_object_or_404(ProfileEmbeddingsTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "weight" in payload:
+            try:
+                weight = float(payload.get("weight"))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("weight must be numeric")
+            if weight <= 0:
+                return HttpResponseBadRequest("weight must be greater than zero")
+            te.weight = weight
+        te.save()
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        from api.models import ProfileEmbeddingsTierEndpoint
+        te = get_object_or_404(ProfileEmbeddingsTierEndpoint, pk=tier_endpoint_id)
+        te.delete()
+        return _json_ok()
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]

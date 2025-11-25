@@ -16,10 +16,18 @@ from api.models import (
     EmbeddingsTierEndpoint,
     EmbeddingsModelEndpoint,
     LLMProvider,
+    LLMRoutingProfile,
     PersistentLLMTier,
     PersistentTierEndpoint,
     PersistentModelEndpoint,
     PersistentTokenRange,
+    ProfileBrowserTier,
+    ProfileBrowserTierEndpoint,
+    ProfileEmbeddingsTier,
+    ProfileEmbeddingsTierEndpoint,
+    ProfilePersistentTier,
+    ProfilePersistentTierEndpoint,
+    ProfileTokenRange,
 )
 
 
@@ -293,4 +301,169 @@ def build_llm_overview() -> dict[str, Any]:
     }
 
 
-__all__ = ["build_llm_overview"]
+def serialize_routing_profile_list_item(profile: LLMRoutingProfile) -> dict[str, Any]:
+    """Serialize a profile for list views (minimal details)."""
+    return {
+        "id": str(profile.id),
+        "name": profile.name,
+        "display_name": profile.display_name,
+        "description": profile.description,
+        "is_active": profile.is_active,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
+        "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
+        "cloned_from_id": str(profile.cloned_from_id) if profile.cloned_from_id else None,
+    }
+
+
+def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, Any]:
+    """
+    Serialize a full routing profile with all nested config.
+    Expects the profile to have prefetched related objects.
+    """
+    # Persistent config: token ranges -> tiers -> endpoints
+    persistent_ranges: list[dict[str, Any]] = []
+    for token_range in profile.persistent_token_ranges.all():
+        tiers_payload: list[dict[str, Any]] = []
+        for tier in token_range.tiers.all():
+            tier_endpoints = []
+            for te in tier.tier_endpoints.all():
+                endpoint = te.endpoint
+                tier_endpoints.append({
+                    "id": str(te.id),
+                    "endpoint_id": str(endpoint.id),
+                    "label": f"{endpoint.provider.display_name} · {endpoint.litellm_model}",
+                    "weight": float(te.weight),
+                    "endpoint_key": endpoint.key,
+                })
+            tiers_payload.append({
+                "id": str(tier.id),
+                "order": tier.order,
+                "description": tier.description,
+                "is_premium": tier.is_premium,
+                "is_max": tier.is_max,
+                "credit_multiplier": str(tier.credit_multiplier) if tier.credit_multiplier else None,
+                "endpoints": tier_endpoints,
+            })
+        persistent_ranges.append({
+            "id": str(token_range.id),
+            "name": token_range.name,
+            "min_tokens": token_range.min_tokens,
+            "max_tokens": token_range.max_tokens,
+            "tiers": tiers_payload,
+        })
+
+    # Browser config: tiers -> endpoints
+    browser_tiers: list[dict[str, Any]] = []
+    for tier in profile.browser_tiers.all():
+        tier_endpoints = []
+        for te in tier.tier_endpoints.all():
+            endpoint = te.endpoint
+            tier_endpoints.append({
+                "id": str(te.id),
+                "endpoint_id": str(endpoint.id),
+                "label": f"{endpoint.provider.display_name} · {endpoint.browser_model}",
+                "weight": float(te.weight),
+                "endpoint_key": endpoint.key,
+            })
+        browser_tiers.append({
+            "id": str(tier.id),
+            "order": tier.order,
+            "description": tier.description,
+            "is_premium": tier.is_premium,
+            "endpoints": tier_endpoints,
+        })
+
+    # Embeddings config: tiers -> endpoints
+    embedding_tiers: list[dict[str, Any]] = []
+    for tier in profile.embeddings_tiers.all():
+        tier_endpoints = []
+        for te in tier.tier_endpoints.all():
+            endpoint = te.endpoint
+            label_provider = endpoint.provider.display_name if endpoint.provider else "Unlinked"
+            tier_endpoints.append({
+                "id": str(te.id),
+                "endpoint_id": str(endpoint.id),
+                "label": f"{label_provider} · {endpoint.litellm_model}",
+                "weight": float(te.weight),
+                "endpoint_key": endpoint.key,
+            })
+        embedding_tiers.append({
+            "id": str(tier.id),
+            "order": tier.order,
+            "description": tier.description,
+            "endpoints": tier_endpoints,
+        })
+
+    return {
+        "id": str(profile.id),
+        "name": profile.name,
+        "display_name": profile.display_name,
+        "description": profile.description,
+        "is_active": profile.is_active,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
+        "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
+        "cloned_from_id": str(profile.cloned_from_id) if profile.cloned_from_id else None,
+        "persistent": {"ranges": persistent_ranges},
+        "browser": {"tiers": browser_tiers},
+        "embeddings": {"tiers": embedding_tiers},
+    }
+
+
+def build_routing_profiles_list() -> list[dict[str, Any]]:
+    """Build a list of all routing profiles (minimal details)."""
+    profiles = LLMRoutingProfile.objects.order_by("-is_active", "-updated_at")
+    return [serialize_routing_profile_list_item(p) for p in profiles]
+
+
+def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
+    """
+    Fetch a routing profile with all nested relations prefetched for serialization.
+    """
+    # Prefetch for persistent: token_ranges -> tiers -> tier_endpoints -> endpoint.provider
+    persistent_tier_endpoint_prefetch = Prefetch(
+        "tier_endpoints",
+        queryset=ProfilePersistentTierEndpoint.objects.select_related("endpoint__provider").order_by("endpoint__litellm_model"),
+    )
+    persistent_tier_prefetch = Prefetch(
+        "tiers",
+        queryset=ProfilePersistentTier.objects.prefetch_related(persistent_tier_endpoint_prefetch).order_by("is_premium", "is_max", "order"),
+    )
+    persistent_range_prefetch = Prefetch(
+        "persistent_token_ranges",
+        queryset=ProfileTokenRange.objects.prefetch_related(persistent_tier_prefetch).order_by("min_tokens"),
+    )
+
+    # Prefetch for browser: browser_tiers -> tier_endpoints -> endpoint.provider
+    browser_tier_endpoint_prefetch = Prefetch(
+        "tier_endpoints",
+        queryset=ProfileBrowserTierEndpoint.objects.select_related("endpoint__provider").order_by("endpoint__browser_model"),
+    )
+    browser_tier_prefetch = Prefetch(
+        "browser_tiers",
+        queryset=ProfileBrowserTier.objects.prefetch_related(browser_tier_endpoint_prefetch).order_by("is_premium", "order"),
+    )
+
+    # Prefetch for embeddings: embeddings_tiers -> tier_endpoints -> endpoint.provider
+    embedding_tier_endpoint_prefetch = Prefetch(
+        "tier_endpoints",
+        queryset=ProfileEmbeddingsTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
+    )
+    embedding_tier_prefetch = Prefetch(
+        "embeddings_tiers",
+        queryset=ProfileEmbeddingsTier.objects.prefetch_related(embedding_tier_endpoint_prefetch).order_by("order"),
+    )
+
+    return LLMRoutingProfile.objects.prefetch_related(
+        persistent_range_prefetch,
+        browser_tier_prefetch,
+        embedding_tier_prefetch,
+    ).get(id=profile_id)
+
+
+__all__ = [
+    "build_llm_overview",
+    "build_routing_profiles_list",
+    "get_routing_profile_with_prefetch",
+    "serialize_routing_profile_detail",
+    "serialize_routing_profile_list_item",
+]

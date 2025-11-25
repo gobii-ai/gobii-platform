@@ -28,6 +28,10 @@ _current_eval_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVa
     "eval_run_id", default=None
 )
 
+_current_eval_routing_profile: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "eval_routing_profile", default=None
+)
+
 
 def set_current_eval_run_id(run_id: str | None) -> None:
     _current_eval_run_id.set(run_id)
@@ -35,6 +39,16 @@ def set_current_eval_run_id(run_id: str | None) -> None:
 
 def get_current_eval_run_id() -> str | None:
     return _current_eval_run_id.get()
+
+
+def set_current_eval_routing_profile(profile: Any) -> None:
+    """Set the routing profile for the current eval context."""
+    _current_eval_routing_profile.set(profile)
+
+
+def get_current_eval_routing_profile() -> Any:
+    """Get the routing profile for the current eval context, or None."""
+    return _current_eval_routing_profile.get()
 
 class AgentEventListener:
     """
