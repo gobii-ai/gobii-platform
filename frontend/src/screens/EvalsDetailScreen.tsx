@@ -580,10 +580,11 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
         <CompareModal
           onClose={() => setShowCompareModal(false)}
           onCompare={handleCompare}
-          comparableCount={completionStats.completed}
+          comparableCount={firstCompletedRun?.comparison?.comparable_runs_count}
           currentFingerprint={firstCompletedRun?.scenario_fingerprint}
           currentCodeVersion={firstCompletedRun?.code_version}
           currentModel={firstCompletedRun?.primary_model}
+          currentRunType={firstCompletedRun?.run_type}
         />
       )}
     </div>
