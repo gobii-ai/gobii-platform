@@ -446,11 +446,12 @@ def get_llm_config() -> Tuple[str, dict]:
         )
 
     _provider_key, model, params = configs[0]
-    # Remove any internal-only hints that shouldn't be passed to litellm
+    # Remove any internal-only hints that shouldn't be passed to litellm.
+    # Note: supports_temperature is kept so run_completion() can drop temperature if needed.
     params = {
         k: v
         for k, v in params.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_temperature")
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision")
     }
     return model, params
 
@@ -645,10 +646,11 @@ def get_llm_config_with_failover(
     allow_unconfigured: bool = False,
     agent: Any | None = None,
     is_first_loop: bool | None = None,
+    routing_profile: Any | None = None,
 ) -> List[Tuple[str, str, dict]]:
     """
     Get LLM configurations for tiered failover with token-based tier selection.
-    
+
     Args:
         provider_tiers: Optional custom provider tier configuration.
                        If None, uses token-based tiers based on token_count
@@ -658,14 +660,188 @@ def get_llm_config_with_failover(
         agent: Optional agent instance (or None). When provided (or resolvable via
             agent_id) and running in proprietary mode, premium tiers may be preferred.
         is_first_loop: Whether this is the first run of the agent (brand-new)
-        
+        routing_profile: Optional LLMRoutingProfile instance. When provided, uses
+            this profile's configuration instead of the active profile or legacy config.
+
     Returns:
         List of (provider_name, model_name, litellm_params) tuples in failover order
 
     Raises:
         LLMNotConfiguredError: If no providers are available with valid API keys (unless allow_unconfigured=True)
     """
-    # Always attempt DB-backed configuration first; fallback to legacy when empty
+    # Try routing profile first, then fall back to legacy config
+    configs = _get_failover_configs_from_profile(
+        token_count=token_count,
+        agent_id=agent_id,
+        agent=agent,
+        is_first_loop=is_first_loop,
+        routing_profile=routing_profile,
+    )
+    if configs:
+        _cache_bootstrap_status(False)
+        return configs
+
+    # Fall back to legacy PersistentTokenRange-based config
+    configs = _get_failover_configs_from_legacy(
+        token_count=token_count,
+        agent_id=agent_id,
+        agent=agent,
+        is_first_loop=is_first_loop,
+    )
+    if configs:
+        _cache_bootstrap_status(False)
+        return configs
+
+    if allow_unconfigured:
+        _cache_bootstrap_status(True)
+        return []
+
+    _cache_bootstrap_status(True)
+    raise LLMNotConfiguredError(
+        "No LLM providers are currently configured. Complete the setup wizard before running agents."
+    )
+
+
+def _get_failover_configs_from_profile(
+    *,
+    token_count: int,
+    agent_id: str | None,
+    agent: Any | None,
+    is_first_loop: bool | None,
+    routing_profile: Any | None,
+) -> List[Tuple[str, str, dict]]:
+    """Get failover configs from an LLMRoutingProfile.
+
+    If routing_profile is None, attempts to use the active profile.
+    Returns empty list if no profile config is available.
+    """
+    try:
+        LLMRoutingProfile = apps.get_model('api', 'LLMRoutingProfile')
+        ProfileTokenRange = apps.get_model('api', 'ProfileTokenRange')
+        ProfilePersistentTier = apps.get_model('api', 'ProfilePersistentTier')
+
+        # Resolve the profile to use
+        profile = routing_profile
+        if profile is None:
+            profile = LLMRoutingProfile.objects.filter(is_active=True, is_eval_snapshot=False).first()
+
+        if profile is None:
+            return []  # No active profile, fall back to legacy
+
+        # Find the token range for this profile
+        token_range = (
+            ProfileTokenRange.objects
+            .filter(profile=profile)
+            .filter(min_tokens__lte=token_count)
+            .filter(Q(max_tokens__gt=token_count) | Q(max_tokens__isnull=True))
+            .order_by('min_tokens')
+            .last()
+        )
+
+        if token_range is None:
+            # Fallback to smallest or largest range in this profile
+            smallest_range = ProfileTokenRange.objects.filter(profile=profile).order_by('min_tokens').first()
+            largest_range = ProfileTokenRange.objects.filter(profile=profile).order_by('-min_tokens').first()
+            if smallest_range and token_count < smallest_range.min_tokens:
+                token_range = smallest_range
+                logger.info(
+                    "Token count %s below configured minimum (%s); using profile range '%s' as fallback",
+                    token_count,
+                    smallest_range.min_tokens,
+                    smallest_range.name,
+                )
+            elif largest_range:
+                token_range = largest_range
+                logger.info(
+                    "Token count %s exceeds configured ranges; using highest profile range '%s' (min=%s) as fallback",
+                    token_count,
+                    largest_range.name,
+                    largest_range.min_tokens,
+                )
+
+        if token_range is None:
+            return []  # No token ranges in this profile
+
+        # Determine agent tier
+        agent_instance = agent
+        agent_tier = AgentLLMTier.STANDARD
+        if getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+            if agent_instance is None and agent_id:
+                try:
+                    PersistentAgent = apps.get_model('api', 'PersistentAgent')
+                    agent_instance = (
+                        PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
+                    )
+                except Exception:
+                    logger.debug(
+                        "Unable to resolve agent %s for premium tier routing",
+                        agent_id,
+                        exc_info=True,
+                    )
+                    agent_instance = None
+            agent_tier = get_agent_llm_tier(
+                agent_instance,
+                is_first_loop=is_first_loop,
+            )
+
+        combined_configs: List[Tuple[str, str, dict]] = []
+        profile_name = getattr(profile, 'name', 'unknown')
+
+        if agent_tier is AgentLLMTier.MAX:
+            max_tiers = ProfilePersistentTier.objects.filter(
+                token_range=token_range,
+                is_max=True,
+            ).order_by("order")
+            max_configs = _collect_failover_configs(
+                max_tiers,
+                token_range_name=f"{profile_name}:{token_range.name}",
+                tier_label="max",
+            )
+            if max_configs:
+                combined_configs.extend(max_configs)
+
+        if agent_tier in (AgentLLMTier.MAX, AgentLLMTier.PREMIUM):
+            premium_tiers = ProfilePersistentTier.objects.filter(
+                token_range=token_range,
+                is_premium=True,
+                is_max=False,
+            ).order_by("order")
+            premium_configs = _collect_failover_configs(
+                premium_tiers,
+                token_range_name=f"{profile_name}:{token_range.name}",
+                tier_label="premium",
+            )
+            if premium_configs:
+                combined_configs.extend(premium_configs)
+
+        standard_tiers = ProfilePersistentTier.objects.filter(
+            token_range=token_range,
+            is_premium=False,
+            is_max=False,
+        ).order_by("order")
+        standard_configs = _collect_failover_configs(
+            standard_tiers,
+            token_range_name=f"{profile_name}:{token_range.name}",
+            tier_label="standard",
+        )
+        if standard_configs:
+            combined_configs.extend(standard_configs)
+
+        return combined_configs
+
+    except Exception:
+        logger.debug("Error getting config from routing profile", exc_info=True)
+        return []
+
+
+def _get_failover_configs_from_legacy(
+    *,
+    token_count: int,
+    agent_id: str | None,
+    agent: Any | None,
+    is_first_loop: bool | None,
+) -> List[Tuple[str, str, dict]]:
+    """Get failover configs from legacy PersistentTokenRange/PersistentLLMTier tables."""
     try:
         PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
         PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
@@ -700,94 +876,92 @@ def get_llm_config_with_failover(
     except Exception:
         token_range = None
 
-    if token_range is not None:
-        agent_instance = agent
-        agent_tier = AgentLLMTier.STANDARD
-        if getattr(settings, "GOBII_PROPRIETARY_MODE", False):
-            if agent_instance is None and agent_id:
-                try:
-                    PersistentAgent = apps.get_model('api', 'PersistentAgent')
-                    agent_instance = (
-                        PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
-                    )
-                except Exception:
-                    logger.debug(
-                        "Unable to resolve agent %s for premium tier routing",
-                        agent_id,
-                        exc_info=True,
-                    )
-                    agent_instance = None
-            agent_tier = get_agent_llm_tier(
-                agent_instance,
-                is_first_loop=is_first_loop,
-            )
-
-        combined_configs: List[Tuple[str, str, dict]] = []
-
-        if agent_tier is AgentLLMTier.MAX:
-            max_tiers = PersistentLLMTier.objects.filter(
-                token_range=token_range,
-                is_max=True,
-            ).order_by("order")
-            max_configs = _collect_failover_configs(
-                max_tiers,
-                token_range_name=token_range.name,
-                tier_label="max",
-            )
-            if max_configs:
-                combined_configs.extend(max_configs)
-
-        if agent_tier in (AgentLLMTier.MAX, AgentLLMTier.PREMIUM):
-            premium_tiers = PersistentLLMTier.objects.filter(
-                token_range=token_range,
-                is_premium=True,
-                is_max=False,
-            ).order_by("order")
-            premium_configs = _collect_failover_configs(
-                premium_tiers,
-                token_range_name=token_range.name,
-                tier_label="premium",
-            )
-            if premium_configs:
-                combined_configs.extend(premium_configs)
-
-        standard_tiers = PersistentLLMTier.objects.filter(
-            token_range=token_range,
-            is_premium=False,
-            is_max=False,
-        ).order_by("order")
-        standard_configs = _collect_failover_configs(
-            standard_tiers,
-            token_range_name=token_range.name,
-            tier_label="standard",
-        )
-        if standard_configs:
-            combined_configs.extend(standard_configs)
-
-        if combined_configs:
-            _cache_bootstrap_status(False)
-            return combined_configs
-
-    if allow_unconfigured:
-        _cache_bootstrap_status(True)
+    if token_range is None:
         return []
 
-    _cache_bootstrap_status(True)
-    raise LLMNotConfiguredError(
-        "No LLM providers are currently configured. Complete the setup wizard before running agents."
+    agent_instance = agent
+    agent_tier = AgentLLMTier.STANDARD
+    if getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        if agent_instance is None and agent_id:
+            try:
+                PersistentAgent = apps.get_model('api', 'PersistentAgent')
+                agent_instance = (
+                    PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
+                )
+            except Exception:
+                logger.debug(
+                    "Unable to resolve agent %s for premium tier routing",
+                    agent_id,
+                    exc_info=True,
+                )
+                agent_instance = None
+        agent_tier = get_agent_llm_tier(
+            agent_instance,
+            is_first_loop=is_first_loop,
+        )
+
+    combined_configs: List[Tuple[str, str, dict]] = []
+
+    if agent_tier is AgentLLMTier.MAX:
+        max_tiers = PersistentLLMTier.objects.filter(
+            token_range=token_range,
+            is_max=True,
+        ).order_by("order")
+        max_configs = _collect_failover_configs(
+            max_tiers,
+            token_range_name=token_range.name,
+            tier_label="max",
+        )
+        if max_configs:
+            combined_configs.extend(max_configs)
+
+    if agent_tier in (AgentLLMTier.MAX, AgentLLMTier.PREMIUM):
+        premium_tiers = PersistentLLMTier.objects.filter(
+            token_range=token_range,
+            is_premium=True,
+            is_max=False,
+        ).order_by("order")
+        premium_configs = _collect_failover_configs(
+            premium_tiers,
+            token_range_name=token_range.name,
+            tier_label="premium",
+        )
+        if premium_configs:
+            combined_configs.extend(premium_configs)
+
+    standard_tiers = PersistentLLMTier.objects.filter(
+        token_range=token_range,
+        is_premium=False,
+        is_max=False,
+    ).order_by("order")
+    standard_configs = _collect_failover_configs(
+        standard_tiers,
+        token_range_name=token_range.name,
+        tier_label="standard",
     )
+    if standard_configs:
+        combined_configs.extend(standard_configs)
+
+    return combined_configs
 
 
 def get_summarization_llm_config(
     *,
     agent: Any | None = None,
     agent_id: str | None = None,
+    routing_profile: Any | None = None,
 ) -> Tuple[str, dict]:
     """
     Get LiteLLM configuration specifically for summarization tasks.
 
     Uses the same provider priority as get_llm_config() but with
     temperature=0 for deterministic summarization.
+
+    Args:
+        agent: Optional agent instance.
+        agent_id: Optional agent ID.
+        routing_profile: Optional LLMRoutingProfile instance. When provided,
+            uses this profile's configuration instead of the active profile.
 
     Returns:
         Tuple of (model_name, litellm_params)
@@ -802,6 +976,7 @@ def get_summarization_llm_config(
         agent_id=agent_id,
         token_count=0,
         agent=agent,
+        routing_profile=routing_profile,
     )
     _provider_key, model, params_with_hints = configs[0]
     # Remove internal-only hints that shouldn't be passed to litellm

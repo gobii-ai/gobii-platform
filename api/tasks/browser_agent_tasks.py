@@ -318,7 +318,11 @@ PROVIDER_PRIORITY: List[List[Any]] = getattr(
 DEFAULT_GOOGLE_MODEL = getattr(settings, "GOOGLE_LLM_MODEL", "gemini-2.5-pro")
 
 
-def _resolve_browser_provider_priority_from_db(*, prefer_premium: bool = False):
+def _resolve_browser_provider_priority_from_db(
+    *,
+    prefer_premium: bool = False,
+    routing_profile: Any = None,
+):
     """Return DB-configured browser tiers as a list of tiers with endpoint dicts.
 
     Each tier is a list of dicts: {
@@ -331,16 +335,122 @@ def _resolve_browser_provider_priority_from_db(*, prefer_premium: bool = False):
         'max_output_tokens': int | None,
         'has_key': bool,
     }
+
+    Args:
+        prefer_premium: Whether to prioritize premium tiers.
+        routing_profile: Optional LLMRoutingProfile instance. When provided, uses
+            this profile's browser config instead of the active profile or legacy policy.
+
     Returns None if DB feature disabled or on error/empty.
     """
+    # Try routing profile first
+    result = _resolve_browser_from_profile(
+        prefer_premium=prefer_premium,
+        routing_profile=routing_profile,
+    )
+    if result:
+        return result
+
+    # Fall back to legacy BrowserLLMPolicy
+    return _resolve_browser_from_legacy_policy(prefer_premium=prefer_premium)
+
+
+def _resolve_browser_from_profile(
+    *,
+    prefer_premium: bool,
+    routing_profile: Any,
+) -> list[list[dict[str, Any]]] | None:
+    """Get browser tiers from an LLMRoutingProfile."""
     try:
-        LLMProvider = apps.get_model('api', 'LLMProvider')
+        LLMRoutingProfile = apps.get_model('api', 'LLMRoutingProfile')
+        ProfileBrowserTier = apps.get_model('api', 'ProfileBrowserTier')
+        ProfileBrowserTierEndpoint = apps.get_model('api', 'ProfileBrowserTierEndpoint')
+
+        # Resolve the profile to use
+        profile = routing_profile
+        if profile is None:
+            profile = LLMRoutingProfile.objects.filter(is_active=True).first()
+
+        if profile is None:
+            return None  # No active profile, fall back to legacy
+
+        def collect_tiers(is_premium: bool) -> list[list[dict[str, Any]]]:
+            tiers: list[list[dict[str, Any]]] = []
+            for tier in ProfileBrowserTier.objects.filter(profile=profile, is_premium=is_premium).order_by('order'):
+                entries = []
+                for te in ProfileBrowserTierEndpoint.objects.filter(tier=tier).select_related('endpoint__provider').all():
+                    endpoint = te.endpoint
+                    provider = endpoint.provider
+                    if not (provider.enabled and endpoint.enabled):
+                        continue
+                    has_admin_key = bool(provider.api_key_encrypted)
+                    has_env_key = bool(provider.env_var_name and os.getenv(provider.env_var_name))
+                    # Resolve effective API key
+                    api_key = None
+                    if has_admin_key:
+                        try:
+                            from api.encryption import SecretsEncryption
+                            api_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
+                        except Exception:
+                            api_key = None
+                    if api_key is None and has_env_key:
+                        api_key = os.getenv(provider.env_var_name)
+                    # Allow OPENAI_COMPAT without a real key by sending a dummy key when base_url is set
+                    if not api_key and provider.browser_backend == 'OPENAI_COMPAT' and endpoint.browser_base_url:
+                        api_key = 'sk-noauth'
+                    if not api_key:
+                        continue
+                    raw_model = (endpoint.browser_model or "").strip()
+                    base_url = endpoint.browser_base_url or ""
+                    if provider.key == "openrouter" and not base_url:
+                        base_url = DEFAULT_API_BASE
+                    if not raw_model:
+                        continue
+
+                    entries.append({
+                        'provider_key': provider.key,
+                        'endpoint_key': endpoint.key,
+                        'weight': float(te.weight),
+                        'browser_model': raw_model,
+                        'base_url': base_url,
+                        'max_output_tokens': endpoint.max_output_tokens,
+                        'backend': provider.browser_backend,
+                        'supports_vision': bool(getattr(endpoint, 'supports_vision', False)),
+                        'api_key': api_key,
+                        'has_key': True,
+                        'is_premium': is_premium,
+                    })
+                if entries:
+                    tiers.append(entries)
+            return tiers
+
+        ordered_tiers: list[list[dict[str, Any]]] = []
+
+        if prefer_premium:
+            premium_tiers = collect_tiers(True)
+            if premium_tiers:
+                ordered_tiers.extend(premium_tiers)
+
+        standard_tiers = collect_tiers(False)
+        if standard_tiers:
+            ordered_tiers.extend(standard_tiers)
+
+        return ordered_tiers or None
+
+    except Exception:
+        return None
+
+
+def _resolve_browser_from_legacy_policy(*, prefer_premium: bool) -> list[list[dict[str, Any]]] | None:
+    """Get browser tiers from legacy BrowserLLMPolicy."""
+    try:
         BrowserLLMPolicy = apps.get_model('api', 'BrowserLLMPolicy')
         BrowserLLMTier = apps.get_model('api', 'BrowserLLMTier')
         BrowserTierEndpoint = apps.get_model('api', 'BrowserTierEndpoint')
         active = BrowserLLMPolicy.objects.filter(is_active=True).first()
         if not active:
             return None
+
         def collect_tiers(is_premium: bool) -> list[list[dict[str, Any]]]:
             tiers: list[list[dict[str, Any]]] = []
             for tier in BrowserLLMTier.objects.filter(policy=active, is_premium=is_premium).order_by('order'):
@@ -1511,8 +1621,23 @@ def _process_browser_use_task_core(
                 if prefer_premium:
                     agent_span.set_attribute("browser_tier.prefer_premium", True)
 
+                # Look up routing profile from eval_run if this is an eval task
+                eval_routing_profile = None
+                if task_obj.eval_run_id:
+                    try:
+                        from api.models import EvalRun
+                        eval_run = EvalRun.objects.select_related("llm_routing_profile").get(id=task_obj.eval_run_id)
+                        eval_routing_profile = eval_run.llm_routing_profile
+                        if eval_routing_profile:
+                            agent_span.set_attribute("browser_tier.routing_profile", eval_routing_profile.name)
+                    except EvalRun.DoesNotExist:
+                        pass
+
                 # Resolve provider priority from DB only (no legacy fallback)
-                db_priority = _resolve_browser_provider_priority_from_db(prefer_premium=prefer_premium)
+                db_priority = _resolve_browser_provider_priority_from_db(
+                    prefer_premium=prefer_premium,
+                    routing_profile=eval_routing_profile,
+                )
                 if not db_priority:
                     # Allow tests that patch _execute_agent_with_failover to proceed
                     # by passing a no-op DB-shaped tier. In production, this path

@@ -23,9 +23,9 @@ def _clear_requested_hash(agent_id: str, expected_hash: str) -> None:
     ).update(mini_description_requested_hash="")
 
 
-def _generate_via_llm(agent: PersistentAgent, charter: str) -> str:
+def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any = None) -> str:
     try:
-        model, params = get_summarization_llm_config(agent=agent)
+        model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
     except Exception as exc:
         logger.warning("No summarization model available for mini description: %s", exc)
         return ""
@@ -67,7 +67,12 @@ def _generate_via_llm(agent: PersistentAgent, charter: str) -> str:
 
 
 @shared_task(bind=True, name="api.agent.tasks.generate_agent_mini_description")
-def generate_agent_mini_description_task(self, persistent_agent_id: str, charter_hash: str) -> None:  # noqa: D401, ANN001
+def generate_agent_mini_description_task(
+    self,  # noqa: ANN001
+    persistent_agent_id: str,
+    charter_hash: str,
+    routing_profile_id: str | None = None,
+) -> None:
     """Generate and persist a mini description for the given agent."""
     try:
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
@@ -77,6 +82,15 @@ def generate_agent_mini_description_task(self, persistent_agent_id: str, charter
             persistent_agent_id,
         )
         return
+
+    # Look up routing profile if provided
+    routing_profile = None
+    if routing_profile_id:
+        try:
+            from api.models import LLMRoutingProfile
+            routing_profile = LLMRoutingProfile.objects.filter(id=routing_profile_id).first()
+        except Exception:
+            logger.debug("Failed to look up routing profile %s", routing_profile_id, exc_info=True)
 
     charter = (agent.charter or "").strip()
     if not charter:
@@ -95,7 +109,7 @@ def generate_agent_mini_description_task(self, persistent_agent_id: str, charter
         )
         return
 
-    mini_desc = _generate_via_llm(agent, charter)
+    mini_desc = _generate_via_llm(agent, charter, routing_profile)
     if not mini_desc:
         mini_desc = charter
 

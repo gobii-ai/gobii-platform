@@ -18,6 +18,7 @@ from uuid import UUID
 import litellm
 from opentelemetry import baggage, trace
 from pottery import Redlock
+from django.apps import apps
 from django.db import transaction, close_old_connections
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
@@ -56,6 +57,7 @@ from .llm_config import (
     is_llm_bootstrap_required,
 )
 from api.agent.events import publish_agent_event, AgentEventType
+from api.evals.execution import get_current_eval_routing_profile
 from .prompt_context import (
     build_prompt_context,
     get_agent_daily_credit_state,
@@ -591,6 +593,25 @@ def _get_recent_preferred_config(
             created_at,
         )
         return None
+
+    # Invalidate preferred provider if LLM config has changed since last completion
+    try:
+        LLMRoutingProfile = apps.get_model("api", "LLMRoutingProfile")
+        active_profile = LLMRoutingProfile.objects.filter(is_active=True).only("updated_at").first()
+        if active_profile and active_profile.updated_at and created_at < active_profile.updated_at:
+            logger.info(
+                "Agent %s preferred provider stale due to config change (completion=%s, config_updated=%s)",
+                agent_id,
+                created_at,
+                active_profile.updated_at,
+            )
+            return None
+    except Exception:
+        logger.debug(
+            "Unable to check LLM config staleness for agent %s",
+            agent_id,
+            exc_info=True,
+        )
 
     if last_model and last_provider:
         streak = 0
@@ -1301,8 +1322,12 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
             return agent
 
+        # Extract routing profile ID for metadata tasks
+        routing_profile = get_current_eval_routing_profile()
+        routing_profile_id = str(routing_profile.id) if routing_profile else None
+
         try:
-            maybe_schedule_short_description(agent)
+            maybe_schedule_short_description(agent, routing_profile_id=routing_profile_id)
         except Exception:
             logger.exception(
                 "Failed to evaluate short description scheduling for agent %s",
@@ -1310,14 +1335,14 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
             )
 
         try:
-            maybe_schedule_mini_description(agent)
+            maybe_schedule_mini_description(agent, routing_profile_id=routing_profile_id)
         except Exception:
             logger.exception(
                 "Failed to evaluate mini description scheduling for agent %s",
                 persistent_agent_id,
             )
         try:
-            maybe_schedule_agent_tags(agent)
+            maybe_schedule_agent_tags(agent, routing_profile_id=routing_profile_id)
         except Exception:
             logger.exception(
                 "Failed to evaluate tag scheduling for agent %s",
@@ -1574,6 +1599,7 @@ def _run_agent_loop(
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
                 daily_credit_state=credit_snapshot["daily_state"] if credit_snapshot else None,
+                routing_profile=get_current_eval_routing_profile(),
             )
             prompt_archive_attached = False
 
@@ -1629,6 +1655,7 @@ def _run_agent_loop(
                     token_count=fitted_token_count,
                     agent=agent,
                     is_first_loop=is_first_run,
+                    routing_profile=get_current_eval_routing_profile(),
                 )
             except LLMNotConfiguredError:
                 logger.warning(

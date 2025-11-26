@@ -13,6 +13,7 @@ from ..short_description import (
     maybe_schedule_short_description,
 )
 from ..tags import maybe_schedule_agent_tags
+from api.evals.execution import get_current_eval_routing_profile
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +67,14 @@ def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Di
     try:
         agent.charter = new_charter.strip()
         agent.save(update_fields=["charter"])
-        maybe_schedule_short_description(agent)
-        maybe_schedule_mini_description(agent)
-        maybe_schedule_agent_tags(agent)
+
+        # Extract routing profile ID for metadata tasks
+        routing_profile = get_current_eval_routing_profile()
+        routing_profile_id = str(routing_profile.id) if routing_profile else None
+
+        maybe_schedule_short_description(agent, routing_profile_id=routing_profile_id)
+        maybe_schedule_mini_description(agent, routing_profile_id=routing_profile_id)
+        maybe_schedule_agent_tags(agent, routing_profile_id=routing_profile_id)
         return {
             "status": "ok",
             "message": "Charter updated successfully.",

@@ -3412,6 +3412,15 @@ from .models import (
     BrowserLLMPolicy,
     BrowserLLMTier,
     BrowserTierEndpoint,
+    # Routing Profiles
+    LLMRoutingProfile,
+    ProfileTokenRange,
+    ProfilePersistentTier,
+    ProfilePersistentTierEndpoint,
+    ProfileBrowserTier,
+    ProfileBrowserTierEndpoint,
+    ProfileEmbeddingsTier,
+    ProfileEmbeddingsTierEndpoint,
 )
 
 
@@ -3630,6 +3639,104 @@ class BrowserLLMPolicyAdmin(admin.ModelAdmin):
         absolute_url = f"{protocol}{current_site.domain}{rel}"
 
         return format_html(f'<a href="{absolute_url}" target="_blank">{absolute_url}</a>')
+
+
+# --------------------------------------------------------------------------- #
+#  LLM Routing Profiles Admin
+# --------------------------------------------------------------------------- #
+
+class ProfileTokenRangeInline(admin.TabularInline):
+    model = ProfileTokenRange
+    extra = 0
+    fields = ("name", "min_tokens", "max_tokens")
+
+
+class ProfilePersistentTierEndpointInline(admin.TabularInline):
+    model = ProfilePersistentTierEndpoint
+    extra = 0
+    readonly_fields = ("is_premium", "is_max")
+    autocomplete_fields = ("endpoint",)
+
+
+class ProfileBrowserTierEndpointInline(admin.TabularInline):
+    model = ProfileBrowserTierEndpoint
+    extra = 0
+    readonly_fields = ("is_premium",)
+    autocomplete_fields = ("endpoint",)
+
+
+class ProfileEmbeddingsTierEndpointInline(admin.TabularInline):
+    model = ProfileEmbeddingsTierEndpoint
+    extra = 0
+    autocomplete_fields = ("endpoint",)
+
+
+@admin.register(LLMRoutingProfile)
+class LLMRoutingProfileAdmin(admin.ModelAdmin):
+    list_display = ("display_name", "name", "is_active", "is_eval_snapshot", "created_at", "updated_at")
+    list_filter = ("is_active", "is_eval_snapshot")
+    search_fields = ("name", "display_name", "description")
+    readonly_fields = ("created_at", "updated_at", "created_by", "cloned_from", "is_eval_snapshot")
+    fields = (
+        "name",
+        "display_name",
+        "description",
+        "is_active",
+        "is_eval_snapshot",
+        "created_at",
+        "updated_at",
+        "created_by",
+        "cloned_from",
+    )
+    inlines = [ProfileTokenRangeInline]
+
+    def get_queryset(self, request):
+        """By default, exclude eval snapshots unless explicitly filtering for them."""
+        qs = super().get_queryset(request)
+        # Show all profiles if filtering by is_eval_snapshot, otherwise hide snapshots
+        if "is_eval_snapshot__exact" in request.GET:
+            return qs
+        return qs.filter(is_eval_snapshot=False)
+
+    def save_model(self, request, obj, form, change):
+        if not change:  # Creating new profile
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(ProfileTokenRange)
+class ProfileTokenRangeAdmin(admin.ModelAdmin):
+    list_display = ("profile", "name", "min_tokens", "max_tokens")
+    list_filter = ("profile",)
+    search_fields = ("name", "profile__name")
+    ordering = ("profile", "min_tokens")
+
+
+@admin.register(ProfilePersistentTier)
+class ProfilePersistentTierAdmin(admin.ModelAdmin):
+    list_display = ("token_range", "order", "description", "is_premium", "is_max", "credit_multiplier")
+    list_filter = ("token_range__profile", "is_premium", "is_max")
+    search_fields = ("description", "token_range__name", "token_range__profile__name")
+    ordering = ("token_range__profile", "token_range__min_tokens", "order")
+    inlines = [ProfilePersistentTierEndpointInline]
+
+
+@admin.register(ProfileBrowserTier)
+class ProfileBrowserTierAdmin(admin.ModelAdmin):
+    list_display = ("profile", "order", "description", "is_premium")
+    list_filter = ("profile", "is_premium")
+    search_fields = ("description", "profile__name")
+    ordering = ("profile", "order")
+    inlines = [ProfileBrowserTierEndpointInline]
+
+
+@admin.register(ProfileEmbeddingsTier)
+class ProfileEmbeddingsTierAdmin(admin.ModelAdmin):
+    list_display = ("profile", "order", "description")
+    list_filter = ("profile",)
+    search_fields = ("description", "profile__name")
+    ordering = ("profile", "order")
+    inlines = [ProfileEmbeddingsTierEndpointInline]
 
 
 # ------------------------------------------------------------------

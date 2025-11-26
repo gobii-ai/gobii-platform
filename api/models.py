@@ -17,7 +17,7 @@ from django.utils.text import get_valid_filename
 from django.db.utils import OperationalError, ProgrammingError
 
 from django.contrib.auth import get_user_model
-from django.db.models.signals import post_save, pre_delete, pre_save
+from django.db.models.signals import post_save, post_delete, pre_delete, pre_save
 
 from django.dispatch import receiver
 
@@ -1989,6 +1989,340 @@ class BrowserTierEndpoint(models.Model):
     def save(self, *args, **kwargs):
         self.is_premium = bool(self.tier.is_premium)
         super().save(*args, **kwargs)
+
+
+# --------------------------------------------------------------------------- #
+#  LLM Routing Profiles (switchable config containers for failover/tiers)
+# --------------------------------------------------------------------------- #
+
+class LLMRoutingProfile(models.Model):
+    """Top-level container for a complete LLM routing configuration.
+
+    A routing profile groups together the full failover/tier configuration for:
+    - Persistent agents (token-range-based tiers)
+    - Browser agents (policy-based tiers)
+    - Embeddings (simple tier ordering)
+
+    Only one profile can be active at a time for runtime routing. Evals can
+    override the active profile by specifying a profile on EvalSuiteRun.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.SlugField(
+        max_length=64,
+        unique=True,
+        help_text="URL-safe identifier, e.g., 'production-v3', 'eval-gpt5-only'",
+    )
+    display_name = models.CharField(max_length=128)
+    description = models.TextField(blank=True)
+
+    is_active = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Active profile used for all runtime routing. Only one can be active.",
+    )
+    is_eval_snapshot = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="If true, this is a frozen snapshot created for an eval run. Not editable.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_llm_profiles",
+    )
+    cloned_from = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="clones",
+        help_text="Source profile this was cloned from, if any.",
+    )
+
+    eval_judge_endpoint = models.ForeignKey(
+        "PersistentModelEndpoint",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="eval_judge_profiles",
+        help_text="Endpoint used for eval judging/grading. If null, uses default from tier config.",
+    )
+
+    class Meta:
+        ordering = ["-is_active", "display_name"]
+        indexes = [
+            models.Index(fields=["name"]),
+            models.Index(fields=["is_active"]),
+            models.Index(fields=["is_eval_snapshot"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_active"],
+                condition=Q(is_active=True),
+                name="unique_active_llm_routing_profile",
+            )
+        ]
+
+    def __str__(self):
+        suffix = " (active)" if self.is_active else ""
+        return f"{self.display_name}{suffix}"
+
+
+class ProfileTokenRange(models.Model):
+    """Token range within a routing profile for persistent agent tier selection."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    profile = models.ForeignKey(
+        LLMRoutingProfile,
+        on_delete=models.CASCADE,
+        related_name="persistent_token_ranges",
+    )
+    name = models.CharField(max_length=64, help_text="Range name, e.g., 'small', 'medium', 'large'")
+    min_tokens = models.PositiveIntegerField()
+    max_tokens = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Exclusive upper bound; null means infinity",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["profile", "min_tokens"]
+        unique_together = [("profile", "name")]
+        indexes = [
+            models.Index(fields=["profile", "min_tokens", "max_tokens"]),
+        ]
+
+    def __str__(self):
+        upper = "∞" if self.max_tokens is None else str(self.max_tokens)
+        return f"{self.profile.name}:{self.name} [{self.min_tokens}, {upper})"
+
+
+class ProfilePersistentTier(models.Model):
+    """Failover tier within a profile's token range for persistent agents."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    token_range = models.ForeignKey(
+        ProfileTokenRange,
+        on_delete=models.CASCADE,
+        related_name="tiers",
+    )
+    order = models.PositiveIntegerField(help_text="1-based order within the range")
+    description = models.CharField(max_length=256, blank=True)
+    is_premium = models.BooleanField(
+        default=False,
+        help_text="Marks tiers reserved for premium routing.",
+        db_index=True,
+    )
+    is_max = models.BooleanField(
+        default=False,
+        help_text="Marks tiers reserved for max-tier routing.",
+        db_index=True,
+    )
+    credit_multiplier = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("1.00"),
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text="Multiplier applied to credit consumption for this tier.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["token_range__profile", "token_range__min_tokens", "order"]
+        unique_together = [("token_range", "order", "is_premium", "is_max")]
+        constraints = [
+            models.CheckConstraint(
+                check=~Q(is_max=True, is_premium=True),
+                name="profilepersistenttier_max_excludes_premium",
+            )
+        ]
+
+    def __str__(self):
+        if self.is_max:
+            tier_type = "max"
+        elif self.is_premium:
+            tier_type = "premium"
+        else:
+            tier_type = "standard"
+        return f"{self.token_range} {tier_type} tier {self.order}"
+
+
+class ProfilePersistentTierEndpoint(models.Model):
+    """Weighted endpoint assignment within a profile's persistent tier."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tier = models.ForeignKey(
+        ProfilePersistentTier,
+        on_delete=models.CASCADE,
+        related_name="tier_endpoints",
+    )
+    endpoint = models.ForeignKey(
+        PersistentModelEndpoint,
+        on_delete=models.CASCADE,
+        related_name="in_profile_tiers",
+    )
+    weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
+    is_premium = models.BooleanField(
+        default=False,
+        help_text="Matches the premium status of the associated tier.",
+        editable=False,
+        db_index=True,
+    )
+    is_max = models.BooleanField(
+        default=False,
+        help_text="Matches the max-tier status of the associated tier.",
+        editable=False,
+        db_index=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tier__order", "endpoint__key"]
+        unique_together = [("tier", "endpoint")]
+
+    def __str__(self):
+        if self.tier.is_max:
+            tier_type = "max"
+        elif self.tier.is_premium:
+            tier_type = "premium"
+        else:
+            tier_type = "standard"
+        return f"{self.tier} → {self.endpoint.key} [{tier_type}] (w={self.weight})"
+
+    def save(self, *args, **kwargs):
+        self.is_premium = bool(self.tier.is_premium)
+        self.is_max = bool(self.tier.is_max)
+        super().save(*args, **kwargs)
+
+
+class ProfileBrowserTier(models.Model):
+    """Browser agent failover tier within a routing profile."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    profile = models.ForeignKey(
+        LLMRoutingProfile,
+        on_delete=models.CASCADE,
+        related_name="browser_tiers",
+    )
+    order = models.PositiveIntegerField(help_text="1-based order within the profile")
+    description = models.CharField(max_length=256, blank=True)
+    is_premium = models.BooleanField(
+        default=False,
+        help_text="Marks tiers reserved for premium browser routing.",
+        db_index=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["profile", "order"]
+        unique_together = [("profile", "order", "is_premium")]
+
+    def __str__(self):
+        tier_type = "premium" if self.is_premium else "standard"
+        return f"{self.profile.name} browser {tier_type} tier {self.order}"
+
+
+class ProfileBrowserTierEndpoint(models.Model):
+    """Weighted endpoint assignment within a profile's browser tier."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tier = models.ForeignKey(
+        ProfileBrowserTier,
+        on_delete=models.CASCADE,
+        related_name="tier_endpoints",
+    )
+    endpoint = models.ForeignKey(
+        BrowserModelEndpoint,
+        on_delete=models.CASCADE,
+        related_name="in_profile_tiers",
+    )
+    weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
+    is_premium = models.BooleanField(
+        default=False,
+        help_text="Matches the premium status of the associated tier.",
+        editable=False,
+        db_index=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tier__order", "endpoint__key"]
+        unique_together = [("tier", "endpoint")]
+
+    def __str__(self):
+        tier_type = "premium" if self.tier.is_premium else "standard"
+        return f"{self.tier} → {self.endpoint.key} [{tier_type}] (w={self.weight})"
+
+    def save(self, *args, **kwargs):
+        self.is_premium = bool(self.tier.is_premium)
+        super().save(*args, **kwargs)
+
+
+class ProfileEmbeddingsTier(models.Model):
+    """Embeddings failover tier within a routing profile."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    profile = models.ForeignKey(
+        LLMRoutingProfile,
+        on_delete=models.CASCADE,
+        related_name="embeddings_tiers",
+    )
+    order = models.PositiveIntegerField(help_text="1-based order within the profile")
+    description = models.CharField(max_length=256, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["profile", "order"]
+        unique_together = [("profile", "order")]
+
+    def __str__(self):
+        return f"{self.profile.name} embeddings tier {self.order}"
+
+
+class ProfileEmbeddingsTierEndpoint(models.Model):
+    """Weighted endpoint assignment within a profile's embeddings tier."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tier = models.ForeignKey(
+        ProfileEmbeddingsTier,
+        on_delete=models.CASCADE,
+        related_name="tier_endpoints",
+    )
+    endpoint = models.ForeignKey(
+        EmbeddingsModelEndpoint,
+        on_delete=models.CASCADE,
+        related_name="in_profile_tiers",
+    )
+    weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tier__order", "endpoint__key"]
+        unique_together = [("tier", "endpoint")]
+
+    def __str__(self):
+        return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
 
 
 class DecodoCredential(models.Model):
@@ -7023,6 +7357,14 @@ class EvalSuiteRun(models.Model):
         blank=True,
         help_text="Agent reused across all scenarios if agent_strategy is reuse_agent.",
     )
+    llm_routing_profile = models.ForeignKey(
+        "LLMRoutingProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="eval_suite_runs",
+        help_text="LLM routing profile to use for this suite. If null, uses active profile.",
+    )
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
@@ -7072,7 +7414,20 @@ class EvalRun(models.Model):
     # Execution context
     budget_id = models.CharField(max_length=100, blank=True)
     branch_id = models.CharField(max_length=100, blank=True)
-    
+    llm_routing_profile = models.ForeignKey(
+        "LLMRoutingProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="eval_runs",
+        help_text="LLM routing profile used for this run.",
+    )
+    llm_routing_profile_name = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Snapshot of profile name at run time (preserved if profile deleted).",
+    )
+
     # Metrics snapshots (aggregated after run)
     tokens_used = models.IntegerField(default=0)
     credits_cost = models.DecimalField(max_digits=20, decimal_places=6, default=Decimal("0"))
@@ -7151,3 +7506,60 @@ class EvalRunTask(models.Model):
 
     def __str__(self):
         return f"{self.run.scenario_slug} - {self.name} ({self.status})"
+
+
+# =============================================================================
+# Signals to touch LLMRoutingProfile when child models change
+# This invalidates the "preferred provider" cache for agents
+# =============================================================================
+
+def _touch_routing_profile(profile):
+    """Touch the profile's updated_at to invalidate preferred provider cache."""
+    if profile:
+        LLMRoutingProfile.objects.filter(pk=profile.pk).update(updated_at=timezone.now())
+
+
+@receiver(post_save, sender=ProfileTokenRange)
+@receiver(post_delete, sender=ProfileTokenRange)
+def touch_profile_on_token_range_change(sender, instance, **kwargs):
+    _touch_routing_profile(instance.profile)
+
+
+@receiver(post_save, sender=ProfilePersistentTier)
+@receiver(post_delete, sender=ProfilePersistentTier)
+def touch_profile_on_persistent_tier_change(sender, instance, **kwargs):
+    profile = instance.token_range.profile if instance.token_range else None
+    _touch_routing_profile(profile)
+
+
+@receiver(post_save, sender=ProfilePersistentTierEndpoint)
+@receiver(post_delete, sender=ProfilePersistentTierEndpoint)
+def touch_profile_on_persistent_tier_endpoint_change(sender, instance, **kwargs):
+    profile = instance.tier.token_range.profile if instance.tier and instance.tier.token_range else None
+    _touch_routing_profile(profile)
+
+
+@receiver(post_save, sender=ProfileBrowserTier)
+@receiver(post_delete, sender=ProfileBrowserTier)
+def touch_profile_on_browser_tier_change(sender, instance, **kwargs):
+    _touch_routing_profile(instance.profile)
+
+
+@receiver(post_save, sender=ProfileBrowserTierEndpoint)
+@receiver(post_delete, sender=ProfileBrowserTierEndpoint)
+def touch_profile_on_browser_tier_endpoint_change(sender, instance, **kwargs):
+    profile = instance.tier.profile if instance.tier else None
+    _touch_routing_profile(profile)
+
+
+@receiver(post_save, sender=ProfileEmbeddingsTier)
+@receiver(post_delete, sender=ProfileEmbeddingsTier)
+def touch_profile_on_embeddings_tier_change(sender, instance, **kwargs):
+    _touch_routing_profile(instance.profile)
+
+
+@receiver(post_save, sender=ProfileEmbeddingsTierEndpoint)
+@receiver(post_delete, sender=ProfileEmbeddingsTierEndpoint)
+def touch_profile_on_embeddings_tier_endpoint_change(sender, instance, **kwargs):
+    profile = instance.tier.profile if instance.tier else None
+    _touch_routing_profile(profile)

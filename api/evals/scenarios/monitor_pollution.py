@@ -4,7 +4,6 @@ from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
 from api.models import EvalRunTask, PersistentAgentMessage
-from api.agent.core.llm_config import get_llm_config
 from api.evals.sim_config import get_sim_weather_url
 from api.agent.events import AgentEventType
 
@@ -86,14 +85,11 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         
         # 2. Verify Charter Update
         self.record_task_result(run_id, 2, EvalRunTask.Status.RUNNING)
-        judge_model, judge_params = get_llm_config()
-        
+
         charter_judge_q = "Does the agent's charter mention monitoring pollution or air quality in Washington DC?"
         charter_choice, charter_reason = self.llm_judge(
             question=charter_judge_q,
             context=f"Agent Charter:\n{agent.charter}",
-            model=judge_model,
-            params=judge_params,
         )
         
         if charter_choice == "Yes":
@@ -111,7 +107,7 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
 
         # 3. Verify Schedule Setting
         self.record_task_result(run_id, 3, EvalRunTask.Status.RUNNING)
-        
+
         schedule_judge_q = (
             "Is the agent's schedule set to something reasonable for monitoring daily weather/pollution? "
             "(e.g. daily, twice daily). It should NOT be extremely frequent (every minute) or missing."
@@ -119,8 +115,6 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         schedule_choice, schedule_reason = self.llm_judge(
             question=schedule_judge_q,
             context=f"Agent Schedule: {agent.schedule}",
-            model=judge_model,
-            params=judge_params,
         )
 
         if schedule_choice == "Yes":

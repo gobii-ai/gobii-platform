@@ -76,9 +76,9 @@ def _extract_tags(content: str) -> List[str]:
     return normalize_tags(parsed)
 
 
-def _generate_via_llm(agent: PersistentAgent, charter: str) -> List[str]:
+def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any = None) -> List[str]:
     try:
-        model, params = get_summarization_llm_config(agent=agent)
+        model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
     except Exception as exc:
         logger.warning("No summarization model available for tag generation: %s", exc)
         return []
@@ -120,13 +120,27 @@ def _generate_via_llm(agent: PersistentAgent, charter: str) -> List[str]:
 
 
 @shared_task(bind=True, name="api.agent.tasks.generate_agent_tags")
-def generate_agent_tags_task(self, persistent_agent_id: str, charter_hash: str) -> None:
+def generate_agent_tags_task(
+    self,  # noqa: ANN001
+    persistent_agent_id: str,
+    charter_hash: str,
+    routing_profile_id: str | None = None,
+) -> None:
     """Generate and persist tags for the given agent."""
     try:
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
     except PersistentAgent.DoesNotExist:
         logger.info("Skipping tag generation; agent %s no longer exists", persistent_agent_id)
         return
+
+    # Look up routing profile if provided
+    routing_profile = None
+    if routing_profile_id:
+        try:
+            from api.models import LLMRoutingProfile
+            routing_profile = LLMRoutingProfile.objects.filter(id=routing_profile_id).first()
+        except Exception:
+            logger.debug("Failed to look up routing profile %s", routing_profile_id, exc_info=True)
 
     charter = (agent.charter or "").strip()
     if not charter:
@@ -145,7 +159,7 @@ def generate_agent_tags_task(self, persistent_agent_id: str, charter_hash: str) 
         )
         return
 
-    tags = _generate_via_llm(agent, charter)
+    tags = _generate_via_llm(agent, charter, routing_profile)
     PersistentAgent.objects.filter(id=agent.id).update(
         tags=tags,
         tags_charter_hash=current_hash if tags else "",

@@ -102,8 +102,15 @@ def build_mini_description(
     return fallback_message, "placeholder"
 
 
-def maybe_schedule_short_description(agent: PersistentAgent) -> bool:
+def maybe_schedule_short_description(
+    agent: PersistentAgent,
+    routing_profile_id: str | None = None,
+) -> bool:
     """Schedule short description generation if needed.
+
+    Args:
+        agent: The agent to generate a short description for.
+        routing_profile_id: Optional routing profile ID to use for LLM calls.
 
     Returns True when a task was enqueued, False otherwise.
     """
@@ -130,7 +137,7 @@ def maybe_schedule_short_description(agent: PersistentAgent) -> bool:
             generate_agent_short_description_task,
         )
 
-        generate_agent_short_description_task.delay(str(agent.id), charter_hash)
+        generate_agent_short_description_task.delay(str(agent.id), charter_hash, routing_profile_id)
         logger.debug(
             "Queued short description generation for agent %s (hash=%s)",
             agent.id,
@@ -147,8 +154,16 @@ def maybe_schedule_short_description(agent: PersistentAgent) -> bool:
         return False
 
 
-def maybe_schedule_mini_description(agent: PersistentAgent) -> bool:
-    """Schedule mini description generation if needed."""
+def maybe_schedule_mini_description(
+    agent: PersistentAgent,
+    routing_profile_id: str | None = None,
+) -> bool:
+    """Schedule mini description generation if needed.
+
+    Args:
+        agent: The agent to generate a mini description for.
+        routing_profile_id: Optional routing profile ID to use for LLM calls.
+    """
     charter = (agent.charter or "").strip()
     if not charter:
         return False
@@ -172,7 +187,7 @@ def maybe_schedule_mini_description(agent: PersistentAgent) -> bool:
             generate_agent_mini_description_task,
         )
 
-        generate_agent_mini_description_task.delay(str(agent.id), charter_hash)
+        generate_agent_mini_description_task.delay(str(agent.id), charter_hash, routing_profile_id)
         logger.debug(
             "Queued mini description generation for agent %s (hash=%s)",
             agent.id,

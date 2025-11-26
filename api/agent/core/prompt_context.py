@@ -446,6 +446,7 @@ def build_prompt_context(
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
+    routing_profile: Any = None,
 ) -> tuple[List[dict], int, Optional[UUID]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
@@ -456,6 +457,8 @@ def build_prompt_context(
         max_iterations: Maximum iterations allowed for this processing cycle.
         reasoning_only_streak: Number of consecutive iterations without tool calls.
         is_first_run: Whether this is the very first processing cycle for the agent.
+        daily_credit_state: Pre-computed daily credit state (optional).
+        routing_profile: LLMRoutingProfile instance for eval routing (optional).
 
     Returns:
         Tuple of (messages, fitted_token_count, prompt_archive_id) where
@@ -471,12 +474,12 @@ def build_prompt_context(
 
     ensure_steps_compacted(
         agent=agent,
-        summarise_fn=partial(llm_summarise_steps, agent=agent),
+        summarise_fn=partial(llm_summarise_steps, agent=agent, routing_profile=routing_profile),
         safety_identifier=safety_id,
     )
     ensure_comms_compacted(
         agent=agent,
-        summarise_fn=partial(llm_summarise_comms, agent=agent),
+        summarise_fn=partial(llm_summarise_comms, agent=agent, routing_profile=routing_profile),
         safety_identifier=safety_id,
     )
 
@@ -491,6 +494,7 @@ def build_prompt_context(
             allow_unconfigured=True,
             agent=agent,
             is_first_loop=is_first_run,
+            routing_profile=routing_profile,
         )
     except LLMNotConfiguredError:
         failover_configs = None

@@ -129,6 +129,7 @@ class TestEventProcessingTokenCounting(TestCase):
                     token_count=0,
                     allow_unconfigured=True,
                     is_first_loop=False,
+                    routing_profile=None,
                 )
 
                 self.assertIsInstance(messages, list)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Beaker, Loader2, Play, RefreshCcw, CheckSquare, Minus, Plus } from 'lucide-react'
+import { AlertTriangle, Beaker, ChevronDown, Loader2, Play, RefreshCcw, CheckSquare, Minus, Plus } from 'lucide-react'
 
 import {
   createSuiteRuns,
@@ -8,6 +8,7 @@ import {
   type EvalSuite,
   type EvalSuiteRun,
 } from '../api/evals'
+import { fetchRoutingProfiles, type RoutingProfileListItem } from '../api/llmConfig'
 import { StatusBadge } from '../components/common/StatusBadge'
 import { RunTypeBadge } from '../components/common/RunTypeBadge'
 
@@ -36,6 +37,8 @@ export function EvalsScreen() {
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [routingProfiles, setRoutingProfiles] = useState<RoutingProfileListItem[]>([])
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
 
   const listRefreshInFlight = useRef(false)
   const runTypeFilterOptions: { value: 'all' | EvalSuiteRun['run_type']; label: string }[] = [
@@ -54,6 +57,21 @@ export function EvalsScreen() {
       setErrorMessage('Unable to load suites right now.')
     }
   }, [selectedSuites.size])
+
+  const loadRoutingProfiles = useCallback(async () => {
+    try {
+      const result = await fetchRoutingProfiles()
+      setRoutingProfiles(result.profiles)
+      // Default to the active profile
+      const activeProfile = result.profiles.find((p) => p.is_active)
+      if (activeProfile && !selectedProfileId) {
+        setSelectedProfileId(activeProfile.id)
+      }
+    } catch (error) {
+      console.error(error)
+      // Non-fatal - profiles are optional
+    }
+  }, [selectedProfileId])
 
   const loadSuiteRuns = useCallback(async () => {
     if (listRefreshInFlight.current) return
@@ -77,7 +95,8 @@ export function EvalsScreen() {
   useEffect(() => {
     loadSuites()
     loadSuiteRuns()
-  }, [loadSuites, loadSuiteRuns])
+    loadRoutingProfiles()
+  }, [loadSuites, loadSuiteRuns, loadRoutingProfiles])
 
   const toggleSuiteSelection = (slug: string) => {
     setSelectedSuites((prev) => {
@@ -108,6 +127,7 @@ export function EvalsScreen() {
         suite_slugs,
         agent_strategy: 'ephemeral_per_scenario',
         n_runs: clampRunCount(runCount),
+        llm_routing_profile_id: selectedProfileId,
       })
       await loadSuiteRuns()
     } catch (error) {
@@ -145,6 +165,25 @@ export function EvalsScreen() {
             </button>
 
             <div className="h-6 w-px bg-slate-200 mx-1" />
+
+            {routingProfiles.length > 0 && (
+              <div className="relative">
+                <select
+                  value={selectedProfileId || ''}
+                  onChange={(e) => setSelectedProfileId(e.target.value || null)}
+                  className="appearance-none bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                >
+                  <option value="">No profile</option>
+                  {routingProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.display_name || profile.name}
+                      {profile.is_active ? ' (active)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+              </div>
+            )}
 
             <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200">
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-2">Runs</span>

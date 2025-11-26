@@ -22,6 +22,7 @@ from ...models import (
     PersistentAgent,
     PersistentAgentMessage,
 )
+from ...evals.execution import get_current_eval_routing_profile
 
 import litellm
 
@@ -207,10 +208,57 @@ def _score_embeddings_for_endpoint(
         return None
 
 
-def _embedding_similarity(left: str, right: str) -> Optional[float]:
+def _embedding_similarity(left: str, right: str, routing_profile=None) -> Optional[float]:
     if litellm is None:
         return None
 
+    # Try profile-based config first, then fall back to legacy
+    result = _embedding_similarity_from_profile(left, right, routing_profile)
+    if result is not None:
+        return result
+
+    return _embedding_similarity_from_legacy(left, right)
+
+
+def _embedding_similarity_from_profile(left: str, right: str, routing_profile=None) -> Optional[float]:
+    """Get embeddings similarity using an LLMRoutingProfile's embeddings config."""
+    try:
+        from ...models import LLMRoutingProfile, ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint
+
+        # Resolve the profile to use
+        profile = routing_profile
+        if profile is None:
+            profile = get_current_eval_routing_profile()
+        if profile is None:
+            profile = LLMRoutingProfile.objects.filter(is_active=True).first()
+
+        if profile is None:
+            return None  # Fall back to legacy
+
+        tier_prefetch = Prefetch(
+            "tier_endpoints",
+            queryset=ProfileEmbeddingsTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
+        )
+        tiers = ProfileEmbeddingsTier.objects.filter(profile=profile).prefetch_related(tier_prefetch).order_by("order")
+
+        for tier in tiers:
+            tier_endpoints = [
+                entry for entry in tier.tier_endpoints.all()
+                if entry.weight > 0
+            ]
+            for entry in tier_endpoints:
+                ratio = _score_embeddings_for_endpoint(tier, entry.endpoint, left, right)
+                if ratio is not None:
+                    return ratio
+        return None
+
+    except Exception:
+        logger.debug("Error getting embeddings config from profile", exc_info=True)
+        return None
+
+
+def _embedding_similarity_from_legacy(left: str, right: str) -> Optional[float]:
+    """Get embeddings similarity using legacy EmbeddingsLLMTier config."""
     tier_prefetch = Prefetch(
         "tier_endpoints",
         queryset=EmbeddingsTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),

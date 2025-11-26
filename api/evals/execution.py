@@ -28,6 +28,10 @@ _current_eval_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVa
     "eval_run_id", default=None
 )
 
+_current_eval_routing_profile: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "eval_routing_profile", default=None
+)
+
 
 def set_current_eval_run_id(run_id: str | None) -> None:
     _current_eval_run_id.set(run_id)
@@ -35,6 +39,16 @@ def set_current_eval_run_id(run_id: str | None) -> None:
 
 def get_current_eval_run_id() -> str | None:
     return _current_eval_run_id.get()
+
+
+def set_current_eval_routing_profile(profile: Any) -> None:
+    """Set the routing profile for the current eval context."""
+    _current_eval_routing_profile.set(profile)
+
+
+def get_current_eval_routing_profile() -> Any:
+    """Get the routing profile for the current eval context, or None."""
+    return _current_eval_routing_profile.get()
 
 class AgentEventListener:
     """
@@ -300,9 +314,8 @@ class ScenarioExecutionTools:
     ) -> Tuple[str, str]:
         """
         Ask an LLM to judge a context based on a question and a set of options.
-        Uses tool calling to ensure structured output. Automatically falls back to
-        the configured failover tier to pick the first available model when none
-        (or only a model name) is provided.
+        Uses tool calling to ensure structured output. Uses the eval routing profile
+        if one is set, otherwise falls back to the active profile or legacy config.
 
         Args:
             question: The specific question to answer.
@@ -314,7 +327,7 @@ class ScenarioExecutionTools:
         Returns:
             A tuple of (choice, reasoning). choice will be one of the strings in `options`.
         """
-        from api.agent.core.llm_config import get_llm_config, LLMNotConfiguredError
+        from api.agent.core.llm_config import get_llm_config_with_failover, LLMNotConfiguredError
 
         options_list = list(options)
 
@@ -346,52 +359,69 @@ class ScenarioExecutionTools:
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}\n\nValid Options: {', '.join(options_list)}"}
         ]
 
-        configured_model: Optional[str] = None
-        configured_params: Dict[str, Any] = {}
-
-        if model is None or params is None:
+        # If caller provided both model and params, use them directly
+        if model is not None and params is not None:
+            safe_params = dict(params)
+            if safe_params.get("temperature") is None:
+                safe_params["temperature"] = 0.0
             try:
-                configured_model, configured_params = get_llm_config()
-            except LLMNotConfiguredError as exc:
-                # If a caller passed a model but no params, continue with empty params.
-                if model is None:
-                    logger.error("LLM judge missing configuration: %s", exc)
-                    return "Error", "No LLM configuration available for judgment."
-                configured_params = {}
+                response = run_completion(
+                    model=model,
+                    messages=prompt,
+                    tools=[tool_definition],
+                    params=safe_params
+                )
+                return self._extract_judgment(response)
+            except Exception as e:
+                logger.error("LLM judge failed with explicit model %s: %s", model, e)
+                return "Error", f"Exception during judgment: {str(e)}"
 
-        effective_model = model or configured_model
-        if not effective_model:
+        # Use failover configs with routing profile support
+        try:
+            routing_profile = get_current_eval_routing_profile()
+            failover_configs = get_llm_config_with_failover(routing_profile=routing_profile)
+        except LLMNotConfiguredError as exc:
+            logger.error("LLM judge missing configuration: %s", exc)
+            return "Error", "No LLM configuration available for judgment."
+
+        if not failover_configs:
             return "Error", "No LLM model available for judgment."
 
-        safe_params = dict(params or configured_params or {})
-        # Default to deterministic temperature unless the endpoint requires its own value.
-        if safe_params.get("temperature") is None:
-            safe_params["temperature"] = 0.0
+        last_error: Optional[Exception] = None
+        for _provider, cfg_model, cfg_params in failover_configs:
+            effective_model = model or cfg_model
+            safe_params = dict(params or cfg_params or {})
+            if safe_params.get("temperature") is None:
+                safe_params["temperature"] = 0.0
 
-        try:
-            response = run_completion(
-                model=effective_model,
-                messages=prompt,
-                tools=[tool_definition],
-                # Use "auto" instead of forcing - some models (like glm-4.6) return empty args with forced tool_choice
-                params=safe_params
-            )
+            try:
+                response = run_completion(
+                    model=effective_model,
+                    messages=prompt,
+                    tools=[tool_definition],
+                    params=safe_params
+                )
+                return self._extract_judgment(response)
+            except Exception as e:
+                last_error = e
+                logger.warning("LLM judge failed with model %s: %s, trying next", effective_model, e)
+                continue
 
-            tool_calls = response.choices[0].message.tool_calls
-            if not tool_calls:
-                 return "Error", "LLM did not call the judgment tool."
+        logger.error("LLM judge failed with all providers: %s", last_error)
+        return "Error", f"Exception during judgment: {str(last_error)}"
 
-            # Find the submit_judgment call
-            for tc in tool_calls:
-                if tc.function.name == "submit_judgment":
-                    args = json.loads(tc.function.arguments)
-                    return args.get("choice"), args.get("reasoning")
+    def _extract_judgment(self, response) -> Tuple[str, str]:
+        """Extract judgment from LLM response tool calls."""
+        tool_calls = response.choices[0].message.tool_calls
+        if not tool_calls:
+            return "Error", "LLM did not call the judgment tool."
 
-            return "Error", "LLM did not call submit_judgment tool."
+        for tc in tool_calls:
+            if tc.function.name == "submit_judgment":
+                args = json.loads(tc.function.arguments)
+                return args.get("choice"), args.get("reasoning")
 
-        except Exception as e:
-            logger.error(f"LLM judge failed: {e}")
-            return "Error", f"Exception during judgment: {str(e)}"
+        return "Error", "LLM did not call submit_judgment tool."
 
     def wait_for_event(
         self,

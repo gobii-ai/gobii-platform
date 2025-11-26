@@ -19,6 +19,11 @@ import {
   BookText,
   Search,
   Layers,
+  Copy,
+  Check,
+  Settings2,
+  Pencil,
+  Scale,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -523,6 +528,49 @@ function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
 }
 
 function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
+  const mapped = tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'embedding',
+      premium: false,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
+  applySequentialFallbackNames(mapped, () => 'embedding')
+  return mapped
+}
+
+// Profile-based mapping functions
+function mapBrowserTiersFromProfile(tiers: llmApi.ProfileBrowserTier[] = []): Tier[] {
+  const mapped = tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'browser',
+      premium: tier.is_premium,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
+  applySequentialFallbackNames(mapped, (tier) => `browser:${tier.premium ? 'premium' : 'standard'}`)
+  return mapped
+}
+
+function mapEmbeddingTiersFromProfile(tiers: llmApi.ProfileEmbeddingTier[] = []): Tier[] {
   const mapped = tiers.map((tier) => {
     const normalized = normalizeTierEndpointWeights(tier.endpoints)
     return {
@@ -1498,6 +1546,44 @@ export function LlmConfigScreen() {
   const [dirtyTierIds, setDirtyTierIds] = useState<Set<string>>(new Set())
   const stagedWeightsRef = useRef<Record<string, { scope: TierScope; updates: { id: string; weight: number }[] }>>({})
 
+  // Profile-related state
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [newProfileName, setNewProfileName] = useState('')
+  const [editProfileModalOpen, setEditProfileModalOpen] = useState(false)
+  const [editProfileDisplayName, setEditProfileDisplayName] = useState('')
+  const [editProfileDescription, setEditProfileDescription] = useState('')
+
+  // Fetch list of routing profiles
+  const profilesQuery = useQuery({
+    queryKey: ['llm-routing-profiles'],
+    queryFn: ({ signal }) => llmApi.fetchRoutingProfiles(signal),
+    refetchOnWindowFocus: false,
+  })
+
+  // Auto-select active profile when profiles load
+  useEffect(() => {
+    if (profilesQuery.data?.profiles && !selectedProfileId) {
+      const activeProfile = profilesQuery.data.profiles.find(p => p.is_active)
+      if (activeProfile) {
+        setSelectedProfileId(activeProfile.id)
+      } else if (profilesQuery.data.profiles.length > 0) {
+        setSelectedProfileId(profilesQuery.data.profiles[0].id)
+      }
+    }
+  }, [profilesQuery.data?.profiles, selectedProfileId])
+
+  // Fetch selected profile detail
+  const profileDetailQuery = useQuery({
+    queryKey: ['llm-routing-profile', selectedProfileId],
+    queryFn: ({ signal }) => selectedProfileId ? llmApi.fetchRoutingProfileDetail(selectedProfileId, signal) : Promise.resolve(null),
+    enabled: Boolean(selectedProfileId),
+    refetchOnWindowFocus: false,
+  })
+
+  const selectedProfile = profileDetailQuery.data?.profile ?? null
+  const profiles = profilesQuery.data?.profiles ?? []
+
   const overviewQuery = useQuery({
     queryKey: ['llm-overview'],
     queryFn: ({ signal }) => llmApi.fetchLlmOverview(signal),
@@ -1506,9 +1592,29 @@ export function LlmConfigScreen() {
 
   const stats = overviewQuery.data?.stats
   const providers = useMemo(() => mapProviders(overviewQuery.data?.providers), [overviewQuery.data?.providers])
-  const persistentStructures = useMemo(() => mapPersistentData(overviewQuery.data?.persistent.ranges), [overviewQuery.data?.persistent.ranges])
-  const browserTiers = useMemo(() => mapBrowserTiers(overviewQuery.data?.browser ?? null), [overviewQuery.data?.browser])
-  const embeddingTiers = useMemo(() => mapEmbeddingTiers(overviewQuery.data?.embeddings.tiers), [overviewQuery.data?.embeddings.tiers])
+
+  // Use profile-based data for tier structures when a profile is selected
+  const persistentStructures = useMemo(() => {
+    if (selectedProfile) {
+      return mapPersistentData(selectedProfile.persistent.ranges)
+    }
+    return mapPersistentData(overviewQuery.data?.persistent.ranges)
+  }, [selectedProfile, overviewQuery.data?.persistent.ranges])
+
+  const browserTiers = useMemo(() => {
+    if (selectedProfile) {
+      return mapBrowserTiersFromProfile(selectedProfile.browser.tiers)
+    }
+    return mapBrowserTiers(overviewQuery.data?.browser ?? null)
+  }, [selectedProfile, overviewQuery.data?.browser])
+
+  const embeddingTiers = useMemo(() => {
+    if (selectedProfile) {
+      return mapEmbeddingTiersFromProfile(selectedProfile.embeddings.tiers)
+    }
+    return mapEmbeddingTiers(overviewQuery.data?.embeddings.tiers)
+  }, [selectedProfile, overviewQuery.data?.embeddings.tiers])
+
   const browserStandardTiers = useMemo(() => browserTiers.filter((tier) => !tier.premium), [browserTiers])
   const browserPremiumTiers = useMemo(() => browserTiers.filter((tier) => tier.premium), [browserTiers])
   const endpointChoices = overviewQuery.data?.choices ?? { persistent_endpoints: [], browser_endpoints: [], embedding_endpoints: [] }
@@ -1516,7 +1622,7 @@ export function LlmConfigScreen() {
   useEffect(() => {
     setPendingWeights({})
     setDirtyTierIds(new Set())
-  }, [overviewQuery.data])
+  }, [overviewQuery.data, selectedProfile])
 
   useEffect(() => {
     if (!providers.length) {
@@ -1534,6 +1640,8 @@ export function LlmConfigScreen() {
   }, [providers])
 
   const invalidateOverview = () => queryClient.invalidateQueries({ queryKey: ['llm-overview'] })
+  const invalidateProfiles = () => queryClient.invalidateQueries({ queryKey: ['llm-routing-profiles'] })
+  const invalidateProfileDetail = () => queryClient.invalidateQueries({ queryKey: ['llm-routing-profile', selectedProfileId] })
 
   const runMutation = async <T,>(action: () => Promise<T>, options?: MutationOptions) => {
     const { rethrow, ...feedbackOptions } = options ?? {}
@@ -2069,6 +2177,500 @@ export function LlmConfigScreen() {
     }
   }
 
+  // ===============================
+  // Profile Management Handlers
+  // ===============================
+
+  const handleCreateProfile = async (name: string, displayName?: string) => {
+    return runWithFeedback(
+      async () => {
+        const result = await llmApi.createRoutingProfile({
+          name: name.toLowerCase().replace(/\s+/g, '-'),
+          display_name: displayName || name,
+        })
+        await invalidateProfiles()
+        if (result.profile_id) {
+          setSelectedProfileId(result.profile_id)
+        }
+        return result
+      },
+      {
+        successMessage: 'Profile created',
+        label: 'Creating profile…',
+        busyKey: 'profile-create',
+        context: name,
+      },
+    )
+  }
+
+  const handleCloneProfile = async (profileId: string, newName?: string) => {
+    return runWithFeedback(
+      async () => {
+        const result = await llmApi.cloneRoutingProfile(profileId, newName ? { name: newName } : undefined)
+        await invalidateProfiles()
+        if (result.profile_id) {
+          setSelectedProfileId(result.profile_id)
+        }
+        return result
+      },
+      {
+        successMessage: 'Profile cloned',
+        label: 'Cloning profile…',
+        busyKey: actionKey('profile', profileId, 'clone'),
+        context: 'Routing profile',
+      },
+    )
+  }
+
+  const handleActivateProfile = async (profileId: string) => {
+    return runWithFeedback(
+      async () => {
+        await llmApi.activateRoutingProfile(profileId)
+        await invalidateProfiles()
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: 'Profile activated',
+        label: 'Activating profile…',
+        busyKey: actionKey('profile', profileId, 'activate'),
+        context: 'Routing profile',
+      },
+    )
+  }
+
+  const handleDeleteProfile = (profileId: string, profileName: string) =>
+    confirmDestructiveAction({
+      title: `Delete profile "${profileName}"?`,
+      message: 'This will permanently remove the profile and all its tier configurations. Active profiles cannot be deleted.',
+      confirmLabel: 'Delete profile',
+      onConfirm: async () => {
+        await runWithFeedback(
+          async () => {
+            await llmApi.deleteRoutingProfile(profileId)
+            await invalidateProfiles()
+            // If we deleted the selected profile, select the first available
+            if (profileId === selectedProfileId) {
+              const remaining = profiles.filter(p => p.id !== profileId)
+              const next = remaining.find(p => p.is_active) || remaining[0]
+              setSelectedProfileId(next?.id || null)
+            }
+          },
+          {
+            successMessage: 'Profile deleted',
+            label: 'Deleting profile…',
+            busyKey: actionKey('profile', profileId, 'delete'),
+            context: profileName,
+          },
+        )
+      },
+    })
+
+  const handleUpdateProfile = async (profileId: string, payload: { display_name?: string; description?: string; eval_judge_endpoint_id?: string | null }) => {
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateRoutingProfile(profileId, payload)
+        await invalidateProfiles()
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: 'Profile updated',
+        label: 'Updating profile…',
+        busyKey: actionKey('profile', profileId, 'update'),
+        context: 'Routing profile',
+      },
+    )
+  }
+
+  const handleUpdateEvalJudge = async (endpointId: string | null) => {
+    if (!selectedProfileId) return
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateRoutingProfile(selectedProfileId, { eval_judge_endpoint_id: endpointId })
+        await invalidateProfiles()
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: endpointId ? 'Eval judge updated' : 'Eval judge cleared',
+        label: 'Updating eval judge…',
+        busyKey: actionKey('profile', selectedProfileId, 'eval-judge'),
+        context: 'Eval judge',
+      },
+    )
+  }
+
+  // ===============================
+  // Profile-Specific Tier Handlers
+  // ===============================
+
+  const handleProfileRangeAdd = () => {
+    if (!selectedProfileId) return handleAddRange()
+    const sorted = [...persistentStructures.ranges].sort((a, b) => (a.max_tokens ?? Infinity) - (b.max_tokens ?? Infinity))
+    const last = sorted.at(-1)
+    const baseMin = last?.max_tokens ?? 0
+    const name = `Range ${sorted.length + 1}`
+    return runWithFeedback(
+      async () => {
+        await llmApi.createProfileTokenRange(selectedProfileId, { name, min_tokens: baseMin, max_tokens: baseMin + 10000 })
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: 'Range added',
+        label: 'Creating range…',
+        busyKey: actionKey('profile-range', 'create'),
+        context: name,
+      },
+    )
+  }
+
+  const handleProfileRangeUpdate = (rangeId: string, field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => {
+    if (!selectedProfile) return handleRangeUpdate(rangeId, field, value)
+    const payload: Record<string, string | number | null> = {}
+    payload[field] = value
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateProfileTokenRange(rangeId, payload)
+        await invalidateProfileDetail()
+      },
+      {
+        label: 'Saving range…',
+        busyKey: actionKey('profile-range', rangeId, field),
+        context: 'Token range',
+      },
+    )
+  }
+
+  const handleProfileRangeRemove = (range: TokenRange) => {
+    if (!selectedProfile) return handleRangeRemove(range)
+    return confirmDestructiveAction({
+      title: `Delete range "${range.name}"?`,
+      message: 'All tiers in this token range will also be deleted.',
+      confirmLabel: 'Delete range',
+      onConfirm: () =>
+        runWithFeedback(
+          async () => {
+            await llmApi.deleteProfileTokenRange(range.id)
+            await invalidateProfileDetail()
+          },
+          {
+            successMessage: 'Range removed',
+            label: 'Removing range…',
+            busyKey: actionKey('profile-range', range.id, 'remove'),
+            context: range.name,
+          },
+        ),
+    })
+  }
+
+  const handleProfileTierAdd = (rangeId: string, isPremium: boolean) => {
+    if (!selectedProfile) return handleTierAdd(rangeId, isPremium)
+    return runWithFeedback(
+      async () => {
+        await llmApi.createProfilePersistentTier(rangeId, { is_premium: isPremium })
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: 'Tier added',
+        label: 'Creating tier…',
+        busyKey: actionKey('profile-range', rangeId, isPremium ? 'add-premium-tier' : 'add-standard-tier'),
+        context: 'Persistent tier',
+      },
+    )
+  }
+
+  const handleProfileTierMove = (rangeId: string, tierId: string, direction: 'up' | 'down') => {
+    if (!selectedProfile) return handleTierMove(rangeId, tierId, direction)
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateProfilePersistentTier(tierId, { move: direction })
+        await invalidateProfileDetail()
+      },
+      {
+        label: direction === 'up' ? 'Moving tier up…' : 'Moving tier down…',
+        busyKey: actionKey('profile-persistent', tierId, 'move', direction),
+        busyKeys: [actionKey('profile-persistent', tierId, 'move'), actionKey('profile-persistent-range', rangeId, 'move')],
+        context: 'Persistent tier',
+      },
+    )
+  }
+
+  const handleProfileTierRemove = (tier: Tier) => {
+    if (!selectedProfile) return handleTierRemove(tier)
+    return confirmDestructiveAction({
+      title: `Delete tier "${tier.name}"?`,
+      message: 'Endpoints will be detached from this tier.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () =>
+        runWithFeedback(
+          async () => {
+            await llmApi.deleteProfilePersistentTier(tier.id)
+            await invalidateProfileDetail()
+          },
+          {
+            successMessage: 'Tier removed',
+            label: 'Removing tier…',
+            busyKey: actionKey('profile-persistent', tier.id, 'remove'),
+            context: tier.name,
+          },
+        ),
+    })
+  }
+
+  const handleProfileBrowserTierAdd = (isPremium: boolean) => {
+    if (!selectedProfile || !selectedProfileId) return handleBrowserTierAdd(isPremium)
+    return runWithFeedback(
+      async () => {
+        await llmApi.createProfileBrowserTier(selectedProfileId, { is_premium: isPremium })
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: 'Browser tier added',
+        label: 'Creating browser tier…',
+        busyKey: actionKey('profile-browser', isPremium ? 'premium-add' : 'standard-add'),
+        context: 'Browser tiers',
+      },
+    )
+  }
+
+  const handleProfileBrowserTierMove = (tierId: string, direction: 'up' | 'down') => {
+    if (!selectedProfile) return handleBrowserTierMove(tierId, direction)
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateProfileBrowserTier(tierId, { move: direction })
+        await invalidateProfileDetail()
+      },
+      {
+        label: direction === 'up' ? 'Moving browser tier up…' : 'Moving browser tier down…',
+        busyKey: actionKey('profile-browser', tierId, 'move', direction),
+        busyKeys: [actionKey('profile-browser', tierId, 'move')],
+        context: 'Browser tiers',
+      },
+    )
+  }
+
+  const handleProfileBrowserTierRemove = (tier: Tier) => {
+    if (!selectedProfile) return handleBrowserTierRemove(tier)
+    return confirmDestructiveAction({
+      title: `Delete browser tier "${tier.name}"?`,
+      message: 'Endpoints assigned to this tier will stop serving browser workloads.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () =>
+        runWithFeedback(
+          async () => {
+            await llmApi.deleteProfileBrowserTier(tier.id)
+            await invalidateProfileDetail()
+          },
+          {
+            successMessage: 'Browser tier removed',
+            label: 'Removing browser tier…',
+            busyKey: actionKey('profile-browser', tier.id, 'remove'),
+            context: tier.name,
+          },
+        ),
+    })
+  }
+
+  const handleProfileEmbeddingTierAdd = () => {
+    if (!selectedProfile || !selectedProfileId) return handleEmbeddingTierAdd()
+    return runWithFeedback(
+      async () => {
+        await llmApi.createProfileEmbeddingTier(selectedProfileId, {})
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: 'Embedding tier added',
+        label: 'Creating embedding tier…',
+        busyKey: actionKey('profile-embedding', 'add'),
+        context: 'Embedding tiers',
+      },
+    )
+  }
+
+  const handleProfileEmbeddingTierMove = (tierId: string, direction: 'up' | 'down') => {
+    if (!selectedProfile) return handleEmbeddingTierMove(tierId, direction)
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateProfileEmbeddingTier(tierId, { move: direction })
+        await invalidateProfileDetail()
+      },
+      {
+        label: direction === 'up' ? 'Moving embedding tier up…' : 'Moving embedding tier down…',
+        busyKey: actionKey('profile-embedding', tierId, 'move', direction),
+        busyKeys: [actionKey('profile-embedding', tierId, 'move')],
+        context: 'Embedding tiers',
+      },
+    )
+  }
+
+  const handleProfileEmbeddingTierRemove = (tier: Tier) => {
+    if (!selectedProfile) return handleEmbeddingTierRemove(tier)
+    return confirmDestructiveAction({
+      title: `Delete embedding tier "${tier.name}"?`,
+      message: 'Any weighting rules tied to this tier will be lost.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () =>
+        runWithFeedback(
+          async () => {
+            await llmApi.deleteProfileEmbeddingTier(tier.id)
+            await invalidateProfileDetail()
+          },
+          {
+            successMessage: 'Embedding tier removed',
+            label: 'Removing embedding tier…',
+            busyKey: actionKey('profile-embedding', tier.id, 'remove'),
+            context: tier.name,
+          },
+        ),
+    })
+  }
+
+  // Profile-specific tier endpoint handlers
+  const commitProfileTierEndpointWeights = (tier: Tier, scope: TierScope) => {
+    if (!selectedProfile) return commitTierEndpointWeights(tier, scope)
+
+    const key = `${scope}:${tier.id}`
+    const staged = stagedWeightsRef.current[key]
+    if (!staged) return
+    delete stagedWeightsRef.current[key]
+    setSavingTierIds((prev) => {
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
+    const mutation = async () => {
+      const normalized: Record<string, number> = ensureServerUnits(
+        staged.updates.map((entry) => ({ id: entry.id, unit: entry.weight })),
+      )
+      const ops = staged.updates.map((entry) => {
+        const payload = { weight: encodeServerWeight(normalized[entry.id] ?? entry.weight) }
+        if (scope === 'browser') {
+          return llmApi.updateProfileBrowserTierEndpoint(entry.id, payload)
+        }
+        if (scope === 'embedding') {
+          return llmApi.updateProfileEmbeddingTierEndpoint(entry.id, payload)
+        }
+        return llmApi.updateProfilePersistentTierEndpoint(entry.id, payload)
+      })
+      await Promise.all(ops)
+      await invalidateProfileDetail()
+    }
+    return runWithFeedback(mutation, {
+      label: 'Saving weights…',
+      busyKey: actionKey('profile-tier', tier.id, 'weights'),
+      context: `${tier.name} weights`,
+    }).finally(() => {
+      setSavingTierIds((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+      setDirtyTierIds((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    })
+  }
+
+  const handleProfileTierEndpointRemove = (tier: Tier, endpoint: TierEndpoint, scope: TierScope) => {
+    if (!selectedProfile) return handleTierEndpointRemove(tier, endpoint, scope)
+
+    return confirmDestructiveAction({
+      title: `Remove "${endpoint.label}" from ${tier.name}?`,
+      message: 'This tier will lose access to the endpoint until it is added again.',
+      confirmLabel: 'Remove endpoint',
+      onConfirm: () =>
+        runWithFeedback(
+          async () => {
+            if (scope === 'browser') {
+              await llmApi.deleteProfileBrowserTierEndpoint(endpoint.id)
+            } else if (scope === 'embedding') {
+              await llmApi.deleteProfileEmbeddingTierEndpoint(endpoint.id)
+            } else {
+              await llmApi.deleteProfilePersistentTierEndpoint(endpoint.id)
+            }
+            await invalidateProfileDetail()
+          },
+          {
+            successMessage: 'Endpoint removed',
+            label: 'Removing endpoint…',
+            busyKey: actionKey('profile-tier-endpoint', endpoint.id, 'remove'),
+            context: tier.name,
+          },
+        ),
+    })
+  }
+
+  const submitProfileTierEndpoint = async (endpointId: string) => {
+    if (!endpointModal || !selectedProfile) return submitTierEndpoint(endpointId)
+    const { tier, scope } = endpointModal
+
+    let stagedWeights: Record<string, number> | null = null
+    const mutation = async () => {
+      const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
+      const requestPayload = { endpoint_id: endpointId, weight: encodeServerWeight(initialUnit) }
+      let response: { tier_endpoint_id?: string } = {}
+      if (scope === 'browser') {
+        response = await llmApi.addProfileBrowserTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
+      } else if (scope === 'embedding') {
+        response = await llmApi.addProfileEmbeddingTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
+      } else {
+        response = await llmApi.addProfilePersistentTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
+      }
+      const newTierEndpointId = response?.tier_endpoint_id
+      if (!newTierEndpointId) {
+        return
+      }
+
+      const evenWeights = distributeEvenWeights([...tier.endpoints.map((ep) => ep.id), newTierEndpointId])
+      stagedWeights = evenWeights
+      setPendingWeights((prev) => {
+        const next = { ...prev }
+        Object.entries(evenWeights).forEach(([tierEndpointId, weight]) => {
+          next[tierEndpointId] = weight
+        })
+        return next
+      })
+
+      const normalized: Record<string, number> = ensureServerUnits(
+        Object.entries(evenWeights).map(([id, unit]) => ({ id, unit })),
+      )
+      const updates = Object.entries(evenWeights).map(([tierEndpointId, weight]) => {
+        const payload = { weight: encodeServerWeight(normalized[tierEndpointId] ?? weight) }
+        if (scope === 'browser') {
+          return llmApi.updateProfileBrowserTierEndpoint(tierEndpointId, payload)
+        }
+        if (scope === 'embedding') {
+          return llmApi.updateProfileEmbeddingTierEndpoint(tierEndpointId, payload)
+        }
+        return llmApi.updateProfilePersistentTierEndpoint(tierEndpointId, payload)
+      })
+
+      await Promise.all(updates)
+      await invalidateProfileDetail()
+    }
+
+    const busyKey = actionKey('profile', scope, tier.id, 'attach-endpoint')
+    try {
+      await runWithFeedback(mutation, {
+        successMessage: 'Endpoint added',
+        label: 'Adding endpoint…',
+        busyKey,
+        context: tier.name,
+      })
+    } catch (error) {
+      setPendingWeights((prev) => {
+        const next = { ...prev }
+        if (stagedWeights) {
+          Object.keys(stagedWeights).forEach((key) => {
+            delete next[key]
+          })
+        }
+        return next
+      })
+      throw error
+    }
+  }
+
   const statsCards = [
     { label: 'Active providers', value: stats ? String(stats.active_providers) : '—', hint: 'Enabled vendors', icon: <PlugZap className="size-5" /> },
     { label: 'Persistent endpoints', value: stats ? String(stats.persistent_endpoints) : '—', hint: 'LLMs available for agents', icon: <Atom className="size-5" /> },
@@ -2095,6 +2697,129 @@ export function LlmConfigScreen() {
             <StatCard key={card.label} label={card.label} value={card.value} hint={card.hint} icon={card.icon} />
           ))}
         </div>
+
+        {/* Routing Profile Selector */}
+        <div className="gobii-card-base px-6 py-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-indigo-100 p-2.5">
+                <Settings2 className="size-5 text-indigo-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Routing Profile</h2>
+                <p className="text-sm text-slate-500">
+                  {selectedProfile?.description || 'Select a profile to view/edit its tier configuration'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {profilesQuery.isPending ? (
+                <div className="flex items-center gap-2 text-slate-500 text-sm">
+                  <LoaderCircle className="size-4 animate-spin" /> Loading profiles...
+                </div>
+              ) : (
+                <>
+                  <select
+                    value={selectedProfileId || ''}
+                    onChange={(e) => setSelectedProfileId(e.target.value || null)}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 min-w-[200px]"
+                  >
+                    {profiles.length === 0 && <option value="">No profiles</option>}
+                    {profiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.display_name || profile.name}
+                        {profile.is_active ? ' (Active)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-2">
+                    {selectedProfile && !selectedProfile.is_active && (
+                      <button
+                        type="button"
+                        className={button.primary}
+                        onClick={() => handleActivateProfile(selectedProfile.id)}
+                        disabled={isBusy(actionKey('profile', selectedProfile.id, 'activate'))}
+                      >
+                        {isBusy(actionKey('profile', selectedProfile.id, 'activate')) ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                          <Check className="size-4" />
+                        )}
+                        Activate
+                      </button>
+                    )}
+                    {selectedProfile && selectedProfile.is_active && (
+                      <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-100 px-3 py-1.5 text-sm font-medium text-emerald-700">
+                        <Check className="size-4" />
+                        Active
+                      </span>
+                    )}
+                    {selectedProfile && (
+                      <button
+                        type="button"
+                        className={button.secondary}
+                        onClick={() => {
+                          setEditProfileDisplayName(selectedProfile.display_name || selectedProfile.name)
+                          setEditProfileDescription(selectedProfile.description || '')
+                          setEditProfileModalOpen(true)
+                        }}
+                        disabled={isBusy(actionKey('profile', selectedProfile.id, 'update'))}
+                        title="Edit this profile"
+                      >
+                        {isBusy(actionKey('profile', selectedProfile.id, 'update')) ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                          <Pencil className="size-4" />
+                        )}
+                        Edit
+                      </button>
+                    )}
+                    {selectedProfile && (
+                      <button
+                        type="button"
+                        className={button.secondary}
+                        onClick={() => handleCloneProfile(selectedProfile.id)}
+                        disabled={isBusy(actionKey('profile', selectedProfile.id, 'clone'))}
+                        title="Clone this profile"
+                      >
+                        {isBusy(actionKey('profile', selectedProfile.id, 'clone')) ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                          <Copy className="size-4" />
+                        )}
+                        Clone
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className={button.secondary}
+                      onClick={() => setProfileModalOpen(true)}
+                    >
+                      <Plus className="size-4" />
+                      New
+                    </button>
+                    {selectedProfile && !selectedProfile.is_active && (
+                      <button
+                        type="button"
+                        className={button.iconDanger}
+                        onClick={() => handleDeleteProfile(selectedProfile.id, selectedProfile.display_name || selectedProfile.name)}
+                        disabled={isBusy(actionKey('profile', selectedProfile.id, 'delete'))}
+                        title="Delete this profile"
+                      >
+                        {isBusy(actionKey('profile', selectedProfile.id, 'delete')) ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="size-4" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
         <SectionCard
           title="Provider inventory"
           description="Toggle providers on/off, rotate keys, and review exposed endpoints."
@@ -2134,9 +2859,9 @@ export function LlmConfigScreen() {
         </SectionCard>
         <SectionCard
           title="Token-based failover tiers"
-          description="Manage token ranges, tier ordering, and weighted endpoints."
+          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Manage token ranges, tier ordering, and weighted endpoints.'}
           actions={
-            <button type="button" className={button.primary} onClick={handleAddRange}>
+            <button type="button" className={button.primary} onClick={selectedProfile ? handleProfileRangeAdd : handleAddRange}>
               <PlusCircle className="size-4" /> Add range
             </button>
           }
@@ -2147,15 +2872,15 @@ export function LlmConfigScreen() {
                 key={range.id}
                 range={range}
                 tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
-                onAddTier={(isPremium) => handleTierAdd(range.id, isPremium)}
-                onUpdate={(field, value) => handleRangeUpdate(range.id, field, value)}
-                onRemove={() => handleRangeRemove(range)}
-                onMoveTier={(tierId, direction) => handleTierMove(range.id, tierId, direction)}
-                onRemoveTier={handleTierRemove}
+                onAddTier={(isPremium) => selectedProfile ? handleProfileTierAdd(range.id, isPremium) : handleTierAdd(range.id, isPremium)}
+                onUpdate={(field, value) => selectedProfile ? handleProfileRangeUpdate(range.id, field, value) : handleRangeUpdate(range.id, field, value)}
+                onRemove={() => selectedProfile ? handleProfileRangeRemove(range) : handleRangeRemove(range)}
+                onMoveTier={(tierId, direction) => selectedProfile ? handleProfileTierMove(range.id, tierId, direction) : handleTierMove(range.id, tierId, direction)}
+                onRemoveTier={selectedProfile ? handleProfileTierRemove : handleTierRemove}
                 onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
                 onStageEndpointWeight={stageTierEndpointWeight}
-                onCommitEndpointWeights={commitTierEndpointWeights}
-                onRemoveEndpoint={(tier, endpoint) => handleTierEndpointRemove(tier, endpoint, 'persistent')}
+                onCommitEndpointWeights={(tier) => selectedProfile ? commitProfileTierEndpointWeights(tier, 'persistent') : commitTierEndpointWeights(tier, 'persistent')}
+                onRemoveEndpoint={(tier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(tier, endpoint, 'persistent') : handleTierEndpointRemove(tier, endpoint, 'persistent')}
                 pendingWeights={pendingWeights}
                 savingTierIds={savingTierIds}
                 dirtyTierIds={dirtyTierIds}
@@ -2164,7 +2889,7 @@ export function LlmConfigScreen() {
             ))}
             {persistentStructures.ranges.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-500">
-                {overviewQuery.isPending ? (
+                {(overviewQuery.isPending || profileDetailQuery.isPending) ? (
                   <div className="flex items-center justify-center gap-2">
                     <LoaderCircle className="size-5 animate-spin" /> Loading ranges...
                   </div>
@@ -2177,13 +2902,13 @@ export function LlmConfigScreen() {
         </SectionCard>
         <SectionCard
           title="Browser-use models"
-          description="Dedicated tiers for browser automations."
+          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Dedicated tiers for browser automations.'}
         >
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
               <div className="flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-slate-700">Standard tiers</h4>
-                <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(false)}>
+                <button type="button" className={button.secondary} onClick={() => selectedProfile ? handleProfileBrowserTierAdd(false) : handleBrowserTierAdd(false)}>
                   <PlusCircle className="size-4" /> Add
                 </button>
               </div>
@@ -2200,12 +2925,12 @@ export function LlmConfigScreen() {
                   canMoveDown={index < lastIndex}
                   isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
                   isSaving={savingTierIds.has(`browser:${tier.id}`)}
-                  onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
-                  onRemove={handleBrowserTierRemove}
+                  onMove={(direction) => selectedProfile ? handleProfileBrowserTierMove(tier.id, direction) : handleBrowserTierMove(tier.id, direction)}
+                  onRemove={selectedProfile ? handleProfileBrowserTierRemove : handleBrowserTierRemove}
                   onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
                   onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
-                  onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
-                  onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'browser')}
+                  onCommitEndpointWeights={(currentTier) => selectedProfile ? commitProfileTierEndpointWeights(currentTier, 'browser') : commitTierEndpointWeights(currentTier, 'browser')}
+                  onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(currentTier, endpoint, 'browser') : handleTierEndpointRemove(currentTier, endpoint, 'browser')}
                   isActionBusy={isBusy}
                 />
                 )
@@ -2214,7 +2939,7 @@ export function LlmConfigScreen() {
             <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
               <div className="flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-emerald-800">Premium tiers</h4>
-                <button type="button" className={button.secondary} onClick={() => handleBrowserTierAdd(true)}>
+                <button type="button" className={button.secondary} onClick={() => selectedProfile ? handleProfileBrowserTierAdd(true) : handleBrowserTierAdd(true)}>
                   <PlusCircle className="size-4" /> Add
                 </button>
               </div>
@@ -2231,12 +2956,12 @@ export function LlmConfigScreen() {
                   canMoveDown={index < lastIndex}
                   isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
                   isSaving={savingTierIds.has(`browser:${tier.id}`)}
-                  onMove={(direction) => handleBrowserTierMove(tier.id, direction)}
-                  onRemove={handleBrowserTierRemove}
+                  onMove={(direction) => selectedProfile ? handleProfileBrowserTierMove(tier.id, direction) : handleBrowserTierMove(tier.id, direction)}
+                  onRemove={selectedProfile ? handleProfileBrowserTierRemove : handleBrowserTierRemove}
                   onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
                   onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
-                  onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'browser')}
-                  onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'browser')}
+                  onCommitEndpointWeights={(currentTier) => selectedProfile ? commitProfileTierEndpointWeights(currentTier, 'browser') : commitTierEndpointWeights(currentTier, 'browser')}
+                  onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(currentTier, endpoint, 'browser') : handleTierEndpointRemove(currentTier, endpoint, 'browser')}
                   isActionBusy={isBusy}
                 />
                 )
@@ -2246,7 +2971,7 @@ export function LlmConfigScreen() {
         </SectionCard>
         <SectionCard
           title="Other model consumers"
-          description="Surface-level overview of summarization, embeddings, and tooling hints."
+          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, and tooling hints.'}
         >
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2269,6 +2994,45 @@ export function LlmConfigScreen() {
                 </div>
               </div>
             </div>
+            {selectedProfile && (
+              <div className="bg-amber-50/50 p-4 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <Scale className="size-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-slate-900/90">Eval Judge</h4>
+                    <p className="text-sm text-slate-600 mb-3">Endpoint used for evaluation judging/grading in this profile.</p>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                        value={selectedProfile.eval_judge_endpoint?.endpoint_id ?? ''}
+                        onChange={(e) => handleUpdateEvalJudge(e.target.value || null)}
+                        disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge'))}
+                      >
+                        <option value="">— Use default tier fallback —</option>
+                        {endpointChoices.persistent_endpoints.map((ep) => (
+                          <option key={ep.id} value={ep.id}>
+                            {ep.label} ({ep.model})
+                          </option>
+                        ))}
+                      </select>
+                      {selectedProfile.eval_judge_endpoint && (
+                        <button
+                          type="button"
+                          className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => handleUpdateEvalJudge(null)}
+                          disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge'))}
+                        >
+                          <X className="size-4" />
+                        </button>
+                      )}
+                      {isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge')) && (
+                        <Loader2 className="size-4 text-amber-600 animate-spin flex-shrink-0" />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
               <div className="flex items-center justify-between">
                 <div className="flex items-start gap-3">
@@ -2278,7 +3042,7 @@ export function LlmConfigScreen() {
                     <p className="text-sm text-slate-600">Fallback order for generating embeddings.</p>
                   </div>
                 </div>
-                <button type="button" className={button.secondary} onClick={handleEmbeddingTierAdd}>
+                <button type="button" className={button.secondary} onClick={selectedProfile ? handleProfileEmbeddingTierAdd : handleEmbeddingTierAdd}>
                   <PlusCircle className="size-4" /> Add tier
                 </button>
               </div>
@@ -2294,12 +3058,12 @@ export function LlmConfigScreen() {
                   canMoveDown={index < lastIndex}
                   isDirty={dirtyTierIds.has(`embedding:${tier.id}`)}
                   isSaving={savingTierIds.has(`embedding:${tier.id}`)}
-                  onMove={(direction) => handleEmbeddingTierMove(tier.id, direction)}
-                  onRemove={handleEmbeddingTierRemove}
+                  onMove={(direction) => selectedProfile ? handleProfileEmbeddingTierMove(tier.id, direction) : handleEmbeddingTierMove(tier.id, direction)}
+                  onRemove={selectedProfile ? handleProfileEmbeddingTierRemove : handleEmbeddingTierRemove}
                   onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
                   onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
-                  onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'embedding')}
-                  onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'embedding')}
+                  onCommitEndpointWeights={(currentTier) => selectedProfile ? commitProfileTierEndpointWeights(currentTier, 'embedding') : commitTierEndpointWeights(currentTier, 'embedding')}
+                  onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(currentTier, endpoint, 'embedding') : handleTierEndpointRemove(currentTier, endpoint, 'embedding')}
                   isActionBusy={isBusy}
                 />
                 )
@@ -2313,8 +3077,8 @@ export function LlmConfigScreen() {
             tier={endpointModal.tier}
             scope={endpointModal.scope}
             choices={endpointChoices}
-            busy={isBusy(actionKey(endpointModal.scope, endpointModal.tier.id, 'attach-endpoint'))}
-            onAdd={(endpointId) => submitTierEndpoint(endpointId)}
+            busy={isBusy(actionKey(selectedProfile ? 'profile' : endpointModal.scope, endpointModal.scope, endpointModal.tier.id, 'attach-endpoint'))}
+            onAdd={(endpointId) => selectedProfile ? submitProfileTierEndpoint(endpointId) : submitTierEndpoint(endpointId)}
             onClose={() => setEndpointModal(null)}
           />
         )}
@@ -2329,6 +3093,171 @@ export function LlmConfigScreen() {
             onConfirm={handleConfirmDialogConfirm}
             onCancel={handleConfirmDialogCancel}
           />
+        )}
+        {profileModalOpen && (
+          <ModalPortal>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                  <h3 className="text-lg font-semibold text-slate-900">Create Routing Profile</h3>
+                  <button
+                    type="button"
+                    className={button.icon}
+                    onClick={() => {
+                      setProfileModalOpen(false)
+                      setNewProfileName('')
+                    }}
+                  >
+                    <X className="size-5" />
+                  </button>
+                </div>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault()
+                    if (!newProfileName.trim()) return
+                    try {
+                      await handleCreateProfile(newProfileName.trim())
+                      setProfileModalOpen(false)
+                      setNewProfileName('')
+                    } catch {
+                      // Error handled by runWithFeedback
+                    }
+                  }}
+                  className="p-6 space-y-4"
+                >
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Profile Name</label>
+                    <input
+                      type="text"
+                      value={newProfileName}
+                      onChange={(e) => setNewProfileName(e.target.value)}
+                      placeholder="e.g., Production, Staging, Eval A"
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                      autoFocus
+                    />
+                    <p className="mt-1 text-xs text-slate-500">
+                      A unique identifier will be generated from the name.
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      className={button.secondary}
+                      onClick={() => {
+                        setProfileModalOpen(false)
+                        setNewProfileName('')
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className={button.primary}
+                      disabled={!newProfileName.trim() || isBusy('profile-create')}
+                    >
+                      {isBusy('profile-create') ? (
+                        <>
+                          <LoaderCircle className="size-4 animate-spin" />
+                          Creating...
+                        </>
+                      ) : (
+                        'Create Profile'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </ModalPortal>
+        )}
+        {editProfileModalOpen && selectedProfile && (
+          <ModalPortal>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                  <h3 className="text-lg font-semibold text-slate-900">Edit Routing Profile</h3>
+                  <button
+                    type="button"
+                    className={button.icon}
+                    onClick={() => {
+                      setEditProfileModalOpen(false)
+                      setEditProfileDisplayName('')
+                      setEditProfileDescription('')
+                    }}
+                  >
+                    <X className="size-5" />
+                  </button>
+                </div>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault()
+                    if (!editProfileDisplayName.trim()) return
+                    try {
+                      await handleUpdateProfile(selectedProfile.id, {
+                        display_name: editProfileDisplayName.trim(),
+                        description: editProfileDescription.trim(),
+                      })
+                      setEditProfileModalOpen(false)
+                      setEditProfileDisplayName('')
+                      setEditProfileDescription('')
+                    } catch {
+                      // Error handled by runWithFeedback
+                    }
+                  }}
+                  className="p-6 space-y-4"
+                >
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
+                    <input
+                      type="text"
+                      value={editProfileDisplayName}
+                      onChange={(e) => setEditProfileDisplayName(e.target.value)}
+                      placeholder="e.g., Production, Staging, Eval A"
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                    <textarea
+                      value={editProfileDescription}
+                      onChange={(e) => setEditProfileDescription(e.target.value)}
+                      placeholder="Optional description for this profile"
+                      rows={3}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      className={button.secondary}
+                      onClick={() => {
+                        setEditProfileModalOpen(false)
+                        setEditProfileDisplayName('')
+                        setEditProfileDescription('')
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className={button.primary}
+                      disabled={!editProfileDisplayName.trim() || isBusy(actionKey('profile', selectedProfile.id, 'update'))}
+                    >
+                      {isBusy(actionKey('profile', selectedProfile.id, 'update')) ? (
+                        <>
+                          <LoaderCircle className="size-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        'Save Changes'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </ModalPortal>
         )}
       </div>
     </>

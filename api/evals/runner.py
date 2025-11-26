@@ -11,7 +11,7 @@ from api.models import (
 from api.evals.registry import ScenarioRegistry
 from api.evals.realtime import broadcast_run_update, broadcast_suite_update, broadcast_task_update
 from api.evals.metrics import aggregate_run_metrics
-from api.evals.execution import set_current_eval_run_id
+from api.evals.execution import set_current_eval_run_id, set_current_eval_routing_profile
 import api.evals.loader # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -98,10 +98,29 @@ class EvalRunner:
         Main execution method.
         """
         logger.info(f"Starting eval run {self.run.id} for scenario {self.run.scenario_slug}")
-        
+
+        # Resolve the routing profile from the suite run (if set)
+        routing_profile = None
+        if self.run.suite_run_id:
+            try:
+                suite = EvalSuiteRun.objects.select_related("llm_routing_profile").get(
+                    id=self.run.suite_run_id
+                )
+                routing_profile = suite.llm_routing_profile
+            except EvalSuiteRun.DoesNotExist:
+                pass
+
+        # Snapshot the routing profile on the run for history
+        if routing_profile:
+            self.run.llm_routing_profile = routing_profile
+            self.run.llm_routing_profile_name = routing_profile.name
+
         self.run.status = EvalRun.Status.RUNNING
         self.run.started_at = timezone.now()
-        self.run.save(update_fields=['status', 'started_at'])
+        save_fields = ['status', 'started_at']
+        if routing_profile:
+            save_fields.extend(['llm_routing_profile', 'llm_routing_profile_name'])
+        self.run.save(update_fields=save_fields)
         broadcast_run_update(self.run)
         _update_suite_state(self.run.suite_run_id)
 
@@ -109,7 +128,7 @@ class EvalRunner:
             # Pre-create tasks for visibility
             # We wipe existing tasks if this is a re-run to avoid duplicates
             self.run.tasks.all().delete()
-            
+
             for i, task_def in enumerate(self.scenario.tasks, start=1):
                 EvalRunTask.objects.create(
                     run=self.run,
@@ -119,12 +138,14 @@ class EvalRunner:
                     status=EvalRunTask.Status.PENDING
                 )
 
-            # Run the scenario logic
+            # Run the scenario logic with eval context
             set_current_eval_run_id(str(self.run.id))
+            set_current_eval_routing_profile(routing_profile)
             try:
                 self.scenario.run(str(self.run.id), str(self.run.agent_id))
             finally:
                 set_current_eval_run_id(None)
+                set_current_eval_routing_profile(None)
 
             # Mark completion
             self.run.status = EvalRun.Status.COMPLETED
@@ -133,7 +154,7 @@ class EvalRunner:
             logger.exception(f"Eval run {self.run.id} failed with exception")
             self.run.status = EvalRun.Status.ERRORED
             self.run.notes = f"Exception:\n{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-        
+
         finally:
             _finalize_pending_tasks(self.run, self.run.status)
             self.run.finished_at = timezone.now()

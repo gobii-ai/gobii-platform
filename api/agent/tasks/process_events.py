@@ -64,6 +64,7 @@ def process_agent_events_task(
     mock_config: Optional[Dict[str, Any]] = None,
 ) -> None:  # noqa: D401, ANN001
     """Celery task that triggers event processing for one persistent agent."""
+    from api.evals.execution import set_current_eval_routing_profile
 
     # Get the Celery-provided span and rename it for clarity
     span = trace.get_current_span()
@@ -73,7 +74,21 @@ def process_agent_events_task(
     # Make the agent ID available to downstream spans/processors
     baggage.set_baggage("persistent_agent.id", str(persistent_agent_id))
 
+    # Look up and set the routing profile from the eval run (if any)
+    # This is needed because context variables don't propagate across Celery tasks
+    routing_profile = None
+    if eval_run_id:
+        try:
+            from api.models import EvalRun
+            eval_run = EvalRun.objects.select_related("llm_routing_profile").filter(id=eval_run_id).first()
+            if eval_run and eval_run.llm_routing_profile:
+                routing_profile = eval_run.llm_routing_profile
+                span.set_attribute("eval.routing_profile", routing_profile.name)
+        except Exception:
+            logger.debug("Failed to look up routing profile for eval_run %s", eval_run_id, exc_info=True)
+
     try:
+        set_current_eval_routing_profile(routing_profile)
         # Delegate to core logic
         process_agent_events(
             persistent_agent_id,
@@ -84,6 +99,7 @@ def process_agent_events_task(
             mock_config=mock_config,
         )
     finally:
+        set_current_eval_routing_profile(None)
         # Ensure queued flag clears even if processing short-circuits
         clear_processing_queued_flag(persistent_agent_id)
         _broadcast_processing_state(persistent_agent_id)

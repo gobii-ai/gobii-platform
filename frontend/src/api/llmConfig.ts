@@ -249,3 +249,205 @@ export type EndpointTestResponse = {
 export function testEndpoint(payload: { endpoint_id: string; kind: ProviderEndpoint['type'] }) {
   return jsonRequest<EndpointTestResponse>(`${base}/test-endpoint/`, withCsrf(payload))
 }
+
+// =============================================================================
+// Routing Profiles
+// =============================================================================
+
+export type RoutingProfileListItem = {
+  id: string
+  name: string
+  display_name: string
+  description: string
+  is_active: boolean
+  created_at: string | null
+  updated_at: string | null
+  cloned_from_id: string | null
+  eval_judge_endpoint_id: string | null
+}
+
+export type EvalJudgeEndpoint = {
+  endpoint_id: string
+  endpoint_key: string
+  label: string
+  model: string
+}
+
+export type ProfilePersistentTier = {
+  id: string
+  order: number
+  description: string
+  is_premium: boolean
+  is_max: boolean
+  credit_multiplier: string | null
+  endpoints: TierEndpoint[]
+}
+
+export type ProfileTokenRange = {
+  id: string
+  name: string
+  min_tokens: number
+  max_tokens: number | null
+  tiers: ProfilePersistentTier[]
+}
+
+export type ProfileBrowserTier = {
+  id: string
+  order: number
+  description: string
+  is_premium: boolean
+  endpoints: TierEndpoint[]
+}
+
+export type ProfileEmbeddingTier = {
+  id: string
+  order: number
+  description: string
+  endpoints: TierEndpoint[]
+}
+
+export type RoutingProfileDetail = {
+  id: string
+  name: string
+  display_name: string
+  description: string
+  is_active: boolean
+  created_at: string | null
+  updated_at: string | null
+  cloned_from_id: string | null
+  eval_judge_endpoint: EvalJudgeEndpoint | null
+  persistent: { ranges: ProfileTokenRange[] }
+  browser: { tiers: ProfileBrowserTier[] }
+  embeddings: { tiers: ProfileEmbeddingTier[] }
+}
+
+export type RoutingProfilesListResponse = {
+  profiles: RoutingProfileListItem[]
+}
+
+export type RoutingProfileDetailResponse = {
+  profile: RoutingProfileDetail
+}
+
+export function fetchRoutingProfiles(signal?: AbortSignal): Promise<RoutingProfilesListResponse> {
+  return jsonFetch<RoutingProfilesListResponse>(`${base}/routing-profiles/`, { signal })
+}
+
+export function fetchRoutingProfileDetail(profileId: string, signal?: AbortSignal): Promise<RoutingProfileDetailResponse> {
+  return jsonFetch<RoutingProfileDetailResponse>(`${base}/routing-profiles/${profileId}/`, { signal })
+}
+
+export function createRoutingProfile(payload: {
+  name: string
+  display_name?: string
+  description?: string
+}): Promise<{ ok: boolean; profile_id: string }> {
+  return jsonRequest(`${base}/routing-profiles/`, withCsrf(payload))
+}
+
+export function updateRoutingProfile(profileId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/routing-profiles/${profileId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteRoutingProfile(profileId: string) {
+  return jsonRequest(`${base}/routing-profiles/${profileId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function activateRoutingProfile(profileId: string) {
+  return jsonRequest(`${base}/routing-profiles/${profileId}/activate/`, withCsrf({}))
+}
+
+export function cloneRoutingProfile(profileId: string, payload?: {
+  name?: string
+  display_name?: string
+  description?: string
+}): Promise<{ ok: boolean; profile_id: string; name: string }> {
+  return jsonRequest(`${base}/routing-profiles/${profileId}/clone/`, withCsrf(payload ?? {}))
+}
+
+// Profile-specific tier management
+const profileBase = `${base}/routing-profiles`
+
+export function createProfileTokenRange(profileId: string, payload: { name: string; min_tokens: number; max_tokens: number | null }) {
+  return jsonRequest(`${profileBase}/${profileId}/token-ranges/`, withCsrf(payload))
+}
+
+export function updateProfileTokenRange(rangeId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${profileBase}/token-ranges/${rangeId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteProfileTokenRange(rangeId: string) {
+  return jsonRequest(`${profileBase}/token-ranges/${rangeId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function createProfilePersistentTier(rangeId: string, payload: { is_premium?: boolean; is_max?: boolean; description?: string; credit_multiplier?: string }) {
+  return jsonRequest(`${profileBase}/token-ranges/${rangeId}/tiers/`, withCsrf(payload))
+}
+
+export function updateProfilePersistentTier(tierId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${profileBase}/persistent-tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteProfilePersistentTier(tierId: string) {
+  return jsonRequest(`${profileBase}/persistent-tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function addProfilePersistentTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+  return jsonRequest(`${profileBase}/persistent-tiers/${tierId}/endpoints/`, withCsrf(payload))
+}
+
+export function updateProfilePersistentTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${profileBase}/persistent-tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteProfilePersistentTierEndpoint(tierEndpointId: string) {
+  return jsonRequest(`${profileBase}/persistent-tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function createProfileBrowserTier(profileId: string, payload: { is_premium?: boolean; description?: string }) {
+  return jsonRequest(`${profileBase}/${profileId}/browser-tiers/`, withCsrf(payload))
+}
+
+export function updateProfileBrowserTier(tierId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${profileBase}/browser-tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteProfileBrowserTier(tierId: string) {
+  return jsonRequest(`${profileBase}/browser-tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function addProfileBrowserTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+  return jsonRequest(`${profileBase}/browser-tiers/${tierId}/endpoints/`, withCsrf(payload))
+}
+
+export function updateProfileBrowserTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${profileBase}/browser-tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteProfileBrowserTierEndpoint(tierEndpointId: string) {
+  return jsonRequest(`${profileBase}/browser-tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function createProfileEmbeddingTier(profileId: string, payload: { description?: string }) {
+  return jsonRequest(`${profileBase}/${profileId}/embeddings-tiers/`, withCsrf(payload))
+}
+
+export function updateProfileEmbeddingTier(tierId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${profileBase}/embeddings-tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteProfileEmbeddingTier(tierId: string) {
+  return jsonRequest(`${profileBase}/embeddings-tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function addProfileEmbeddingTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+  return jsonRequest(`${profileBase}/embeddings-tiers/${tierId}/endpoints/`, withCsrf(payload))
+}
+
+export function updateProfileEmbeddingTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${profileBase}/embeddings-tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteProfileEmbeddingTierEndpoint(tierEndpointId: string) {
+  return jsonRequest(`${profileBase}/embeddings-tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+}

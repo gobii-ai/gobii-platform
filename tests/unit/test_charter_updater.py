@@ -42,7 +42,7 @@ class CharterUpdaterToolTests(TestCase):
 
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.charter, new_charter)
-        mock_schedule.assert_called_once_with(self.agent)
+        mock_schedule.assert_called_once_with(self.agent, routing_profile_id=None)
         self.assertEqual(
             response,
             {
