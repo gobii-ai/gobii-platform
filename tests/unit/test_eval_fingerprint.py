@@ -194,3 +194,152 @@ class GitVersionTests(TestCase):
         branch = get_code_branch()
 
         self.assertEqual(branch, "")
+
+
+@tag("batch_eval_fingerprint")
+class EvalComparisonAPITests(TestCase):
+    """Tests for eval comparison API endpoints."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from api.models import BrowserUseAgent, PersistentAgent, EvalRun
+
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username="eval_test_user",
+            email="eval@test.com",
+            password="testpass",
+            is_staff=True,
+            is_superuser=True,
+        )
+
+        # Create a browser agent and persistent agent for eval runs
+        self.browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Test Browser Agent",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Test Agent",
+            browser_use_agent=self.browser_agent,
+            charter="Test charter",
+        )
+
+        # Create eval runs with fingerprints
+        self.run1 = EvalRun.objects.create(
+            scenario_slug="weather_lookup",
+            scenario_version="1.0.0",
+            scenario_fingerprint="abc123def456",
+            code_version="commit1",
+            code_branch="main",
+            agent=self.agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.COMPLETED,
+        )
+        self.run2 = EvalRun.objects.create(
+            scenario_slug="weather_lookup",
+            scenario_version="1.0.0",
+            scenario_fingerprint="abc123def456",  # Same fingerprint
+            code_version="commit2",
+            code_branch="main",
+            agent=self.agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.COMPLETED,
+        )
+        self.run3 = EvalRun.objects.create(
+            scenario_slug="weather_lookup",
+            scenario_version="1.0.0",
+            scenario_fingerprint="different123",  # Different fingerprint
+            code_version="commit3",
+            code_branch="main",
+            agent=self.agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.COMPLETED,
+        )
+
+    def test_run_detail_includes_fingerprint_fields(self):
+        """Run detail should include fingerprint, code_version, code_branch."""
+        self.client.force_login(self.user)
+        response = self.client.get(f"/console/api/evals/runs/{self.run1.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["run"]
+        self.assertEqual(data["scenario_fingerprint"], "abc123def456")
+        self.assertEqual(data["code_version"], "commit1")
+        self.assertEqual(data["code_branch"], "main")
+
+    def test_run_detail_includes_comparison_metadata(self):
+        """Run detail should include comparable_runs_count."""
+        self.client.force_login(self.user)
+        response = self.client.get(f"/console/api/evals/runs/{self.run1.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["run"]
+        self.assertIn("comparison", data)
+        # run2 has same fingerprint, run3 does not
+        self.assertEqual(data["comparison"]["comparable_runs_count"], 1)
+        self.assertTrue(data["comparison"]["has_comparable_runs"])
+
+    def test_compare_endpoint_pragmatic_tier(self):
+        """Pragmatic tier returns runs with same fingerprint."""
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=pragmatic"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["tier"], "pragmatic")
+        self.assertEqual(len(data["runs"]), 1)  # Only run2 matches
+        self.assertEqual(data["runs"][0]["id"], str(self.run2.id))
+
+    def test_compare_endpoint_historical_tier(self):
+        """Historical tier returns runs with same slug (any fingerprint)."""
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=historical"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["tier"], "historical")
+        self.assertEqual(len(data["runs"]), 2)  # Both run2 and run3 match
+
+    def test_compare_endpoint_historical_warns_on_fingerprint_mismatch(self):
+        """Historical tier warns when fingerprints differ."""
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=historical"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIsNotNone(data["fingerprint_warning"])
+        self.assertIn("different fingerprints", data["fingerprint_warning"])
+
+    def test_compare_endpoint_invalid_tier(self):
+        """Invalid tier returns error."""
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=invalid"
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_compare_endpoint_run_type_filter(self):
+        """Can filter by run_type."""
+        from api.models import EvalRun
+
+        # Mark run2 as official
+        self.run2.run_type = EvalRun.RunType.OFFICIAL
+        self.run2.save()
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=pragmatic&run_type=official"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data["runs"]), 1)
+        self.assertEqual(data["runs"][0]["run_type"], "official")

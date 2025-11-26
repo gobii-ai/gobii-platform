@@ -112,7 +112,7 @@ We discussed three tiers:
 
 ## Implementation Plan
 
-### Phase 1: Data Capture (Current)
+### Phase 1: Data Capture ✅ COMPLETE
 
 1. Create `api/evals/fingerprint.py`:
    - `compute_scenario_fingerprint(scenario)` - AST hash
@@ -126,11 +126,21 @@ We discussed three tiers:
 
 3. Populate in `EvalRunner` at run start
 
-### Phase 2: Comparison Foundation (Future)
+### Phase 2: Comparison Foundation ✅ COMPLETE
 
-1. API endpoint to get runs with matching fingerprint
-2. Comparison metadata in run detail response
-3. Warning when fingerprints differ
+1. API endpoint: `GET /console/api/evals/runs/<id>/compare/`
+   - `?tier=strict` - Same fingerprint + same LLM profile lineage
+   - `?tier=pragmatic` (default) - Same fingerprint, any config
+   - `?tier=historical` - Same scenario slug, any fingerprint
+   - `?run_type=official` - Filter by run type
+   - Returns `fingerprint_warning` when comparing runs with different fingerprints
+
+2. Run detail response includes:
+   - `scenario_fingerprint`, `code_version`, `code_branch`
+   - `comparison.comparable_runs_count`
+   - `comparison.has_comparable_runs`
+
+3. Fingerprint mismatch warnings in historical tier comparisons
 
 ### Phase 3: UI (Future)
 

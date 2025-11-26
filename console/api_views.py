@@ -11,7 +11,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Min
 from django.http import HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -656,6 +656,9 @@ def _serialize_eval_run(run: EvalRun, *, include_tasks: bool = False) -> dict[st
         "suite_run_id": str(run.suite_run_id) if run.suite_run_id else None,
         "scenario_slug": run.scenario_slug,
         "scenario_version": run.scenario_version,
+        "scenario_fingerprint": run.scenario_fingerprint or None,
+        "code_version": run.code_version or None,
+        "code_branch": run.code_branch or None,
         "status": run.status,
         "run_type": run.run_type,
         "started_at": run.started_at.isoformat() if run.started_at else None,
@@ -3358,4 +3361,109 @@ class EvalRunDetailAPIView(SystemAdminAPIView):
             EvalRun.objects.prefetch_related("tasks"),
             pk=run_id,
         )
-        return JsonResponse({"run": _serialize_eval_run(run, include_tasks=True)})
+        payload = _serialize_eval_run(run, include_tasks=True)
+
+        # Add comparison metadata if fingerprint exists
+        if run.scenario_fingerprint:
+            comparable_count = EvalRun.objects.filter(
+                scenario_fingerprint=run.scenario_fingerprint,
+                status=EvalRun.Status.COMPLETED,
+            ).exclude(id=run.id).count()
+            payload["comparison"] = {
+                "comparable_runs_count": comparable_count,
+                "has_comparable_runs": comparable_count > 0,
+            }
+
+        return JsonResponse({"run": payload})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EvalRunCompareAPIView(SystemAdminAPIView):
+    """
+    Get runs comparable to a given run.
+
+    Supports three comparison tiers via ?tier= parameter:
+    - strict: Same fingerprint + same LLM profile lineage (most rigorous)
+    - pragmatic (default): Same fingerprint, any config
+    - historical: Same scenario slug, any fingerprint (loosest)
+    """
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, run_id: str, *args: Any, **kwargs: Any):
+        run = get_object_or_404(EvalRun, pk=run_id)
+
+        tier = request.GET.get("tier", "pragmatic").lower()
+        if tier not in ("strict", "pragmatic", "historical"):
+            return HttpResponseBadRequest("tier must be one of: strict, pragmatic, historical")
+
+        run_type_filter = request.GET.get("run_type")
+        if run_type_filter:
+            run_type_filter = run_type_filter.lower()
+            if run_type_filter not in dict(EvalRun.RunType.choices):
+                return HttpResponseBadRequest("Invalid run_type")
+
+        limit_raw = request.GET.get("limit", "50")
+        try:
+            limit = max(1, min(100, int(limit_raw)))
+        except ValueError:
+            return HttpResponseBadRequest("limit must be an integer")
+
+        # Build query based on tier
+        qs = EvalRun.objects.filter(status=EvalRun.Status.COMPLETED).exclude(id=run.id)
+
+        if tier == "strict":
+            # Same fingerprint + same LLM profile lineage
+            if not run.scenario_fingerprint:
+                return JsonResponse({
+                    "runs": [],
+                    "tier": tier,
+                    "target_run_id": str(run.id),
+                    "warning": "Target run has no fingerprint - cannot do strict comparison",
+                })
+            qs = qs.filter(scenario_fingerprint=run.scenario_fingerprint)
+            # Filter by LLM profile lineage if the run has one
+            if run.llm_routing_profile_id:
+                # Get the source profile (cloned_from) or use the profile itself
+                profile = run.llm_routing_profile
+                source_id = profile.cloned_from_id if profile.cloned_from_id else profile.id
+                qs = qs.filter(
+                    models.Q(llm_routing_profile_id=source_id) |
+                    models.Q(llm_routing_profile__cloned_from_id=source_id)
+                )
+        elif tier == "pragmatic":
+            # Same fingerprint, any config
+            if not run.scenario_fingerprint:
+                return JsonResponse({
+                    "runs": [],
+                    "tier": tier,
+                    "target_run_id": str(run.id),
+                    "warning": "Target run has no fingerprint - falling back to slug matching",
+                })
+            qs = qs.filter(scenario_fingerprint=run.scenario_fingerprint)
+        else:  # historical
+            # Same scenario slug, any fingerprint
+            qs = qs.filter(scenario_slug=run.scenario_slug)
+
+        # Apply run_type filter if specified
+        if run_type_filter:
+            qs = qs.filter(run_type=run_type_filter)
+
+        # Order by most recent first
+        qs = qs.order_by("-finished_at")[:limit]
+
+        runs = list(qs.prefetch_related("tasks"))
+
+        # Check for fingerprint mismatches in historical tier
+        fingerprint_warning = None
+        if tier == "historical" and run.scenario_fingerprint:
+            mismatched = [r for r in runs if r.scenario_fingerprint != run.scenario_fingerprint]
+            if mismatched:
+                fingerprint_warning = f"{len(mismatched)} run(s) have different fingerprints - eval code may have changed"
+
+        return JsonResponse({
+            "runs": [_serialize_eval_run(r, include_tasks=False) for r in runs],
+            "tier": tier,
+            "target_run_id": str(run.id),
+            "target_fingerprint": run.scenario_fingerprint or None,
+            "fingerprint_warning": fingerprint_warning,
+        })

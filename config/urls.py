@@ -70,6 +70,7 @@ from console.api_views import (
     EvalSuiteRunListAPIView,
     EvalSuiteRunRunTypeAPIView,
     EvalRunDetailAPIView,
+    EvalRunCompareAPIView,
 )
 from console.usage_views import (
     UsageSummaryAPIView,
@@ -250,6 +251,7 @@ urlpatterns = [
     path("console/api/evals/suite-runs/<uuid:suite_run_id>/", EvalSuiteRunDetailAPIView.as_view(), name="console_evals_suite_run_detail"),
     path("console/api/evals/suite-runs/<uuid:suite_run_id>/run-type/", EvalSuiteRunRunTypeAPIView.as_view(), name="console_evals_suite_run_run_type"),
     path("console/api/evals/runs/<uuid:run_id>/", EvalRunDetailAPIView.as_view(), name="console_evals_run_detail"),
+    path("console/api/evals/runs/<uuid:run_id>/compare/", EvalRunCompareAPIView.as_view(), name="console_evals_run_compare"),
     path("console/api/mcp/servers/", MCPServerListAPIView.as_view(), name="console-mcp-server-list"),
     path("console/api/mcp/servers/<uuid:server_id>/", MCPServerDetailAPIView.as_view(), name="console-mcp-server-detail"),
     path("console/api/mcp/servers/<uuid:server_id>/assignments/", MCPServerAssignmentsAPIView.as_view(), name="console-mcp-server-assignments"),
