@@ -10,6 +10,7 @@ import hashlib
 import inspect
 import subprocess
 import textwrap
+from pathlib import Path
 
 
 def compute_scenario_fingerprint(scenario) -> str:
@@ -52,9 +53,13 @@ def get_code_version() -> str:
     """
     Get the current git commit hash.
 
+    Tries git first (for local development), then falls back to .git-commit
+    file (for Docker deployments where git isn't available).
+
     Returns:
-        12-character short git hash, or empty string if not in a git repo
+        12-character short git hash, or empty string if unavailable
     """
+    # Try git first (local dev)
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -67,6 +72,15 @@ def get_code_version() -> str:
             return result.stdout.strip()[:12]
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
+
+    # Fall back to .git-commit file (Docker deployments)
+    # The file is written during Docker build with the commit SHA
+    commit_file = Path(__file__).parent.parent.parent / ".git-commit"
+    if commit_file.exists():
+        content = commit_file.read_text().strip()
+        if content and content != "unknown":
+            return content[:12]
+
     return ""
 
 
