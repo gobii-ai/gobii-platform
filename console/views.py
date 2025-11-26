@@ -2835,6 +2835,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         server_overview = mcp_server_service.agent_server_overview(agent)
         context['inherited_mcp_servers'] = [s for s in server_overview if s.get('inherited')]
+        context['organization_mcp_servers'] = [
+            s for s in server_overview if s.get('scope') == MCPServerConfig.Scope.ORGANIZATION
+        ]
         personal_servers = [s for s in server_overview if s.get('scope') == MCPServerConfig.Scope.USER]
         context['personal_mcp_servers'] = personal_servers
         context['show_personal_mcp_form'] = agent.organization_id is None and bool(personal_servers)
@@ -3020,6 +3023,19 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             if server.get('inherited')
         ]
 
+        organization_servers = [
+            {
+                'id': str(server.get('id')),
+                'displayName': server.get('display_name'),
+                'description': server.get('description'),
+                'scope': server.get('scope'),
+                'inherited': bool(server.get('inherited')),
+                'assigned': bool(server.get('assigned')),
+            }
+            for server in server_overview
+            if server.get('scope') == MCPServerConfig.Scope.ORGANIZATION
+        ]
+
         personal_servers = [
             {
                 'id': str(server.get('id')),
@@ -3044,6 +3060,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         return {
             'inherited': inherited_servers,
+            'organization': organization_servers,
             'personal': personal_servers,
             'showPersonalForm': agent.organization_id is None and bool(personal_servers),
             'canManage': can_manage,
@@ -3376,6 +3393,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'allowlist': allowlist,
             'mcpServers': {
                 'inherited': inherited_servers,
+                'organization': context.get('organization_mcp_servers', []),
                 'personal': personal_servers,
                 'showPersonalForm': bool(context.get('show_personal_mcp_form')),
                 'canManage': mcp_can_manage,
@@ -3417,7 +3435,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         if webhook_action:
             return self._handle_webhook_action(request, agent, webhook_action, ajax=is_ajax)
 
-        if request.POST.get('mcp_server_action') == 'update_personal':
+        if request.POST.get('mcp_server_action'):
             return self._handle_mcp_server_update(request, agent, ajax=is_ajax)
 
         # Handle AJAX allowlist / reassignment operations
@@ -3712,6 +3730,25 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         agent.organization_id = target_org_id
                         agent.full_clean()
                         agent.save(update_fields=['organization'])
+
+                        # Drop any personal MCP server assignments when moving into an organization
+                        from api.models import PersistentAgentEnabledTool, PersistentAgentMCPServer, MCPServerConfig
+
+                        removed_personal_ids = list(
+                            PersistentAgentMCPServer.objects.filter(
+                                agent=agent, server_config__scope=MCPServerConfig.Scope.USER
+                            ).values_list('server_config_id', flat=True)
+                        )
+                        if removed_personal_ids:
+                            PersistentAgentMCPServer.objects.filter(
+                                agent=agent,
+                                server_config__scope=MCPServerConfig.Scope.USER,
+                            ).delete()
+                            PersistentAgentEnabledTool.objects.filter(
+                                agent=agent,
+                                server_config_id__in=removed_personal_ids,
+                            ).delete()
+
                         messages.success(request, 'Agent assigned to organization.')
                         # Also switch the server-side session context so subsequent requests
                         # operate under the correct organization scope immediately.
@@ -4228,21 +4265,40 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             messages.success(request, message)
             return redirect_response
 
-        if agent.organization_id:
-            return _error_response("Personal MCP servers can only be configured for your own agents.")
+        action = request.POST.get('mcp_server_action')
+        if action == 'update_personal':
+            if agent.organization_id:
+                return _error_response("Personal MCP servers can only be configured for your own agents.")
 
-        server_ids = request.POST.getlist('personal_servers')
-        try:
-            mcp_server_service.update_agent_personal_servers(
-                agent,
-                server_ids,
-                actor_user_id=request.user.id,
-                source=AnalyticsSource.WEB,
-            )
-        except ValueError as exc:
-            return _error_response(str(exc))
+            server_ids = request.POST.getlist('personal_servers')
+            try:
+                mcp_server_service.update_agent_personal_servers(
+                    agent,
+                    server_ids,
+                    actor_user_id=request.user.id,
+                    source=AnalyticsSource.WEB,
+                )
+            except ValueError as exc:
+                return _error_response(str(exc))
 
-        return _success_response("Personal MCP server access updated.")
+            return _success_response("Personal MCP server access updated.")
+        if action == 'update_org':
+            if not agent.organization_id:
+                return _error_response("Organization MCP servers can only be configured for organization agents.")
+            server_ids = request.POST.getlist('org_servers')
+            try:
+                mcp_server_service.update_agent_org_servers(
+                    agent,
+                    server_ids,
+                    actor_user_id=request.user.id,
+                    source=AnalyticsSource.WEB,
+                )
+            except ValueError as exc:
+                return _error_response(str(exc))
+
+            return _success_response("Organization MCP server access updated.")
+
+        return _error_response("Unsupported MCP server action.")
 
     def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
         redirect_response = redirect('agent_detail', pk=agent.pk)
