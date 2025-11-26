@@ -665,6 +665,7 @@ def _serialize_eval_run(run: EvalRun, *, include_tasks: bool = False) -> dict[st
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         "agent_id": str(run.agent_id) if run.agent_id else None,
         "llm_routing_profile_name": run.llm_routing_profile_name or None,
+        "primary_model": run.primary_model or None,
         "prompt_tokens": run.prompt_tokens,
         "completion_tokens": run.completion_tokens,
         "cached_tokens": run.cached_tokens,
@@ -3386,21 +3387,41 @@ class EvalRunCompareAPIView(SystemAdminAPIView):
     - strict: Same fingerprint + same LLM profile lineage (most rigorous)
     - pragmatic (default): Same fingerprint, any config
     - historical: Same scenario slug, any fingerprint (loosest)
+
+    Supports grouping via ?group_by= parameter:
+    - code_version: Group by git commit (isolate code changes)
+    - primary_model: Group by LLM model (compare models)
+    - llm_profile: Group by routing profile (compare configs)
+
+    Additional filters to hold variables constant:
+    - ?code_version=: Filter to specific git commit
+    - ?primary_model=: Filter to specific model
     """
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, run_id: str, *args: Any, **kwargs: Any):
+        from django.db.models import Avg, Count, Sum
+        from django.db.models.functions import Coalesce
+
         run = get_object_or_404(EvalRun, pk=run_id)
 
         tier = request.GET.get("tier", "pragmatic").lower()
         if tier not in ("strict", "pragmatic", "historical"):
             return HttpResponseBadRequest("tier must be one of: strict, pragmatic, historical")
 
+        group_by = request.GET.get("group_by")
+        if group_by and group_by not in ("code_version", "primary_model", "llm_profile"):
+            return HttpResponseBadRequest("group_by must be one of: code_version, primary_model, llm_profile")
+
         run_type_filter = request.GET.get("run_type")
         if run_type_filter:
             run_type_filter = run_type_filter.lower()
             if run_type_filter not in dict(EvalRun.RunType.choices):
                 return HttpResponseBadRequest("Invalid run_type")
+
+        # Additional filters to hold variables constant
+        code_version_filter = request.GET.get("code_version")
+        primary_model_filter = request.GET.get("primary_model")
 
         limit_raw = request.GET.get("limit", "50")
         try:
@@ -3409,13 +3430,14 @@ class EvalRunCompareAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("limit must be an integer")
 
         # Build query based on tier
-        qs = EvalRun.objects.filter(status=EvalRun.Status.COMPLETED).exclude(id=run.id)
+        qs = EvalRun.objects.filter(status=EvalRun.Status.COMPLETED)
 
         if tier == "strict":
             # Same fingerprint + same LLM profile lineage
             if not run.scenario_fingerprint:
                 return JsonResponse({
                     "runs": [],
+                    "groups": [],
                     "tier": tier,
                     "target_run_id": str(run.id),
                     "warning": "Target run has no fingerprint - cannot do strict comparison",
@@ -3423,7 +3445,6 @@ class EvalRunCompareAPIView(SystemAdminAPIView):
             qs = qs.filter(scenario_fingerprint=run.scenario_fingerprint)
             # Filter by LLM profile lineage if the run has one
             if run.llm_routing_profile_id:
-                # Get the source profile (cloned_from) or use the profile itself
                 profile = run.llm_routing_profile
                 source_id = profile.cloned_from_id if profile.cloned_from_id else profile.id
                 qs = qs.filter(
@@ -3435,6 +3456,7 @@ class EvalRunCompareAPIView(SystemAdminAPIView):
             if not run.scenario_fingerprint:
                 return JsonResponse({
                     "runs": [],
+                    "groups": [],
                     "tier": tier,
                     "target_run_id": str(run.id),
                     "warning": "Target run has no fingerprint - falling back to slug matching",
@@ -3444,21 +3466,84 @@ class EvalRunCompareAPIView(SystemAdminAPIView):
             # Same scenario slug, any fingerprint
             qs = qs.filter(scenario_slug=run.scenario_slug)
 
-        # Apply run_type filter if specified
+        # Apply additional filters
         if run_type_filter:
             qs = qs.filter(run_type=run_type_filter)
-
-        # Order by most recent first
-        qs = qs.order_by("-finished_at")[:limit]
-
-        runs = list(qs.prefetch_related("tasks"))
+        if code_version_filter:
+            qs = qs.filter(code_version=code_version_filter)
+        if primary_model_filter:
+            qs = qs.filter(primary_model=primary_model_filter)
 
         # Check for fingerprint mismatches in historical tier
         fingerprint_warning = None
         if tier == "historical" and run.scenario_fingerprint:
-            mismatched = [r for r in runs if r.scenario_fingerprint != run.scenario_fingerprint]
-            if mismatched:
-                fingerprint_warning = f"{len(mismatched)} run(s) have different fingerprints - eval code may have changed"
+            mismatched_count = qs.exclude(scenario_fingerprint=run.scenario_fingerprint).count()
+            if mismatched_count:
+                fingerprint_warning = f"{mismatched_count} run(s) have different fingerprints - eval code may have changed"
+
+        # Handle grouping
+        if group_by:
+            group_field = {
+                "code_version": "code_version",
+                "primary_model": "primary_model",
+                "llm_profile": "llm_routing_profile_name",
+            }[group_by]
+
+            groups = (
+                qs.values(group_field)
+                .annotate(
+                    run_count=Count("id"),
+                    avg_cost=Avg("total_cost"),
+                    avg_tokens=Avg("tokens_used"),
+                    total_tasks=Sum("step_count"),
+                    # Pass rate requires counting tasks - simplified here
+                )
+                .order_by("-run_count")[:limit]
+            )
+
+            # Enrich with pass rate by fetching task stats
+            groups_list = []
+            for g in groups:
+                group_value = g[group_field]
+                group_runs = qs.filter(**{group_field: group_value}).prefetch_related("tasks")
+
+                # Calculate pass rate across all runs in group
+                total_passed = 0
+                total_tasks = 0
+                for gr in group_runs:
+                    for task in gr.tasks.all():
+                        total_tasks += 1
+                        if task.status == "passed":
+                            total_passed += 1
+
+                groups_list.append({
+                    "group_by": group_by,
+                    "value": group_value or "(none)",
+                    "run_count": g["run_count"],
+                    "avg_cost": float(g["avg_cost"]) if g["avg_cost"] else 0,
+                    "avg_tokens": float(g["avg_tokens"]) if g["avg_tokens"] else 0,
+                    "pass_rate": (total_passed / total_tasks * 100) if total_tasks > 0 else 0,
+                    "total_tasks": total_tasks,
+                    "passed_tasks": total_passed,
+                    "is_current": group_value == getattr(run, group_field),
+                })
+
+            return JsonResponse({
+                "groups": groups_list,
+                "group_by": group_by,
+                "tier": tier,
+                "target_run_id": str(run.id),
+                "target_fingerprint": run.scenario_fingerprint or None,
+                "fingerprint_warning": fingerprint_warning,
+                "filters": {
+                    "code_version": code_version_filter,
+                    "primary_model": primary_model_filter,
+                    "run_type": run_type_filter,
+                },
+            })
+
+        # Non-grouped: return individual runs (excluding current run)
+        runs = list(qs.exclude(id=run.id).order_by("-finished_at")[:limit].prefetch_related("tasks"))
 
         return JsonResponse({
             "runs": [_serialize_eval_run(r, include_tasks=False) for r in runs],

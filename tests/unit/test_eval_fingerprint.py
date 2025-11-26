@@ -343,3 +343,136 @@ class EvalComparisonAPITests(TestCase):
         data = response.json()
         self.assertEqual(len(data["runs"]), 1)
         self.assertEqual(data["runs"][0]["run_type"], "official")
+
+    def test_run_detail_includes_primary_model(self):
+        """Run detail should include primary_model field."""
+        from api.models import EvalRun
+
+        self.run1.primary_model = "claude-sonnet-4"
+        self.run1.save()
+
+        self.client.force_login(self.user)
+        response = self.client.get(f"/console/api/evals/runs/{self.run1.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["run"]
+        self.assertEqual(data["primary_model"], "claude-sonnet-4")
+
+    def test_compare_endpoint_group_by_code_version(self):
+        """Can group runs by code_version."""
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=historical&group_by=code_version"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("groups", data)
+        self.assertEqual(data["group_by"], "code_version")
+        # Should have 3 groups (commit1, commit2, commit3)
+        self.assertEqual(len(data["groups"]), 3)
+
+    def test_compare_endpoint_group_by_primary_model(self):
+        """Can group runs by primary_model."""
+        from api.models import EvalRun
+
+        # Set different models
+        self.run1.primary_model = "claude-sonnet-4"
+        self.run1.save()
+        self.run2.primary_model = "claude-sonnet-4"
+        self.run2.save()
+        self.run3.primary_model = "gpt-4o"
+        self.run3.save()
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=historical&group_by=primary_model"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["group_by"], "primary_model")
+        # Should have 2 groups (claude-sonnet-4 and gpt-4o)
+        self.assertEqual(len(data["groups"]), 2)
+
+    def test_compare_endpoint_filter_by_code_version(self):
+        """Can filter to specific code_version."""
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=historical&code_version=commit2"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        # Should only return run2 (commit2), excluding run1 (current)
+        self.assertEqual(len(data["runs"]), 1)
+        self.assertEqual(data["runs"][0]["code_version"], "commit2")
+
+    def test_compare_endpoint_filter_by_primary_model(self):
+        """Can filter to specific primary_model."""
+        from api.models import EvalRun
+
+        self.run1.primary_model = "claude-sonnet-4"
+        self.run1.save()
+        self.run2.primary_model = "claude-sonnet-4"
+        self.run2.save()
+        self.run3.primary_model = "gpt-4o"
+        self.run3.save()
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=historical&primary_model=gpt-4o"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data["runs"]), 1)
+        self.assertEqual(data["runs"][0]["primary_model"], "gpt-4o")
+
+    def test_compare_endpoint_invalid_group_by(self):
+        """Invalid group_by returns error."""
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?group_by=invalid"
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_compare_endpoint_group_includes_pass_rate(self):
+        """Grouped response includes pass_rate calculation."""
+        from api.models import EvalRunTask
+
+        # Add some tasks with pass/fail status
+        EvalRunTask.objects.create(
+            run=self.run1, sequence=1, name="task1",
+            assertion_type="manual", status=EvalRunTask.Status.PASSED
+        )
+        EvalRunTask.objects.create(
+            run=self.run1, sequence=2, name="task2",
+            assertion_type="manual", status=EvalRunTask.Status.PASSED
+        )
+        EvalRunTask.objects.create(
+            run=self.run2, sequence=1, name="task1",
+            assertion_type="manual", status=EvalRunTask.Status.PASSED
+        )
+        EvalRunTask.objects.create(
+            run=self.run2, sequence=2, name="task2",
+            assertion_type="manual", status=EvalRunTask.Status.FAILED
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/console/api/evals/runs/{self.run1.id}/compare/?tier=historical&group_by=code_version"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Find the groups
+        commit1_group = next((g for g in data["groups"] if g["value"] == "commit1"), None)
+        commit2_group = next((g for g in data["groups"] if g["value"] == "commit2"), None)
+
+        self.assertIsNotNone(commit1_group)
+        self.assertIsNotNone(commit2_group)
+        self.assertEqual(commit1_group["pass_rate"], 100.0)  # 2/2 passed
+        self.assertEqual(commit2_group["pass_rate"], 50.0)   # 1/2 passed

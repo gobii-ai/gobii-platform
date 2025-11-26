@@ -57,12 +57,14 @@ Why not structural fingerprint (just task names/types)?
 scenario_fingerprint  # AST hash of scenario class (16 char hex)
 code_version          # Git commit hash (12 char)
 code_branch           # Git branch name
+primary_model         # LLM model name (e.g., 'claude-sonnet-4')
 ```
 
 Plus existing fields:
 - `scenario_slug` - identifies which scenario
 - `scenario_version` - manual version string
 - `llm_routing_profile` - immutable snapshot (already implemented)
+- `llm_routing_profile_name` - denormalized for display
 
 ### Comparison Logic
 
@@ -129,18 +131,34 @@ We discussed three tiers:
 ### Phase 2: Comparison Foundation ✅ COMPLETE
 
 1. API endpoint: `GET /console/api/evals/runs/<id>/compare/`
+
+   **Tier parameter** (controls what's considered "comparable"):
    - `?tier=strict` - Same fingerprint + same LLM profile lineage
    - `?tier=pragmatic` (default) - Same fingerprint, any config
    - `?tier=historical` - Same scenario slug, any fingerprint
-   - `?run_type=official` - Filter by run type
    - Returns `fingerprint_warning` when comparing runs with different fingerprints
 
+   **Grouping parameter** (for variable isolation):
+   - `?group_by=code_version` - Group runs by git commit
+   - `?group_by=primary_model` - Group runs by LLM model
+   - `?group_by=llm_profile` - Group runs by routing profile name
+   - Grouped response includes `groups[]` with aggregated metrics and `pass_rate`
+
+   **Filter parameters** (narrow the result set):
+   - `?run_type=official|adhoc` - Filter by run type
+   - `?code_version=abc123` - Filter to specific commit
+   - `?primary_model=claude-sonnet-4` - Filter to specific model
+
 2. Run detail response includes:
-   - `scenario_fingerprint`, `code_version`, `code_branch`
+   - `scenario_fingerprint`, `code_version`, `code_branch`, `primary_model`
    - `comparison.comparable_runs_count`
    - `comparison.has_comparable_runs`
 
 3. Fingerprint mismatch warnings in historical tier comparisons
+
+4. `primary_model` denormalized from routing profile for efficient querying:
+   - Extracted via `get_primary_model()` which traverses Profile → TokenRange → Tier → Endpoint
+   - DB-indexed for fast grouping/filtering
 
 ### Phase 3: UI (Future)
 
@@ -148,6 +166,36 @@ We discussed three tiers:
 2. Timeline visualization showing progress
 3. Side-by-side metrics comparison
 4. Warning indicators for fingerprint mismatches
+
+## Variable Isolation
+
+The key to honest evaluation is isolating what you're testing. Three variables typically change:
+
+| Variable | What Changed | Captured By |
+|----------|-------------|-------------|
+| Agent code | Business logic, prompts | `code_version` |
+| LLM model | claude-sonnet-4 vs gpt-4 | `primary_model` |
+| LLM config | Temperature, routing | `llm_routing_profile_name` |
+
+### Example Use Cases
+
+**"Did our refactor improve things?"**
+```
+?group_by=code_version&primary_model=claude-sonnet-4
+```
+Same model, see performance across code commits.
+
+**"Which model performs best?"**
+```
+?group_by=primary_model&code_version=abc123
+```
+Same agent code, compare models.
+
+**"Is our new profile better?"**
+```
+?group_by=llm_profile&code_version=abc123&primary_model=claude-sonnet-4
+```
+Same code + model, compare routing configurations.
 
 ## Metrics That Matter
 

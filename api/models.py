@@ -7443,6 +7443,12 @@ class EvalRun(models.Model):
         blank=True,
         help_text="Snapshot of profile name at run time (preserved if profile deleted).",
     )
+    primary_model = models.CharField(
+        max_length=128,
+        blank=True,
+        db_index=True,
+        help_text="Primary LLM model used (e.g., 'claude-sonnet-4'). Denormalized for comparison queries.",
+    )
 
     # Metrics snapshots (aggregated after run)
     tokens_used = models.IntegerField(default=0)

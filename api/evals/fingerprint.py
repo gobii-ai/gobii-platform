@@ -108,3 +108,59 @@ def _get_repo_root() -> str:
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
     return None
+
+
+def get_primary_model(routing_profile) -> str:
+    """
+    Extract the primary model name from an LLM routing profile.
+
+    Traverses the profile structure to find the first/primary model:
+    Profile → TokenRange (lowest min) → Tier (order=1) → Endpoint → litellm_model
+
+    Args:
+        routing_profile: An LLMRoutingProfile instance
+
+    Returns:
+        Model name string (e.g., 'claude-sonnet-4'), or empty string if not found
+    """
+    if not routing_profile:
+        return ""
+
+    try:
+        # Get the first token range (lowest min_tokens)
+        token_range = (
+            routing_profile.persistent_token_ranges
+            .order_by("min_tokens")
+            .first()
+        )
+        if not token_range:
+            return ""
+
+        # Get the first tier (order=1, non-premium for standard routing)
+        tier = (
+            token_range.tiers
+            .filter(is_premium=False, is_max=False)
+            .order_by("order")
+            .first()
+        )
+        if not tier:
+            # Fall back to any tier
+            tier = token_range.tiers.order_by("order").first()
+        if not tier:
+            return ""
+
+        # Get the highest-weighted endpoint in this tier
+        tier_endpoint = (
+            tier.tier_endpoints
+            .select_related("endpoint")
+            .order_by("-weight")
+            .first()
+        )
+        if not tier_endpoint or not tier_endpoint.endpoint:
+            return ""
+
+        return tier_endpoint.endpoint.litellm_model or ""
+
+    except Exception:
+        # Don't fail the eval run if we can't extract the model
+        return ""
