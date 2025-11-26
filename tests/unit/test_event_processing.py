@@ -375,11 +375,6 @@ class PromptContextBuilderTests(TestCase):
         """LLM tool payload should hide enable_database once sqlite_batch is enabled."""
         enable_tools(self.agent, ["sqlite_batch"])
 
-        tool_defs = [
-            {"function": {"name": "enable_database", "description": "enable sqlite"}},
-            {"function": {"name": "sqlite_batch", "description": "use sqlite"}},
-        ]
-
         response_message = MagicMock()
         response_message.tool_calls = None
         response_message.content = "Reasoning output"
@@ -391,7 +386,6 @@ class PromptContextBuilderTests(TestCase):
 
         with patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
              patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
-             patch('api.agent.core.event_processing.get_agent_tools', return_value=tool_defs), \
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
             from api.agent.core import event_processing as ep
             with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
