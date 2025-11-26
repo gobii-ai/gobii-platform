@@ -43,6 +43,16 @@ export type EvalRun = {
   finished_at: string | null
   agent_id: string | null
   llm_routing_profile_name?: string | null
+  // Fingerprint fields for comparison
+  scenario_fingerprint?: string
+  code_version?: string
+  code_branch?: string
+  primary_model?: string
+  // Comparison metadata (only in detail response)
+  comparison?: {
+    comparable_runs_count: number
+    has_comparable_runs: boolean
+  }
   tasks?: EvalTask[]
   task_totals?: EvalTaskTotals
   prompt_tokens?: number
@@ -197,4 +207,74 @@ export function updateSuiteRunType(
     json: payload,
     includeCsrf: true,
   })
+}
+
+// Comparison types
+export type ComparisonTier = 'strict' | 'pragmatic' | 'historical'
+export type ComparisonGroupBy = 'code_version' | 'primary_model' | 'llm_profile'
+
+export type ComparisonRunSummary = {
+  id: string
+  scenario_slug: string
+  status: string
+  run_type: EvalRunType
+  started_at: string | null
+  finished_at: string | null
+  scenario_fingerprint: string
+  code_version: string
+  code_branch: string
+  primary_model: string
+  llm_routing_profile_name: string | null
+  task_totals: EvalTaskTotals | null
+  total_cost: number | null
+  tokens_used: number | null
+  completion_count: number | null
+  step_count: number | null
+}
+
+export type ComparisonGroup = {
+  key: string
+  runs: ComparisonRunSummary[]
+  run_count: number
+  pass_rate: number | null
+  avg_cost: number | null
+  avg_tokens: number | null
+  avg_steps: number | null
+}
+
+export type ComparisonResponse = {
+  reference_run: ComparisonRunSummary
+  tier: ComparisonTier
+  group_by: ComparisonGroupBy | null
+  // Ungrouped results
+  runs?: ComparisonRunSummary[]
+  // Grouped results
+  groups?: ComparisonGroup[]
+  // Warnings
+  fingerprint_warning?: string
+  fingerprint_mismatches?: string[]
+}
+
+export type ComparisonParams = {
+  tier?: ComparisonTier
+  group_by?: ComparisonGroupBy
+  run_type?: EvalRunType
+  code_version?: string
+  primary_model?: string
+}
+
+export function fetchRunComparison(
+  runId: string,
+  params: ComparisonParams = {},
+  signal?: AbortSignal,
+): Promise<ComparisonResponse> {
+  const search = new URLSearchParams()
+  if (params.tier) search.set('tier', params.tier)
+  if (params.group_by) search.set('group_by', params.group_by)
+  if (params.run_type) search.set('run_type', params.run_type)
+  if (params.code_version) search.set('code_version', params.code_version)
+  if (params.primary_model) search.set('primary_model', params.primary_model)
+  const query = search.toString()
+  const url = `/console/api/evals/runs/${runId}/compare/${query ? `?${query}` : ''}`
+  return jsonFetch(url, { method: 'GET', signal })
 }

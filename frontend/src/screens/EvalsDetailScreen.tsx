@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle, ChevronDown, ChevronRight, Cpu } from 'lucide-react'
+import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle, ChevronDown, ChevronRight, Cpu, BarChart3 } from 'lucide-react'
 
-import { fetchSuiteRunDetail, updateSuiteRunType, type EvalRun, type EvalSuiteRun, type EvalTask, type LLMRoutingProfileSnapshot, type LLMProfileTokenRange, type LLMProfileTier } from '../api/evals'
+import { fetchSuiteRunDetail, updateSuiteRunType, fetchRunComparison, type EvalRun, type EvalSuiteRun, type EvalTask, type LLMRoutingProfileSnapshot, type LLMProfileTokenRange, type LLMProfileTier, type ComparisonResponse, type ComparisonGroupBy } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
 import { RunTypeBadge } from '../components/common/RunTypeBadge'
+import { CompareModal, CompareResultsView, type CompareConfig } from '../components/evals'
 
 const formatCurrency = (value?: number | null, digits = 4) => {
   if (value == null) return '—'
@@ -44,6 +45,13 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [updatingRunType, setUpdatingRunType] = useState(false)
   const [viewRunIndex, setViewRunIndex] = useState(0)
+
+  // Comparison state
+  const [showCompareModal, setShowCompareModal] = useState(false)
+  const [compareRunId, setCompareRunId] = useState<string | null>(null)
+  const [comparisonData, setComparisonData] = useState<ComparisonResponse | null>(null)
+  const [comparisonLoading, setComparisonLoading] = useState(false)
+  const [comparisonGroupBy, setComparisonGroupBy] = useState<ComparisonGroupBy | null>(null)
 
   const hasRuns = useMemo(() => Boolean(suite?.runs && suite.runs.length), [suite?.runs])
   
@@ -167,6 +175,64 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
       setUpdatingRunType(false)
     }
   }
+
+  // Get first completed run for comparison
+  const firstCompletedRun = useMemo(() => {
+    if (!suite?.runs) return null
+    return suite.runs.find((r) => r.status === 'completed') || null
+  }, [suite?.runs])
+
+  // Open compare modal for a specific run
+  const openCompareModal = (runId: string) => {
+    setCompareRunId(runId)
+    setShowCompareModal(true)
+    setComparisonData(null)
+  }
+
+  // Execute comparison
+  const handleCompare = async (config: CompareConfig) => {
+    if (!compareRunId) return
+
+    setShowCompareModal(false)
+    setComparisonLoading(true)
+    setComparisonGroupBy(config.groupBy)
+    setError(null)
+
+    try {
+      const result = await fetchRunComparison(compareRunId, {
+        tier: config.tier,
+        group_by: config.groupBy || undefined,
+        run_type: config.runType || undefined,
+      })
+      setComparisonData(result)
+    } catch (err) {
+      console.error(err)
+      setError('Unable to load comparison data.')
+    } finally {
+      setComparisonLoading(false)
+    }
+  }
+
+  // Close comparison view
+  const closeComparison = () => {
+    setComparisonData(null)
+    setCompareRunId(null)
+    setComparisonGroupBy(null)
+  }
+
+  // Get group by label for display
+  const groupByLabel = useMemo(() => {
+    switch (comparisonGroupBy) {
+      case 'code_version':
+        return 'Code Version'
+      case 'primary_model':
+        return 'Model'
+      case 'llm_profile':
+        return 'LLM Profile'
+      default:
+        return 'Group'
+    }
+  }, [comparisonGroupBy])
 
   useEffect(() => {
     let cancelled = false
@@ -301,6 +367,16 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
               >
                 {updatingRunType ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 {suite.run_type === 'official' ? 'Mark as One-off' : 'Mark as Official'}
+              </button>
+            )}
+            {firstCompletedRun && (
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg shadow-sm hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
+                onClick={() => openCompareModal(firstCompletedRun.id)}
+              >
+                <BarChart3 className="w-4 h-4" />
+                Compare
               </button>
             )}
           </div>
@@ -474,6 +550,41 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
             </div>
           </section>
         </>
+      )}
+
+      {/* Comparison Loading State */}
+      {comparisonLoading && (
+        <div className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white rounded-2xl p-8 shadow-2xl flex flex-col items-center gap-4">
+            <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+            <p className="text-sm font-medium text-slate-700">Loading comparison data...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Comparison Results View */}
+      {comparisonData && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-white">
+          <div className="max-w-6xl mx-auto p-6">
+            <CompareResultsView
+              data={comparisonData}
+              onClose={closeComparison}
+              groupByLabel={groupByLabel}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Compare Modal */}
+      {showCompareModal && compareRunId && (
+        <CompareModal
+          onClose={() => setShowCompareModal(false)}
+          onCompare={handleCompare}
+          comparableCount={completionStats.completed}
+          currentFingerprint={firstCompletedRun?.scenario_fingerprint}
+          currentCodeVersion={firstCompletedRun?.code_version}
+          currentModel={firstCompletedRun?.primary_model}
+        />
       )}
     </div>
   )
