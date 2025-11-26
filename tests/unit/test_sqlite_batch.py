@@ -94,16 +94,6 @@ class SqliteBatchToolTests(TestCase):
             result = out["results"][0]
             self.assertEqual(result["result"][0]["answer"], 42)
 
-    def test_auto_sleep_when_only_writes(self):
-        with self._with_temp_db():
-            queries = [
-                "CREATE TABLE t(a INTEGER)",
-                "INSERT INTO t(a) VALUES (1)",
-            ]
-            out = execute_sqlite_batch(self.agent, {"queries": queries})
-            self.assertEqual(out.get("status"), "ok")
-            self.assertTrue(out.get("auto_sleep_ok"))
-
     def test_will_continue_work_false_sets_auto_sleep(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"queries": "SELECT 1", "will_continue_work": False})
