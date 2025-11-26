@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle } from 'lucide-react'
+import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle, ChevronDown, ChevronRight, Cpu } from 'lucide-react'
 
-import { fetchSuiteRunDetail, updateSuiteRunType, type EvalRun, type EvalSuiteRun, type EvalTask } from '../api/evals'
+import { fetchSuiteRunDetail, updateSuiteRunType, type EvalRun, type EvalSuiteRun, type EvalTask, type LLMRoutingProfileSnapshot, type LLMProfileTokenRange, type LLMProfileTier } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
 import { RunTypeBadge } from '../components/common/RunTypeBadge'
 
@@ -418,7 +418,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Tokens</p>
                     <p className="text-2xl font-bold text-slate-900 mt-1">{formatTokens(costTotals.tokens_used)}</p>
                     <p className="text-xs text-slate-500">
-                      Prompt {formatTokens(costTotals.prompt_tokens)} <span className="text-slate-300 mx-1">|</span> 
+                      Prompt {formatTokens(costTotals.prompt_tokens)} <span className="text-slate-300 mx-1">|</span>
                       Cached {formatTokens(costTotals.cached_tokens)} <span className="text-slate-300 mx-1">|</span>
                       Completion {formatTokens(costTotals.completion_tokens)}
                     </p>
@@ -427,6 +427,11 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
               </div>
             )}
           </section>
+
+          {/* LLM Routing Profile Section */}
+          {suite.llm_routing_profile && (
+            <LLMProfileSection profile={suite.llm_routing_profile} />
+          )}
 
           {/* Scenarios section */}
           <section className="card overflow-hidden" style={{ padding: 0 }}>
@@ -593,7 +598,7 @@ function TaskRow({ task }: { task: EvalTask }) {
            </p>
            <span className="shrink-0 text-[10px] font-mono text-slate-500 bg-white px-1.5 py-0.5 rounded ring-1 ring-slate-200">{task.assertion_type}</span>
         </div>
-        
+
         {task.observed_summary && (
           <div className={`mt-2 text-xs p-2.5 rounded ring-1 ring-slate-100 leading-relaxed font-mono bg-white ${isFail ? 'text-rose-800 bg-rose-50/30' : 'text-slate-600'}`}>
             {task.observed_summary}
@@ -610,6 +615,192 @@ function TaskRow({ task }: { task: EvalTask }) {
           </span>
         </div>
       </div>
+    </div>
+  )
+}
+
+function LLMProfileSection({ profile }: { profile: LLMRoutingProfileSnapshot }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const totalEndpoints = useMemo(() => {
+    let count = 0
+    profile.persistent?.ranges?.forEach(range => {
+      range.tiers?.forEach(tier => {
+        count += tier.endpoints?.length || 0
+      })
+    })
+    profile.browser?.tiers?.forEach(tier => {
+      count += tier.endpoints?.length || 0
+    })
+    profile.embeddings?.tiers?.forEach(tier => {
+      count += tier.endpoints?.length || 0
+    })
+    return count
+  }, [profile])
+
+  const persistentRangeCount = profile.persistent?.ranges?.length || 0
+  const browserTierCount = profile.browser?.tiers?.length || 0
+  const embeddingsTierCount = profile.embeddings?.tiers?.length || 0
+
+  return (
+    <section className="card overflow-hidden" style={{ padding: 0 }}>
+      <div
+        className="bg-gradient-to-r from-purple-50/80 to-indigo-50/80 border-b border-purple-100 px-6 py-4 cursor-pointer flex items-center justify-between"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-white/90 rounded-lg shadow-sm text-purple-600">
+            <Cpu className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">LLM Configuration</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {profile.display_name}
+              {profile.is_eval_snapshot && (
+                <span className="ml-2 px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-[10px] font-medium">
+                  Snapshot
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-xs text-slate-500 hidden sm:flex items-center gap-3">
+            <span>{persistentRangeCount} token range{persistentRangeCount !== 1 ? 's' : ''}</span>
+            <span className="text-slate-300">·</span>
+            <span>{browserTierCount} browser tier{browserTierCount !== 1 ? 's' : ''}</span>
+            <span className="text-slate-300">·</span>
+            <span>{totalEndpoints} endpoint{totalEndpoints !== 1 ? 's' : ''}</span>
+          </div>
+          {expanded ? (
+            <ChevronDown className="w-5 h-5 text-slate-400" />
+          ) : (
+            <ChevronRight className="w-5 h-5 text-slate-400" />
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="p-6 space-y-6">
+          {/* Profile Info */}
+          <div className="grid sm:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Profile Name</p>
+              <p className="font-mono text-slate-700 mt-1">{profile.name}</p>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Display Name</p>
+              <p className="text-slate-700 mt-1">{profile.display_name}</p>
+            </div>
+            {profile.eval_judge_endpoint && (
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Eval Judge</p>
+                <p className="text-slate-700 mt-1">{profile.eval_judge_endpoint.label}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Persistent Token Ranges */}
+          {profile.persistent?.ranges && profile.persistent.ranges.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 mb-3">Persistent Agent Tiers</h3>
+              <div className="space-y-3">
+                {profile.persistent.ranges.map((range) => (
+                  <TokenRangeCard key={range.id} range={range} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Browser Tiers */}
+          {profile.browser?.tiers && profile.browser.tiers.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 mb-3">Browser Agent Tiers</h3>
+              <div className="space-y-2">
+                {profile.browser.tiers.map((tier) => (
+                  <TierCard key={tier.id} tier={tier} type="browser" />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Embeddings Tiers */}
+          {profile.embeddings?.tiers && profile.embeddings.tiers.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 mb-3">Embeddings Tiers</h3>
+              <div className="space-y-2">
+                {profile.embeddings.tiers.map((tier) => (
+                  <TierCard key={tier.id} tier={tier} type="embeddings" />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function TokenRangeCard({ range }: { range: LLMProfileTokenRange }) {
+  const maxDisplay = range.max_tokens === null ? '∞' : range.max_tokens.toLocaleString()
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+      <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-sm text-slate-800">{range.name}</span>
+          <span className="text-xs text-slate-500 font-mono">
+            [{range.min_tokens.toLocaleString()} – {maxDisplay} tokens]
+          </span>
+        </div>
+        <span className="text-xs text-slate-400">{range.tiers?.length || 0} tier(s)</span>
+      </div>
+      {range.tiers && range.tiers.length > 0 && (
+        <div className="divide-y divide-slate-100">
+          {range.tiers.map((tier) => (
+            <TierCard key={tier.id} tier={tier} type="persistent" />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TierCard({ tier, type }: { tier: LLMProfileTier; type: 'persistent' | 'browser' | 'embeddings' }) {
+  const tierLabel = tier.is_max ? 'Max' : tier.is_premium ? 'Premium' : 'Standard'
+  const tierColor = tier.is_max ? 'text-amber-700 bg-amber-50' : tier.is_premium ? 'text-purple-700 bg-purple-50' : 'text-slate-600 bg-slate-50'
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-400">Tier {tier.order}</span>
+          <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${tierColor}`}>
+            {tierLabel}
+          </span>
+          {tier.credit_multiplier && tier.credit_multiplier !== '1.00' && (
+            <span className="text-[10px] text-slate-500 font-mono">{tier.credit_multiplier}× credits</span>
+          )}
+        </div>
+        {tier.description && (
+          <span className="text-xs text-slate-500">{tier.description}</span>
+        )}
+      </div>
+      {tier.endpoints && tier.endpoints.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {tier.endpoints.map((ep) => (
+            <div
+              key={ep.id}
+              className="text-xs px-2 py-1 rounded bg-white border border-slate-200 text-slate-700 flex items-center gap-1.5"
+            >
+              <span className="font-medium">{ep.label}</span>
+              {ep.weight !== 1 && (
+                <span className="text-slate-400 font-mono">({ep.weight})</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

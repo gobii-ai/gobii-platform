@@ -42,6 +42,7 @@ export type EvalRun = {
   started_at: string | null
   finished_at: string | null
   agent_id: string | null
+  llm_routing_profile_name?: string | null
   tasks?: EvalTask[]
   task_totals?: EvalTaskTotals
   prompt_tokens?: number
@@ -56,6 +57,54 @@ export type EvalRun = {
   credits_cost?: number
   completion_count?: number
   step_count?: number
+}
+
+// LLM Routing Profile types for eval snapshots
+export type LLMProfileTierEndpoint = {
+  id: string
+  endpoint_id: string
+  label: string
+  weight: number
+  endpoint_key: string
+}
+
+export type LLMProfileTier = {
+  id: string
+  order: number
+  description: string
+  is_premium: boolean
+  is_max?: boolean
+  credit_multiplier?: string | null
+  endpoints: LLMProfileTierEndpoint[]
+}
+
+export type LLMProfileTokenRange = {
+  id: string
+  name: string
+  min_tokens: number
+  max_tokens: number | null
+  tiers: LLMProfileTier[]
+}
+
+export type LLMRoutingProfileSnapshot = {
+  id: string
+  name: string
+  display_name: string
+  description: string
+  is_active: boolean
+  is_eval_snapshot: boolean
+  created_at: string | null
+  updated_at: string | null
+  cloned_from_id: string | null
+  eval_judge_endpoint: {
+    endpoint_id: string
+    endpoint_key: string
+    label: string
+    model: string
+  } | null
+  persistent: { ranges: LLMProfileTokenRange[] }
+  browser: { tiers: LLMProfileTier[] }
+  embeddings: { tiers: LLMProfileTier[] }
 }
 
 export type EvalSuiteRun = {
@@ -83,6 +132,7 @@ export type EvalSuiteRun = {
     total_cost: number
     credits_cost: number
   } | null
+  llm_routing_profile?: LLMRoutingProfileSnapshot | null
 }
 
 export type EvalSuite = {

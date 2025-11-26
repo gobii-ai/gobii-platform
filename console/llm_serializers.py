@@ -314,6 +314,7 @@ def serialize_routing_profile_list_item(profile: LLMRoutingProfile) -> dict[str,
         "display_name": profile.display_name,
         "description": profile.description,
         "is_active": profile.is_active,
+        "is_eval_snapshot": profile.is_eval_snapshot,
         "created_at": profile.created_at.isoformat() if profile.created_at else None,
         "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
         "cloned_from_id": str(profile.cloned_from_id) if profile.cloned_from_id else None,
@@ -418,6 +419,7 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
         "display_name": profile.display_name,
         "description": profile.description,
         "is_active": profile.is_active,
+        "is_eval_snapshot": profile.is_eval_snapshot,
         "created_at": profile.created_at.isoformat() if profile.created_at else None,
         "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
         "cloned_from_id": str(profile.cloned_from_id) if profile.cloned_from_id else None,
@@ -429,8 +431,11 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
 
 
 def build_routing_profiles_list() -> list[dict[str, Any]]:
-    """Build a list of all routing profiles (minimal details)."""
-    profiles = LLMRoutingProfile.objects.order_by("-is_active", "-updated_at")
+    """Build a list of all routing profiles (minimal details).
+
+    Excludes eval snapshots which are frozen copies created for eval runs.
+    """
+    profiles = LLMRoutingProfile.objects.filter(is_eval_snapshot=False).order_by("-is_active", "-updated_at")
     return [serialize_routing_profile_list_item(p) for p in profiles]
 
 

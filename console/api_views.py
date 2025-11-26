@@ -661,6 +661,7 @@ def _serialize_eval_run(run: EvalRun, *, include_tasks: bool = False) -> dict[st
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         "agent_id": str(run.agent_id) if run.agent_id else None,
+        "llm_routing_profile_name": run.llm_routing_profile_name or None,
         "prompt_tokens": run.prompt_tokens,
         "completion_tokens": run.completion_tokens,
         "cached_tokens": run.cached_tokens,
@@ -715,6 +716,21 @@ def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, inc
             "credits_cost": float(sum(r.credits_cost for r in runs)),
         }
 
+    # Serialize the LLM routing profile if present
+    llm_routing_profile = None
+    if suite.llm_routing_profile_id:
+        from console.llm_serializers import get_routing_profile_with_prefetch, serialize_routing_profile_detail
+        try:
+            profile = get_routing_profile_with_prefetch(str(suite.llm_routing_profile_id))
+            llm_routing_profile = serialize_routing_profile_detail(profile)
+        except Exception:
+            # Fallback to basic info if prefetch fails
+            llm_routing_profile = {
+                "id": str(suite.llm_routing_profile_id),
+                "name": suite.llm_routing_profile.name if suite.llm_routing_profile else None,
+                "display_name": suite.llm_routing_profile.display_name if suite.llm_routing_profile else None,
+            }
+
     return {
         "id": str(suite.id),
         "suite_slug": suite.suite_slug,
@@ -729,6 +745,7 @@ def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, inc
         "run_totals": aggregate_counts if include_runs else None,
         "task_totals": suite_task_totals if include_runs else None,
         "cost_totals": cost_totals if include_runs else None,
+        "llm_routing_profile": llm_routing_profile,
     }
 
 
@@ -3117,11 +3134,15 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
 
         # Optional LLM routing profile for the eval
         from api.models import LLMRoutingProfile
-        llm_routing_profile = None
+        from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
+        source_routing_profile = None
         llm_routing_profile_id = body.get("llm_routing_profile_id")
         if llm_routing_profile_id:
             try:
-                llm_routing_profile = LLMRoutingProfile.objects.get(id=llm_routing_profile_id)
+                source_routing_profile = LLMRoutingProfile.objects.get(
+                    id=llm_routing_profile_id,
+                    is_eval_snapshot=False,  # Don't allow selecting an existing snapshot
+                )
             except LLMRoutingProfile.DoesNotExist:
                 return HttpResponseBadRequest("LLM routing profile not found")
 
@@ -3154,7 +3175,20 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 return HttpResponseBadRequest(f"Suite '{suite_slug}' not found")
 
             scenario_slugs = list(dict.fromkeys(suite_obj.scenario_slugs))
+
+            # Create a temporary suite run ID to use for snapshot naming
+            temp_suite_run_id = uuid.uuid4()
+
+            # Create a snapshot of the profile if one was specified
+            profile_snapshot = None
+            if source_routing_profile:
+                profile_snapshot = create_eval_profile_snapshot(
+                    source_routing_profile,
+                    str(temp_suite_run_id),
+                )
+
             suite_run = EvalSuiteRun.objects.create(
+                id=temp_suite_run_id,
                 suite_slug=suite_obj.slug,
                 initiated_by=request.user,
                 status=EvalSuiteRun.Status.RUNNING,
@@ -3163,7 +3197,7 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 agent_strategy=agent_strategy,
                 shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
                 started_at=timezone.now(),
-                llm_routing_profile=llm_routing_profile,
+                llm_routing_profile=profile_snapshot,
             )
 
             created_for_suite = 0

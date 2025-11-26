@@ -723,7 +723,7 @@ def _get_failover_configs_from_profile(
         # Resolve the profile to use
         profile = routing_profile
         if profile is None:
-            profile = LLMRoutingProfile.objects.filter(is_active=True).first()
+            profile = LLMRoutingProfile.objects.filter(is_active=True, is_eval_snapshot=False).first()
 
         if profile is None:
             return []  # No active profile, fall back to legacy

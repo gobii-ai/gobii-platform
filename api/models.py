@@ -2021,6 +2021,11 @@ class LLMRoutingProfile(models.Model):
         db_index=True,
         help_text="Active profile used for all runtime routing. Only one can be active.",
     )
+    is_eval_snapshot = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="If true, this is a frozen snapshot created for an eval run. Not editable.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2054,6 +2059,7 @@ class LLMRoutingProfile(models.Model):
         indexes = [
             models.Index(fields=["name"]),
             models.Index(fields=["is_active"]),
+            models.Index(fields=["is_eval_snapshot"]),
         ]
         constraints = [
             models.UniqueConstraint(

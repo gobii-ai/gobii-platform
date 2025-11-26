@@ -3673,21 +3673,30 @@ class ProfileEmbeddingsTierEndpointInline(admin.TabularInline):
 
 @admin.register(LLMRoutingProfile)
 class LLMRoutingProfileAdmin(admin.ModelAdmin):
-    list_display = ("display_name", "name", "is_active", "created_at", "updated_at")
-    list_filter = ("is_active",)
+    list_display = ("display_name", "name", "is_active", "is_eval_snapshot", "created_at", "updated_at")
+    list_filter = ("is_active", "is_eval_snapshot")
     search_fields = ("name", "display_name", "description")
-    readonly_fields = ("created_at", "updated_at", "created_by", "cloned_from")
+    readonly_fields = ("created_at", "updated_at", "created_by", "cloned_from", "is_eval_snapshot")
     fields = (
         "name",
         "display_name",
         "description",
         "is_active",
+        "is_eval_snapshot",
         "created_at",
         "updated_at",
         "created_by",
         "cloned_from",
     )
     inlines = [ProfileTokenRangeInline]
+
+    def get_queryset(self, request):
+        """By default, exclude eval snapshots unless explicitly filtering for them."""
+        qs = super().get_queryset(request)
+        # Show all profiles if filtering by is_eval_snapshot, otherwise hide snapshots
+        if "is_eval_snapshot__exact" in request.GET:
+            return qs
+        return qs.filter(is_eval_snapshot=False)
 
     def save_model(self, request, obj, form, change):
         if not change:  # Creating new profile
