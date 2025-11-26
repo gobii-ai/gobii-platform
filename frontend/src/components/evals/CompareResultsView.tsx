@@ -4,7 +4,7 @@ import * as echarts from 'echarts/core'
 import { BarChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import { AlertTriangle, TrendingUp, TrendingDown, Minus, X } from 'lucide-react'
+import { AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
 import type { ComparisonResponse, ComparisonGroup, ComparisonRunSummary, ComparisonGroupBy } from '../../api/evals'
 
@@ -12,8 +12,6 @@ echarts.use([BarChart, GridComponent, LegendComponent, TooltipComponent, CanvasR
 
 type CompareResultsViewProps = {
   data: ComparisonResponse
-  onClose: () => void
-  groupByLabel: string
 }
 
 const formatCurrency = (value: number | null, digits = 4) => {
@@ -388,34 +386,26 @@ function InsightSummary({ groups }: { groups: ComparisonGroup[] }) {
   )
 }
 
-export function CompareResultsView({ data, onClose, groupByLabel }: CompareResultsViewProps) {
+function formatGroupBy(groupBy: ComparisonGroupBy | null | undefined): string {
+  switch (groupBy) {
+    case 'code_version':
+      return 'Code Version'
+    case 'primary_model':
+      return 'Model'
+    case 'llm_profile':
+      return 'LLM Profile'
+    default:
+      return 'Group'
+  }
+}
+
+export function CompareResultsView({ data }: CompareResultsViewProps) {
   const hasGroups = data.groups && data.groups.length > 0
   const hasRuns = data.runs && data.runs.length > 0
+  const groupByLabel = formatGroupBy(data.group_by)
 
   return (
     <div className="space-y-6">
-      {/* Sub-header with metadata and close button */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">
-          Grouped by <span className="font-medium text-slate-700">{groupByLabel}</span>
-          {' · '}
-          <span className="font-medium text-slate-700">{data.tier}</span> tier
-          {data.target_fingerprint && (
-            <span className="ml-2 font-mono text-xs text-slate-400">
-              (fingerprint: {data.target_fingerprint})
-            </span>
-          )}
-        </p>
-        <button
-          type="button"
-          onClick={onClose}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
-        >
-          <X className="w-4 h-4" />
-          Close
-        </button>
-      </div>
-
       {/* Fingerprint Warning */}
       {data.fingerprint_warning && (
         <div className="flex items-start gap-3 p-4 rounded-lg bg-amber-50 border border-amber-200">
