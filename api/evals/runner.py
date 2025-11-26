@@ -12,6 +12,7 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.realtime import broadcast_run_update, broadcast_suite_update, broadcast_task_update
 from api.evals.metrics import aggregate_run_metrics
 from api.evals.execution import set_current_eval_run_id, set_current_eval_routing_profile
+from api.evals.fingerprint import compute_scenario_fingerprint, get_code_version, get_code_branch, get_primary_model
 import api.evals.loader # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -114,12 +115,18 @@ class EvalRunner:
         if routing_profile:
             self.run.llm_routing_profile = routing_profile
             self.run.llm_routing_profile_name = routing_profile.name
+            self.run.primary_model = get_primary_model(routing_profile)
+
+        # Capture fingerprint and code version for comparison tracking
+        self.run.scenario_fingerprint = compute_scenario_fingerprint(self.scenario)
+        self.run.code_version = get_code_version()
+        self.run.code_branch = get_code_branch()
 
         self.run.status = EvalRun.Status.RUNNING
         self.run.started_at = timezone.now()
-        save_fields = ['status', 'started_at']
+        save_fields = ['status', 'started_at', 'scenario_fingerprint', 'code_version', 'code_branch']
         if routing_profile:
-            save_fields.extend(['llm_routing_profile', 'llm_routing_profile_name'])
+            save_fields.extend(['llm_routing_profile', 'llm_routing_profile_name', 'primary_model'])
         self.run.save(update_fields=save_fields)
         broadcast_run_update(self.run)
         _update_suite_state(self.run.suite_run_id)

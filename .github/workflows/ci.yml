@@ -228,6 +228,8 @@ jobs:
             tag: batch_browser_agent_max_tokens
           - batch: support_turnstile
             tag: batch_support_turnstile
+          - batch: eval_fingerprint
+            tag: batch_eval_fingerprint
           - batch: eval_sim
             tag: eval_sim
     env:

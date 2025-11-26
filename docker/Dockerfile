@@ -68,6 +68,10 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY . .
 
+# Write git commit SHA for runtime traceability (passed from CI)
+ARG GIT_COMMIT=unknown
+RUN echo "${GIT_COMMIT}" > .git-commit
+
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir --editable .
 

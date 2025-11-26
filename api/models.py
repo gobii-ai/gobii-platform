@@ -7397,6 +7397,12 @@ class EvalRun(models.Model):
     )
     scenario_slug = models.CharField(max_length=200)
     scenario_version = models.CharField(max_length=50, blank=True)
+    scenario_fingerprint = models.CharField(
+        max_length=16,
+        blank=True,
+        db_index=True,
+        help_text="AST hash of scenario code for comparability tracking.",
+    )
     agent = models.ForeignKey(PersistentAgent, on_delete=models.CASCADE)
     initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
@@ -7414,6 +7420,16 @@ class EvalRun(models.Model):
     # Execution context
     budget_id = models.CharField(max_length=100, blank=True)
     branch_id = models.CharField(max_length=100, blank=True)
+    code_version = models.CharField(
+        max_length=12,
+        blank=True,
+        help_text="Git commit hash at run time.",
+    )
+    code_branch = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Git branch name at run time.",
+    )
     llm_routing_profile = models.ForeignKey(
         "LLMRoutingProfile",
         on_delete=models.SET_NULL,
@@ -7426,6 +7442,12 @@ class EvalRun(models.Model):
         max_length=64,
         blank=True,
         help_text="Snapshot of profile name at run time (preserved if profile deleted).",
+    )
+    primary_model = models.CharField(
+        max_length=128,
+        blank=True,
+        db_index=True,
+        help_text="Primary LLM model used (e.g., 'claude-sonnet-4'). Denormalized for comparison queries.",
     )
 
     # Metrics snapshots (aggregated after run)
