@@ -188,6 +188,8 @@ jobs:
             tag: batch_agent_tags
           - batch: llm_tier_preferences
             tag: batch_llm_intelligence
+          - batch: llm_routing_profiles
+            tag: llm_routing_profiles_batch
           - batch: schedule
             tag: batch_schedule
           - batch: owner_billing
