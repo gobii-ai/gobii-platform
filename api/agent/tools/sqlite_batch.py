@@ -123,11 +123,8 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             "message": error_message if had_error else f"Executed {len(results)} queries. Database size: {db_size_mb:.2f} MB.{size_warning}",
         }
 
-        if not had_error:
-            if will_continue_work is False:
-                response["auto_sleep_ok"] = True
-            elif only_write_queries:
-                response["auto_sleep_ok"] = True
+        if not had_error and will_continue_work is False:
+            response["auto_sleep_ok"] = True
 
         return response
     except Exception as outer:

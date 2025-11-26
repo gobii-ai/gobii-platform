@@ -112,13 +112,13 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     detailKind: 'sqliteBatch',
     derive(_, parameters) {
       const queriesParam = parameters?.queries
-      const rawQueries = Array.isArray(queriesParam)
-        ? (queriesParam as unknown[])
-        : queriesParam
-          ? [queriesParam as unknown]
-          : Array.isArray(parameters?.operations)
-            ? (parameters?.operations as unknown[])
-            : []
+      let rawQueries: unknown[] = [];
+      if (queriesParam) {
+        rawQueries = Array.isArray(queriesParam) ? queriesParam : [queriesParam];
+      } else if (Array.isArray(parameters?.operations)) {
+        // Fallback for backward compatibility with older tool calls
+        rawQueries = parameters.operations;
+      }
 
       return {
         caption: rawQueries.length ? `${rawQueries.length} statement${rawQueries.length === 1 ? '' : 's'}` : 'SQL batch',
