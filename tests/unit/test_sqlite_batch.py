@@ -1,19 +1,14 @@
-from django.test import TestCase, tag
-from django.contrib.auth import get_user_model
-from django.utils import timezone
-import tempfile
 import os
 import sqlite3
-import json
+import tempfile
 
-from api.models import PersistentAgent, BrowserUseAgent
+from django.contrib.auth import get_user_model
+from django.test import TestCase, tag
+from django.utils import timezone
+
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
-from api.agent.tools.sqlite_query import (
-    execute_sqlite_query,
-    set_sqlite_db_path as set_query_db_path,
-    reset_sqlite_db_path as reset_query_db_path,
-)
-from api.agent.tools.sqlite_state import set_sqlite_db_path, reset_sqlite_db_path
+from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
+from api.models import BrowserUseAgent, PersistentAgent
 
 
 @tag("batch_sqlite")
@@ -40,7 +35,6 @@ class SqliteBatchToolTests(TestCase):
         tmp = tempfile.TemporaryDirectory()
         db_path = os.path.join(tmp.name, "state.db")
         token_state = set_sqlite_db_path(db_path)
-        token_query = set_query_db_path(db_path)
 
         class _Cxt:
             def __enter__(self_inner):
@@ -50,229 +44,79 @@ class SqliteBatchToolTests(TestCase):
                 try:
                     reset_sqlite_db_path(token_state)
                 finally:
-                    try:
-                        reset_query_db_path(token_query)
-                    finally:
-                        tmp.cleanup()
+                    tmp.cleanup()
 
         return _Cxt()
 
-    def test_atomic_commit_and_select(self):
+    def test_executes_multiple_queries(self):
         with self._with_temp_db() as (db_path, token, tmp):
-            ops = [
+            queries = [
                 "CREATE TABLE t(a INTEGER)",
                 "INSERT INTO t(a) VALUES (1),(2)",
                 "SELECT a FROM t ORDER BY a",
             ]
-            out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
+            out = execute_sqlite_batch(self.agent, {"queries": queries})
             self.assertEqual(out.get("status"), "ok")
             results = out.get("results", [])
-            self.assertEqual(len(results), 3)
-            self.assertEqual(results[2]["schema"], ["a"])  # SELECT columns
-            self.assertEqual([r["a"] for r in results[2]["rows"]], [1, 2])
-            # db size present
+            self.assertEqual(len(results), len(queries))
+            self.assertEqual(results[-1]["result"], [{"a": 1}, {"a": 2}])
             self.assertIsInstance(out.get("db_size_mb"), (int, float))
+            self.assertIn("Executed 3 queries", out.get("message", ""))
 
-    def test_atomic_rollback_on_error(self):
+    def test_stops_on_error_and_reports_index(self):
         with self._with_temp_db() as (db_path, token, tmp):
-            ops = [
+            queries = [
                 "CREATE TABLE t(a INTEGER PRIMARY KEY)",
                 "INSERT INTO t(a) VALUES (1)",
-                "INSERT INTO t(a) VALUES (1)",  # duplicate -> constraint violation
-            ]
-            out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
-            self.assertEqual(out.get("status"), "error")
-
-            # Verify rollback: table t should not exist
-            conn = sqlite3.connect(db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='t';")
-                rows = cur.fetchall()
-                self.assertEqual(len(rows), 0)
-            finally:
-                conn.close()
-
-    def test_per_statement_continues_on_error(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            ops = [
-                "CREATE TABLE t(a INTEGER PRIMARY KEY)",
-                "INSERT INTO t(a) VALUES (1)",
-                "INSERT INTO t(a) VALUES (1)",  # duplicate -> error but should continue
+                "INSERT INTO t(a) VALUES (1)",  # duplicate -> error
                 "INSERT INTO t(a) VALUES (2)",
-                "SELECT COUNT(*) as c FROM t",
             ]
-            out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "per_statement"})
-            self.assertEqual(out.get("status"), "error")  # at least one op failed
+            out = execute_sqlite_batch(self.agent, {"queries": queries})
+            self.assertEqual(out.get("status"), "error")
             results = out.get("results", [])
-            # Last result should be SELECT with c == 2
-            self.assertIn("rows", results[-1])
-            self.assertEqual(results[-1]["rows"][0]["c"], 2)
+            self.assertEqual(len(results), 2)  # stops before failing query
+            self.assertIn("Query 2 failed", out.get("message", ""))
 
-            # Ensure table exists and contains two rows
+            # First insert should have committed; later queries not executed
             conn = sqlite3.connect(db_path)
             try:
                 cur = conn.cursor()
                 cur.execute("SELECT COUNT(*) FROM t;")
                 (count,) = cur.fetchone()
-                self.assertEqual(count, 2)
+                self.assertEqual(count, 1)
             finally:
                 conn.close()
 
-    def test_select_truncation_flag(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            # Create and fill with > default row limit rows to trigger truncation flag
-            ops = ["CREATE TABLE t(a INTEGER)"] + [
-                f"INSERT INTO t(a) VALUES ({i})" for i in range(400)
-            ] + [
-                "SELECT a FROM t ORDER BY a",
-            ]
-            out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
-            results = out.get("results", [])
-            select_res = results[-1]
-            self.assertEqual(len(select_res["rows"]), 200)
-            self.assertTrue(select_res["truncated_rows"])
-            self.assertTrue(out.get("truncated_rows"))
-            self.assertEqual(out.get("row_limit"), 200)
-            # db size present
-            self.assertIsInstance(out.get("db_size_mb"), (int, float))
+    def test_single_query_field_is_normalized(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(self.agent, {"queries": "SELECT 42 AS answer"})
+            self.assertEqual(out.get("status"), "ok")
+            result = out["results"][0]
+            self.assertEqual(result["result"][0]["answer"], 42)
 
-    def test_row_limit_override(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            ops = ["CREATE TABLE t(a INTEGER)"] + [
-                f"INSERT INTO t(a) VALUES ({i})" for i in range(300)
-            ] + [
-                "SELECT a FROM t ORDER BY a",
-            ]
-            out = execute_sqlite_batch(
-                self.agent,
-                {"operations": ops, "mode": "atomic", "row_limit": 500},
-            )
-            results = out.get("results", [])
-            select_res = results[-1]
-            self.assertEqual(len(select_res["rows"]), 300)
-            self.assertFalse(select_res["truncated_rows"])
-            self.assertFalse(out.get("truncated_rows"))
-            self.assertEqual(out.get("row_limit"), 500)
-
-    def test_operations_stringified_json_is_normalized(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            ops = [
+    def test_auto_sleep_when_only_writes(self):
+        with self._with_temp_db():
+            queries = [
                 "CREATE TABLE t(a INTEGER)",
                 "INSERT INTO t(a) VALUES (1)",
-                "SELECT a FROM t",
             ]
-            payload = {
-                "operations": json.dumps(ops),
-                "mode": "atomic",
-            }
-            out = execute_sqlite_batch(self.agent, payload)
+            out = execute_sqlite_batch(self.agent, {"queries": queries})
             self.assertEqual(out.get("status"), "ok")
-            rows = out["results"][-1]["rows"]
-            self.assertEqual(rows[0]["a"], 1)
+            self.assertTrue(out.get("auto_sleep_ok"))
 
-    def test_operations_plain_string_is_wrapped(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            payload = {
-                "operations": "CREATE TABLE t(a INTEGER)",
-                "mode": "atomic",
-            }
-            out = execute_sqlite_batch(self.agent, payload)
+    def test_will_continue_work_false_sets_auto_sleep(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(self.agent, {"queries": "SELECT 1", "will_continue_work": False})
             self.assertEqual(out.get("status"), "ok")
-            # Subsequent insert using proper list to confirm table exists
-            insert_out = execute_sqlite_batch(
-                self.agent,
-                {"operations": ["INSERT INTO t(a) VALUES (5)"]},
-            )
-            self.assertEqual(insert_out.get("status"), "ok")
+            self.assertTrue(out.get("auto_sleep_ok"))
 
-    def test_operations_list_of_dicts_with_sql_key(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            payload = {
-                "operations": [
-                    {"sql": "CREATE TABLE t(a INTEGER)"},
-                    {"sql": "INSERT INTO t(a) VALUES (7)"},
-                    {"sql": "SELECT a FROM t"},
-                ]
-            }
-            out = execute_sqlite_batch(self.agent, payload)
-            self.assertEqual(out.get("status"), "ok")
-            rows = out["results"][-1]["rows"]
-            self.assertEqual(rows[0]["a"], 7)
-
-    def test_auto_split_multiple_statements(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            payload = {
-                "operations": [
-                    "CREATE TABLE t(a INTEGER); INSERT INTO t(a) VALUES (1); INSERT INTO t(a) VALUES (2); SELECT COUNT(*) as c FROM t"
-                ],
-                "mode": "atomic",
-            }
-            out = execute_sqlite_batch(self.agent, payload)
-            self.assertEqual(out.get("status"), "ok")
-            results = out.get("results", [])
-            # Expect four entries after auto-split
-            self.assertEqual(len(results), 4)
-            self.assertEqual(results[-1]["rows"][0]["c"], 2)
-            warning_texts = out.get("warnings") or []
-            self.assertTrue(any("auto-split" in w.lower() for w in warning_texts))
-
-    def test_curly_quotes_are_sanitized(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            ops = [
-                "CREATE TABLE t(val TEXT)",
-                "INSERT INTO t(val) VALUES (‘alpha’)",
-                "INSERT INTO t(val) VALUES (‘It’s done’)",
-                "SELECT val FROM t ORDER BY val",
-            ]
-            out = execute_sqlite_batch(self.agent, {"operations": ops})
-            self.assertEqual(out.get("status"), "ok")
-            rows = [row["val"] for row in out["results"][-1]["rows"]]
-            self.assertCountEqual(rows, ["alpha", "It's done"])
-
-    def test_create_trigger_statement_not_split(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            ops = [
-                "CREATE TABLE t(id INTEGER PRIMARY KEY)",
-                "CREATE TABLE log(entry INTEGER)",
-                (
-                    "CREATE TRIGGER trig AFTER INSERT ON t BEGIN "
-                    "INSERT INTO log(entry) VALUES (NEW.id); "
-                    "INSERT INTO log(entry) VALUES (NEW.id + 1); "
-                    "END;"
-                ),
-                "INSERT INTO t(id) VALUES (5)",
-                "SELECT entry FROM log ORDER BY entry",
-            ]
-            out = execute_sqlite_batch(self.agent, {"operations": ops, "mode": "atomic"})
-            self.assertEqual(out.get("status"), "ok")
-            rows = out["results"][-1]["rows"]
-            self.assertEqual(rows, [{"entry": 5}, {"entry": 6}])
-
-    def test_auto_split_errors_include_original_index(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            payload = {
-                "operations": [
-                    "CREATE TABLE t(a INTEGER); INSERT INTO missing_table VALUES (1)"
-                ]
-            }
-            out = execute_sqlite_batch(self.agent, payload)
+    def test_invalid_queries_are_rejected(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(self.agent, {"queries": ["  "]})
             self.assertEqual(out.get("status"), "error")
-            errors = [res for res in out.get("results", []) if not res.get("ok")]
-            self.assertTrue(errors)
-            self.assertTrue(
-                any(err["error"].get("at_original_index") == 0 for err in errors if "error" in err)
-            )
+            self.assertIn("queries", out.get("message", ""))
 
-    def test_semicolon_only_operation_is_invalid(self):
-        with self._with_temp_db() as (db_path, token, tmp):
-            payload = {
-                "operations": [
-                    "CREATE TABLE t(a INTEGER)",
-                    ";",
-                ]
-            }
-            out = execute_sqlite_batch(self.agent, payload)
+    def test_string_or_array_only(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(self.agent, {"queries": {"sql": "SELECT 1"}})
             self.assertEqual(out.get("status"), "error")
-            errors = [res for res in out.get("results", []) if not res.get("ok")]
-            self.assertTrue(any(err["error"]["code"] == "invalid_input" for err in errors))

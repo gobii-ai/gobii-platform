@@ -111,10 +111,18 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconColorClass: 'text-emerald-600',
     detailKind: 'sqliteBatch',
     derive(_, parameters) {
-      const operations = Array.isArray(parameters?.operations) ? (parameters?.operations as unknown[]) : []
+      const queriesParam = parameters?.queries
+      const rawQueries = Array.isArray(queriesParam)
+        ? (queriesParam as unknown[])
+        : queriesParam
+          ? [queriesParam as unknown]
+          : Array.isArray(parameters?.operations)
+            ? (parameters?.operations as unknown[])
+            : []
+
       return {
-        caption: operations.length ? `${operations.length} statement${operations.length === 1 ? '' : 's'}` : 'SQL batch',
-        sqlStatements: operations.map(String),
+        caption: rawQueries.length ? `${rawQueries.length} statement${rawQueries.length === 1 ? '' : 's'}` : 'SQL batch',
+        sqlStatements: rawQueries.map(String),
       }
     },
   },
