@@ -67,6 +67,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 logger.exception("Error checking user plan; defaulting to standard Startup CTA")
                 pass
 
+        def format_contacts(plan_name: str) -> str:
+            """Return display-friendly per-plan contact cap."""
+            limit = PLAN_CONFIG.get(plan_name, {}).get("max_contacts_per_agent")
+            return f"{limit} contacts/agent" if limit is not None else "Contacts/agent: —"
+
         # Pricing cards data - new 3-tier structure
         context["pricing_plans"] = [
             {
@@ -80,6 +85,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "badge": None,
                 "disabled": False,
                 "features": [
+                    format_contacts(PlanNames.FREE),
                     "5 always-on agents",
                     "30 day time limit for always-on agents",
                     "Basic API access",
@@ -102,6 +108,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "cta_disabled": startup_cta_disabled,
                 "current_plan": startup_current,
                 "features": [
+                    format_contacts(PlanNames.STARTUP),
                     "Unlimited always-on agents",
                     "No time limit for always-on agents",
                     "$0.10 per task beyond 500",
@@ -123,6 +130,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "cta_disabled": scale_cta_disabled,
                 "current_plan": scale_current,
                 "features": [
+                    format_contacts(PlanNames.SCALE),
                     "Unlimited always-on agents",
                     "Dedicated onboarding specialist",
                     "$0.04 per task beyond 10,000",
