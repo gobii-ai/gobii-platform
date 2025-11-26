@@ -3248,6 +3248,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             for server in context.get('inherited_mcp_servers', [])
         ]
 
+        organization_servers = [
+            {
+                'id': str(server.get('id')),
+                'displayName': server.get('display_name'),
+                'description': server.get('description'),
+                'scope': server.get('scope'),
+                'inherited': bool(server.get('inherited')),
+                'assigned': bool(server.get('assigned')),
+            }
+            for server in context.get('organization_mcp_servers', [])
+        ]
+
         personal_servers = [
             {
                 'id': str(server.get('id')),
@@ -3393,7 +3405,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'allowlist': allowlist,
             'mcpServers': {
                 'inherited': inherited_servers,
-                'organization': context.get('organization_mcp_servers', []),
+                'organization': organization_servers,
                 'personal': personal_servers,
                 'showPersonalForm': bool(context.get('show_personal_mcp_form')),
                 'canManage': mcp_can_manage,

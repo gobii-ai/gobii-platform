@@ -140,6 +140,8 @@ jobs:
             tag: batch_mcp_tools
           - batch: mcp_admin
             tag: batch_mcp_admin
+          - batch: mcp_org_assignment
+            tag: mcp_org_assignment_batch
           - batch: pipedream_connect
             tag: pipedream_connect
           - batch: promptree
