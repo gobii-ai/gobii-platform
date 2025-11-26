@@ -9,7 +9,7 @@ def _populate_completion_type(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0205_merge_20251125_1840"),
+        ("api", "0211_eval_run_primary_model"),
     ]
 
     operations = [
