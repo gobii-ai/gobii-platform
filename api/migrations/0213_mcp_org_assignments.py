@@ -9,6 +9,10 @@ def forwards(apps, schema_editor):
     with transaction.atomic():
         org_servers = MCPServerConfig.objects.filter(scope="organization")
         for server in org_servers:
+            # If this server already has explicit assignments, leave them as-is.
+            if Assignment.objects.filter(server_config=server).exists():
+                continue
+
             agent_ids = list(
                 PersistentAgent.objects.filter(organization_id=server.organization_id).values_list("id", flat=True)
             )
