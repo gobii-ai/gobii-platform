@@ -81,7 +81,7 @@ from ..tools.sqlite_state import agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.search_tools import execute_search_tools
-from ..tools.tool_manager import execute_enabled_tool
+from ..tools.tool_manager import SQLITE_TOOL_NAME, execute_enabled_tool
 from ..tools.web_chat_sender import execute_send_chat_message
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
@@ -93,6 +93,7 @@ from ...models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
+    PersistentAgentEnabledTool,
 )
 from config import settings
 from config.redis_client import get_redis_client
@@ -114,6 +115,31 @@ AUTO_SLEEP_FLAG = "auto_sleep_ok"
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
 
 __all__ = ["process_agent_events"]
+
+
+def _filter_enable_database_tool(agent: PersistentAgent, tools: List[dict]) -> List[dict]:
+    """Hide enable_database once sqlite_batch has already been enabled."""
+    try:
+        sqlite_enabled = PersistentAgentEnabledTool.objects.filter(
+            agent=agent, tool_full_name=SQLITE_TOOL_NAME
+        ).exists()
+    except Exception:
+        logger.debug("SQLite enablement check failed; leaving tool list unchanged", exc_info=True)
+        return tools
+
+    if not sqlite_enabled:
+        return tools
+
+    filtered = [
+        tool
+        for tool in tools
+        if not (
+            isinstance(tool, dict)
+            and tool.get("function", {}).get("name") == "enable_database"
+        )
+    ]
+    return filtered
+
 
 def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[BudgetContext]) -> None:
     """Best-effort attempt to close the budget cycle when the agent goes idle."""
@@ -1390,7 +1416,7 @@ def _run_agent_loop(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     logger.info("Starting agent loop for agent %s", agent.id)
-    tools = get_agent_tools(agent)
+    tools = _filter_enable_database_tool(agent, get_agent_tools(agent))
     
     # Track cumulative token usage across all iterations
     cumulative_token_usage = {
@@ -1795,13 +1821,22 @@ def _run_agent_loop(
                         result = execute_secure_credentials_request(agent, tool_params)
                     elif tool_name == "enable_database":
                         result = execute_enable_database(agent, tool_params)
+                        before_count = len(tools)
+                        tools = _filter_enable_database_tool(agent, get_agent_tools(agent))
+                        after_count = len(tools)
+                        logger.info(
+                            "Agent %s: refreshed tools after enable_database (before=%d after=%d)",
+                            agent.id,
+                            before_count,
+                            after_count,
+                        )
                     elif tool_name == "request_contact_permission":
                         result = execute_request_contact_permission(agent, tool_params)
                     elif tool_name == "search_tools":
                         result = execute_search_tools(agent, tool_params)
                         # After search_tools auto-enables relevant tools, refresh tool definitions
                         before_count = len(tools)
-                        tools = get_agent_tools(agent)
+                        tools = _filter_enable_database_tool(agent, get_agent_tools(agent))
                         after_count = len(tools)
                         logger.info(
                             "Agent %s: refreshed tools after search_tools (before=%d after=%d)",

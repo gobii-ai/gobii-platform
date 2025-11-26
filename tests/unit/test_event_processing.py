@@ -25,6 +25,7 @@ from api.admin import PersistentAgentPromptArchiveAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
 from api.agent.tools.search_web import execute_search_web as _execute_search_web
 from api.agent.tools.http_request import execute_http_request as _execute_http_request
+from api.agent.tools.tool_manager import enable_tools
 from api.agent.tasks.process_events import process_agent_cron_trigger_task, _remove_orphaned_celery_beat_task
 from api.models import (
     BrowserUseAgent,
@@ -369,6 +370,41 @@ class PromptContextBuilderTests(TestCase):
         completion = PersistentAgentCompletion.objects.get(agent=self.agent)
         self.assertEqual(completion.llm_model, "mock-model")
         self.assertEqual(completion.llm_provider, "mock-provider")
+
+    def test_agent_loop_filters_enable_database_from_tools(self):
+        """LLM tool payload should hide enable_database once sqlite_batch is enabled."""
+        enable_tools(self.agent, ["sqlite_batch"])
+
+        tool_defs = [
+            {"function": {"name": "enable_database", "description": "enable sqlite"}},
+            {"function": {"name": "sqlite_batch", "description": "use sqlite"}},
+        ]
+
+        response_message = MagicMock()
+        response_message.tool_calls = None
+        response_message.content = "Reasoning output"
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock()
+        response.choices = [response_choice]
+        response.model_extra = {}
+        token_usage = {"model": "mock-model", "provider": "mock-provider"}
+
+        with patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+             patch('api.agent.core.event_processing.get_agent_tools', return_value=tool_defs), \
+             patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+                _run_agent_loop(self.agent, is_first_run=False)
+
+        passed_tools = mock_completion.call_args.kwargs["tools"]
+        tool_names = [
+            entry.get("function", {}).get("name")
+            for entry in passed_tools
+            if isinstance(entry, dict)
+        ]
+        self.assertNotIn("enable_database", tool_names)
+        self.assertIn("sqlite_batch", tool_names)
 
 
 @tag("batch_event_processing")
