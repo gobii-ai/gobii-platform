@@ -53,7 +53,7 @@ PLAN_CONFIG = {
         "description": "Scale plan with enhanced limits and support.",
         "price": 250,
         "currency": "USD",
-        "max_contacts_per_agent": 20,
+        "max_contacts_per_agent": 50,
         "org": False
     },
     PlanNames.ORG_TEAM: {
