@@ -152,8 +152,13 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                 "type": "object",
                 "properties": {
                     "queries": {
-                        "type": ["string", "array"],
-                        "items": {"type": "string"},
+                        "anyOf": [
+                            {"type": "string"},
+                            {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        ],
                         "description": "SQL to execute (string for one statement, or array for multiple). You are responsible for managing schema and selective retrieval.",
                     },
                     "will_continue_work": {
