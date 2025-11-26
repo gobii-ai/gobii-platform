@@ -50,7 +50,7 @@ class AgentTagGenerationTests(TestCase):
         agent.refresh_from_db()
         expected_hash = compute_charter_hash(agent.charter)
         self.assertEqual(agent.tags_requested_hash, expected_hash)
-        mocked_delay.assert_called_once_with(str(agent.id), expected_hash)
+        mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
 
     def test_generate_agent_tags_updates_fields(self):
         agent = self._create_agent()

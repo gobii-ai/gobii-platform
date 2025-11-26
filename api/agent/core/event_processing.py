@@ -1322,8 +1322,12 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
 
             return agent
 
+        # Extract routing profile ID for metadata tasks
+        routing_profile = get_current_eval_routing_profile()
+        routing_profile_id = str(routing_profile.id) if routing_profile else None
+
         try:
-            maybe_schedule_short_description(agent)
+            maybe_schedule_short_description(agent, routing_profile_id=routing_profile_id)
         except Exception:
             logger.exception(
                 "Failed to evaluate short description scheduling for agent %s",
@@ -1331,14 +1335,14 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
             )
 
         try:
-            maybe_schedule_mini_description(agent)
+            maybe_schedule_mini_description(agent, routing_profile_id=routing_profile_id)
         except Exception:
             logger.exception(
                 "Failed to evaluate mini description scheduling for agent %s",
                 persistent_agent_id,
             )
         try:
-            maybe_schedule_agent_tags(agent)
+            maybe_schedule_agent_tags(agent, routing_profile_id=routing_profile_id)
         except Exception:
             logger.exception(
                 "Failed to evaluate tag scheduling for agent %s",

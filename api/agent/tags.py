@@ -89,8 +89,16 @@ def normalize_tags(raw_tags: Iterable[str]) -> List[str]:
     return normalized
 
 
-def maybe_schedule_agent_tags(agent: PersistentAgent) -> bool:
-    """Schedule LLM tag generation when the charter changes."""
+def maybe_schedule_agent_tags(
+    agent: PersistentAgent,
+    routing_profile_id: str | None = None,
+) -> bool:
+    """Schedule LLM tag generation when the charter changes.
+
+    Args:
+        agent: The agent to generate tags for.
+        routing_profile_id: Optional routing profile ID to use for LLM calls.
+    """
     charter = (agent.charter or "").strip()
     if not charter:
         return False
@@ -118,7 +126,7 @@ def maybe_schedule_agent_tags(agent: PersistentAgent) -> bool:
     try:
         from api.agent.tasks.agent_tags import generate_agent_tags_task
 
-        generate_agent_tags_task.delay(str(agent.id), charter_hash)
+        generate_agent_tags_task.delay(str(agent.id), charter_hash, routing_profile_id)
         logger.debug("Queued tag generation for agent %s (hash=%s)", agent.id, charter_hash)
         return True
     except Exception:

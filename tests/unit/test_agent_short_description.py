@@ -51,7 +51,7 @@ class AgentShortDescriptionTests(TestCase):
         agent.refresh_from_db()
         expected_hash = compute_charter_hash(agent.charter)
         self.assertEqual(agent.short_description_requested_hash, expected_hash)
-        mocked_delay.assert_called_once_with(str(agent.id), expected_hash)
+        mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
 
     def test_generate_short_description_updates_fields(self) -> None:
         agent = self._create_agent()
@@ -102,7 +102,7 @@ class AgentShortDescriptionTests(TestCase):
         agent.refresh_from_db()
         expected_hash = compute_charter_hash(agent.charter)
         self.assertEqual(agent.mini_description_requested_hash, expected_hash)
-        mocked_delay.assert_called_once_with(str(agent.id), expected_hash)
+        mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
 
     def test_generate_mini_description_updates_fields(self) -> None:
         agent = self._create_agent()
