@@ -4,7 +4,7 @@ import * as echarts from 'echarts/core'
 import { BarChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import { AlertTriangle, TrendingUp, TrendingDown, Minus, ArrowLeft, X } from 'lucide-react'
+import { AlertTriangle, TrendingUp, TrendingDown, Minus, X } from 'lucide-react'
 
 import type { ComparisonResponse, ComparisonGroup, ComparisonRunSummary, ComparisonGroupBy } from '../../api/evals'
 
@@ -55,8 +55,8 @@ const chartColors = [
 
 function PassRateChart({ groups }: { groups: ComparisonGroup[] }) {
   const option = useMemo(() => {
-    const categories = groups.map((g) => g.key || 'Unknown')
-    const passRates = groups.map((g) => (g.pass_rate != null ? Math.round(g.pass_rate * 100) : 0))
+    const categories = groups.map((g) => g.value || 'Unknown')
+    const passRates = groups.map((g) => Math.round(g.pass_rate))
 
     return {
       tooltip: {
@@ -118,8 +118,8 @@ function PassRateChart({ groups }: { groups: ComparisonGroup[] }) {
 
 function CostChart({ groups }: { groups: ComparisonGroup[] }) {
   const option = useMemo(() => {
-    const categories = groups.map((g) => g.key || 'Unknown')
-    const costs = groups.map((g) => g.avg_cost ?? 0)
+    const categories = groups.map((g) => g.value || 'Unknown')
+    const costs = groups.map((g) => g.avg_cost)
 
     return {
       tooltip: {
@@ -200,7 +200,7 @@ function TrendIndicator({ current, baseline, inverse = false }: { current: numbe
 function GroupedResultsTable({ groups, groupBy }: { groups: ComparisonGroup[]; groupBy: ComparisonGroupBy | null }) {
   const sortedGroups = useMemo(() => {
     // Sort by pass rate descending
-    return [...groups].sort((a, b) => (b.pass_rate ?? 0) - (a.pass_rate ?? 0))
+    return [...groups].sort((a, b) => b.pass_rate - a.pass_rate)
   }, [groups])
 
   const baseline = sortedGroups[sortedGroups.length - 1] // Use worst as baseline for comparison
@@ -230,25 +230,30 @@ function GroupedResultsTable({ groups, groupBy }: { groups: ComparisonGroup[]; g
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Pass Rate</th>
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Avg Cost</th>
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Avg Tokens</th>
-            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Avg Steps</th>
+            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tasks</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {sortedGroups.map((group, index) => (
-            <tr key={group.key} className="hover:bg-slate-50 transition-colors">
+            <tr key={group.value} className={`hover:bg-slate-50 transition-colors ${group.is_current ? 'bg-indigo-50/50' : ''}`}>
               <td className="py-3 px-4">
                 <div className="flex items-center gap-2">
                   <div
                     className="w-3 h-3 rounded-full shrink-0"
                     style={{ backgroundColor: chartColors[index % chartColors.length] }}
                   />
-                  <span className="font-mono text-slate-800 font-medium">{group.key || 'Unknown'}</span>
+                  <span className="font-mono text-slate-800 font-medium">{group.value || 'Unknown'}</span>
+                  {group.is_current && (
+                    <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-100 px-1.5 py-0.5 rounded">
+                      CURRENT
+                    </span>
+                  )}
                 </div>
               </td>
               <td className="py-3 px-4 text-center text-slate-600">{group.run_count}</td>
               <td className="py-3 px-4 text-center">
                 <div className="flex items-center justify-center gap-2">
-                  <span className="font-semibold text-slate-900">{formatPercent(group.pass_rate)}</span>
+                  <span className="font-semibold text-slate-900">{Math.round(group.pass_rate)}%</span>
                   {group !== baseline && (
                     <TrendIndicator current={group.pass_rate} baseline={baseline.pass_rate} />
                   )}
@@ -265,8 +270,9 @@ function GroupedResultsTable({ groups, groupBy }: { groups: ComparisonGroup[]; g
               <td className="py-3 px-4 text-center font-mono text-slate-600">
                 {formatTokens(group.avg_tokens)}
               </td>
-              <td className="py-3 px-4 text-center font-mono text-slate-600">
-                {group.avg_steps?.toFixed(1) ?? '—'}
+              <td className="py-3 px-4 text-center text-slate-600">
+                <span className="text-emerald-600 font-medium">{group.passed_tasks}</span>
+                <span className="text-slate-400">/{group.total_tasks}</span>
               </td>
             </tr>
           ))}
@@ -337,25 +343,25 @@ function InsightSummary({ groups }: { groups: ComparisonGroup[] }) {
   const insights = useMemo(() => {
     if (groups.length < 2) return null
 
-    const sortedByPassRate = [...groups].sort((a, b) => (b.pass_rate ?? 0) - (a.pass_rate ?? 0))
-    const sortedByCost = [...groups].sort((a, b) => (a.avg_cost ?? Infinity) - (b.avg_cost ?? Infinity))
+    const sortedByPassRate = [...groups].sort((a, b) => b.pass_rate - a.pass_rate)
+    const sortedByCost = [...groups].sort((a, b) => a.avg_cost - b.avg_cost)
 
     const best = sortedByPassRate[0]
     const cheapest = sortedByCost[0]
 
     const messages: string[] = []
 
-    if (best.key && best.pass_rate != null) {
-      messages.push(`${best.key} has the best pass rate at ${formatPercent(best.pass_rate)}`)
+    if (best.value) {
+      messages.push(`${best.value} has the best pass rate at ${Math.round(best.pass_rate)}%`)
     }
 
-    if (cheapest.key && cheapest.avg_cost != null && cheapest.key !== best.key) {
-      messages.push(`${cheapest.key} is most cost-effective at ${formatCurrency(cheapest.avg_cost)}/run`)
+    if (cheapest.value && cheapest.value !== best.value) {
+      messages.push(`${cheapest.value} is most cost-effective at ${formatCurrency(cheapest.avg_cost)}/run`)
     }
 
     // Check if there's a clear winner (best accuracy AND cheapest)
-    if (best.key === cheapest.key && best.key) {
-      return [`${best.key} offers the best balance of accuracy (${formatPercent(best.pass_rate)}) and cost (${formatCurrency(best.avg_cost)}/run)`]
+    if (best.value === cheapest.value && best.value) {
+      return [`${best.value} offers the best balance of accuracy (${Math.round(best.pass_rate)}%) and cost (${formatCurrency(best.avg_cost)}/run)`]
     }
 
     return messages
@@ -388,29 +394,25 @@ export function CompareResultsView({ data, onClose, groupByLabel }: CompareResul
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Sub-header with metadata and close button */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">Comparison Results</h2>
-            <p className="text-sm text-slate-500">
-              {data.reference_run.scenario_slug} · Grouped by {groupByLabel} · {data.tier} tier
-            </p>
-          </div>
-        </div>
+        <p className="text-sm text-slate-500">
+          Grouped by <span className="font-medium text-slate-700">{groupByLabel}</span>
+          {' · '}
+          <span className="font-medium text-slate-700">{data.tier}</span> tier
+          {data.target_fingerprint && (
+            <span className="ml-2 font-mono text-xs text-slate-400">
+              (fingerprint: {data.target_fingerprint})
+            </span>
+          )}
+        </p>
         <button
           type="button"
           onClick={onClose}
-          className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
         >
-          <X className="w-5 h-5" />
+          <X className="w-4 h-4" />
+          Close
         </button>
       </div>
 
@@ -421,11 +423,6 @@ export function CompareResultsView({ data, onClose, groupByLabel }: CompareResul
           <div>
             <p className="text-sm font-semibold text-amber-800">Fingerprint Mismatch</p>
             <p className="text-sm text-amber-700 mt-1">{data.fingerprint_warning}</p>
-            {data.fingerprint_mismatches && data.fingerprint_mismatches.length > 0 && (
-              <p className="text-xs text-amber-600 mt-2 font-mono">
-                Different fingerprints: {data.fingerprint_mismatches.join(', ')}
-              </p>
-            )}
           </div>
         </div>
       )}
@@ -453,7 +450,7 @@ export function CompareResultsView({ data, onClose, groupByLabel }: CompareResul
             <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
               <h3 className="text-sm font-semibold text-slate-900">Detailed Comparison</h3>
             </div>
-            <GroupedResultsTable groups={data.groups} groupBy={data.group_by} />
+            <GroupedResultsTable groups={data.groups} groupBy={data.group_by ?? null} />
           </div>
         </>
       )}

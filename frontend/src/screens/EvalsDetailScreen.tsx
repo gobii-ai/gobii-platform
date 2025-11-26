@@ -554,25 +554,26 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
 
       {/* Comparison Loading State */}
       {comparisonLoading && (
-        <div className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center">
-          <div className="bg-white rounded-2xl p-8 shadow-2xl flex flex-col items-center gap-4">
-            <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-            <p className="text-sm font-medium text-slate-700">Loading comparison data...</p>
-          </div>
-        </div>
+        <section className="card p-8 flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+          <p className="text-sm font-medium text-slate-700">Loading comparison data...</p>
+        </section>
       )}
 
-      {/* Comparison Results View */}
+      {/* Comparison Results View - renders inline */}
       {comparisonData && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-white">
-          <div className="max-w-6xl mx-auto p-6">
+        <section className="card overflow-hidden" style={{ padding: 0 }}>
+          <div className="bg-gradient-to-r from-indigo-50/80 to-purple-50/80 border-b border-indigo-100 px-6 py-4">
+            <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Comparison Results</h2>
+          </div>
+          <div className="p-6">
             <CompareResultsView
               data={comparisonData}
               onClose={closeComparison}
               groupByLabel={groupByLabel}
             />
           </div>
-        </div>
+        </section>
       )}
 
       {/* Compare Modal */}

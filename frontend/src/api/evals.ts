@@ -233,26 +233,34 @@ export type ComparisonRunSummary = {
 }
 
 export type ComparisonGroup = {
-  key: string
-  runs: ComparisonRunSummary[]
+  group_by: ComparisonGroupBy
+  value: string
   run_count: number
-  pass_rate: number | null
-  avg_cost: number | null
-  avg_tokens: number | null
-  avg_steps: number | null
+  pass_rate: number // percentage 0-100
+  avg_cost: number
+  avg_tokens: number
+  total_tasks: number
+  passed_tasks: number
+  is_current: boolean
 }
 
 export type ComparisonResponse = {
-  reference_run: ComparisonRunSummary
+  // Target run info
+  target_run_id: string
+  target_fingerprint: string | null
   tier: ComparisonTier
-  group_by: ComparisonGroupBy | null
-  // Ungrouped results
-  runs?: ComparisonRunSummary[]
-  // Grouped results
+  // Grouped results (when group_by is set)
+  group_by?: ComparisonGroupBy | null
   groups?: ComparisonGroup[]
+  // Ungrouped results (when no group_by)
+  runs?: ComparisonRunSummary[]
   // Warnings
-  fingerprint_warning?: string
-  fingerprint_mismatches?: string[]
+  fingerprint_warning?: string | null
+  filters?: {
+    code_version: string | null
+    primary_model: string | null
+    run_type: string | null
+  }
 }
 
 export type ComparisonParams = {
