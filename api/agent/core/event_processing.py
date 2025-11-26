@@ -42,6 +42,7 @@ from .token_usage import (
     coerce_int as _coerce_int,
     completion_kwargs_from_usage,
     extract_token_usage,
+    set_usage_span_attributes,
     usage_attribute as _usage_attribute,
 )
 from ..short_description import (
@@ -349,24 +350,7 @@ def _completion_with_failover(
                     model=model,
                     provider=provider,
                 )
-
-                if usage:
-                    llm_span.set_attribute(
-                        "llm.usage.prompt_tokens",
-                        _coerce_int(_usage_attribute(usage, "prompt_tokens")),
-                    )
-                    llm_span.set_attribute(
-                        "llm.usage.completion_tokens",
-                        _coerce_int(_usage_attribute(usage, "completion_tokens")),
-                    )
-                    llm_span.set_attribute(
-                        "llm.usage.total_tokens",
-                        _coerce_int(_usage_attribute(usage, "total_tokens")),
-                    )
-                    details = _usage_attribute(usage, "prompt_tokens_details")
-                    if details:
-                        cached_tokens = _coerce_int(_usage_attribute(details, "cached_tokens"))
-                        llm_span.set_attribute("llm.usage.cached_tokens", cached_tokens)
+                set_usage_span_attributes(llm_span, usage)
 
                 return response, token_usage
                 
