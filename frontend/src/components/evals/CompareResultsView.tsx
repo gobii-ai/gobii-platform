@@ -341,25 +341,59 @@ function InsightSummary({ groups }: { groups: ComparisonGroup[] }) {
   const insights = useMemo(() => {
     if (groups.length < 2) return null
 
-    const sortedByPassRate = [...groups].sort((a, b) => b.pass_rate - a.pass_rate)
-    const sortedByCost = [...groups].sort((a, b) => a.avg_cost - b.avg_cost)
-
-    const best = sortedByPassRate[0]
-    const cheapest = sortedByCost[0]
-
     const messages: string[] = []
 
-    if (best.value) {
-      messages.push(`${best.value} has the best pass rate at ${Math.round(best.pass_rate)}%`)
+    // Find best pass rate and all groups that have it
+    const bestPassRate = Math.max(...groups.map((g) => g.pass_rate))
+    const bestPassRateGroups = groups.filter((g) => g.pass_rate === bestPassRate)
+
+    // Find lowest cost and all groups that have it
+    const lowestCost = Math.min(...groups.map((g) => g.avg_cost))
+    const lowestCostGroups = groups.filter((g) => g.avg_cost === lowestCost)
+
+    // Pass rate insight
+    if (bestPassRateGroups.length === groups.length) {
+      // All tied
+      messages.push(`All options have equal pass rate at ${Math.round(bestPassRate)}%`)
+    } else if (bestPassRateGroups.length > 1) {
+      // Multiple tied for best
+      const names = bestPassRateGroups.map((g) => g.value).join(' and ')
+      messages.push(`${names} are tied for best pass rate at ${Math.round(bestPassRate)}%`)
+    } else if (bestPassRateGroups[0]?.value) {
+      // Single winner
+      messages.push(`${bestPassRateGroups[0].value} has the best pass rate at ${Math.round(bestPassRate)}%`)
     }
 
-    if (cheapest.value && cheapest.value !== best.value) {
-      messages.push(`${cheapest.value} is most cost-effective at ${formatCurrency(cheapest.avg_cost)}/run`)
+    // Cost insight - only show if there's meaningful cost difference
+    const costSpread = Math.max(...groups.map((g) => g.avg_cost)) - lowestCost
+    const hasMeaningfulCostDiff = costSpread > 0.001 // More than $0.001 difference
+
+    if (hasMeaningfulCostDiff) {
+      if (lowestCostGroups.length === groups.length) {
+        // All tied on cost (unlikely but handle it)
+        messages.push(`All options have similar cost at ~${formatCurrency(lowestCost)}/run`)
+      } else if (lowestCostGroups.length > 1) {
+        const names = lowestCostGroups.map((g) => g.value).join(' and ')
+        messages.push(`${names} are tied for most cost-effective at ${formatCurrency(lowestCost)}/run`)
+      } else if (lowestCostGroups[0]?.value) {
+        // Only show if different from pass rate winner(s)
+        const isAlsoPassRateWinner = bestPassRateGroups.some((g) => g.value === lowestCostGroups[0].value)
+        if (!isAlsoPassRateWinner || bestPassRateGroups.length > 1) {
+          messages.push(`${lowestCostGroups[0].value} is most cost-effective at ${formatCurrency(lowestCost)}/run`)
+        }
+      }
     }
 
-    // Check if there's a clear winner (best accuracy AND cheapest)
-    if (best.value === cheapest.value && best.value) {
-      return [`${best.value} offers the best balance of accuracy (${Math.round(best.pass_rate)}%) and cost (${formatCurrency(best.avg_cost)}/run)`]
+    // Special case: single option wins both
+    if (
+      bestPassRateGroups.length === 1 &&
+      lowestCostGroups.length === 1 &&
+      bestPassRateGroups[0].value === lowestCostGroups[0].value &&
+      hasMeaningfulCostDiff
+    ) {
+      return [
+        `${bestPassRateGroups[0].value} offers the best balance: ${Math.round(bestPassRate)}% pass rate and lowest cost at ${formatCurrency(lowestCost)}/run`,
+      ]
     }
 
     return messages
