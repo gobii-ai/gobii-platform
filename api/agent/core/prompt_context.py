@@ -519,10 +519,6 @@ def build_prompt_context(
         proactive_context=proactive_context,
     )
     
-    # Unified history first (order within user prompt: unified_history -> important -> critical)
-    unified_history_group = prompt.group("unified_history", weight=3)
-    _get_unified_history_prompt(agent, unified_history_group)
-
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
 
@@ -595,6 +591,10 @@ def build_prompt_context(
             weight=2,
             non_shrinkable=True
         )
+
+    # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
+    unified_history_group = prompt.group("unified_history", weight=3)
+    _get_unified_history_prompt(agent, unified_history_group)
 
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
