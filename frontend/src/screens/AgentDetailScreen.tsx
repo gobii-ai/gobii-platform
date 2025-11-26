@@ -150,6 +150,7 @@ type PersonalMcpServer = {
 
 type McpServersInfo = {
   inherited: McpServer[]
+  organization: McpServer[]
   personal: PersonalMcpServer[]
   showPersonalForm: boolean
   canManage: boolean
@@ -332,10 +333,15 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [savedWebhooks, setSavedWebhooks] = useState<AgentWebhook[]>(initialData.webhooks)
   const [webhooksState, setWebhooksState] = useState<DisplayWebhook[]>(() => normalizeWebhooks(initialData.webhooks))
   const [pendingWebhookActions, setPendingWebhookActions] = useState<PendingWebhookAction[]>([])
+  const initialOrgServerSet = useMemo(() => {
+    return new Set(initialData.mcpServers.organization.filter((server) => server.assigned).map((server) => server.id))
+  }, [initialData.mcpServers.organization])
   const initialPersonalServerSet = useMemo(() => {
     return new Set(initialData.mcpServers.personal.filter((server) => server.assigned).map((server) => server.id))
   }, [initialData.mcpServers.personal])
+  const [savedOrgServers, setSavedOrgServers] = useState<Set<string>>(() => new Set(initialOrgServerSet))
   const [savedPersonalServers, setSavedPersonalServers] = useState<Set<string>>(() => new Set(initialPersonalServerSet))
+  const [selectedOrgServers, setSelectedOrgServers] = useState<Set<string>>(() => new Set(initialOrgServerSet))
   const [selectedPersonalServers, setSelectedPersonalServers] = useState<Set<string>>(() => new Set(initialPersonalServerSet))
   const [savedPeerLinks, setSavedPeerLinks] = useState(initialData.peerLinks)
   const [peerLinksState, setPeerLinksState] = useState<PeerLinkEntryState[]>(initialData.peerLinks.entries)
@@ -360,16 +366,21 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
     setFormState(initialFormState)
   }, [initialFormState])
 
-  useEffect(() => {
-    setSavedWebhooks(initialData.webhooks)
-    setWebhooksState(normalizeWebhooks(initialData.webhooks))
-    setPendingWebhookActions([])
-  }, [initialData.webhooks])
+useEffect(() => {
+  setSavedWebhooks(initialData.webhooks)
+  setWebhooksState(normalizeWebhooks(initialData.webhooks))
+  setPendingWebhookActions([])
+}, [initialData.webhooks])
 
-  useEffect(() => {
-    setSavedPersonalServers(new Set(initialPersonalServerSet))
-    setSelectedPersonalServers(new Set(initialPersonalServerSet))
-  }, [initialPersonalServerSet])
+useEffect(() => {
+  setSavedOrgServers(new Set(initialOrgServerSet))
+  setSelectedOrgServers(new Set(initialOrgServerSet))
+}, [initialOrgServerSet])
+
+useEffect(() => {
+  setSavedPersonalServers(new Set(initialPersonalServerSet))
+  setSelectedPersonalServers(new Set(initialPersonalServerSet))
+}, [initialPersonalServerSet])
 
   useEffect(() => {
     setSavedPeerLinks(initialData.peerLinks)
@@ -379,22 +390,36 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
     setPendingPeerActions([])
   }, [initialData.peerLinks])
 
-  const mcpHasChanges = useMemo(
-    () => !areSetsEqual(selectedPersonalServers, savedPersonalServers),
-    [selectedPersonalServers, savedPersonalServers],
-  )
+const mcpHasChanges = useMemo(
+  () =>
+    !areSetsEqual(selectedPersonalServers, savedPersonalServers) ||
+    !areSetsEqual(selectedOrgServers, savedOrgServers),
+  [selectedPersonalServers, savedPersonalServers, selectedOrgServers, savedOrgServers],
+)
 
-  const togglePersonalServer = useCallback((serverId: string) => {
-    setSelectedPersonalServers((prev) => {
-      const next = new Set(prev)
-      if (next.has(serverId)) {
-        next.delete(serverId)
-      } else {
-        next.add(serverId)
-      }
-      return next
-    })
-  }, [])
+const togglePersonalServer = useCallback((serverId: string) => {
+  setSelectedPersonalServers((prev) => {
+    const next = new Set(prev)
+    if (next.has(serverId)) {
+      next.delete(serverId)
+    } else {
+      next.add(serverId)
+    }
+    return next
+  })
+}, [])
+
+const toggleOrganizationServer = useCallback((serverId: string) => {
+  setSelectedOrgServers((prev) => {
+    const next = new Set(prev)
+    if (next.has(serverId)) {
+      next.delete(serverId)
+    } else {
+      next.add(serverId)
+    }
+    return next
+  })
+}, [])
 
   const submitFormData = useCallback(
     async (formData: FormData) => {
@@ -567,6 +592,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
 
   const handleResetAll = useCallback(() => {
     resetForm()
+    setSelectedOrgServers(new Set(savedOrgServers))
     setSelectedPersonalServers(new Set(savedPersonalServers))
     setPendingWebhookActions([])
     setWebhooksState(normalizeWebhooks(savedWebhooks))
@@ -575,7 +601,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
     setPeerLinkCandidates(savedPeerLinks.candidates)
     setPeerLinkDefaults(savedPeerLinks.defaults)
     setSaveError(null)
-  }, [resetForm, savedPeerLinks, savedPersonalServers, savedWebhooks])
+  }, [resetForm, savedOrgServers, savedPeerLinks, savedPersonalServers, savedWebhooks])
 
   const handleSaveAll = useCallback(async () => {
     if (!hasAnyChanges) {
@@ -592,11 +618,20 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
       }
 
       if (mcpHasChanges) {
-        const formData = new FormData()
-        formData.append('mcp_server_action', 'update_personal')
-        selectedPersonalServers.forEach((id) => formData.append('personal_servers', id))
-        await submitFormData(formData)
-        setSavedPersonalServers(new Set(selectedPersonalServers))
+        if (initialData.agent.organization) {
+          const formData = new FormData()
+          formData.append('mcp_server_action', 'update_org')
+          selectedOrgServers.forEach((id) => formData.append('org_servers', id))
+          await submitFormData(formData)
+          setSavedOrgServers(new Set(selectedOrgServers))
+          setSavedPersonalServers(new Set(selectedPersonalServers))
+        } else {
+          const formData = new FormData()
+          formData.append('mcp_server_action', 'update_personal')
+          selectedPersonalServers.forEach((id) => formData.append('personal_servers', id))
+          await submitFormData(formData)
+          setSavedPersonalServers(new Set(selectedPersonalServers))
+        }
       }
 
       if (pendingWebhookActions.length) {
@@ -1252,7 +1287,10 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
 
       <IntegrationsSection
         mcpServers={initialData.mcpServers}
+        isOrgAgent={Boolean(initialData.agent.organization)}
+        selectedOrgServers={selectedOrgServers}
         selectedPersonalServers={selectedPersonalServers}
+        onToggleOrganizationServer={toggleOrganizationServer}
         onTogglePersonalServer={togglePersonalServer}
         peerLinks={{ entries: peerLinksState, candidates: peerLinkCandidates, defaults: peerLinkDefaults }}
         onPeerLinkAdd={() => openPeerLinkModal('create')}
@@ -1876,7 +1914,10 @@ function AllowlistDirectionFlags({ allowInbound, allowOutbound, labelColor }: Al
 
 type IntegrationsSectionProps = {
   mcpServers: McpServersInfo
+  isOrgAgent: boolean
+  selectedOrgServers: Set<string>
   selectedPersonalServers: Set<string>
+  onToggleOrganizationServer: (id: string) => void
   onTogglePersonalServer: (id: string) => void
   peerLinks: {
     entries: PeerLinkEntryState[]
@@ -1895,7 +1936,10 @@ type IntegrationsSectionProps = {
 
 function IntegrationsSection({
   mcpServers,
+  isOrgAgent,
+  selectedOrgServers,
   selectedPersonalServers,
+  onToggleOrganizationServer,
   onTogglePersonalServer,
   peerLinks,
   onPeerLinkAdd,
@@ -1918,14 +1962,17 @@ function IntegrationsSection({
       </summary>
       <div className="divide-y divide-gray-200/70">
         <section className="p-6 sm:p-8 space-y-6">
-          <div>
-            <h3 className="text-base font-semibold text-gray-800">MCP Servers</h3>
-            <p className="text-sm text-gray-500">Platform and organization MCP servers are always enabled for this agent. Configure optional personal servers below.</p>
-          </div>
+        <div>
+          <h3 className="text-base font-semibold text-gray-800">MCP Servers</h3>
+          <p className="text-sm text-gray-500">
+            Platform MCP servers are always enabled. Enable or disable organization servers per agent, and configure optional personal
+            servers when applicable.
+          </p>
+        </div>
 
-          {mcpServers.inherited.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-sm font-semibold text-gray-700">Inherited Servers</h4>
+        {mcpServers.inherited.length > 0 && (
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-gray-700">Inherited Servers</h4>
               <ul className="space-y-2">
                 {mcpServers.inherited.map((server) => (
                   <li key={server.id} className="flex items-start justify-between gap-3 border border-gray-200 bg-gray-50 rounded-lg px-4 py-3">
@@ -1937,6 +1984,35 @@ function IntegrationsSection({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {mcpServers.organization.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-sm font-semibold text-gray-700">Organization Servers</h4>
+              {isOrgAgent ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {mcpServers.organization.map((server) => {
+                    const checked = selectedOrgServers.has(server.id)
+                    return (
+                      <label key={server.id} className="flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded"
+                          checked={checked}
+                          onChange={() => onToggleOrganizationServer(server.id)}
+                        />
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">{server.displayName}</p>
+                          {server.description && <p className="text-sm text-gray-600">{server.description}</p>}
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">Organization MCP servers can be managed when the agent belongs to an organization.</p>
+              )}
             </div>
           )}
 
