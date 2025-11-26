@@ -286,3 +286,51 @@ export function fetchRunComparison(
   const url = `/console/api/evals/runs/${runId}/compare/${query ? `?${query}` : ''}`
   return jsonFetch(url, { method: 'GET', signal })
 }
+
+// Suite-level comparison types
+export type SuiteComparisonSummary = {
+  id: string
+  suite_slug: string
+  status: string
+  run_type: EvalRunType
+  started_at: string | null
+  finished_at: string | null
+  code_version: string | null
+  primary_model: string | null
+  llm_profile: string | null
+  pass_rate: number
+  total_cost: number
+  total_tokens: number
+  passed_tasks: number
+  total_tasks: number
+}
+
+export type SuiteComparisonResponse = {
+  // Target suite info
+  target_suite_run_id: string
+  tier: ComparisonTier
+  // Grouped results (when group_by is set)
+  group_by?: ComparisonGroupBy | null
+  groups?: ComparisonGroup[]
+  // Ungrouped results (when no group_by)
+  suite_runs?: SuiteComparisonSummary[]
+  // Warnings
+  fingerprint_warning?: string | null
+  filters?: {
+    run_type: string | null
+  }
+}
+
+export function fetchSuiteRunComparison(
+  suiteRunId: string,
+  params: ComparisonParams = {},
+  signal?: AbortSignal,
+): Promise<SuiteComparisonResponse> {
+  const search = new URLSearchParams()
+  if (params.tier) search.set('tier', params.tier)
+  if (params.group_by) search.set('group_by', params.group_by)
+  if (params.run_type) search.set('run_type', params.run_type)
+  const query = search.toString()
+  const url = `/console/api/evals/suite-runs/${suiteRunId}/compare/${query ? `?${query}` : ''}`
+  return jsonFetch(url, { method: 'GET', signal })
+}

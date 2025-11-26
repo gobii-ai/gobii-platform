@@ -6,12 +6,12 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import { AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
-import type { ComparisonResponse, ComparisonGroup, ComparisonRunSummary, ComparisonGroupBy } from '../../api/evals'
+import type { ComparisonResponse, SuiteComparisonResponse, ComparisonGroup, ComparisonRunSummary, SuiteComparisonSummary, ComparisonGroupBy } from '../../api/evals'
 
 echarts.use([BarChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 type CompareResultsViewProps = {
-  data: ComparisonResponse
+  data: ComparisonResponse | SuiteComparisonResponse
 }
 
 const formatCurrency = (value: number | null, digits = 4) => {
@@ -337,6 +337,62 @@ function UngroupedResultsTable({ runs }: { runs: ComparisonRunSummary[] }) {
   )
 }
 
+function UngroupedSuiteResultsTable({ suiteRuns }: { suiteRuns: SuiteComparisonSummary[] }) {
+  const sortedRuns = useMemo(() => {
+    return [...suiteRuns].sort((a, b) => {
+      const dateA = a.started_at ? new Date(a.started_at).getTime() : 0
+      const dateB = b.started_at ? new Date(b.started_at).getTime() : 0
+      return dateB - dateA // Most recent first
+    })
+  }, [suiteRuns])
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-200">
+            <th className="text-left py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Date</th>
+            <th className="text-left py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Model</th>
+            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Pass Rate</th>
+            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tasks</th>
+            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Cost</th>
+            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Type</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {sortedRuns.map((suite) => (
+            <tr key={suite.id} className="hover:bg-slate-50 transition-colors">
+              <td className="py-3 px-4 text-slate-600">{formatTs(suite.started_at)}</td>
+              <td className="py-3 px-4 text-slate-700 font-medium">{suite.primary_model || '—'}</td>
+              <td className="py-3 px-4 text-center">
+                <span className="font-semibold text-slate-900">
+                  {Math.round(suite.pass_rate)}%
+                </span>
+              </td>
+              <td className="py-3 px-4 text-center text-slate-600">
+                <span className="text-emerald-600 font-medium">{suite.passed_tasks}</span>
+                <span className="text-slate-400">/{suite.total_tasks}</span>
+              </td>
+              <td className="py-3 px-4 text-center font-mono text-slate-700">{formatCurrency(suite.total_cost)}</td>
+              <td className="py-3 px-4 text-center">
+                <span
+                  className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                    suite.run_type === 'official'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {suite.run_type === 'official' ? 'Official' : 'One-off'}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function InsightSummary({ groups }: { groups: ComparisonGroup[] }) {
   const insights = useMemo(() => {
     if (groups.length < 2) return null
@@ -435,7 +491,10 @@ function formatGroupBy(groupBy: ComparisonGroupBy | null | undefined): string {
 
 export function CompareResultsView({ data }: CompareResultsViewProps) {
   const hasGroups = data.groups && data.groups.length > 0
-  const hasRuns = data.runs && data.runs.length > 0
+  // Handle both scenario-level (runs) and suite-level (suite_runs) responses
+  const runs = 'runs' in data ? data.runs : undefined
+  const suiteRuns = 'suite_runs' in data ? data.suite_runs : undefined
+  const hasRuns = (runs && runs.length > 0) || (suiteRuns && suiteRuns.length > 0)
   const groupByLabel = formatGroupBy(data.group_by)
 
   return (
@@ -479,15 +538,27 @@ export function CompareResultsView({ data }: CompareResultsViewProps) {
         </>
       )}
 
-      {/* Ungrouped View */}
-      {!hasGroups && hasRuns && data.runs && (
+      {/* Ungrouped View - Scenario Level */}
+      {!hasGroups && runs && runs.length > 0 && (
         <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
           <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
             <h3 className="text-sm font-semibold text-slate-900">
-              {data.runs.length} Comparable Run{data.runs.length !== 1 ? 's' : ''}
+              {runs.length} Comparable Run{runs.length !== 1 ? 's' : ''}
             </h3>
           </div>
-          <UngroupedResultsTable runs={data.runs} />
+          <UngroupedResultsTable runs={runs} />
+        </div>
+      )}
+
+      {/* Ungrouped View - Suite Level */}
+      {!hasGroups && suiteRuns && suiteRuns.length > 0 && (
+        <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+            <h3 className="text-sm font-semibold text-slate-900">
+              {suiteRuns.length} Comparable Suite Run{suiteRuns.length !== 1 ? 's' : ''}
+            </h3>
+          </div>
+          <UngroupedSuiteResultsTable suiteRuns={suiteRuns} />
         </div>
       )}
 

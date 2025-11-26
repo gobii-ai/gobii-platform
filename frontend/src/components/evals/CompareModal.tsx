@@ -14,10 +14,10 @@ type CompareModalProps = {
   onClose: () => void
   onCompare: (config: CompareConfig) => void
   comparableCount?: number
-  currentFingerprint?: string
   currentCodeVersion?: string
   currentModel?: string
   currentRunType?: EvalRunType
+  isSuiteLevel?: boolean
 }
 
 const groupByOptions: { value: ComparisonGroupBy; label: string; description: string; icon: typeof GitBranch }[] = [
@@ -66,6 +66,7 @@ export function CompareModal({
   currentCodeVersion,
   currentModel,
   currentRunType,
+  isSuiteLevel = false,
 }: CompareModalProps) {
   const [groupBy, setGroupBy] = useState<ComparisonGroupBy | null>('code_version')
   const [tier, setTier] = useState<ComparisonTier>('pragmatic')
@@ -76,13 +77,14 @@ export function CompareModal({
     onCompare({ tier, groupBy, runType })
   }
 
+  const title = isSuiteLevel ? 'Compare Suite Runs' : 'Compare Scenario Runs'
   const subtitle = comparableCount != null && comparableCount > 0
-    ? `${comparableCount} comparable run${comparableCount !== 1 ? 's' : ''} found with same eval code`
-    : 'Find runs to compare against'
+    ? `${comparableCount} comparable ${isSuiteLevel ? 'suite' : 'run'}${comparableCount !== 1 ? 's' : ''} found`
+    : `Compare ${isSuiteLevel ? 'suite runs' : 'scenario runs'} across different configurations`
 
   return (
     <Modal
-      title="Compare Eval Runs"
+      title={title}
       subtitle={subtitle}
       icon={BarChart3}
       iconBgClass="bg-indigo-100"

@@ -3552,3 +3552,243 @@ class EvalRunCompareAPIView(SystemAdminAPIView):
             "target_fingerprint": run.scenario_fingerprint or None,
             "fingerprint_warning": fingerprint_warning,
         })
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EvalSuiteRunCompareAPIView(SystemAdminAPIView):
+    """
+    Compare suite runs at the aggregate level (across all scenarios).
+
+    Supports three comparison tiers via ?tier= parameter:
+    - strict: Same suite + all scenario fingerprints must match
+    - pragmatic (default): Same suite + same scenario slugs
+    - historical: Same suite slug only (loosest)
+
+    Supports grouping via ?group_by= parameter:
+    - code_version: Group by git commit (isolate code changes)
+    - primary_model: Group by primary LLM model (compare models)
+    - llm_profile: Group by routing profile (compare configs)
+    """
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, suite_run_id: str, *args: Any, **kwargs: Any):
+        from django.db.models import Avg, Count, Sum
+
+        suite_run = get_object_or_404(
+            EvalSuiteRun.objects.prefetch_related("runs__tasks"),
+            pk=suite_run_id,
+        )
+
+        tier = request.GET.get("tier", "pragmatic").lower()
+        if tier not in ("strict", "pragmatic", "historical"):
+            return HttpResponseBadRequest("tier must be one of: strict, pragmatic, historical")
+
+        group_by = request.GET.get("group_by")
+        if group_by and group_by not in ("code_version", "primary_model", "llm_profile"):
+            return HttpResponseBadRequest("group_by must be one of: code_version, primary_model, llm_profile")
+
+        run_type_filter = request.GET.get("run_type")
+        if run_type_filter:
+            run_type_filter = run_type_filter.lower()
+            if run_type_filter not in dict(EvalSuiteRun.RunType.choices):
+                return HttpResponseBadRequest("Invalid run_type")
+
+        limit_raw = request.GET.get("limit", "50")
+        try:
+            limit = max(1, min(100, int(limit_raw)))
+        except ValueError:
+            return HttpResponseBadRequest("limit must be an integer")
+
+        # Get fingerprints and scenario slugs from target suite
+        target_runs = list(suite_run.runs.all())
+        target_fingerprints = {r.scenario_fingerprint for r in target_runs if r.scenario_fingerprint}
+        target_scenario_slugs = {r.scenario_slug for r in target_runs}
+
+        # Get primary model from first run (for "is_current" detection)
+        target_primary_model = target_runs[0].primary_model if target_runs else None
+        target_code_version = target_runs[0].code_version if target_runs else None
+        target_llm_profile = target_runs[0].llm_routing_profile_name if target_runs else None
+
+        # Build query for comparable suite runs
+        qs = EvalSuiteRun.objects.filter(
+            suite_slug=suite_run.suite_slug,
+            status=EvalSuiteRun.Status.COMPLETED,
+        ).prefetch_related("runs__tasks")
+
+        if tier == "strict":
+            # Same suite + all scenario fingerprints must match
+            # Filter to suites that have runs with ALL the same fingerprints
+            if not target_fingerprints:
+                return JsonResponse({
+                    "suite_runs": [],
+                    "groups": [],
+                    "tier": tier,
+                    "target_suite_run_id": str(suite_run.id),
+                    "warning": "Target suite has no fingerprints - cannot do strict comparison",
+                })
+            # We'll filter after fetching since this requires checking all runs
+        elif tier == "pragmatic":
+            # Same suite + same scenario slugs (fingerprints may differ)
+            pass  # We'll filter after fetching
+        # historical: just same suite_slug, already filtered
+
+        if run_type_filter:
+            qs = qs.filter(run_type=run_type_filter)
+
+        # Fetch all candidate suites
+        candidate_suites = list(qs.order_by("-finished_at")[:limit * 3])  # Fetch extra for filtering
+
+        # Filter based on tier
+        comparable_suites = []
+        fingerprint_warning = None
+        mismatched_count = 0
+
+        for candidate in candidate_suites:
+            candidate_runs = list(candidate.runs.all())
+            candidate_fingerprints = {r.scenario_fingerprint for r in candidate_runs if r.scenario_fingerprint}
+            candidate_slugs = {r.scenario_slug for r in candidate_runs}
+
+            if tier == "strict":
+                # All fingerprints must match exactly
+                if candidate_fingerprints == target_fingerprints:
+                    comparable_suites.append(candidate)
+                elif candidate_slugs == target_scenario_slugs:
+                    mismatched_count += 1
+            elif tier == "pragmatic":
+                # Same scenario slugs required
+                if candidate_slugs == target_scenario_slugs:
+                    comparable_suites.append(candidate)
+                    if candidate_fingerprints != target_fingerprints:
+                        mismatched_count += 1
+            else:  # historical
+                # Any suite with same suite_slug
+                comparable_suites.append(candidate)
+                if candidate_fingerprints != target_fingerprints:
+                    mismatched_count += 1
+
+            if len(comparable_suites) >= limit:
+                break
+
+        if mismatched_count > 0 and tier in ("pragmatic", "historical"):
+            fingerprint_warning = f"{mismatched_count} suite(s) have different scenario fingerprints - eval code may have changed"
+
+        # Helper to calculate suite stats
+        def calc_suite_stats(suite: EvalSuiteRun) -> dict:
+            runs = list(suite.runs.all())
+            total_passed = 0
+            total_tasks = 0
+            total_cost = 0.0
+            total_tokens = 0
+
+            for run in runs:
+                total_cost += float(run.total_cost or 0)
+                total_tokens += run.tokens_used or 0
+                for task in run.tasks.all():
+                    total_tasks += 1
+                    if task.status == "passed":
+                        total_passed += 1
+
+            return {
+                "passed": total_passed,
+                "total": total_tasks,
+                "pass_rate": (total_passed / total_tasks * 100) if total_tasks > 0 else 0,
+                "total_cost": total_cost,
+                "total_tokens": total_tokens,
+                "primary_model": runs[0].primary_model if runs else None,
+                "code_version": runs[0].code_version if runs else None,
+                "llm_profile": runs[0].llm_routing_profile_name if runs else None,
+            }
+
+        # Handle grouping
+        if group_by:
+            # Group comparable suites by the specified field
+            groups_map: dict[str, list] = {}
+            for suite in comparable_suites:
+                stats = calc_suite_stats(suite)
+                if group_by == "code_version":
+                    key = stats["code_version"] or "(none)"
+                elif group_by == "primary_model":
+                    key = stats["primary_model"] or "(none)"
+                else:  # llm_profile
+                    key = stats["llm_profile"] or "(none)"
+
+                if key not in groups_map:
+                    groups_map[key] = []
+                groups_map[key].append({
+                    "suite": suite,
+                    "stats": stats,
+                })
+
+            # Aggregate stats per group
+            groups_list = []
+            for key, items in groups_map.items():
+                total_passed = sum(i["stats"]["passed"] for i in items)
+                total_tasks = sum(i["stats"]["total"] for i in items)
+                total_cost = sum(i["stats"]["total_cost"] for i in items)
+                total_tokens = sum(i["stats"]["total_tokens"] for i in items)
+                suite_count = len(items)
+
+                # Determine if this is the current group
+                if group_by == "code_version":
+                    is_current = key == (target_code_version or "(none)")
+                elif group_by == "primary_model":
+                    is_current = key == (target_primary_model or "(none)")
+                else:
+                    is_current = key == (target_llm_profile or "(none)")
+
+                groups_list.append({
+                    "group_by": group_by,
+                    "value": key,
+                    "suite_count": suite_count,
+                    "run_count": suite_count,  # For compatibility with frontend
+                    "avg_cost": total_cost / suite_count if suite_count > 0 else 0,
+                    "avg_tokens": total_tokens / suite_count if suite_count > 0 else 0,
+                    "pass_rate": (total_passed / total_tasks * 100) if total_tasks > 0 else 0,
+                    "total_tasks": total_tasks,
+                    "passed_tasks": total_passed,
+                    "is_current": is_current,
+                })
+
+            # Sort by pass rate descending
+            groups_list.sort(key=lambda x: x["pass_rate"], reverse=True)
+
+            return JsonResponse({
+                "groups": groups_list,
+                "group_by": group_by,
+                "tier": tier,
+                "target_suite_run_id": str(suite_run.id),
+                "fingerprint_warning": fingerprint_warning,
+                "filters": {
+                    "run_type": run_type_filter,
+                },
+            })
+
+        # Non-grouped: return individual suite runs
+        suite_runs_data = []
+        for suite in comparable_suites:
+            if suite.id == suite_run.id:
+                continue  # Exclude current suite
+            stats = calc_suite_stats(suite)
+            suite_runs_data.append({
+                "id": str(suite.id),
+                "suite_slug": suite.suite_slug,
+                "status": suite.status,
+                "run_type": suite.run_type,
+                "started_at": suite.started_at.isoformat() if suite.started_at else None,
+                "finished_at": suite.finished_at.isoformat() if suite.finished_at else None,
+                "code_version": stats["code_version"],
+                "primary_model": stats["primary_model"],
+                "llm_profile": stats["llm_profile"],
+                "pass_rate": stats["pass_rate"],
+                "total_cost": stats["total_cost"],
+                "total_tokens": stats["total_tokens"],
+                "passed_tasks": stats["passed"],
+                "total_tasks": stats["total"],
+            })
+
+        return JsonResponse({
+            "suite_runs": suite_runs_data,
+            "tier": tier,
+            "target_suite_run_id": str(suite_run.id),
+            "fingerprint_warning": fingerprint_warning,
+        })

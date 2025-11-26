@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle, ChevronDown, ChevronRight, Cpu, BarChart3 } from 'lucide-react'
 
-import { fetchSuiteRunDetail, updateSuiteRunType, fetchRunComparison, type EvalRun, type EvalSuiteRun, type EvalTask, type LLMRoutingProfileSnapshot, type LLMProfileTokenRange, type LLMProfileTier, type ComparisonResponse, type ComparisonGroupBy } from '../api/evals'
+import { fetchSuiteRunDetail, updateSuiteRunType, fetchRunComparison, fetchSuiteRunComparison, type EvalRun, type EvalSuiteRun, type EvalTask, type LLMRoutingProfileSnapshot, type LLMProfileTokenRange, type LLMProfileTier, type ComparisonResponse, type SuiteComparisonResponse, type ComparisonGroupBy } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
 import { RunTypeBadge } from '../components/common/RunTypeBadge'
 import { CompareModal, CompareResultsView, type CompareConfig } from '../components/evals'
@@ -48,8 +48,9 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
 
   // Comparison state
   const [showCompareModal, setShowCompareModal] = useState(false)
-  const [compareRunId, setCompareRunId] = useState<string | null>(null)
-  const [comparisonData, setComparisonData] = useState<ComparisonResponse | null>(null)
+  const [compareMode, setCompareMode] = useState<'suite' | 'scenario' | null>(null)
+  const [compareRunId, setCompareRunId] = useState<string | null>(null) // For scenario-level comparison
+  const [comparisonData, setComparisonData] = useState<ComparisonResponse | SuiteComparisonResponse | null>(null)
   const [comparisonLoading, setComparisonLoading] = useState(false)
   const [comparisonGroupBy, setComparisonGroupBy] = useState<ComparisonGroupBy | null>(null)
 
@@ -176,35 +177,45 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
     }
   }
 
-  // Get first completed run for comparison
-  const firstCompletedRun = useMemo(() => {
-    if (!suite?.runs) return null
-    return suite.runs.find((r) => r.status === 'completed') || null
-  }, [suite?.runs])
+  // Open suite-level comparison modal
+  const openSuiteCompareModal = () => {
+    setCompareMode('suite')
+    setCompareRunId(null)
+    setShowCompareModal(true)
+    setComparisonData(null)
+  }
 
-  // Open compare modal for a specific run
-  const openCompareModal = (runId: string) => {
+  // Open scenario-level comparison modal for a specific run
+  const openScenarioCompareModal = (runId: string) => {
+    setCompareMode('scenario')
     setCompareRunId(runId)
     setShowCompareModal(true)
     setComparisonData(null)
   }
 
-  // Execute comparison
+  // Execute comparison (suite or scenario level)
   const handleCompare = async (config: CompareConfig) => {
-    if (!compareRunId) return
-
     setShowCompareModal(false)
     setComparisonLoading(true)
     setComparisonGroupBy(config.groupBy)
     setError(null)
 
     try {
-      const result = await fetchRunComparison(compareRunId, {
-        tier: config.tier,
-        group_by: config.groupBy || undefined,
-        run_type: config.runType || undefined,
-      })
-      setComparisonData(result)
+      if (compareMode === 'suite') {
+        const result = await fetchSuiteRunComparison(suiteRunId, {
+          tier: config.tier,
+          group_by: config.groupBy || undefined,
+          run_type: config.runType || undefined,
+        })
+        setComparisonData(result)
+      } else if (compareMode === 'scenario' && compareRunId) {
+        const result = await fetchRunComparison(compareRunId, {
+          tier: config.tier,
+          group_by: config.groupBy || undefined,
+          run_type: config.runType || undefined,
+        })
+        setComparisonData(result)
+      }
     } catch (err) {
       console.error(err)
       setError('Unable to load comparison data.')
@@ -216,6 +227,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   // Close comparison view
   const closeComparison = () => {
     setComparisonData(null)
+    setCompareMode(null)
     setCompareRunId(null)
     setComparisonGroupBy(null)
   }
@@ -393,11 +405,11 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                   {suite.run_type === 'official' ? 'Mark as One-off' : 'Mark as Official'}
                 </button>
               )}
-              {firstCompletedRun && (
+              {suite?.status === 'completed' && (
                 <button
                   type="button"
                   className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg shadow-sm hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
-                  onClick={() => openCompareModal(firstCompletedRun.id)}
+                  onClick={openSuiteCompareModal}
                 >
                   <BarChart3 className="w-4 h-4" />
                   Compare
@@ -565,7 +577,13 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
             </div>
             <div className="divide-y divide-slate-100">
               {Object.entries(groupedRuns).map(([slug, runs]) => (
-                <ScenarioGroup key={slug} scenarioSlug={slug} run={runs[viewRunIndex]} index={viewRunIndex} />
+                <ScenarioGroup
+                  key={slug}
+                  scenarioSlug={slug}
+                  run={runs[viewRunIndex]}
+                  index={viewRunIndex}
+                  onCompare={openScenarioCompareModal}
+                />
               ))}
               {!hasRuns && (
                 <div className="p-12 text-center text-slate-500 font-medium">
@@ -596,10 +614,12 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                   <BarChart3 className="w-6 h-6" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Comparison Results</h1>
+                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                    {compareMode === 'suite' ? 'Suite' : 'Scenario'} Comparison
+                  </h1>
                   <p className="text-slate-600 mt-1">
                     {groupByLabel} · {comparisonData.tier} tier
-                    {comparisonData.target_fingerprint && (
+                    {'target_fingerprint' in comparisonData && comparisonData.target_fingerprint && (
                       <span className="ml-2 font-mono text-xs text-slate-400">
                         ({comparisonData.target_fingerprint})
                       </span>
@@ -613,7 +633,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                 className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
               >
                 <ArrowLeft className="w-4 h-4" />
-                Back to Run
+                Back to Details
               </button>
             </div>
           </div>
@@ -624,24 +644,23 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
       )}
 
       {/* Compare Modal */}
-      {showCompareModal && compareRunId && (
+      {showCompareModal && (
         <CompareModal
           onClose={() => setShowCompareModal(false)}
           onCompare={handleCompare}
-          comparableCount={firstCompletedRun?.comparison?.comparable_runs_count}
-          currentFingerprint={firstCompletedRun?.scenario_fingerprint}
-          currentCodeVersion={firstCompletedRun?.code_version}
-          currentModel={firstCompletedRun?.primary_model}
-          currentRunType={firstCompletedRun?.run_type}
+          currentCodeVersion={suite?.runs?.[0]?.code_version}
+          currentModel={suite?.runs?.[0]?.primary_model}
+          currentRunType={suite?.run_type}
+          isSuiteLevel={compareMode === 'suite'}
         />
       )}
     </div>
   )
 }
 
-function ScenarioGroup({ scenarioSlug, run, index }: { scenarioSlug: string; run?: EvalRun, index: number }) {
+function ScenarioGroup({ scenarioSlug, run, index, onCompare }: { scenarioSlug: string; run?: EvalRun; index: number; onCompare: (runId: string) => void }) {
   const [expanded, setExpanded] = useState(true)
-  
+
   const isCompleted = run?.status === 'completed'
   const isRunning = run?.status === 'running'
   const isMissing = !run
@@ -650,13 +669,13 @@ function ScenarioGroup({ scenarioSlug, run, index }: { scenarioSlug: string; run
 
   return (
     <div className="bg-white transition-colors hover:bg-slate-50 group">
-       <div 
+       <div
         className="flex flex-wrap items-center justify-between gap-4 p-6 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-4">
-           <div className={`w-3 h-3 rounded-full shadow-sm shrink-0 
-             ${isMissing ? 'bg-slate-200' : isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`} 
+           <div className={`w-3 h-3 rounded-full shadow-sm shrink-0
+             ${isMissing ? 'bg-slate-200' : isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`}
            />
            <div>
               <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{scenarioSlug}</h3>
@@ -691,6 +710,20 @@ function ScenarioGroup({ scenarioSlug, run, index }: { scenarioSlug: string; run
                  {formatDuration(run.started_at, run.finished_at)}
                </div>
              </div>
+           )}
+           {isCompleted && (
+             <button
+               type="button"
+               onClick={(e) => {
+                 e.stopPropagation()
+                 onCompare(run!.id)
+               }}
+               className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded hover:bg-indigo-100 transition-colors"
+               title="Compare this scenario"
+             >
+               <BarChart3 className="w-3 h-3" />
+               Compare
+             </button>
            )}
            {run ? <StatusBadge status={run.status || 'pending'} /> : <span className="text-xs text-slate-400 italic px-2">Not run</span>}
         </div>
