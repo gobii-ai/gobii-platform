@@ -21,7 +21,6 @@ import {
   Layers,
   Copy,
   Check,
-  ChevronRight,
   Settings2,
   Pencil,
   Scale,

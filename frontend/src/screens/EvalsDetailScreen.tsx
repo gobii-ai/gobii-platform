@@ -640,7 +640,6 @@ function LLMProfileSection({ profile }: { profile: LLMRoutingProfileSnapshot }) 
 
   const persistentRangeCount = profile.persistent?.ranges?.length || 0
   const browserTierCount = profile.browser?.tiers?.length || 0
-  const embeddingsTierCount = profile.embeddings?.tiers?.length || 0
 
   return (
     <section className="card overflow-hidden" style={{ padding: 0 }}>
@@ -718,7 +717,7 @@ function LLMProfileSection({ profile }: { profile: LLMRoutingProfileSnapshot }) 
               <h3 className="text-sm font-bold text-slate-800 mb-3">Browser Agent Tiers</h3>
               <div className="space-y-2">
                 {profile.browser.tiers.map((tier) => (
-                  <TierCard key={tier.id} tier={tier} type="browser" />
+                  <TierCard key={tier.id} tier={tier} />
                 ))}
               </div>
             </div>
@@ -730,7 +729,7 @@ function LLMProfileSection({ profile }: { profile: LLMRoutingProfileSnapshot }) 
               <h3 className="text-sm font-bold text-slate-800 mb-3">Embeddings Tiers</h3>
               <div className="space-y-2">
                 {profile.embeddings.tiers.map((tier) => (
-                  <TierCard key={tier.id} tier={tier} type="embeddings" />
+                  <TierCard key={tier.id} tier={tier} />
                 ))}
               </div>
             </div>
@@ -758,7 +757,7 @@ function TokenRangeCard({ range }: { range: LLMProfileTokenRange }) {
       {range.tiers && range.tiers.length > 0 && (
         <div className="divide-y divide-slate-100">
           {range.tiers.map((tier) => (
-            <TierCard key={tier.id} tier={tier} type="persistent" />
+            <TierCard key={tier.id} tier={tier} />
           ))}
         </div>
       )}
@@ -766,7 +765,7 @@ function TokenRangeCard({ range }: { range: LLMProfileTokenRange }) {
   )
 }
 
-function TierCard({ tier, type }: { tier: LLMProfileTier; type: 'persistent' | 'browser' | 'embeddings' }) {
+function TierCard({ tier }: { tier: LLMProfileTier }) {
   const tierLabel = tier.is_max ? 'Max' : tier.is_premium ? 'Premium' : 'Standard'
   const tierColor = tier.is_max ? 'text-amber-700 bg-amber-50' : tier.is_premium ? 'text-purple-700 bg-purple-50' : 'text-slate-600 bg-slate-50'
 
