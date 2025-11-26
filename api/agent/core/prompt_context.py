@@ -546,7 +546,7 @@ def build_prompt_context(
     )
 
     # Contacts block - use promptree natively
-    _build_contacts_block(agent, important_group, span)
+    recent_contacts_text = _build_contacts_block(agent, important_group, span)
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
@@ -691,6 +691,12 @@ def build_prompt_context(
         weight=2,
         non_shrinkable=True
     )
+    if recent_contacts_text:
+        critical_group.section_text(
+            "recent_contacts",
+            recent_contacts_text,
+            weight=1,
+        )
 
     if peer_dm_context:
         peer_dm_group = critical_group.group("peer_dm_context", weight=5)
@@ -802,8 +808,11 @@ def build_prompt_context(
     )
 
 
-def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
-    """Add contact information sections to the provided promptree group."""
+def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str | None:
+    """Add contact information sections to the provided promptree group.
+
+    Returns the rendered recent contacts text so it can be placed in a critical section.
+    """
     limit_msg_history = message_history_limit(agent)
 
     # Agent endpoints (all, highlight primary)
@@ -881,16 +890,13 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
                     meta_str = f" (recent msg: {body_preview}...)"
             recent_meta[key] = meta_str
 
+    recent_contacts_text: str | None = None
     if recent_meta:
         recent_lines = []
         for ch, addr in sorted(recent_meta.keys()):
             recent_lines.append(f"- {ch}: {addr}{recent_meta[(ch, addr)]}")
 
-        contacts_group.section_text(
-            "recent_contacts",
-            "\n".join(recent_lines),
-            weight=1
-        )
+        recent_contacts_text = "\n".join(recent_lines)
 
     peer_links = (
         AgentPeerLink.objects.filter(is_enabled=True)
@@ -1006,6 +1012,8 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> None:
             weight=3,
             non_shrinkable=True
         )
+
+    return recent_contacts_text
 
 
 def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None:
