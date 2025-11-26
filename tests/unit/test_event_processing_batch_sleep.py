@@ -69,7 +69,7 @@ class TestBatchToolCallsWithSleep(TestCase):
 
         tc_email = mk_tc('send_email', '{"to": "a@example.com", "subject": "hi", "html_body": "<p>Hi</p>"}')
         tc_charter = mk_tc('update_charter', '{"charter": "do x"}')
-        tc_sqlite = mk_tc('sqlite_batch', '{"ops": [{"sql": "create table if not exists x(id int)"}], "mode": "atomic"}')
+        tc_sqlite = mk_tc('sqlite_batch', '{"queries": ["create table if not exists x(id int)"]}')
         tc_sleep = mk_tc('sleep_until_next_trigger', '{}')
 
         msg = MagicMock()

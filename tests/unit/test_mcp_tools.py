@@ -1356,12 +1356,12 @@ class MCPToolIntegrationTests(TestCase):
             self.assertIsNone(row.last_used_at)
             self.assertEqual(row.usage_count, 0)
 
-            result = execute_enabled_tool(self.agent, "sqlite_batch", {"operations": ["select 1"]})
+            result = execute_enabled_tool(self.agent, "sqlite_batch", {"queries": ["select 1"]})
         finally:
             tm.BUILTIN_TOOL_REGISTRY["sqlite_batch"]["executor"] = original_executor
 
         self.assertEqual(result["status"], "ok")
-        mock_sqlite.assert_called_once_with(self.agent, {"operations": ["select 1"]})
+        mock_sqlite.assert_called_once_with(self.agent, {"queries": ["select 1"]})
         row.refresh_from_db()
         self.assertIsNotNone(row.last_used_at)
         self.assertEqual(row.usage_count, 1)
