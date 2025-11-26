@@ -9,6 +9,7 @@ import ast
 import hashlib
 import inspect
 import subprocess
+import textwrap
 
 
 def compute_scenario_fingerprint(scenario) -> str:
@@ -34,11 +35,13 @@ def compute_scenario_fingerprint(scenario) -> str:
 
     try:
         source = inspect.getsource(cls)
+        # Dedent to handle classes defined inside functions/methods
+        source = textwrap.dedent(source)
         tree = ast.parse(source)
         # ast.dump with no annotations gives a normalized representation
         normalized = ast.dump(tree, annotate_fields=False)
         return hashlib.sha256(normalized.encode()).hexdigest()[:16]
-    except (OSError, TypeError) as e:
+    except (OSError, TypeError, SyntaxError):
         # Fallback if source unavailable (e.g., dynamically generated)
         # Use class name + module as degraded fingerprint
         fallback = f"{cls.__module__}.{cls.__name__}"
