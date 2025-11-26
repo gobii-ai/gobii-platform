@@ -37,6 +37,7 @@ from ...models import (
     PersistentAgentToolCall,
     PersistentAgentCronTrigger,
     PersistentAgentSystemStep,
+    PersistentAgentCompletion,
 )
 
 import logging
@@ -44,6 +45,7 @@ from opentelemetry import trace
 
 from .llm_config import get_summarization_llm_config
 from .llm_utils import run_completion
+from .token_usage import extract_token_usage, log_agent_completion, set_usage_span_attributes
 
 __all__ = [
     "ensure_steps_compacted",
@@ -436,13 +438,26 @@ def llm_summarise_steps(
     ]
 
     try:
-        model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
+        provider, model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
 
         if model.startswith("openai"):
             if safety_identifier:
                 params["safety_identifier"] = str(safety_identifier)
 
         resp = run_completion(model=model, messages=prompt, params=params)
+        token_usage, usage = extract_token_usage(
+            resp,
+            model=model,
+            provider=provider,
+        )
+
+        set_usage_span_attributes(trace.get_current_span(), usage)
+        log_agent_completion(
+            agent,
+            token_usage,
+            completion_type=PersistentAgentCompletion.CompletionType.STEP_COMPACTION,
+        )
+
         return resp.choices[0].message.content.strip()
     except Exception:
         logger.exception("LiteLLM step summarisation failed – falling back to fallback summariser")

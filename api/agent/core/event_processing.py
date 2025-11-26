@@ -11,7 +11,6 @@ import json
 import logging
 from datetime import timedelta
 from decimal import Decimal
-from numbers import Number
 from typing import List, Tuple, Union, Optional, Dict, Any
 from uuid import UUID
 
@@ -39,6 +38,13 @@ from .budget import (
 )
 from .processing_flags import clear_processing_queued_flag
 from .llm_utils import run_completion
+from .token_usage import (
+    coerce_int as _coerce_int,
+    completion_kwargs_from_usage,
+    extract_token_usage,
+    set_usage_span_attributes,
+    usage_attribute as _usage_attribute,
+)
 from ..short_description import (
     maybe_schedule_mini_description,
     maybe_schedule_short_description,
@@ -99,138 +105,6 @@ from .gemini_cache import (
 )
 
 logger = logging.getLogger(__name__)
-
-_COST_PRECISION = Decimal("0.000001")
-
-def _quantize_cost(value: Decimal) -> Decimal:
-    return value.quantize(_COST_PRECISION)
-
-
-def _safe_decimal(value: Optional[float]) -> Optional[Decimal]:
-    if value is None:
-        return None
-    return Decimal(str(value))
-
-
-def _usage_attribute(usage: Any, attr: str, default: Optional[Any] = None) -> Any:
-    if usage is None:
-        return default
-    if isinstance(usage, dict):
-        return usage.get(attr, default)
-    return getattr(usage, attr, default)
-
-
-def _coerce_int(value: Any) -> int:
-    if value is None:
-        return 0
-    if isinstance(value, Number):
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 0
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 0
-    try:
-        return int(str(value))
-    except Exception:
-        return 0
-
-
-def _compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any]) -> dict:
-    if not token_usage:
-        return {}
-
-    model = token_usage.get("model")
-    provider = token_usage.get("provider")
-    if not model:
-        return {}
-
-    prompt_tokens = _coerce_int(token_usage.get("prompt_tokens"))
-    completion_tokens = _coerce_int(token_usage.get("completion_tokens"))
-    cached_tokens = _coerce_int(token_usage.get("cached_tokens"))
-
-    if raw_usage is not None and not cached_tokens:
-        details = _usage_attribute(raw_usage, "prompt_tokens_details")
-        if details:
-            if isinstance(details, dict):
-                cached_tokens = _coerce_int(details.get("cached_tokens"))
-            else:
-                cached_tokens = _coerce_int(_usage_attribute(details, "cached_tokens", 0))
-
-    cached_tokens = min(cached_tokens, prompt_tokens)
-    uncached_tokens = max(prompt_tokens - cached_tokens, 0)
-
-    model_variants = [model]
-    provider_from_model: Optional[str] = None
-    if "/" in model:
-        provider_from_model, stripped_model = model.split("/", 1)
-        model_variants.append(stripped_model)
-    provider_candidates: List[Optional[str]] = []
-    if provider_from_model:
-        provider_candidates.append(provider_from_model)
-    if provider and provider not in provider_candidates:
-        provider_candidates.append(provider)
-    provider_candidates.append(None)
-
-    model_info = None
-    for candidate_model in model_variants:
-        for candidate_provider in provider_candidates:
-            try:
-                model_info = litellm.get_model_info(
-                    model=candidate_model,
-                    custom_llm_provider=candidate_provider,
-                )
-            except Exception:
-                logger.debug(
-                    "Failed to get model info from litellm for model=%s provider=%s",
-                    candidate_model,
-                    candidate_provider,
-                    exc_info=True,
-                )
-                model_info = None
-                
-            if model_info:
-                break
-        if model_info:
-            break
-
-    if not model_info:
-        logger.debug(
-            "Unable to resolve LiteLLM pricing for model=%s provider_hint=%s",
-            model,
-            provider,
-        )
-        return {}
-
-    def _info_value(key: str) -> Optional[float]:
-        if isinstance(model_info, dict):
-            return model_info.get(key)
-        return getattr(model_info, key, None)
-
-    input_price = _safe_decimal(_info_value("input_cost_per_token"))
-    cache_read_price = _safe_decimal(_info_value("cache_read_input_token_cost")) or input_price
-    output_price = _safe_decimal(_info_value("output_cost_per_token"))
-
-    if input_price is None and output_price is None:
-        return {}
-
-    zero = Decimal("0")
-    uncached_cost = (input_price or zero) * Decimal(uncached_tokens)
-    cached_cost = (cache_read_price or zero) * Decimal(cached_tokens)
-    input_total = uncached_cost + cached_cost
-    output_cost = (output_price or zero) * Decimal(completion_tokens)
-    total_cost = input_total + output_cost
-
-    return {
-        "input_cost_total": _quantize_cost(input_total),
-        "input_cost_uncached": _quantize_cost(uncached_cost),
-        "input_cost_cached": _quantize_cost(cached_cost),
-        "output_cost": _quantize_cost(output_cost),
-        "total_cost": _quantize_cost(total_cost),
-    }
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
@@ -471,36 +345,12 @@ def _completion_with_failover(
                     agent_id or "unknown",
                 )
 
-                # Record usage if available and prepare token usage dict
-                token_usage: Optional[dict] = {
-                    "model": model,
-                    "provider": provider,
-                }
-                usage = response.model_extra.get("usage", None)
-                if usage:
-                    llm_span.set_attribute("llm.usage.prompt_tokens", usage.prompt_tokens)
-                    llm_span.set_attribute("llm.usage.completion_tokens", usage.completion_tokens)
-                    llm_span.set_attribute("llm.usage.total_tokens", usage.total_tokens)
-                    
-                    # Build token usage dict to return
-                    token_usage.update(
-                        {
-                            "prompt_tokens": usage.prompt_tokens,
-                            "completion_tokens": usage.completion_tokens,
-                            "total_tokens": usage.total_tokens,
-                        }
-                    )
-                    
-                    details = usage.prompt_tokens_details
-                    if details:
-                        cached_tokens = getattr(details, "cached_tokens", None) or 0
-                        llm_span.set_attribute("llm.usage.cached_tokens", cached_tokens)
-                        if cached_tokens:
-                            token_usage["cached_tokens"] = cached_tokens
-
-                    cost_fields = _compute_cost_breakdown(token_usage, usage)
-                    if cost_fields:
-                        token_usage.update(cost_fields)
+                token_usage, usage = extract_token_usage(
+                    response,
+                    model=model,
+                    provider=provider,
+                )
+                set_usage_span_attributes(llm_span, usage)
 
                 return response, token_usage
                 
@@ -564,7 +414,10 @@ def _get_recent_preferred_config(
 
     try:
         recent_completions = list(
-            PersistentAgentCompletion.objects.filter(agent=agent)
+            PersistentAgentCompletion.objects.filter(
+                agent=agent,
+                completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            )
             .only("created_at", "llm_model", "llm_provider")
             .order_by("-created_at")[:streak_sample_size]
         )
@@ -1623,21 +1476,10 @@ def _run_agent_loop(
 
             def _token_usage_fields(token_usage: Optional[dict]) -> dict:
                 """Return sanitized token usage values for step creation."""
-                if not token_usage:
-                    return {}
-                return {
-                    "prompt_tokens": token_usage.get("prompt_tokens"),
-                    "completion_tokens": token_usage.get("completion_tokens"),
-                    "total_tokens": token_usage.get("total_tokens"),
-                    "cached_tokens": token_usage.get("cached_tokens"),
-                    "llm_model": token_usage.get("model"),
-                    "llm_provider": token_usage.get("provider"),
-                    "input_cost_total": token_usage.get("input_cost_total"),
-                    "input_cost_uncached": token_usage.get("input_cost_uncached"),
-                    "input_cost_cached": token_usage.get("input_cost_cached"),
-                    "output_cost": token_usage.get("output_cost"),
-                    "total_cost": token_usage.get("total_cost"),
-                }
+                return completion_kwargs_from_usage(
+                    token_usage,
+                    completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+                )
             
             # Use the fitted token count from promptree for LLM selection
             # This fixes the bug where we were using joined message token count

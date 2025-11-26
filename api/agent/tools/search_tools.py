@@ -13,10 +13,11 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 import litellm  # re-exported for tests that patch LiteLLM directly
 from opentelemetry import trace
 
-from ...models import PersistentAgent
+from ...models import PersistentAgent, PersistentAgentCompletion
 from ...evals.execution import get_current_eval_routing_profile
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
+from ..core.token_usage import extract_token_usage, log_agent_completion, set_usage_span_attributes
 from .mcp_manager import get_mcp_manager
 from .tool_manager import (
     enable_tools,
@@ -215,6 +216,18 @@ def _search_with_llm(
                     params=params,
                     tools=[enable_tools_def],
                     **run_kwargs,
+                )
+
+                token_usage, usage = extract_token_usage(
+                    response,
+                    model=model,
+                    provider=provider,
+                )
+                set_usage_span_attributes(trace.get_current_span(), usage)
+                log_agent_completion(
+                    agent,
+                    token_usage,
+                    completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
                 )
 
                 message = response.choices[0].message

@@ -8,11 +8,12 @@ from celery import shared_task
 
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
+from api.agent.core.token_usage import extract_token_usage, log_agent_completion
 from api.agent.short_description import (
     compute_charter_hash,
     prepare_short_description,
 )
-from api.models import PersistentAgent
+from api.models import PersistentAgent, PersistentAgentCompletion
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def _clear_requested_hash(agent_id: str, expected_hash: str) -> None:
 
 def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any = None) -> str:
     try:
-        model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
+        provider, model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
     except Exception as exc:
         logger.warning("No summarization model available for short description: %s", exc)
         return ""
@@ -57,6 +58,17 @@ def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any
     except Exception as exc:
         logger.exception("LLM short description generation failed: %s", exc)
         return ""
+
+    token_usage, _ = extract_token_usage(
+        response,
+        model=model,
+        provider=provider,
+    )
+    log_agent_completion(
+        agent,
+        token_usage,
+        completion_type=PersistentAgentCompletion.CompletionType.SHORT_DESCRIPTION,
+    )
 
     try:
         return response.choices[0].message.content.strip()

@@ -11,8 +11,17 @@ from api.models import (
     PersistentAgentToolCall,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    EvalRun,
 )
+from api.agent.core.budget import BudgetContext, set_current_context
 from api.agent.core.event_processing import _completion_with_failover
+from api.agent.core.compaction import llm_summarise_comms
+from api.agent.core.token_usage import log_agent_completion
+from api.agent.tasks.agent_tags import _generate_via_llm as generate_tags_via_llm
+from api.agent.tasks.short_description import _generate_via_llm as generate_short_desc_via_llm
+from api.agent.tasks.mini_description import _generate_via_llm as generate_mini_desc_via_llm
+from api.agent.tools.search_tools import _search_with_llm
+from tests.utils.token_usage import make_completion_response
 
 User = get_user_model()
 
@@ -42,6 +51,18 @@ class TokenUsageTrackingTest(TestCase):
             name="Test Agent",
             charter="Test charter"
         )
+
+        self.eval_run = EvalRun.objects.create(
+            suite_run=None,
+            scenario_slug="scenario",
+            scenario_version="",
+            agent=self.agent,
+            initiated_by=self.user,
+        )
+
+    def tearDown(self):
+        set_current_context(None)
+        return super().tearDown()
     
     def test_completion_with_failover_returns_token_usage(self):
         """Test that _completion_with_failover returns token usage data."""
@@ -290,6 +311,165 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(totals["total_prompt_tokens"], 300)
         self.assertEqual(totals["total_completion_tokens"], 150)
         self.assertEqual(totals["total_all_tokens"], 450)
+
+    def test_completion_type_defaults_to_orchestrator(self):
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            llm_model="gpt-4",
+        )
+        self.assertEqual(
+            completion.completion_type,
+            PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+        )
+
+    @patch("api.agent.core.compaction.run_completion")
+    @patch("api.agent.core.compaction.get_summarization_llm_config")
+    def test_compaction_llm_completion_logged(self, mock_config, mock_run_completion):
+        mock_config.return_value = ("provider-key", "model-name", {})
+        mock_run_completion.return_value = make_completion_response()
+
+        summary = llm_summarise_comms("", [], agent=self.agent)
+
+        self.assertEqual(summary, "Result")
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.COMPACTION,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_provider, "provider-key")
+        self.assertEqual(completion.prompt_tokens, 10)
+
+    @patch("api.agent.tasks.agent_tags.run_completion")
+    @patch("api.agent.tasks.agent_tags.get_summarization_llm_config")
+    def test_tag_generation_completion_logged(self, mock_config, mock_run_completion):
+        mock_config.return_value = ("provider-key", "tag-model", {})
+        mock_run_completion.return_value = make_completion_response(
+            content='["Alpha","Beta"]',
+            prompt_tokens=8,
+            completion_tokens=2,
+            cached_tokens=1,
+        )
+
+        tags = generate_tags_via_llm(self.agent, self.agent.charter)
+
+        self.assertEqual(tags, ["Alpha", "Beta"])
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.TAG,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_model, "tag-model")
+        self.assertEqual(completion.total_tokens, 10)
+
+    @patch("api.agent.tasks.short_description.run_completion")
+    @patch("api.agent.tasks.short_description.get_summarization_llm_config")
+    def test_short_description_completion_logged(self, mock_config, mock_run_completion):
+        mock_config.return_value = ("provider-key", "short-model", {})
+        mock_run_completion.return_value = make_completion_response(
+            content="Short summary",
+            prompt_tokens=6,
+            completion_tokens=3,
+            cached_tokens=1,
+        )
+
+        result = generate_short_desc_via_llm(self.agent, self.agent.charter)
+
+        self.assertEqual(result, "Short summary")
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.SHORT_DESCRIPTION,
+        ).latest("created_at")
+        self.assertEqual(completion.total_tokens, 9)
+        self.assertEqual(completion.llm_provider, "provider-key")
+
+    @patch("api.agent.tasks.mini_description.run_completion")
+    @patch("api.agent.tasks.mini_description.get_summarization_llm_config")
+    def test_mini_description_completion_logged(self, mock_config, mock_run_completion):
+        mock_config.return_value = ("provider-key", "mini-model", {})
+        mock_run_completion.return_value = make_completion_response(
+            content="Mini label",
+            prompt_tokens=4,
+            completion_tokens=2,
+            cached_tokens=0,
+        )
+
+        result = generate_mini_desc_via_llm(self.agent, self.agent.charter)
+
+        self.assertEqual(result, "Mini label")
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.MINI_DESCRIPTION,
+        ).latest("created_at")
+        self.assertEqual(completion.prompt_tokens, 4)
+        self.assertEqual(completion.completion_tokens, 2)
+
+    def test_log_agent_completion_uses_eval_run_from_budget_context(self):
+        ctx = BudgetContext(
+            agent_id=str(self.agent.id),
+            budget_id="budget",
+            branch_id="branch",
+            depth=0,
+            max_steps=10,
+            max_depth=5,
+            eval_run_id=str(self.eval_run.id),
+        )
+        set_current_context(ctx)
+
+        token_usage = {"model": "test-model", "provider": "test-provider", "prompt_tokens": 3}
+        log_agent_completion(
+            self.agent,
+            token_usage,
+            completion_type=PersistentAgentCompletion.CompletionType.TAG,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.TAG,
+        ).latest("created_at")
+        self.assertEqual(str(completion.eval_run_id), str(self.eval_run.id))
+        self.assertEqual(completion.prompt_tokens, 3)
+
+    @patch("api.models.PersistentAgentCompletion.objects.create", side_effect=RuntimeError("db down"))
+    def test_log_agent_completion_warns_on_failure(self, mock_create):
+        with self.assertLogs("api.agent.core.token_usage", level="WARNING") as captured:
+            log_agent_completion(
+                self.agent,
+                {"model": "m", "provider": "p"},
+                completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+            )
+
+        self.assertTrue(any("Failed to persist completion" in msg for msg in captured.output))
+
+    @patch("api.agent.tools.search_tools.run_completion")
+    @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
+    def test_tool_search_completion_logged(self, mock_failover, mock_run_completion):
+        mock_failover.return_value = [("provider-key", "search-model", {})]
+        mock_run_completion.return_value = make_completion_response(
+            content="Enabled",
+            prompt_tokens=12,
+            completion_tokens=6,
+            cached_tokens=3,
+            tool_names=["http_request"],
+        )
+
+        def _enable(agent, names):
+            return {"status": "success", "enabled": names, "already_enabled": [], "evicted": [], "invalid": []}
+
+        catalog = [{"full_name": "http_request", "description": "HTTP calls", "parameters": {}}]
+        result = _search_with_llm(
+            agent=self.agent,
+            query="Use HTTP",
+            provider_name="test",
+            catalog=catalog,
+            enable_callback=_enable,
+            empty_message="",
+        )
+
+        self.assertEqual(result["status"], "success")
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_model, "search-model")
+        self.assertEqual(completion.total_tokens, 18)
 
 
 if __name__ == '__main__':

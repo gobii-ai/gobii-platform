@@ -10,9 +10,10 @@ from celery import shared_task
 
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
+from api.agent.core.token_usage import extract_token_usage, log_agent_completion
 from api.agent.short_description import compute_charter_hash
 from api.agent.tags import MAX_TAGS, normalize_tags, strip_code_fence
-from api.models import PersistentAgent
+from api.models import PersistentAgent, PersistentAgentCompletion
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ def _extract_tags(content: str) -> List[str]:
 
 def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any = None) -> List[str]:
     try:
-        model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
+        provider, model, params = get_summarization_llm_config(agent=agent, routing_profile=routing_profile)
     except Exception as exc:
         logger.warning("No summarization model available for tag generation: %s", exc)
         return []
@@ -109,6 +110,17 @@ def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any
     except Exception as exc:
         logger.exception("LLM tag generation failed: %s", exc)
         return []
+
+    token_usage, _ = extract_token_usage(
+        response,
+        model=model,
+        provider=provider,
+    )
+    log_agent_completion(
+        agent,
+        token_usage,
+        completion_type=PersistentAgentCompletion.CompletionType.TAG,
+    )
 
     try:
         content = response.choices[0].message.content
