@@ -1795,6 +1795,15 @@ def _run_agent_loop(
                         result = execute_secure_credentials_request(agent, tool_params)
                     elif tool_name == "enable_database":
                         result = execute_enable_database(agent, tool_params)
+                        before_count = len(tools)
+                        tools = get_agent_tools(agent)
+                        after_count = len(tools)
+                        logger.info(
+                            "Agent %s: refreshed tools after enable_database (before=%d after=%d)",
+                            agent.id,
+                            before_count,
+                            after_count,
+                        )
                     elif tool_name == "request_contact_permission":
                         result = execute_request_contact_permission(agent, tool_params)
                     elif tool_name == "search_tools":
