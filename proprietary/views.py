@@ -15,6 +15,7 @@ from proprietary.forms import SupportForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
 from util.subscription_helper import get_user_plan
 from constants.plans import PlanNames
+from config.plans import PLAN_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -134,11 +135,19 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             },
         ]
 
+        # Plan limits pulled from plan configuration to keep the table in sync
+        max_contacts_per_agent = [
+            str(PLAN_CONFIG.get(PlanNames.FREE, {}).get("max_contacts_per_agent", "—")),
+            str(PLAN_CONFIG.get(PlanNames.STARTUP, {}).get("max_contacts_per_agent", "—")),
+            str(PLAN_CONFIG.get(PlanNames.SCALE, {}).get("max_contacts_per_agent", "—")),
+        ]
+
         # Comparison table rows - updated for new tiers
         context["comparison_rows"] = [
             ["Tasks included per month", "100", "500", "10,000"],
             ["Cost per additional task", "—", "$0.10", "$0.04"],
             ["API rate limit (requests/min)", "60", "600", "1,500"],
+            ["Max contacts per agent", *max_contacts_per_agent],
             ["Priority task execution", "—", "✓", "✓"],
             ["Dedicated onboarding", "—", "—", "✓"],
             ["Batch scheduling & queueing", "—", "—", "✓"],
