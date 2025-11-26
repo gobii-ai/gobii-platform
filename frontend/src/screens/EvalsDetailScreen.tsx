@@ -314,74 +314,99 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
     }
   }, [suiteRunId])
 
+  // Browser history management for comparison view
+  useEffect(() => {
+    if (comparisonData) {
+      // Push state when entering comparison mode
+      window.history.pushState({ comparison: true }, '', window.location.href)
+    }
+  }, [comparisonData])
+
+  // Handle browser back button to close comparison
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      // If we're in comparison view and user hit back, close comparison
+      if (comparisonData && !event.state?.comparison) {
+        setComparisonData(null)
+        setCompareRunId(null)
+        setComparisonGroupBy(null)
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [comparisonData])
+
   return (
     <div className="app-shell">
-      <div className="card card--header">
-        <div className="card__body card__body--header flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 sm:py-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/90 rounded-xl shadow-sm text-blue-700">
-              <Beaker className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Eval Run Detail</h1>
-                {suite && <StatusBadge status={suite.status || 'pending'} />}
-                {suite && <RunTypeBadge runType={suite.run_type} />}
+      {!comparisonData && (
+        <div className="card card--header">
+          <div className="card__body card__body--header flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 sm:py-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-white/90 rounded-xl shadow-sm text-blue-700">
+                <Beaker className="w-6 h-6" />
               </div>
-              <p className="text-slate-600 mt-1.5 flex items-center gap-2">
-                Inspect individual scenario runs and task assertions.
-                <span className="text-slate-300">•</span>
-                <span className="font-mono text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{suiteRunId}</span>
-              </p>
+              <div>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Eval Run Detail</h1>
+                  {suite && <StatusBadge status={suite.status || 'pending'} />}
+                  {suite && <RunTypeBadge runType={suite.run_type} />}
+                </div>
+                <p className="text-slate-600 mt-1.5 flex items-center gap-2">
+                  Inspect individual scenario runs and task assertions.
+                  <span className="text-slate-300">•</span>
+                  <span className="font-mono text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{suiteRunId}</span>
+                </p>
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <a
-              href="/console/evals/"
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back
-            </a>
-            <button
-              type="button"
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
-              onClick={() => {
-                fetchSuiteRunDetail(suiteRunId)
-                  .then((res) => setSuite(res.suite_run))
-                  .catch((err) => {
-                    console.error(err)
-                    setError('Unable to refresh right now.')
-                  })
-              }}
-            >
-              <RefreshCcw className="w-4 h-4" />
-              Refresh
-            </button>
-            {suite && (
+            <div className="flex items-center gap-3">
+              <a
+                href="/console/evals/"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </a>
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg shadow-sm hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => toggleRunType(suite.run_type === 'official' ? 'one_off' : 'official')}
-                disabled={updatingRunType}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
+                onClick={() => {
+                  fetchSuiteRunDetail(suiteRunId)
+                    .then((res) => setSuite(res.suite_run))
+                    .catch((err) => {
+                      console.error(err)
+                      setError('Unable to refresh right now.')
+                    })
+                }}
               >
-                {updatingRunType ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {suite.run_type === 'official' ? 'Mark as One-off' : 'Mark as Official'}
+                <RefreshCcw className="w-4 h-4" />
+                Refresh
               </button>
-            )}
-            {firstCompletedRun && (
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg shadow-sm hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
-                onClick={() => openCompareModal(firstCompletedRun.id)}
-              >
-                <BarChart3 className="w-4 h-4" />
-                Compare
-              </button>
-            )}
+              {suite && (
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg shadow-sm hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => toggleRunType(suite.run_type === 'official' ? 'one_off' : 'official')}
+                  disabled={updatingRunType}
+                >
+                  {updatingRunType ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {suite.run_type === 'official' ? 'Mark as One-off' : 'Mark as Official'}
+                </button>
+              )}
+              {firstCompletedRun && (
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg shadow-sm hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
+                  onClick={() => openCompareModal(firstCompletedRun.id)}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Compare
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 shadow-sm">
@@ -399,7 +424,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
         </div>
       )}
 
-      {suite && (
+      {suite && !comparisonData && (
         <>
           <section className="card overflow-hidden" style={{ padding: 0 }}>
             <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4">
@@ -552,56 +577,50 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
         </>
       )}
 
-      {/* Comparison Loading Overlay */}
+      {/* Comparison Loading */}
       {comparisonLoading && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center">
-          <div className="bg-white rounded-2xl p-8 shadow-2xl flex flex-col items-center gap-4">
-            <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-            <p className="text-sm font-medium text-slate-700">Loading comparison data...</p>
-          </div>
+        <div className="card p-12 flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+          <p className="text-sm font-medium text-slate-700">Loading comparison data...</p>
         </div>
       )}
 
-      {/* Comparison Results - Full Screen Dedicated View */}
+      {/* Comparison Results - Rendered as page content */}
       {comparisonData && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-slate-50">
-          {/* Header Bar */}
-          <div className="bg-white border-b border-slate-200 shadow-sm">
-            <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <button
-                  type="button"
-                  onClick={closeComparison}
-                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  Back to Run
-                </button>
-                <div className="h-6 w-px bg-slate-200" />
+        <>
+          {/* Comparison Header Card */}
+          <div className="card card--header">
+            <div className="card__body card__body--header flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 sm:py-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/90 rounded-xl shadow-sm text-indigo-700">
+                  <BarChart3 className="w-6 h-6" />
+                </div>
                 <div>
-                  <h1 className="text-lg font-bold text-slate-900">Comparison Results</h1>
-                  <p className="text-xs text-slate-500">
+                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Comparison Results</h1>
+                  <p className="text-slate-600 mt-1">
                     {groupByLabel} · {comparisonData.tier} tier
+                    {comparisonData.target_fingerprint && (
+                      <span className="ml-2 font-mono text-xs text-slate-400">
+                        ({comparisonData.target_fingerprint})
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                {comparisonData.target_fingerprint && (
-                  <span className="text-xs font-mono text-slate-400 bg-slate-100 px-2 py-1 rounded">
-                    {comparisonData.target_fingerprint}
-                  </span>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={closeComparison}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back to Run
+              </button>
             </div>
           </div>
 
-          {/* Content Area */}
-          <div className="flex-1 overflow-y-auto">
-            <div className="max-w-7xl mx-auto px-6 py-6">
-              <CompareResultsView data={comparisonData} />
-            </div>
-          </div>
-        </div>
+          {/* Comparison Content */}
+          <CompareResultsView data={comparisonData} />
+        </>
       )}
 
       {/* Compare Modal */}
