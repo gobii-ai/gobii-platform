@@ -2187,102 +2187,86 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             )
 
         raw_lines = request.POST.get("agent_lines", "")
-        remaining_lines: list[str] = []
-        success_count = 0
 
-        for raw_line in raw_lines.splitlines():
-            original_line = raw_line.rstrip("\n")
+        # Pass 1: Parse and validate lines to separate valid and invalid entries.
+        parsed_updates = {}  # agent_id -> {schedule: str, original_line: str}
+        error_lines_with_messages = []  # {original_line: str, message: str}
+
+        for original_line in raw_lines.splitlines():
             line = original_line.strip()
             if not line:
                 continue
 
-            agent_part = None
-            schedule_part = None
-
-            if "," in line:
-                agent_part, schedule_part = [part.strip() for part in line.split(",", 1)]
-            else:
+            parts = line.split(",", 1)
+            if len(parts) < 2:
                 parts = line.split(None, 1)
-                if len(parts) == 2:
-                    agent_part, schedule_part = parts[0].strip(), parts[1].strip()
+
+            if len(parts) == 2:
+                agent_part, schedule_part = parts[0].strip(), parts[1].strip()
+            else:
+                agent_part, schedule_part = None, None
 
             if not agent_part or not schedule_part:
-                remaining_lines.append(original_line)
-                self.message_user(
-                    request,
-                    f"Could not parse line '{original_line}'. Use 'agent_id,cron' on each line.",
-                    level=messages.ERROR,
-                )
+                error_lines_with_messages.append({"original_line": original_line,
+                                                  "message": f"Could not parse line '{original_line}'. Use 'agent_id,cron' on each line."})
                 continue
 
             try:
                 agent_id = str(uuid.UUID(agent_part))
             except ValueError:
-                remaining_lines.append(original_line)
-                self.message_user(
-                    request,
-                    f"Invalid agent UUID: {agent_part}",
-                    level=messages.ERROR,
-                )
+                error_lines_with_messages.append(
+                    {"original_line": original_line, "message": f"Invalid agent UUID: {agent_part}"})
                 continue
 
             try:
                 ScheduleParser.parse(schedule_part)
             except ValueError as exc:
-                remaining_lines.append(original_line)
-                self.message_user(
-                    request,
-                    f"Invalid schedule for {agent_id}: {exc}",
-                    level=messages.ERROR,
-                )
+                error_lines_with_messages.append(
+                    {"original_line": original_line, "message": f"Invalid schedule for {agent_part}: {exc}"})
                 continue
 
-            agent = PersistentAgent.objects.filter(id=agent_id).first()
-            if not agent:
-                remaining_lines.append(original_line)
-                self.message_user(
-                    request,
-                    f"Persistent agent not found: {agent_id}",
-                    level=messages.ERROR,
-                )
-                continue
+            parsed_updates[agent_id] = {"schedule": schedule_part, "original_line": original_line}
 
-            previous_schedule = agent.schedule
-            try:
-                agent.schedule = schedule_part
-                agent.save(update_fields=["schedule", "updated_at"])
-                success_count += 1
-            except ValidationError as exc:
-                agent.schedule = previous_schedule
-                error_list = exc.message_dict.get("schedule", [str(exc)]) if hasattr(exc, "message_dict") else [str(exc)]
-                remaining_lines.append(original_line)
-                self.message_user(
-                    request,
-                    f"Schedule rejected for {agent_id}: {error_list[0]}",
-                    level=messages.ERROR,
-                )
-            except Exception as exc:  # pragma: no cover - defensive path
-                agent.schedule = previous_schedule
-                remaining_lines.append(original_line)
-                self.message_user(
-                    request,
-                    f"Failed to reschedule {agent_id}: {exc}",
-                    level=messages.ERROR,
-                )
+        # Pass 2: Fetch agents in bulk and perform updates.
+        success_count = 0
+        if parsed_updates:
+            agent_ids_to_fetch = list(parsed_updates.keys())
+            agents_map = {str(a.id): a for a in PersistentAgent.objects.filter(id__in=agent_ids_to_fetch)}
 
+            for agent_id, data in parsed_updates.items():
+                agent = agents_map.get(agent_id)
+                if not agent:
+                    error_lines_with_messages.append(
+                        {"original_line": data["original_line"], "message": f"Persistent agent not found: {agent_id}"})
+                    continue
+
+                previous_schedule = agent.schedule
+                try:
+                    agent.schedule = data["schedule"]
+                    agent.save(update_fields=["schedule", "updated_at"])
+                    success_count += 1
+                except ValidationError as exc:
+                    agent.schedule = previous_schedule
+                    error_list = exc.message_dict.get("schedule", [str(exc)]) if hasattr(exc, "message_dict") else [
+                        str(exc)]
+                    error_lines_with_messages.append({"original_line": data["original_line"],
+                                                      "message": f"Schedule rejected for {agent_id}: {error_list[0]}"})
+                except Exception as exc:  # pragma: no cover - defensive path
+                    agent.schedule = previous_schedule
+                    error_lines_with_messages.append(
+                        {"original_line": data["original_line"], "message": f"Failed to reschedule {agent_id}: {exc}"})
+
+        # Report successes and failures.
         if success_count:
             plural = "s" if success_count != 1 else ""
-            self.message_user(
-                request,
-                f"Updated schedule for {success_count} agent{plural}.",
-                level=messages.SUCCESS,
-            )
+            self.message_user(request, f"Updated schedule for {success_count} agent{plural}.", level=messages.SUCCESS)
 
-        if remaining_lines:
-            context = {
-                **base_context,
-                "agent_lines": "\n".join(remaining_lines),
-            }
+        if error_lines_with_messages:
+            for error in error_lines_with_messages:
+                self.message_user(request, error["message"], level=messages.ERROR)
+
+            remaining_lines_text = "\n".join([e["original_line"] for e in error_lines_with_messages])
+            context = {**base_context, "agent_lines": remaining_lines_text}
             return TemplateResponse(
                 request,
                 "admin/persistentagent_reschedule.html",
