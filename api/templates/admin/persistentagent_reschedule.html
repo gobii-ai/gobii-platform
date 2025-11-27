@@ -1,0 +1,30 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' 'api' %}">API</a>
+    &rsaquo; <a href="{% url 'admin:api_persistentagent_changelist' %}">{% trans 'Persistent Agents' %}</a>
+    &rsaquo; Bulk Reschedule
+  </div>
+{% endblock %}
+
+{% block content %}
+  <h1>Bulk Reschedule Persistent Agents</h1>
+  <p>Paste one line per agent in the form <code>agent_id,@every 3h</code> or <code>agent_id */15 * * * *</code>. Cron strings are validated before saving and syncing to Celery.</p>
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      <div class="form-row">
+        <label for="id_agent_lines"><strong>Agent ID &amp; schedule</strong></label>
+        <textarea name="agent_lines" id="id_agent_lines" rows="10" cols="80" placeholder="agent-uuid,@every 3h&#10;agent-uuid */30 * * * *">{{ agent_lines|default_if_none:'' }}</textarea>
+      </div>
+    </fieldset>
+    <p class="help">Successful rows are removed after submission. Any invalid IDs or cron strings stay in the box so you can fix them.</p>
+    <div class="submit-row">
+      <a class="button" href="{% url 'admin:api_persistentagent_changelist' %}">Cancel</a>
+      <button type="submit" class="button default">Reschedule Agents</button>
+    </div>
+  </form>
+{% endblock %}
