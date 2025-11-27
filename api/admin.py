@@ -14,6 +14,7 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
 from api.services.proactive_activation import ProactiveActivationService
 from api.agent.core.llm_config import AgentLLMTier
+from api.agent.core.schedule_parser import ScheduleParser
 from .admin_forms import (
     TestSmsForm,
     GrantPlanCreditsForm,
@@ -1934,6 +1935,11 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.trigger_processing_view),
                 name='api_persistentagent_trigger_processing',
             ),
+            path(
+                'reschedule/',
+                self.admin_site.admin_view(self.reschedule_view),
+                name='api_persistentagent_reschedule',
+            ),
         ]
         return custom_urls + urls
 
@@ -2160,6 +2166,111 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 request,
                 "Failed to queue ID(s): " + ", ".join(failures),
                 level=messages.ERROR,
+            )
+
+        return HttpResponseRedirect(changelist_url)
+
+    def reschedule_view(self, request):
+        """Bulk reschedule persistent agents by ID and cron string."""
+        changelist_url = reverse('admin:api_persistentagent_changelist')
+        base_context = {
+            **self.admin_site.each_context(request),
+            "title": "Bulk Reschedule Persistent Agents",
+            "agent_lines": "",
+        }
+
+        if request.method != "POST":
+            return TemplateResponse(
+                request,
+                "admin/persistentagent_reschedule.html",
+                base_context,
+            )
+
+        raw_lines = request.POST.get("agent_lines", "")
+
+        # Pass 1: Parse and validate lines to separate valid and invalid entries.
+        parsed_updates = {}  # agent_id -> {schedule: str, original_line: str}
+        error_lines_with_messages = []  # {original_line: str, message: str}
+
+        for original_line in raw_lines.splitlines():
+            line = original_line.strip()
+            if not line:
+                continue
+
+            parts = line.split(",", 1)
+            if len(parts) < 2:
+                parts = line.split(None, 1)
+
+            if len(parts) == 2:
+                agent_part, schedule_part = parts[0].strip(), parts[1].strip()
+            else:
+                agent_part, schedule_part = None, None
+
+            if not agent_part or not schedule_part:
+                error_lines_with_messages.append({"original_line": original_line,
+                                                  "message": f"Could not parse line '{original_line}'. Use 'agent_id,cron' on each line."})
+                continue
+
+            try:
+                agent_id = str(uuid.UUID(agent_part))
+            except ValueError:
+                error_lines_with_messages.append(
+                    {"original_line": original_line, "message": f"Invalid agent UUID: {agent_part}"})
+                continue
+
+            try:
+                ScheduleParser.parse(schedule_part)
+            except ValueError as exc:
+                error_lines_with_messages.append(
+                    {"original_line": original_line, "message": f"Invalid schedule for {agent_part}: {exc}"})
+                continue
+
+            parsed_updates[agent_id] = {"schedule": schedule_part, "original_line": original_line}
+
+        # Pass 2: Fetch agents in bulk and perform updates.
+        success_count = 0
+        if parsed_updates:
+            agent_ids_to_fetch = list(parsed_updates.keys())
+            agents_map = {str(a.id): a for a in PersistentAgent.objects.filter(id__in=agent_ids_to_fetch)}
+
+            for agent_id, data in parsed_updates.items():
+                agent = agents_map.get(agent_id)
+                if not agent:
+                    error_lines_with_messages.append(
+                        {"original_line": data["original_line"], "message": f"Persistent agent not found: {agent_id}"})
+                    continue
+
+                previous_schedule = agent.schedule
+                try:
+                    agent.schedule = data["schedule"]
+                    agent.save(update_fields=["schedule", "updated_at"])
+                    success_count += 1
+                except ValidationError as exc:
+                    agent.schedule = previous_schedule
+                    error_list = exc.message_dict.get("schedule", [str(exc)]) if hasattr(exc, "message_dict") else [
+                        str(exc)]
+                    error_lines_with_messages.append({"original_line": data["original_line"],
+                                                      "message": f"Schedule rejected for {agent_id}: {error_list[0]}"})
+                except Exception as exc:  # pragma: no cover - defensive path
+                    agent.schedule = previous_schedule
+                    error_lines_with_messages.append(
+                        {"original_line": data["original_line"], "message": f"Failed to reschedule {agent_id}: {exc}"})
+
+        # Report successes and failures.
+        if success_count:
+            plural = "s" if success_count != 1 else ""
+            self.message_user(request, f"Updated schedule for {success_count} agent{plural}.", level=messages.SUCCESS)
+
+        if error_lines_with_messages:
+            for error in error_lines_with_messages:
+                self.message_user(request, error["message"], level=messages.ERROR)
+
+            remaining_lines_text = "\n".join([e["original_line"] for e in error_lines_with_messages])
+            context = {**base_context, "agent_lines": remaining_lines_text}
+            return TemplateResponse(
+                request,
+                "admin/persistentagent_reschedule.html",
+                context,
             )
 
         return HttpResponseRedirect(changelist_url)

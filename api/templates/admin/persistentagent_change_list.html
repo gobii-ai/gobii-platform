@@ -5,6 +5,9 @@
       <li>
           <a href="{% url 'admin:api_persistentagent_trigger_processing' %}" class="button">Trigger Event Processing</a>
       </li>
+      <li>
+          <a href="{% url 'admin:api_persistentagent_reschedule' %}" class="button">Bulk Reschedule Agents</a>
+      </li>
       {{ block.super }}
   </ul>
 {% endblock %}
