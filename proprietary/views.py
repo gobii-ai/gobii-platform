@@ -15,6 +15,7 @@ from proprietary.forms import SupportForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
 from util.subscription_helper import get_user_plan
 from constants.plans import PlanNames
+from config.plans import PLAN_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 logger.exception("Error checking user plan; defaulting to standard Startup CTA")
                 pass
 
+        def format_contacts(plan_name: str) -> str:
+            """Return display-friendly per-plan contact cap."""
+            limit = PLAN_CONFIG.get(plan_name, {}).get("max_contacts_per_agent")
+            return f"{limit} contacts/agent" if limit is not None else "Contacts/agent: —"
+
         # Pricing cards data - new 3-tier structure
         context["pricing_plans"] = [
             {
@@ -79,6 +85,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "badge": None,
                 "disabled": False,
                 "features": [
+                    format_contacts(PlanNames.FREE),
                     "5 always-on agents",
                     "30 day time limit for always-on agents",
                     "Basic API access",
@@ -101,6 +108,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "cta_disabled": startup_cta_disabled,
                 "current_plan": startup_current,
                 "features": [
+                    format_contacts(PlanNames.STARTUP),
                     "Unlimited always-on agents",
                     "No time limit for always-on agents",
                     "$0.10 per task beyond 500",
@@ -122,6 +130,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "cta_disabled": scale_cta_disabled,
                 "current_plan": scale_current,
                 "features": [
+                    format_contacts(PlanNames.SCALE),
                     "Unlimited always-on agents",
                     "Dedicated onboarding specialist",
                     "$0.04 per task beyond 10,000",
@@ -134,11 +143,19 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             },
         ]
 
+        # Plan limits pulled from plan configuration to keep the table in sync
+        max_contacts_per_agent = [
+            str(PLAN_CONFIG.get(PlanNames.FREE, {}).get("max_contacts_per_agent", "—")),
+            str(PLAN_CONFIG.get(PlanNames.STARTUP, {}).get("max_contacts_per_agent", "—")),
+            str(PLAN_CONFIG.get(PlanNames.SCALE, {}).get("max_contacts_per_agent", "—")),
+        ]
+
         # Comparison table rows - updated for new tiers
         context["comparison_rows"] = [
             ["Tasks included per month", "100", "500", "10,000"],
             ["Cost per additional task", "—", "$0.10", "$0.04"],
             ["API rate limit (requests/min)", "60", "600", "1,500"],
+            ["Max contacts per agent", *max_contacts_per_agent],
             ["Priority task execution", "—", "✓", "✓"],
             ["Dedicated onboarding", "—", "—", "✓"],
             ["Batch scheduling & queueing", "—", "—", "✓"],
