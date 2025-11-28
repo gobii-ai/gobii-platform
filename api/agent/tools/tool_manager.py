@@ -19,11 +19,46 @@ from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
+from config.plans import PLAN_CONFIG
+from constants.plans import PlanNames
+from util.subscription_helper import get_owner_plan
 
 logger = logging.getLogger(__name__)
 
 SQLITE_TOOL_NAME = "sqlite_batch"
 HTTP_REQUEST_TOOL_NAME = "http_request"
+
+
+def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
+    """
+    Check if the sqlite tool should be available for this agent.
+
+    SQLite is only available for paid accounts with max intelligence.
+    Free accounts never have access, regardless of premium grace period.
+    """
+    if agent is None:
+        return False
+
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    if owner is None:
+        return False
+
+    try:
+        plan = get_owner_plan(owner)
+    except Exception:
+        logger.exception("Failed to get owner plan for agent %s", agent.id)
+        return False
+
+    is_free = plan.get("id") == PlanNames.FREE
+
+    if is_free:
+        # Free accounts: never allowed
+        return False
+
+    # Paid accounts: only allowed on max intelligence
+    preferred_tier = getattr(agent, "preferred_llm_tier", None)
+    return preferred_tier == AgentLLMTier.MAX.value
+
 
 BUILTIN_TOOL_REGISTRY = {
     SQLITE_TOOL_NAME: {
@@ -375,7 +410,14 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         if isinstance(entry, dict)
     }
 
+    # Check sqlite eligibility once for filtering
+    sqlite_eligible = is_sqlite_enabled_for_agent(agent)
+
     for row in enabled_builtin_rows:
+        # Skip sqlite_batch if agent is not eligible (even if previously enabled)
+        if row.tool_full_name == SQLITE_TOOL_NAME and not sqlite_eligible:
+            continue
+
         registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
         if not registry_entry:
             continue
@@ -407,6 +449,13 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
     entry = resolve_tool_entry(agent, tool_name)
     if not entry:
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}
+
+    # Block sqlite execution for ineligible agents (even if previously enabled)
+    if tool_name == SQLITE_TOOL_NAME and not is_sqlite_enabled_for_agent(agent):
+        return {
+            "status": "error",
+            "message": "Database tool is not available on your current plan. Upgrade to a paid plan with max intelligence to access this feature.",
+        }
 
     if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
         return {"status": "error", "message": f"Tool '{tool_name}' is not enabled for this agent"}

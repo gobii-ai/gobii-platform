@@ -45,6 +45,7 @@ from ..tools.sqlite_state import get_sqlite_schema_prompt
 from ..tools.tool_manager import (
     ensure_default_tools_enabled,
     get_enabled_tool_definitions,
+    is_sqlite_enabled_for_agent,
     SQLITE_TOOL_NAME,
 )
 from ..tools.web_chat_sender import get_send_chat_tool
@@ -601,13 +602,17 @@ def build_prompt_context(
     # Browser tasks - each task gets its own section for better token management
     _build_browser_tasks_sections(agent, variable_group)
     
-    # SQLite schema - include only when sqlite_batch is enabled to save tokens
-    sqlite_enabled = PersistentAgentEnabledTool.objects.filter(
+    # SQLite schema - include only when agent is eligible AND sqlite_batch is enabled
+    sqlite_eligible = is_sqlite_enabled_for_agent(agent)
+    sqlite_db_enabled = PersistentAgentEnabledTool.objects.filter(
         agent=agent,
         tool_full_name=SQLITE_TOOL_NAME,
     ).exists()
+    # Only show sqlite context if agent is eligible (paid + max intelligence)
+    sqlite_active = sqlite_eligible and sqlite_db_enabled
+
     sqlite_schema_block = ""
-    if sqlite_enabled:
+    if sqlite_active:
         sqlite_schema_block = get_sqlite_schema_prompt()
         variable_group.section_text(
             "sqlite_schema",
@@ -625,28 +630,30 @@ def build_prompt_context(
         shrinker="hmt"
     )
 
-    # Contextual note based on whether a schema already exists
-    if sqlite_enabled and any(line.startswith("Table ") for line in sqlite_schema_block.splitlines()):
-        sqlite_note = (
-            "This is your current SQLite schema. Use sqlite_batch whenever you need durable structured memory, complex analysis, or set-based queries. "
-            "You can execute DDL or other SQL statements at any time to modify and evolve the schema so it best supports your ongoing task or charter."
+    # Contextual note - only show sqlite notes if agent is eligible
+    if sqlite_eligible:
+        if sqlite_active and any(line.startswith("Table ") for line in sqlite_schema_block.splitlines()):
+            sqlite_note = (
+                "This is your current SQLite schema. Use sqlite_batch whenever you need durable structured memory, complex analysis, or set-based queries. "
+                "You can execute DDL or other SQL statements at any time to modify and evolve the schema so it best supports your ongoing task or charter."
+            )
+        elif sqlite_active:
+            sqlite_note = (
+                "SQLite is enabled but no user tables exist yet. Use sqlite_batch to create whatever schema best supports your current task or charter."
+            )
+        else:
+            sqlite_note = (
+                "Call enable_database to enable sqlite_batch ONLY if you need durable structured memory, complex analysis, or set-based queries. "
+                "Reason inline for quick math, short lists, or one-off comparisons. "
+                "Once enabled, you can create and evolve a SQLite schema to support your objectives."
+            )
+        variable_group.section_text(
+            "sqlite_note",
+            sqlite_note,
+            weight=1,
+            non_shrinkable=True
         )
-    elif sqlite_enabled:
-        sqlite_note = (
-            "SQLite is enabled but no user tables exist yet. Use sqlite_batch to create whatever schema best supports your current task or charter."
-        )
-    else:
-        sqlite_note = (
-            "Call enable_database to enable sqlite_batch ONLY if you need durable structured memory, complex analysis, or set-based queries. "
-            "Reason inline for quick math, short lists, or one-off comparisons. "
-            "Once enabled, you can create and evolve a SQLite schema to support your objectives."
-        )
-    variable_group.section_text(
-        "sqlite_note",
-        sqlite_note,
-        weight=1,
-        non_shrinkable=True
-    )
+    # For ineligible agents, no sqlite_note is added - they don't have access to the feature
     
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
@@ -1895,9 +1902,14 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
 
     include_enable_db_tool = True
     if agent:
-        include_enable_db_tool = not PersistentAgentEnabledTool.objects.filter(
+        # Only show enable_database if:
+        # 1. Agent is eligible for sqlite (paid + max intelligence)
+        # 2. sqlite_batch is not already enabled
+        sqlite_eligible = is_sqlite_enabled_for_agent(agent)
+        already_enabled = PersistentAgentEnabledTool.objects.filter(
             agent=agent, tool_full_name=SQLITE_TOOL_NAME
         ).exists()
+        include_enable_db_tool = sqlite_eligible and not already_enabled
 
     if include_enable_db_tool:
         static_tools.append(get_enable_database_tool())

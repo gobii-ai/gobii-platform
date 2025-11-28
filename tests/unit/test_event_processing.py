@@ -43,6 +43,7 @@ from api.models import (
     PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
     PromptConfig,
+    UserBilling,
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
@@ -374,6 +375,13 @@ class PromptContextBuilderTests(TestCase):
 
     def test_agent_loop_filters_enable_database_from_tools(self):
         """LLM tool payload should hide enable_database once sqlite_batch is enabled."""
+        # Set up paid account with max intelligence (required for sqlite access)
+        billing, _ = UserBilling.objects.get_or_create(user=self.user)
+        billing.subscription = PlanNamesChoices.STARTUP
+        billing.save(update_fields=["subscription"])
+        self.agent.preferred_llm_tier = AgentLLMTier.MAX.value
+        self.agent.save(update_fields=["preferred_llm_tier"])
+
         enable_tools(self.agent, ["sqlite_batch"])
 
         response_message = MagicMock()

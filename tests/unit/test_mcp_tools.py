@@ -21,7 +21,10 @@ from api.models import (
     MCPServerOAuthCredential,
     PersistentAgentMCPServer,
     PromptConfig,
+    UserBilling,
 )
+from api.agent.core.llm_config import AgentLLMTier
+from constants.plans import PlanNames
 from api.agent.tools.mcp_manager import (
     MCPToolManager,
     MCPToolInfo,
@@ -1103,6 +1106,13 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_get_enabled_tool_definitions_includes_sqlite(self, mock_init, mock_get_tools):
         """Enabled tool definitions include sqlite_batch when enabled."""
+        # Set up paid account with max intelligence (required for sqlite access)
+        billing, _ = UserBilling.objects.get_or_create(user=self.user)
+        billing.subscription = PlanNames.STARTUP
+        billing.save(update_fields=["subscription"])
+        self.agent.preferred_llm_tier = AgentLLMTier.MAX.value
+        self.agent.save(update_fields=["preferred_llm_tier"])
+
         enable_tools(self.agent, ["sqlite_batch"])
         definitions = get_enabled_tool_definitions(self.agent)
         names = {
@@ -1342,6 +1352,13 @@ class MCPToolIntegrationTests(TestCase):
     def test_builtin_execution_updates_usage(self, mock_init, mock_get_tools):
         """Executing a builtin tool should record usage to avoid premature eviction."""
         from api.agent.tools import tool_manager as tm
+
+        # Set up paid account with max intelligence (required for sqlite access)
+        billing, _ = UserBilling.objects.get_or_create(user=self.user)
+        billing.subscription = PlanNames.STARTUP
+        billing.save(update_fields=["subscription"])
+        self.agent.preferred_llm_tier = AgentLLMTier.MAX.value
+        self.agent.save(update_fields=["preferred_llm_tier"])
 
         mock_sqlite = MagicMock(return_value={"status": "ok"})
         original_executor = tm.BUILTIN_TOOL_REGISTRY["sqlite_batch"]["executor"]
