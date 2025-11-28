@@ -2,7 +2,7 @@
 
 import uuid
 from unittest.mock import patch, MagicMock
-from django.test import TestCase, override_settings
+from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
 
 from api.models import (
@@ -33,6 +33,7 @@ def create_test_browser_agent(user):
         return BrowserUseAgent.objects.create(user=user, name="test-browser-agent")
 
 
+@tag("batch_mcp_tools")
 class TestFindMatchingTools(TestCase):
     """Tests for the find_matching_tools function."""
 
@@ -229,6 +230,7 @@ class TestFindMatchingTools(TestCase):
         self.assertEqual(result, set())
 
 
+@tag("batch_mcp_tools")
 class TestAutoEnableHeuristicTools(TestCase):
     """Tests for the auto_enable_heuristic_tools function."""
 
@@ -481,6 +483,7 @@ class TestAutoEnableHeuristicTools(TestCase):
         self.assertEqual(len(result), 1)
 
 
+@tag("batch_mcp_tools")
 class TestHeuristicsRegistryCompleteness(TestCase):
     """Tests to ensure the heuristics registry is well-formed."""
 
