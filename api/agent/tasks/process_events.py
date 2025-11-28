@@ -12,12 +12,36 @@ from typing import Any, Dict, Optional, Sequence
 from celery import Task, shared_task
 from opentelemetry import baggage, trace
 from django.db import transaction
+from django.core.exceptions import ValidationError
 
 from ..core.event_processing import process_agent_events
 from ..core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
+
+
+def _is_task_quota_error(exc: ValidationError) -> bool:
+    messages: list[str] = []
+
+    try:
+        if isinstance(getattr(exc, "message_dict", None), dict):
+            for value in exc.message_dict.values():
+                if isinstance(value, (list, tuple)):
+                    messages.extend(str(item) for item in value)
+                else:
+                    messages.append(str(value))
+    except Exception:
+        # Swallow parsing issues; we'll fall back to generic matching
+        pass
+
+    try:
+        messages.extend(str(m) for m in getattr(exc, "messages", []))
+    except Exception:
+        pass
+
+    combined = " ".join(messages).lower()
+    return "task quota exceeded" in combined or "task credits" in combined
 
 
 def _extract_agent_id(args: Sequence[Any] | None, kwargs: dict[str, Any] | None) -> str | None:
@@ -167,6 +191,16 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
         # Now delegate to the standard event processing pipeline (top-level)
         process_agent_events(persistent_agent_id)
         
+    except ValidationError as exc:
+        if _is_task_quota_error(exc):
+            logger.info(
+                "Skipping cron trigger for agent %s due to task quota: %s",
+                persistent_agent_id,
+                exc,
+            )
+            return
+        raise
+
     except PersistentAgent.DoesNotExist:
         logger.warning(
             "PersistentAgent %s does not exist - removing orphaned Celery beat task", 
