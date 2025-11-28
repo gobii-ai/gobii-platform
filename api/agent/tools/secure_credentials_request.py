@@ -25,7 +25,8 @@ def get_secure_credentials_request_tool() -> dict:
                 "or `spawn_web_task` (classic username/password website login). Do NOT use this tool for MCP tools (e.g., Google Sheets, Slack); "
                 "for MCP tools, call the tool first—if it returns 'action_required' with a connect/auth link, surface that link to the user and wait. "
                 "You typically will want the domain to be broad enough to support multiple login domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. "
-                "IT WILL RETURN A URL; YOU MUST CONTACT THE USER WITH THAT URL SO THEY KNOW THE REQUEST HAS BEEN CREATED AND THEY CAN FILL IN THE SECRETS/CREDENTIALS."
+                "IT WILL RETURN A URL; YOU MUST CONTACT THE USER WITH THAT URL SO THEY KNOW THE REQUEST HAS BEEN CREATED AND THEY CAN FILL IN THE SECRETS/CREDENTIALS. "
+                "IF YOU ARE RE-REQUESTING CREDENTIALS DUE TO AN ERROR, MAKE SURE YOU USE THE RE-REQUEST URL PROVIDED IN THE RETURNED STRING"
             ),
             "parameters": {
                 "type": "object",
@@ -68,6 +69,7 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
     
     created_credentials = []
     errors = []
+    rerequested_credentials = False
     
     logger.info(
         "Agent %s requesting %d credentials",
@@ -101,14 +103,11 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
                         key, domain_pattern, agent.id
                     )
                 else:
-                    # Exists but not requested - convert to a new request (refresh)
                     logger.info(
                         "Re-requesting existing credential %s for domain %s for agent %s",
                         key, domain_pattern, agent.id
                     )
-                    existing.requested = True
-                    existing.encrypted_value = b''
-                    existing.save(update_fields=["requested", "encrypted_value", "updated_at"])
+                    rerequested_credentials = True
 
                 # Treat as created for user feedback
                 created_credentials.append({
@@ -153,9 +152,13 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
         protocol = 'https://'
         relative_url = reverse('agent_secrets_request', kwargs={'pk': agent.id})
         credentials_url = f"{protocol}{current_site.domain}{relative_url}"
+
+        relative_secret_url = reverse('agent_secret', kwargs={'pk': agent.id})
+        secrets_url = f"{protocol}{current_site.domain}{relative_secret_url}"
     except Exception as e:
         logger.warning("Failed to generate credentials URL for agent %s: %s", agent.id, str(e))
         credentials_url = "the agent console"
+        secrets_url = ""
     
     # Build response message
     if created_credentials and not errors:
@@ -164,6 +167,10 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
             f"Successfully created {len(created_credentials)} credential request(s): {credential_list}. "
             f"You must now send a message to the user asking them to securely enter the requested credentials at {credentials_url}"
         )
+
+        if rerequested_credentials:
+            message += f" For re-request of existing credentials, they should be updated here: {secrets_url}."
+
         return {"status": "ok", "message": message, "created_count": len(created_credentials)}
     
     elif created_credentials and errors:
@@ -174,6 +181,10 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
             f"You must now send a message to the user asking them to securely enter the requested credentials at {credentials_url}. "
             f"Errors: {error_list}"
         )
+
+        if rerequested_credentials:
+            message += f" For re-request of existing credentials, they should be updated here: {secrets_url}."
+
         return {"status": "partial", "message": message, "created_count": len(created_credentials), "errors": errors}
     
     else:
