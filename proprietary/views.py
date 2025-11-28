@@ -97,8 +97,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             },
             {
                 "name": "Pro",
-                "price": 35,
-                "price_label": "$35",
+                "price": 40,
+                "price_label": "$40",
                 "desc": "For growing teams",
                 "tasks": "500",
                 "pricing_model": "Billed monthly",
