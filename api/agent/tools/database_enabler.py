@@ -9,7 +9,7 @@ import logging
 from typing import Any, Dict
 
 from ...models import PersistentAgent
-from .tool_manager import enable_tools, SQLITE_TOOL_NAME
+from .tool_manager import enable_tools, is_sqlite_enabled_for_agent, SQLITE_TOOL_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 def execute_enable_database(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Enable the sqlite_batch tool for the agent."""
     logger.info("Agent %s requested enable_database", agent.id)
+
+    # Check eligibility before enabling
+    if not is_sqlite_enabled_for_agent(agent):
+        return {
+            "status": "error",
+            "message": "Database tool is not available on your current plan. Upgrade to a paid plan with max intelligence to access this feature.",
+        }
+
     try:
         result = enable_tools(agent, [SQLITE_TOOL_NAME])
     except Exception as exc:  # pragma: no cover - defensive logging
