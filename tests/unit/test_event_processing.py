@@ -4,6 +4,7 @@ import tempfile
 from datetime import timedelta
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.files.storage import FileSystemStorage
 from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
@@ -497,6 +498,26 @@ class CronTriggerTaskTests(TestCase):
         
         # Verify process_agent_events was called
         mock_process_events.assert_called_once_with(str(self.agent.id))
+
+    @patch('api.agent.tasks.process_events.logger')
+    @patch('api.agent.tasks.process_events.process_agent_events')
+    def test_cron_trigger_task_logs_quota_validation_as_info(self, mock_process_events, mock_logger):
+        """Quota ValidationErrors should be logged as info instead of failing the task."""
+        quota_error = ValidationError(
+            {"quota": ["Task quota exceeded. You have no remaining task credits and no active subscription."]}
+        )
+        mock_process_events.side_effect = quota_error
+        cron_expression = "@hourly"
+
+        process_agent_cron_trigger_task(str(self.agent.id), cron_expression)
+
+        self.assertEqual(PersistentAgentCronTrigger.objects.count(), 1)
+        mock_process_events.assert_called_once_with(str(self.agent.id))
+        mock_logger.info.assert_any_call(
+            "Skipping cron trigger for agent %s due to task quota: %s",
+            str(self.agent.id),
+            quota_error,
+        )
 
     @patch('api.agent.tasks.process_events._remove_orphaned_celery_beat_task')
     @patch('api.agent.tasks.process_events.process_agent_events')
