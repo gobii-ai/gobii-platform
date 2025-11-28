@@ -19,6 +19,7 @@ from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
+from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
 from constants.plans import PlanNames
 from util.subscription_helper import get_owner_plan
@@ -442,6 +443,102 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
     """Return catalog entry for the given tool name if available."""
     catalog = _build_available_tool_index(agent)
     return catalog.get(tool_name)
+
+
+def auto_enable_heuristic_tools(
+    agent: PersistentAgent,
+    text: str,
+    *,
+    max_auto_enable: int = 5,
+) -> List[str]:
+    """
+    Heuristically auto-enable site-specific tools based on keyword mentions in text.
+
+    Only enables tools if there is room in the agent's tool budget - will NOT evict
+    existing tools. This is a best-effort optimization to pre-enable relevant tools
+    before the LLM needs them.
+
+    Args:
+        agent: The agent to enable tools for.
+        text: Text to scan for keyword mentions (typically user message).
+        max_auto_enable: Maximum number of tools to auto-enable per call.
+
+    Returns:
+        List of tool names that were successfully auto-enabled.
+    """
+    if not text or not agent:
+        return []
+
+    # Find tools that match keywords in the text
+    matched_tools = find_matching_tools(text)
+    if not matched_tools:
+        return []
+
+    # Check current capacity
+    cap = get_enabled_tool_limit(agent)
+    current_count = PersistentAgentEnabledTool.objects.filter(agent=agent).count()
+    available_slots = cap - current_count
+
+    # If no room, don't auto-enable (never evict for heuristic matches)
+    if available_slots <= 0:
+        logger.debug(
+            "Skipping autotool heuristics for agent %s: at capacity (%d/%d)",
+            agent.id,
+            current_count,
+            cap,
+        )
+        return []
+
+    # Filter out already-enabled tools
+    already_enabled = set(
+        PersistentAgentEnabledTool.objects.filter(
+            agent=agent,
+            tool_full_name__in=matched_tools,
+        ).values_list("tool_full_name", flat=True)
+    )
+    to_enable = [t for t in matched_tools if t not in already_enabled]
+
+    if not to_enable:
+        return []
+
+    # Limit to available slots and max_auto_enable cap
+    to_enable = to_enable[: min(available_slots, max_auto_enable)]
+
+    # Get the catalog to validate tools exist and get metadata
+    catalog = _build_available_tool_index(agent)
+    manager = _get_manager()
+
+    enabled: List[str] = []
+    for tool_name in to_enable:
+        entry = catalog.get(tool_name)
+        if not entry:
+            logger.debug("Autotool heuristic: tool %s not in catalog, skipping", tool_name)
+            continue
+
+        if entry.provider == "mcp" and manager.is_tool_blacklisted(tool_name):
+            logger.debug("Autotool heuristic: tool %s is blacklisted, skipping", tool_name)
+            continue
+
+        try:
+            row, created = PersistentAgentEnabledTool.objects.get_or_create(
+                agent=agent,
+                tool_full_name=tool_name,
+            )
+            if created:
+                metadata_updates = _apply_tool_metadata(row, entry)
+                if metadata_updates:
+                    row.save(update_fields=metadata_updates)
+                enabled.append(tool_name)
+                logger.info(
+                    "Autotool heuristic: enabled %s for agent %s",
+                    tool_name,
+                    agent.id,
+                )
+        except Exception:
+            logger.exception("Autotool heuristic: failed to enable %s", tool_name)
+            continue
+
+    return enabled
 
 
 def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:

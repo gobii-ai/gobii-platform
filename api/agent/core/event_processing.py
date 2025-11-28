@@ -81,7 +81,7 @@ from ..tools.sqlite_state import agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.search_tools import execute_search_tools
-from ..tools.tool_manager import execute_enabled_tool
+from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools
 from ..tools.web_chat_sender import execute_send_chat_message
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
@@ -1390,6 +1390,23 @@ def _run_agent_loop(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     logger.info("Starting agent loop for agent %s", agent.id)
+
+    # Heuristic auto-enable: scan recent inbound messages for site keywords
+    # and pre-enable relevant tools if there's capacity (no eviction)
+    try:
+        recent_messages = PersistentAgentMessage.objects.filter(
+            owner_agent=agent,
+            is_outbound=False,
+        ).order_by("-timestamp")[:3]
+        combined_text = " ".join(msg.body for msg in recent_messages if msg.body)
+        if combined_text:
+            auto_enabled = auto_enable_heuristic_tools(agent, combined_text)
+            if auto_enabled:
+                span.set_attribute("autotool.enabled_count", len(auto_enabled))
+                span.set_attribute("autotool.enabled_tools", ",".join(auto_enabled))
+    except Exception:
+        logger.debug("Autotool heuristic check failed", exc_info=True)
+
     tools = get_agent_tools(agent)
     
     # Track cumulative token usage across all iterations
