@@ -32,7 +32,7 @@ from .models import (
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
-    StripeConfig,
+    StripeConfig, ToolConfig,
     MeteringBatch,
     UsageThresholdSent,
     PersistentAgentWebhook,
@@ -693,6 +693,28 @@ class BrowserConfigAdmin(admin.ModelAdmin):
         (
             "Limits",
             {"fields": ("max_browser_steps", "max_browser_tasks", "max_active_browser_tasks")},
+        ),
+        ("Metadata", {"fields": ("created_at", "updated_at")}),
+    )
+
+    def has_delete_permission(self, request, obj=None):  # pragma: no cover
+        return False
+
+
+@admin.register(ToolConfig)
+class ToolConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "plan_name",
+        "min_cron_schedule_minutes",
+        "updated_at",
+    )
+    list_filter = ("plan_name",)
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("plan_name",)}),
+        (
+            "Schedules",
+            {"fields": ("min_cron_schedule_minutes",)},
         ),
         ("Metadata", {"fields": ("created_at", "updated_at")}),
     )

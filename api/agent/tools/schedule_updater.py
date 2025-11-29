@@ -6,8 +6,13 @@ This module provides functionality for agents to update their own cron schedules
 import logging
 from celery.schedules import crontab, schedule as celery_schedule
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from ..core.schedule_parser import ScheduleParser
+from api.services.tool_settings import (
+    DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
+    get_tool_settings_for_owner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +24,76 @@ def _should_continue_work(params: dict) -> bool:
         normalized = raw.strip().lower()
         return normalized in {"1", "true", "yes"}
     return bool(raw)
+
+
+def _too_frequent_message(min_interval_minutes: int) -> str:
+    min_minutes = min_interval_minutes or DEFAULT_MIN_CRON_SCHEDULE_MINUTES
+    return f"Schedule is too frequent. Minimum interval is {min_minutes} minutes."
+
+
+def _min_interval_minutes_for_agent(agent) -> int | None:
+    """Return the enforced minimum interval in minutes for the agent's owner."""
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    try:
+        settings = get_tool_settings_for_owner(owner)
+        min_interval_minutes = settings.min_cron_schedule_minutes
+        if min_interval_minutes is None:
+            return None
+        return max(int(min_interval_minutes), 0) or None
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.warning(
+            "Falling back to default cron frequency for agent %s: %s",
+            getattr(agent, "id", None),
+            exc,
+            exc_info=True,
+        )
+        return DEFAULT_MIN_CRON_SCHEDULE_MINUTES
+
+
+def _cron_interval_seconds(schedule_obj: crontab) -> float:
+    """Estimate the interval in seconds between consecutive cron executions."""
+    def _next_run_from(start_time):
+        probe_time = start_time
+        original_nowfun = getattr(schedule_obj, "nowfun", None)
+        safety = 0
+        try:
+            schedule_obj.nowfun = lambda: probe_time
+            delta = schedule_obj.remaining_estimate(probe_time)
+            while delta.total_seconds() < 0 and safety < 10:
+                probe_time = probe_time + abs(delta)
+                schedule_obj.nowfun = lambda: probe_time
+                delta = schedule_obj.remaining_estimate(probe_time)
+                safety += 1
+            return probe_time + delta
+        finally:
+            schedule_obj.nowfun = original_nowfun
+
+    reference_time = timezone.now().replace(second=0, microsecond=0)
+    first_run = _next_run_from(reference_time)
+    second_run = _next_run_from(first_run)
+    return float((second_run - first_run).total_seconds())
+
+
+def _cron_satisfies_min_interval(schedule_obj: crontab, min_interval_seconds: float) -> bool:
+    try:
+        interval_seconds = _cron_interval_seconds(schedule_obj)
+    except Exception as exc:  # pragma: no cover - fallback path
+        logger.warning("Falling back to basic cron frequency check: %s", exc, exc_info=True)
+        minute_values = sorted(list(schedule_obj.minute))
+        if not minute_values:
+            return True
+        if len(minute_values) == 1:
+            interval_seconds = 3600.0
+        else:
+            gaps = []
+            for idx, minute in enumerate(minute_values):
+                next_minute = minute_values[(idx + 1) % len(minute_values)]
+                gap = (next_minute - minute) % 60
+                if gap == 0:
+                    gap = 60
+                gaps.append(gap * 60)
+            interval_seconds = min(gaps)
+    return interval_seconds >= min_interval_seconds
 
 
 def execute_update_schedule(agent, params: dict) -> dict:
@@ -44,7 +119,6 @@ def execute_update_schedule(agent, params: dict) -> dict:
         "Agent %s updating schedule from '%s' to '%s'",
         agent.id, original_schedule or "None", new_schedule_str or "None"
     )
-    min_interval_seconds = 30 * 60  # 30 minutes
 
     try:
         if new_schedule_str:
@@ -53,19 +127,17 @@ def execute_update_schedule(agent, params: dict) -> dict:
             # Validate schedule frequency
             if isinstance(schedule_obj, celery_schedule):
                 interval = schedule_obj.run_every.total_seconds() if hasattr(schedule_obj.run_every, 'total_seconds') else float(schedule_obj.run_every)
-                if interval < min_interval_seconds:
-                    raise ValueError(f"Schedule is too frequent. Minimum interval is {min_interval_seconds} seconds.")
+                min_interval_minutes = _min_interval_minutes_for_agent(agent)
+                min_interval_seconds = (min_interval_minutes or 0) * 60
+                if min_interval_minutes and interval < min_interval_seconds:
+                    raise ValueError(_too_frequent_message(min_interval_minutes))
             
             elif isinstance(schedule_obj, crontab):
-                # For cron, we approximate by checking the number of executions per hour.
-                # More than 2 executions per hour implies an interval < 30 minutes.
-                if len(schedule_obj.minute) > 2:
-                    raise ValueError("Schedule is too frequent (runs more than twice per hour).")
-                if len(schedule_obj.minute) == 2:
-                    sorted_minutes = sorted(list(schedule_obj.minute))
-                    interval = sorted_minutes[1] - sorted_minutes[0]
-                    if interval < 30 or (60 - interval) < 30:
-                        raise ValueError("Schedule is too frequent (interval is less than 30 minutes).")
+                min_interval_minutes = _min_interval_minutes_for_agent(agent)
+                if min_interval_minutes:
+                    min_interval_seconds = min_interval_minutes * 60
+                    if not _cron_satisfies_min_interval(schedule_obj, min_interval_seconds):
+                        raise ValueError(_too_frequent_message(min_interval_minutes))
 
         agent.schedule = new_schedule_str
         # Only validate the schedule field using the model's custom clean method

@@ -44,11 +44,17 @@ from api.models import (
     PersistentAgentSystemMessage,
     PromptConfig,
     UserBilling,
+    ToolConfig,
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from api.agent.core.llm_config import AgentLLMTier
 from api.services.prompt_settings import invalidate_prompt_settings_cache
+from api.services.tool_settings import (
+    DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
+    get_tool_settings_for_plan,
+    invalidate_tool_settings_cache,
+)
 
 User = get_user_model()
 
@@ -633,19 +639,35 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
             browser_use_agent=self.browser_agent,
             schedule="@daily",  # Start with a valid schedule
         )
+        get_tool_settings_for_plan(PlanNamesChoices.FREE)
+        self.tool_config = ToolConfig.objects.get(plan_name=PlanNamesChoices.FREE)
+        self.original_min_interval = self.tool_config.min_cron_schedule_minutes
+        self.tool_config.min_cron_schedule_minutes = DEFAULT_MIN_CRON_SCHEDULE_MINUTES
+        self.tool_config.save()
+        invalidate_tool_settings_cache()
+        self.min_interval_minutes = DEFAULT_MIN_CRON_SCHEDULE_MINUTES
+        self.min_interval_seconds = self.min_interval_minutes * 60
+        self.addCleanup(self._restore_tool_config)
+
+    def _restore_tool_config(self):
+        cfg = ToolConfig.objects.get(plan_name=PlanNamesChoices.FREE)
+        cfg.min_cron_schedule_minutes = self.original_min_interval
+        cfg.save()
+        invalidate_tool_settings_cache()
 
     def test_valid_schedules_accepted(self):
         """Test that schedules meeting minimum interval are accepted."""
         valid_schedules = [
             "@daily",          # Once per day
-            "@hourly",         # Once per hour
-            "@every 30m",      # Exactly 30 minutes
-            "@every 1h",       # 1 hour
+            f"@every {self.min_interval_minutes}m",  # Exactly the configured minimum
+            f"@every {max(self.min_interval_minutes, 60)}m",  # At least an hour
             "@every 2h",       # 2 hours
             "0 */2 * * *",     # Every 2 hours (cron)
             "0 0 * * *",       # Daily at midnight (cron)
             "0 8,20 * * *",    # Twice daily, 12 hours apart (cron)
         ]
+        if self.min_interval_minutes <= 60:
+            valid_schedules.append("@hourly")         # Once per hour
         
         for schedule in valid_schedules:
             with self.subTest(schedule=schedule):
@@ -661,26 +683,16 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
                 self.agent.save()
 
     def test_too_frequent_interval_schedules_rejected(self):
-        """Test that interval schedules more frequent than 30 minutes are rejected."""
-        too_frequent_schedules = [
-            "@every 29m",      # 29 minutes - just under limit
-            "@every 15m",      # 15 minutes
-            "@every 5m",       # 5 minutes
-            "@every 1m",       # 1 minute
-            "@every 30s",      # 30 seconds
-            "@every 1h 29m",   # 1 hour 29 minutes - just under 90 minutes (1.5 hours), but this is > 30m so should be OK
-        ]
-        
-        # Note: "@every 1h 29m" is actually 89 minutes, which is > 30 minutes, so it should be accepted
-        # Let me correct the test cases
+        """Test that interval schedules more frequent than the configured minimum are rejected."""
+        below_limit = max(self.min_interval_minutes - 1, 1)
         actually_too_frequent = [
-            "@every 29m",      # 29 minutes - just under limit
-            "@every 15m",      # 15 minutes
-            "@every 5m",       # 5 minutes
-            "@every 1m",       # 1 minute
-            "@every 30s",      # 30 seconds
+            f"@every {below_limit}m",  # Just under the configured limit
+            "@every 15m",
+            "@every 5m",
+            "@every 1m",
+            "@every 30s",
         ]
-        
+
         for schedule in actually_too_frequent:
             with self.subTest(schedule=schedule):
                 original_schedule = self.agent.schedule
@@ -688,11 +700,26 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
                 
                 self.assertEqual(result["status"], "error")
                 self.assertIn("too frequent", result["message"])
-                self.assertIn("1800 seconds", result["message"])  # 30 minutes in seconds
+                self.assertIn(str(self.min_interval_minutes), result["message"])
                 
                 # Verify schedule wasn't changed
                 self.agent.refresh_from_db()
                 self.assertEqual(self.agent.schedule, original_schedule)
+
+    def test_plan_specific_min_interval_applied(self):
+        """Plan-specific minimum cron frequency is enforced."""
+        stricter_min = self.min_interval_minutes + 15
+        cfg = ToolConfig.objects.get(plan_name=PlanNamesChoices.FREE)
+        cfg.min_cron_schedule_minutes = stricter_min
+        cfg.save()
+        invalidate_tool_settings_cache()
+
+        result = _execute_update_schedule(self.agent, {"new_schedule": f"@every {self.min_interval_minutes}m"})
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn(str(stricter_min), result["message"])
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.schedule, "@daily")
 
     def test_too_frequent_cron_schedules_rejected(self):
         """Test that cron schedules running more than twice per hour are rejected."""
@@ -790,17 +817,18 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
                 self.agent.refresh_from_db()
                 self.assertEqual(self.agent.schedule, original_schedule)
 
-    def test_boundary_30_minute_interval(self):
-        """Test that exactly 30 minute intervals are accepted."""
-        result = _execute_update_schedule(self.agent, {"new_schedule": "@every 30m"})
+    def test_boundary_minute_interval(self):
+        """Test that exactly the configured minimum interval is accepted."""
+        result = _execute_update_schedule(self.agent, {"new_schedule": f"@every {self.min_interval_minutes}m"})
         
         self.assertEqual(result["status"], "ok")
         self.agent.refresh_from_db()
-        self.assertEqual(self.agent.schedule, "@every 30m")
+        self.assertEqual(self.agent.schedule, f"@every {self.min_interval_minutes}m")
 
-    def test_just_under_30_minute_interval(self):
-        """Test that intervals just under 30 minutes are rejected."""
-        result = _execute_update_schedule(self.agent, {"new_schedule": "@every 29m 59s"})
+    def test_just_under_minute_interval(self):
+        """Test that intervals just under the minimum are rejected."""
+        almost_min = max(self.min_interval_minutes - 1, 1)
+        result = _execute_update_schedule(self.agent, {"new_schedule": f"@every {almost_min}m"})
         
         self.assertEqual(result["status"], "error")
         self.assertIn("too frequent", result["message"])
@@ -815,7 +843,7 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
         valid_complex_intervals = [
             "@every 1h 30m",   # 90 minutes
             "@every 2h 15m",   # 135 minutes  
-            "@every 30m 30s",  # 30.5 minutes - should be valid
+            f"@every {self.min_interval_minutes}m 30s",  # Slightly above the minimum
         ]
         
         for schedule in valid_complex_intervals:
