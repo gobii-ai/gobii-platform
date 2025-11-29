@@ -102,7 +102,8 @@ def get_browser_settings_for_owner(owner) -> BrowserPlanSettings:
         try:
             plan = get_owner_plan(owner)
             plan_name = plan.get("id")
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to get owner plan for owner %s: %s", owner, e, exc_info=True)
             plan_name = None
     return get_browser_settings_for_plan(plan_name)
 
