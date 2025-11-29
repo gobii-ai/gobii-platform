@@ -335,7 +335,7 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertTrue(secrets.first().requested)
 
     def test_re_request_already_fulfilled_secret(self):
-        """Requesting a fulfilled credential converts it to requested again (refresh)."""
+        """Re-requesting a fulfilled credential leaves it fulfilled and guides user to update."""
         # Create a fulfilled secret
         fulfilled = PersistentAgentSecret.objects.create(
             agent=self.agent,
@@ -359,19 +359,20 @@ class SecureCredentialsRequestToolTests(TestCase):
         }
 
         result = execute_secure_credentials_request(self.agent, params)
-        # Now treated as ok (converted to requested)
+        # Now treated as ok without flipping to requested
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["created_count"], 1)
-        self.assertIn("credential request(s)", result["message"].lower())
+        self.assertIn("credential request", result["message"].lower())
 
         fulfilled.refresh_from_db()
-        self.assertTrue(fulfilled.requested)
-        self.assertEqual(fulfilled.encrypted_value, b"")
+        # We no longer flip to requested or wipe the value
+        self.assertFalse(fulfilled.requested)
+        self.assertEqual(fulfilled.encrypted_value, b"encrypted_value_here")
 
-        # It should appear in the pending section while requested
+        # It should remain in the available secrets block (not pending)
         context_block = _get_secrets_block(self.agent)
-        self.assertIn("Pending credential requests", context_block)
         self.assertIn("api_key", context_block)
+        self.assertNotIn("Pending credential requests", context_block)
 
         # Simulate fulfilling again and ensure it appears
         fulfilled.set_value("new-value")
