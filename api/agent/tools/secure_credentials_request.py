@@ -153,7 +153,7 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
         relative_url = reverse('agent_secrets_request', kwargs={'pk': agent.id})
         credentials_url = f"{protocol}{current_site.domain}{relative_url}"
 
-        relative_secret_url = reverse('agent_secret', kwargs={'pk': agent.id})
+        relative_secret_url = reverse('agent_secrets', kwargs={'pk': agent.id})
         secrets_url = f"{protocol}{current_site.domain}{relative_secret_url}"
     except Exception as e:
         logger.warning("Failed to generate credentials URL for agent %s: %s", agent.id, str(e))
