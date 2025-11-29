@@ -1,3 +1,5 @@
+import logging
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -6,6 +8,8 @@ from django.core.cache import cache
 
 from constants.plans import PlanNames
 from util.subscription_helper import get_owner_plan
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_MAX_BROWSER_STEPS = getattr(settings, "BROWSER_AGENT_MAX_STEPS", 100)
