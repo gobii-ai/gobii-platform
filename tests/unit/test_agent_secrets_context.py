@@ -274,7 +274,7 @@ class SecureCredentialsRequestToolTests(TestCase):
         # Check result
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["created_count"], 2)
-        self.assertIn("Successfully created 2 credential request(s)", result["message"])
+        self.assertIn("Processed 2 credential request(s)", result["message"])
         self.assertIn("API Key", result["message"])
         self.assertIn("Secret Token", result["message"])
 
@@ -362,9 +362,9 @@ class SecureCredentialsRequestToolTests(TestCase):
         # Now treated as ok (converted to requested)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["created_count"], 1)
-        self.assertIn("credential request(s)", result["message"].lower())
+        self.assertIn("processed 1 credential request", result["message"].lower())
         # Re-request should include update link guidance
-        self.assertIn("updated here", result["message"])
+        self.assertIn("update the existing credential(s)", result["message"].lower())
 
         fulfilled.refresh_from_db()
         # We no longer flip to requested or wipe the value
