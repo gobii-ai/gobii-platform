@@ -33,19 +33,9 @@ def _get_browser_settings(agent: Optional[PersistentAgent]):
     return get_browser_settings_for_owner(_get_plan_owner(agent))
 
 
-def get_browser_max_active_task_limit(agent: Optional[PersistentAgent] = None) -> Optional[int]:
-    """Return the configured max active browser task limit or None when unlimited."""
-    return _get_browser_settings(agent).max_active_browser_tasks
-
-
 def get_browser_daily_task_limit(agent: Optional[PersistentAgent] = None) -> Optional[int]:
     """Return the configured daily browser task limit or None when unlimited."""
     return _get_browser_settings(agent).max_browser_tasks
-
-
-def get_browser_step_limit(agent: Optional[PersistentAgent] = None) -> int:
-    """Return the configured per-task step limit (defaults applied when unset)."""
-    return _get_browser_settings(agent).max_browser_steps
 
 
 def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str, Any]:
