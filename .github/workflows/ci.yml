@@ -84,6 +84,8 @@ jobs:
             tag: batch_organizations
           - batch: browser_profile
             tag: batch_browser_profile
+          - batch: browser_config
+            tag: batch_browser_config
           - batch: forward_detection
             tag: batch_forward_detection
           - batch: fbp_middleware

@@ -1158,7 +1158,7 @@ def add_budget_awareness_sections(
         pass
 
     browser_agent_id = getattr(agent, "browser_use_agent_id", None) if agent else None
-    browser_daily_limit = get_browser_daily_task_limit()
+    browser_daily_limit = get_browser_daily_task_limit(agent)
 
     if browser_agent_id and browser_daily_limit:
         try:
@@ -1899,7 +1899,7 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_send_sms_tool(),
         get_send_chat_tool(),
         get_search_web_tool(),
-        get_spawn_web_task_tool(),
+        get_spawn_web_task_tool(agent),
         get_update_schedule_tool(),
         get_update_charter_tool(),
         get_secure_credentials_request_tool(),

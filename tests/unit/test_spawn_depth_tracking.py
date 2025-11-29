@@ -8,12 +8,13 @@ Redis so the agent loop keeps the cycle open while children run.
 import threading
 import time
 from unittest.mock import patch, MagicMock, call
-from django.test import TransactionTestCase, tag, override_settings
+from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 
-from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask
+from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask, BrowserConfig
 from api.agent.core.budget import AgentBudgetManager, BudgetContext, set_current_context as set_budget_context
 from api.agent.tools.spawn_web_task import execute_spawn_web_task
+from constants.plans import PlanNames
 from util.analytics import AnalyticsEvent
 
 
@@ -57,6 +58,14 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             budget_id=self.budget_id,
             depth=0
         )
+
+    def _set_browser_config(self, *, active: int | None = None, daily: int | None = None) -> None:
+        config, _ = BrowserConfig.objects.get_or_create(plan_name=PlanNames.FREE)
+        if active is not None:
+            config.max_active_browser_tasks = active
+        if daily is not None:
+            config.max_browser_tasks = daily
+        config.save()
         
         # Set up budget context
         self.budget_ctx = BudgetContext(
@@ -198,12 +207,13 @@ class SpawnDepthTrackingTests(TransactionTestCase):
         depth2 = call2[1].get('depth')
         self.assertEqual(depth2, 1, "Second spawn should also be at depth 1")
 
-    @override_settings(BROWSER_AGENT_MAX_ACTIVE_TASKS=2)
     @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
     def test_spawn_respects_active_task_limit(self, mock_process_task, _mock_consume_credit):
         """Ensure the configured active task limit prevents new spawns."""
         mock_process_task.delay = MagicMock()
+
+        self._set_browser_config(active=2)
 
         BrowserUseAgentTask.objects.create(
             agent=self.browser_agent,
@@ -232,13 +242,14 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             "No additional tasks should be created when the limit is reached",
         )
 
-    @override_settings(BROWSER_AGENT_DAILY_MAX_TASKS=2)
     @patch('util.analytics.Analytics.track_event')
     @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
     def test_spawn_respects_daily_task_limit(self, mock_process_task, _mock_consume_credit, mock_track_event):
         """Ensure the daily browser task limit stops additional spawns."""
         mock_process_task.delay = MagicMock()
+
+        self._set_browser_config(daily=2)
 
         # Completed tasks still count toward the per-day total
         BrowserUseAgentTask.objects.create(

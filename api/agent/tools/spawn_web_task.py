@@ -8,7 +8,6 @@ including tool definition and execution logic.
 import logging
 from typing import Dict, Any, Optional
 
-from django.conf import settings
 from django.utils import timezone
 
 from ...models import (
@@ -19,37 +18,49 @@ from ...models import (
 )
 from ..core.budget import get_current_context as get_budget_context, AgentBudgetManager
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from ...services.browser_settings import get_browser_settings_for_owner
 
 logger = logging.getLogger(__name__)
 
 
-def get_browser_max_active_task_limit() -> Optional[int]:
+def _get_plan_owner(agent: Optional[PersistentAgent]):
+    if agent is None:
+        return None
+    return agent.organization or agent.user
+
+
+def _get_browser_settings(agent: Optional[PersistentAgent]):
+    return get_browser_settings_for_owner(_get_plan_owner(agent))
+
+
+def get_browser_max_active_task_limit(agent: Optional[PersistentAgent] = None) -> Optional[int]:
     """Return the configured max active browser task limit or None when unlimited."""
-    try:
-        value = int(getattr(settings, "BROWSER_AGENT_MAX_ACTIVE_TASKS", 3))
-        return value if value > 0 else None
-    except (TypeError, ValueError):
-        return None
+    return _get_browser_settings(agent).max_active_browser_tasks
 
 
-def get_browser_daily_task_limit() -> Optional[int]:
+def get_browser_daily_task_limit(agent: Optional[PersistentAgent] = None) -> Optional[int]:
     """Return the configured daily browser task limit or None when unlimited."""
-    try:
-        value = int(getattr(settings, "BROWSER_AGENT_DAILY_MAX_TASKS", 60))
-        return value if value > 0 else None
-    except (TypeError, ValueError):
-        return None
+    return _get_browser_settings(agent).max_browser_tasks
 
 
-def get_spawn_web_task_tool() -> Dict[str, Any]:
+def get_browser_step_limit(agent: Optional[PersistentAgent] = None) -> int:
+    """Return the configured per-task step limit (defaults applied when unset)."""
+    return _get_browser_settings(agent).max_browser_steps
+
+
+def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str, Any]:
     """Return the spawn_web_task tool definition for the LLM."""
-    max_tasks = get_browser_max_active_task_limit()
-    daily_limit = get_browser_daily_task_limit()
+    settings = _get_browser_settings(agent)
+    max_tasks = settings.max_active_browser_tasks
+    daily_limit = settings.max_browser_tasks
     limit_bits = []
     if max_tasks:
         limit_bits.append(f"Maximum {max_tasks} active tasks at once.")
     if daily_limit:
         limit_bits.append(f"Maximum {daily_limit} browser tasks per day.")
+    step_limit = settings.max_browser_steps
+    if step_limit:
+        limit_bits.append(f"Maximum {step_limit} steps per browser task.")
     if not limit_bits:
         limit_bits.append("Task limits enforced per deployment settings.")
     limit_sentence = " ".join(limit_bits)
@@ -99,6 +110,8 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
     
     browser_use_agent = agent.browser_use_agent
 
+    plan_settings = _get_browser_settings(agent)
+
     # Check active task limit from settings (per agent)
     active_count = BrowserUseAgentTask.objects.filter(
         agent=browser_use_agent,
@@ -108,7 +121,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         ]
     ).count()
 
-    max_tasks = get_browser_max_active_task_limit()
+    max_tasks = plan_settings.max_active_browser_tasks
     if max_tasks and active_count >= max_tasks:
         return {
             "status": "error", 
@@ -116,7 +129,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         }
 
     # Check daily task creation limit
-    daily_limit = get_browser_daily_task_limit()
+    daily_limit = plan_settings.max_browser_tasks
     if daily_limit:
         start_of_day = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         daily_count = BrowserUseAgentTask.objects.filter(

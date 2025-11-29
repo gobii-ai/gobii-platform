@@ -34,6 +34,10 @@ from ..models import (
     AgentFileSpaceAccess,
     AgentFsNode, PersistentAgent,
 )
+from ..services.browser_settings import (
+    DEFAULT_MAX_BROWSER_STEPS,
+    get_browser_settings_for_owner,
+)
 from ..services.task_webhooks import trigger_task_webhook
 from ..openrouter import DEFAULT_API_BASE, get_attribution_headers
 from util import EphemeralXvfb, should_use_ephemeral_xvfb
@@ -709,6 +713,7 @@ async def _run_agent(
     override_max_output_tokens: Optional[int] = None,
     supports_vision: bool = True,
     is_eval: bool = False,
+    max_steps_override: Optional[int] = None,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """Execute the Browser‑Use agent for a single provider."""
     if baggage:
@@ -1025,7 +1030,9 @@ async def _run_agent(
                 )
 
             agent = BUAgent(**agent_kwargs)
-            history = await agent.run()
+            effective_max_steps = max_steps_override or DEFAULT_MAX_BROWSER_STEPS
+            agent_span.set_attribute("browser_use.max_steps", int(effective_max_steps))
+            history = await agent.run(max_steps=effective_max_steps)
 
             # Extract usage details (if available) and annotate tracing
             token_usage = None
@@ -1272,6 +1279,7 @@ def _execute_agent_with_failover(
     browser_use_agent_id: Optional[str] = None,
     persistent_agent_id: Optional[str] = None,
     is_eval: bool = False,
+    max_steps: Optional[int] = None,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """
     Execute the agent with tiered, weighted load-balancing and fail-over.
@@ -1432,6 +1440,7 @@ def _execute_agent_with_failover(
                         supports_vision=vision_enabled,
                         override_max_output_tokens=max_output_tokens,
                         is_eval=is_eval,
+                        max_steps_override=max_steps,
                     )
                 )
 
@@ -1621,6 +1630,10 @@ def _process_browser_use_task_core(
                 if prefer_premium:
                     agent_span.set_attribute("browser_tier.prefer_premium", True)
 
+                owner = task_obj.organization or getattr(agent_context, "organization", None) or task_obj.user
+                plan_settings = get_browser_settings_for_owner(owner)
+                agent_span.set_attribute("browser_use.max_steps_limit", int(plan_settings.max_browser_steps))
+
                 # Look up routing profile from eval_run if this is an eval task
                 eval_routing_profile = None
                 if task_obj.eval_run_id:
@@ -1676,6 +1689,7 @@ def _process_browser_use_task_core(
                     browser_use_agent_id=browser_use_agent_id,
                     persistent_agent_id=persistent_agent_id,
                     is_eval=is_eval,
+                    max_steps=plan_settings.max_browser_steps,
                 )
 
                 safe_result = _jsonify(raw_result)

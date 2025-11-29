@@ -4,6 +4,7 @@ from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
 from api.models import (
+    BrowserConfig,
     BrowserUseAgent,
     BrowserUseAgentTask,
     PersistentAgent,
@@ -23,6 +24,7 @@ from api.agent.core.prompt_context import (
     add_budget_awareness_sections,
     compute_burn_rate,
 )
+from constants.plans import PlanNames
 
 
 class _DummySpan:
@@ -643,14 +645,17 @@ class PersistentAgentToolCreditTests(TestCase):
             prompt="Two",
         )
 
-        with override_settings(BROWSER_AGENT_DAILY_MAX_TASKS=2):
-            result = add_budget_awareness_sections(
-                critical_group,
-                current_iteration=1,
-                max_iterations=5,
-                daily_credit_state=None,
-                agent=self.agent,
-            )
+        config, _ = BrowserConfig.objects.get_or_create(plan_name=PlanNames.FREE)
+        config.max_browser_tasks = 2
+        config.save()
+
+        result = add_budget_awareness_sections(
+            critical_group,
+            current_iteration=1,
+            max_iterations=5,
+            daily_credit_state=None,
+            agent=self.agent,
+        )
         self.assertTrue(result)
         names = [call.args[0] for call in budget_group.section_text.call_args_list]
         self.assertIn("browser_task_usage", names)

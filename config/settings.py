@@ -698,6 +698,8 @@ LOGGING = {
 # - Defaults to False. Headed is necessary in a production environment to reduce bot detection. In a dev environment,
 #   headless is preferred to prevent a browser window from popping up periodically as the agent runs.
 BROWSER_HEADLESS = env.bool("BROWSER_HEADLESS", default=False)
+# Maximum steps a browser task is allowed to execute before forcing completion.
+BROWSER_AGENT_MAX_STEPS = env.int("BROWSER_AGENT_MAX_STEPS", default=100)
 # Maximum allowed concurrently active browser tasks per agent.
 BROWSER_AGENT_MAX_ACTIVE_TASKS = env.int("BROWSER_AGENT_MAX_ACTIVE_TASKS", default=3)
 # Maximum number of browser tasks an agent may spawn per calendar day.

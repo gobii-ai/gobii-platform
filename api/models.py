@@ -47,6 +47,11 @@ from api.services.prompt_settings import (
     DEFAULT_UNIFIED_HISTORY_LIMIT,
     DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
 )
+from api.services.browser_settings import (
+    DEFAULT_MAX_ACTIVE_BROWSER_TASKS,
+    DEFAULT_MAX_BROWSER_STEPS,
+    DEFAULT_MAX_BROWSER_TASKS,
+)
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
 from email.utils import parseaddr
@@ -645,6 +650,50 @@ class DailyCreditConfig(models.Model):
 
     def __str__(self):
         return "Daily credit pacing configuration"
+
+
+class BrowserConfig(models.Model):
+    """Per-plan browser agent configuration."""
+
+    plan_name = models.CharField(
+        primary_key=True,
+        max_length=32,
+        choices=PlanNamesChoices.choices,
+        help_text="Plan identifier the browser limits apply to.",
+    )
+    max_browser_steps = models.PositiveIntegerField(
+        default=DEFAULT_MAX_BROWSER_STEPS,
+        help_text="Maximum steps per browser task; set to 0 to use the system default.",
+    )
+    max_browser_tasks = models.PositiveIntegerField(
+        default=DEFAULT_MAX_BROWSER_TASKS,
+        help_text="Maximum browser tasks that can start each day; set to 0 for unlimited.",
+    )
+    max_active_browser_tasks = models.PositiveIntegerField(
+        default=DEFAULT_MAX_ACTIVE_BROWSER_TASKS,
+        help_text="Maximum concurrently active browser tasks; set to 0 for unlimited.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["plan_name"]
+        verbose_name = "Browser configuration"
+        verbose_name_plural = "Browser configuration"
+
+    def save(self, *args, **kwargs):
+        self.plan_name = (self.plan_name or "").lower()
+        result = super().save(*args, **kwargs)
+        from api.services.browser_settings import invalidate_browser_settings_cache
+
+        invalidate_browser_settings_cache()
+        return result
+
+    def delete(self, using=None, keep_parents=False):
+        raise ValidationError("BrowserConfig cannot be deleted.")
+
+    def __str__(self):
+        return f"{self.plan_name} browser configuration"
 
 
 class PromptConfig(models.Model):
