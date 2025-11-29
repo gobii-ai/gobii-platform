@@ -106,9 +106,6 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
                         "Re-requesting existing credential %s for domain %s for agent %s",
                         key, domain_pattern, agent.id
                     )
-                    existing.requested = True
-                    existing.encrypted_value = b''
-                    existing.save(update_fields=["requested", "encrypted_value", "updated_at"])
 
                 # Treat as created for user feedback
                 created_credentials.append({
