@@ -59,6 +59,16 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             depth=0
         )
 
+        # Default budget context used by spawn helpers in tests
+        self.budget_ctx = BudgetContext(
+            agent_id=str(self.agent.id),
+            budget_id=self.budget_id,
+            branch_id=self.branch_id,
+            depth=0,
+            max_steps=100,
+            max_depth=3,
+        )
+
     def _set_browser_config(self, *, active: int | None = None, daily: int | None = None) -> None:
         config, _ = BrowserConfig.objects.get_or_create(plan_name=PlanNames.FREE)
         if active is not None:
