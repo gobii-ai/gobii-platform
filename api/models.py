@@ -52,6 +52,7 @@ from api.services.browser_settings import (
     DEFAULT_MAX_BROWSER_STEPS,
     DEFAULT_MAX_BROWSER_TASKS,
 )
+from api.services.tool_settings import DEFAULT_MIN_CRON_SCHEDULE_MINUTES
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
 from email.utils import parseaddr
@@ -694,6 +695,42 @@ class BrowserConfig(models.Model):
 
     def __str__(self):
         return f"{self.plan_name} browser configuration"
+
+
+class ToolConfig(models.Model):
+    """Per-plan tool configuration."""
+
+    plan_name = models.CharField(
+        primary_key=True,
+        max_length=32,
+        choices=PlanNamesChoices.choices,
+        help_text="Plan identifier the tool configuration applies to.",
+    )
+    min_cron_schedule_minutes = models.PositiveIntegerField(
+        default=DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
+        help_text="Minimum allowed cron/interval frequency in minutes; set to 0 to disable enforcement.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["plan_name"]
+        verbose_name = "Tool configuration"
+        verbose_name_plural = "Tool configuration"
+
+    def save(self, *args, **kwargs):
+        self.plan_name = (self.plan_name or "").lower()
+        result = super().save(*args, **kwargs)
+        from api.services.tool_settings import invalidate_tool_settings_cache
+
+        invalidate_tool_settings_cache()
+        return result
+
+    def delete(self, using=None, keep_parents=False):
+        raise ValidationError("ToolConfig cannot be deleted.")
+
+    def __str__(self):
+        return f"{self.plan_name} tool configuration"
 
 
 class PromptConfig(models.Model):
