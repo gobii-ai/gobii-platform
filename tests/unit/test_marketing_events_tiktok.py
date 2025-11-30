@@ -97,3 +97,8 @@ class TikTokPayloadTests(SimpleTestCase):
             provider.send(evt)
 
         mock_post.assert_not_called()
+
+    def test_initiate_checkout_maps_to_click_button(self):
+        provider = TikTokCAPI(pixel_id="pixel123", token="token456")
+        self.assertEqual(provider._map_event_name("InitiateCheckout"), "ClickButton")
+        self.assertEqual(provider._map_event_name("Lead"), "Lead")
