@@ -13,8 +13,11 @@ class TikTokCAPI:
         self.token = token
 
     def _map_event_name(self, name: str) -> str:
-        # pass-through; customize mapping if TikTok naming diverges
-        return name
+        # TikTok prefers ClickButton when checkout is initiated from pricing CTA
+        mapping = {
+            "InitiateCheckout": "ClickButton",
+        }
+        return mapping.get(name, name)
 
     @staticmethod
     def _format_timestamp(ts: int | float | str) -> str:
