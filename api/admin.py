@@ -31,7 +31,7 @@ from .models import (
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
-    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, PromptConfig, ToolCreditCost,
+    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
     StripeConfig,
     MeteringBatch,
     UsageThresholdSent,
@@ -672,6 +672,30 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
         if DailyCreditConfig.objects.exists():
             return False
         return super().has_add_permission(request)
+
+    def has_delete_permission(self, request, obj=None):  # pragma: no cover
+        return False
+
+
+@admin.register(BrowserConfig)
+class BrowserConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "plan_name",
+        "max_browser_steps",
+        "max_browser_tasks",
+        "max_active_browser_tasks",
+        "updated_at",
+    )
+    list_filter = ("plan_name",)
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("plan_name",)}),
+        (
+            "Limits",
+            {"fields": ("max_browser_steps", "max_browser_tasks", "max_active_browser_tasks")},
+        ),
+        ("Metadata", {"fields": ("created_at", "updated_at")}),
+    )
 
     def has_delete_permission(self, request, obj=None):  # pragma: no cover
         return False
