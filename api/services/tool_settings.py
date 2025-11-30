@@ -5,7 +5,7 @@ from typing import Optional
 from django.conf import settings
 from django.core.cache import cache
 
-from constants.plans import PlanNames
+from constants.plans import PlanNames, PlanNamesChoices
 from util.subscription_helper import get_owner_plan
 
 
@@ -39,7 +39,7 @@ def _serialise(configs) -> dict:
 
 def _ensure_defaults_exist() -> None:
     ToolConfig = _get_tool_config_model()
-    for plan_name in (PlanNames.FREE, PlanNames.STARTUP, PlanNames.SCALE, PlanNames.ORG_TEAM):
+    for plan_name in PlanNamesChoices.values:
         ToolConfig.objects.get_or_create(
             plan_name=plan_name,
             defaults={"min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES},

@@ -134,19 +134,17 @@ def execute_update_schedule(agent, params: dict) -> dict:
     try:
         if new_schedule_str:
             schedule_obj = ScheduleParser.parse(new_schedule_str)
+            min_interval_minutes = _min_interval_minutes_for_agent(agent)
+            min_interval_seconds = (min_interval_minutes or 0) * 60
 
             # Validate schedule frequency
-            if isinstance(schedule_obj, celery_schedule):
-                interval = schedule_obj.run_every.total_seconds() if hasattr(schedule_obj.run_every, 'total_seconds') else float(schedule_obj.run_every)
-                min_interval_minutes = _min_interval_minutes_for_agent(agent)
-                min_interval_seconds = (min_interval_minutes or 0) * 60
-                if min_interval_minutes and interval < min_interval_seconds:
-                    raise ValueError(_too_frequent_message(min_interval_minutes))
-            
-            elif isinstance(schedule_obj, crontab):
-                min_interval_minutes = _min_interval_minutes_for_agent(agent)
-                if min_interval_minutes:
-                    min_interval_seconds = min_interval_minutes * 60
+            if min_interval_minutes:
+                if isinstance(schedule_obj, celery_schedule):
+                    interval = schedule_obj.run_every.total_seconds() if hasattr(schedule_obj.run_every, 'total_seconds') else float(schedule_obj.run_every)
+                    if interval < min_interval_seconds:
+                        raise ValueError(_too_frequent_message(min_interval_minutes))
+
+                elif isinstance(schedule_obj, crontab):
                     if not _cron_satisfies_min_interval(schedule_obj, min_interval_seconds):
                         raise ValueError(_too_frequent_message(min_interval_minutes))
 

@@ -3,7 +3,7 @@
 from django.conf import settings
 from django.db import migrations, models
 
-from constants.plans import PlanNames
+from constants.plans import PlanNames, PlanNamesChoices
 
 
 def seed_tool_config(apps, schema_editor):
@@ -11,7 +11,7 @@ def seed_tool_config(apps, schema_editor):
 
     default_min_minutes = getattr(settings, "PERSISTENT_AGENT_MIN_SCHEDULE_MINUTES", 30)
 
-    for plan_name in (PlanNames.FREE, PlanNames.STARTUP, PlanNames.SCALE, PlanNames.ORG_TEAM):
+    for plan_name in PlanNamesChoices.values:
         ToolConfig.objects.update_or_create(
             plan_name=plan_name,
             defaults={"min_cron_schedule_minutes": default_min_minutes},
