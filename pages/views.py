@@ -90,6 +90,8 @@ def _emit_checkout_initiated_event(
         properties["value"] = value
     if currency:
         properties["currency"] = currency.upper()
+    else:
+        properties["currency"] = "USD"
 
     try:
         capi(
