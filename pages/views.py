@@ -40,6 +40,7 @@ from django.urls import reverse
 from django.utils import timezone as dj_timezone
 from django.utils.html import escape
 from opentelemetry import trace
+from marketing_events.api import capi
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -63,6 +64,44 @@ def _prepare_stripe_or_404() -> None:
     if not key:
         raise Http404("Stripe billing is not configured.")
     stripe.api_key = key
+
+
+def _emit_checkout_initiated_event(
+    request,
+    user,
+    *,
+    plan_code: str,
+    plan_label: str,
+    value: float | None,
+    currency: str | None,
+    event_id: str,
+    event_name: str = "InitiateCheckout",
+) -> None:
+    """
+    Fan out checkout events to CAPI providers with plan metadata.
+    TikTok maps InitiateCheckout -> ClickButton downstream.
+    """
+    properties = {
+        "plan": plan_code,
+        "plan_label": plan_label,
+        "event_id": event_id,
+    }
+    if value is not None:
+        properties["value"] = value
+    if currency:
+        properties["currency"] = currency.upper()
+    else:
+        properties["currency"] = "USD"
+
+    try:
+        capi(
+            user=user,
+            event_name=event_name,
+            properties=properties,
+            request=request,
+        )
+    except Exception:
+        logger.exception("Failed to emit %s marketing event for %s", event_name, plan_code)
 
 class HomePage(TemplateView):
     template_name = "home.html"
@@ -632,6 +671,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         customer = get_or_create_stripe_customer(user)
 
         price = 0.0
+        price_currency = None
         price_id = stripe_settings.startup_price_id
         if not price_id:
             raise Http404("Pro plan is not configured yet.")
@@ -640,6 +680,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             # unit_amount is in cents, convert to dollars
             if price_object.unit_amount is not None:
                 price = price_object.unit_amount / 100
+            price_currency = getattr(price_object, "currency", None)
         except Price.DoesNotExist:
             logger.warning("Price with ID '%s' does not exist in dj-stripe.", price_id)
             raise Http404("Pro plan pricing is not ready.")
@@ -669,6 +710,16 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "gobii_event_id": event_id,
             "plan": PlanNames.STARTUP,
         }
+
+        _emit_checkout_initiated_event(
+            request=request,
+            user=user,
+            plan_code=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=price,
+            currency=price_currency,
+            event_id=event_id,
+        )
 
         try:
             # Reuse/modify existing subscription when present; keep checkout for first purchase.
@@ -721,6 +772,17 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             idempotency_key=f"checkout-startup-{customer.id}-{event_id}",
         )
 
+        _emit_checkout_initiated_event(
+            request=request,
+            user=user,
+            plan_code=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=price,
+            currency=price_currency,
+            event_id=event_id,
+            event_name="AddPaymentInfo",
+        )
+
         # 3️⃣  No need to sync anything here.  The webhook events
         #     (customer.subscription.created, invoice.paid, etc.)
         #     will hit your handler and use sub.customer.subscriber == user.
@@ -740,6 +802,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         customer = get_or_create_stripe_customer(user)
 
         price = 0.0
+        price_currency = None
         price_id = stripe_settings.scale_price_id
         if not price_id:
             raise Http404("Scale plan is not configured yet.")
@@ -747,6 +810,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             price_object = Price.objects.get(id=price_id)
             if price_object.unit_amount is not None:
                 price = price_object.unit_amount / 100
+            price_currency = getattr(price_object, "currency", None)
         except Price.DoesNotExist:
             logger.warning("Price with ID '%s' does not exist in dj-stripe.", price_id)
             raise Http404("Scale plan pricing is not ready.")
@@ -777,6 +841,16 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "gobii_event_id": event_id,
             "plan": PlanNames.SCALE,
         }
+
+        _emit_checkout_initiated_event(
+            request=request,
+            user=user,
+            plan_code=PlanNames.SCALE,
+            plan_label="Scale",
+            value=price,
+            currency=price_currency,
+            event_id=event_id,
+        )
 
         try:
             subscription, action = ensure_single_individual_subscription(
@@ -825,6 +899,17 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             },
             line_items=line_items,
             idempotency_key=f"checkout-scale-{customer.id}-{event_id}",
+        )
+
+        _emit_checkout_initiated_event(
+            request=request,
+            user=user,
+            plan_code=PlanNames.SCALE,
+            plan_label="Scale",
+            value=price,
+            currency=price_currency,
+            event_id=event_id,
+            event_name="AddPaymentInfo",
         )
 
         return redirect(session.url)
