@@ -50,8 +50,13 @@ def _min_interval_minutes_for_agent(agent) -> int | None:
         return DEFAULT_MIN_CRON_SCHEDULE_MINUTES
 
 
-def _cron_interval_seconds(schedule_obj: crontab) -> float:
-    """Estimate the interval in seconds between consecutive cron executions."""
+def _cron_interval_seconds(schedule_obj: crontab, sample_runs: int = 5) -> float:
+    """Return the smallest interval (in seconds) between consecutive cron executions.
+
+    We sample multiple consecutive runs because some crons have uneven spacing
+    between occurrences (e.g., "10,35 * * * *" alternates 25 and 35 minutes).
+    """
+
     def _next_run_from(start_time):
         probe_time = start_time
         original_nowfun = getattr(schedule_obj, "nowfun", None)
@@ -59,7 +64,7 @@ def _cron_interval_seconds(schedule_obj: crontab) -> float:
         try:
             schedule_obj.nowfun = lambda: probe_time
             delta = schedule_obj.remaining_estimate(probe_time)
-            while delta.total_seconds() < 0 and safety < 10:
+            while delta.total_seconds() <= 0 and safety < 10:
                 probe_time = probe_time + abs(delta)
                 schedule_obj.nowfun = lambda: probe_time
                 delta = schedule_obj.remaining_estimate(probe_time)
@@ -69,9 +74,15 @@ def _cron_interval_seconds(schedule_obj: crontab) -> float:
             schedule_obj.nowfun = original_nowfun
 
     reference_time = timezone.now().replace(second=0, microsecond=0)
-    first_run = _next_run_from(reference_time)
-    second_run = _next_run_from(first_run)
-    return float((second_run - first_run).total_seconds())
+    runs = [_next_run_from(reference_time)]
+    for _ in range(max(sample_runs - 1, 1)):
+        runs.append(_next_run_from(runs[-1]))
+
+    intervals = [
+        float((runs[idx + 1] - runs[idx]).total_seconds())
+        for idx in range(len(runs) - 1)
+    ]
+    return min(intervals) if intervals else float("inf")
 
 
 def _cron_satisfies_min_interval(schedule_obj: crontab, min_interval_seconds: float) -> bool:
