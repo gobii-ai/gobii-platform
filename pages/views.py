@@ -75,9 +75,10 @@ def _emit_checkout_initiated_event(
     value: float | None,
     currency: str | None,
     event_id: str,
+    event_name: str = "InitiateCheckout",
 ) -> None:
     """
-    Fan out checkout click to CAPI providers with plan metadata.
+    Fan out checkout events to CAPI providers with plan metadata.
     TikTok maps InitiateCheckout -> ClickButton downstream.
     """
     properties = {
@@ -89,18 +90,16 @@ def _emit_checkout_initiated_event(
         properties["value"] = value
     if currency:
         properties["currency"] = currency.upper()
-    else:
-        properties["currency"] = "USD"
 
     try:
         capi(
             user=user,
-            event_name="InitiateCheckout",
+            event_name=event_name,
             properties=properties,
             request=request,
         )
     except Exception:
-        logger.exception("Failed to emit checkout marketing event for %s", plan_code)
+        logger.exception("Failed to emit %s marketing event for %s", event_name, plan_code)
 
 class HomePage(TemplateView):
     template_name = "home.html"
@@ -771,6 +770,17 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             idempotency_key=f"checkout-startup-{customer.id}-{event_id}",
         )
 
+        _emit_checkout_initiated_event(
+            request=request,
+            user=user,
+            plan_code=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=price,
+            currency=price_currency,
+            event_id=event_id,
+            event_name="AddPaymentInfo",
+        )
+
         # 3️⃣  No need to sync anything here.  The webhook events
         #     (customer.subscription.created, invoice.paid, etc.)
         #     will hit your handler and use sub.customer.subscriber == user.
@@ -887,6 +897,17 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             },
             line_items=line_items,
             idempotency_key=f"checkout-scale-{customer.id}-{event_id}",
+        )
+
+        _emit_checkout_initiated_event(
+            request=request,
+            user=user,
+            plan_code=PlanNames.SCALE,
+            plan_label="Scale",
+            value=price,
+            currency=price_currency,
+            event_id=event_id,
+            event_name="AddPaymentInfo",
         )
 
         return redirect(session.url)

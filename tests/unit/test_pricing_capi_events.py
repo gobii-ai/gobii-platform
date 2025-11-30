@@ -63,5 +63,35 @@ class PricingCheckoutCapiEventTests(SimpleTestCase):
                 "plan": PlanNames.SCALE,
                 "plan_label": "Scale",
                 "event_id": "evt-456",
+                "currency": "USD",
             },
+        )
+
+    def test_emit_checkout_event_supports_custom_event_name(self):
+        request = self.factory.get("/pricing/")
+        user = SimpleNamespace(id="user-3")
+
+        with patch("pages.views.capi") as mock_capi:
+            _emit_checkout_initiated_event(
+                request=request,
+                user=user,
+                plan_code=PlanNames.STARTUP,
+                plan_label="Pro",
+                value=10,
+                currency="eur",
+                event_id="evt-789",
+                event_name="AddPaymentInfo",
+            )
+
+        mock_capi.assert_called_once_with(
+            user=user,
+            event_name="AddPaymentInfo",
+            properties={
+                "plan": PlanNames.STARTUP,
+                "plan_label": "Pro",
+                "event_id": "evt-789",
+                "value": 10,
+                "currency": "EUR",
+            },
+            request=request,
         )
