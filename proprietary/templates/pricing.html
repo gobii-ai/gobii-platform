@@ -5,6 +5,60 @@
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="Compare Gobii's Free, Pro, and Enterprise plans to scale always-on pretrained workers with transparent pricing.">
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE %}
+  <script>
+    (function () {
+      const payload = {
+        event_name: "ViewContent",
+        content_name: "Subscription Pricing",
+        content_category: "Subscription",
+        content_type: "product",
+        contents: [{ id: "pricing_page", quantity: 1 }],
+        value: 0,
+        currency: "USD",
+      };
+
+      {% if settings.META_PIXEL_ID %}
+      if (typeof window.fbq === "function") {
+        const fbOpts = {};
+        {% if user.is_authenticated %}
+        if ("{{ analytics.data.id_hash|default_if_none:'' }}") {
+          fbOpts.external_id = "{{ user.id }}";
+        }
+        if ("{{ analytics.data.email_hash|default_if_none:'' }}") {
+          fbOpts.em = "{{ user.email }}";
+        }
+        {% endif %}
+        fbq("track", "ViewContent", payload, fbOpts);
+      }
+      {% endif %}
+
+      {% if settings.TIKTOK_PIXEL_ID %}
+      if (window.ttq && typeof window.ttq.track === "function") {
+        const ttPayload = {
+          ...payload,
+          content_type: "subscription",
+          contents: [
+            {
+              content_id: "pricing_page",
+              quantity: 1
+            }
+          ]
+        };
+        {% if user.is_authenticated %}
+        if ("{{ analytics.data.id_hash|default_if_none:'' }}") {
+          ttPayload.external_id = "{{ analytics.data.id_hash }}";
+        }
+        if ("{{ analytics.data.email_hash|default_if_none:'' }}") {
+          ttPayload.email = "{{ analytics.data.email_hash }}";
+        }
+        {% endif %}
+        ttq.track("ViewContent", ttPayload);
+      }
+      {% endif %}
+    })();
+  </script>
+  {% endif %}
 {% endblock %}
 {% block content %}
 <div class="relative">
