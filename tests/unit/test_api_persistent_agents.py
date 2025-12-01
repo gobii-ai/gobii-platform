@@ -139,6 +139,7 @@ class AgentEventProcessingTests(TestCase):
         mock_lock.release.return_value = None
 
         fake_redis = MagicMock()
+        fake_redis.get.return_value = None
         fake_redis.register_script.return_value = MagicMock()
 
         with patch('api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available', return_value=1), \
@@ -158,6 +159,7 @@ class AgentEventProcessingTests(TestCase):
 
         # Mock Redis client and Redlock to avoid Redis connection
         mock_redis_client.return_value = MagicMock()
+        mock_redis_client.return_value.get.return_value = None
         mock_redis_client.return_value.register_script.return_value = MagicMock()
         mock_lock = MagicMock()
         mock_lock.acquire.return_value = True

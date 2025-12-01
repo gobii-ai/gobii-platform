@@ -36,6 +36,14 @@ from .budget import (
     get_current_context as get_budget_context,
     set_current_context as set_budget_context,
 )
+from .burn_control import (
+    BURN_RATE_COOLDOWN_SECONDS,
+    BURN_RATE_USER_INACTIVITY_MINUTES,
+    burn_cooldown_key,
+    burn_follow_up_key,
+    has_recent_user_message,
+    should_pause_for_burn_rate,
+)
 from .processing_flags import clear_processing_queued_flag
 from .llm_utils import run_completion
 from .token_usage import (
@@ -905,6 +913,7 @@ def process_agent_events(
     depth: Optional[int] = None,
     eval_run_id: Optional[str] = None,
     mock_config: Optional[Dict[str, Any]] = None,
+    burn_follow_up_token: Optional[str] = None,
 ) -> None:
     """Process all outstanding events for a persistent agent."""
     span = trace.get_current_span()
@@ -912,6 +921,76 @@ def process_agent_events(
     span.set_attribute("persistent_agent.id", str(persistent_agent_id))
 
     logger.info("process_agent_events(%s) called", persistent_agent_id)
+
+    redis_client = get_redis_client()
+    follow_up_key = burn_follow_up_key(persistent_agent_id)
+    cooldown_key = burn_cooldown_key(persistent_agent_id)
+
+    # If this invocation is a scheduled burn-rate follow-up, ensure the token matches.
+    if burn_follow_up_token:
+        stored_token = redis_client.get(follow_up_key)
+        stored_token_value = (
+            stored_token.decode() if isinstance(stored_token, (bytes, bytearray)) else stored_token
+        )
+        if not stored_token_value or stored_token_value != burn_follow_up_token:
+            logger.info(
+                "Skipping burn-rate follow-up for agent %s (token missing or mismatched).",
+                persistent_agent_id,
+            )
+            span.add_event("Burn-rate follow-up skipped - token mismatch")
+            return
+        try:
+            redis_client.delete(follow_up_key)
+        except Exception:
+            logger.debug(
+                "Failed to clear burn follow-up token for agent %s", persistent_agent_id, exc_info=True
+            )
+    else:
+        # A normal run cancels any pending burn follow-up so we don't double-run.
+        try:
+            deleted = redis_client.delete(follow_up_key)
+            if isinstance(deleted, int) and deleted > 0:
+                logger.info(
+                    "Cleared pending burn-rate follow-up token for agent %s due to new processing run.",
+                    persistent_agent_id,
+                )
+        except Exception:
+            logger.debug(
+                "Failed to clear burn follow-up token for agent %s", persistent_agent_id, exc_info=True
+            )
+
+        # Respect active burn-rate cooldown unless a recent user message arrived.
+        try:
+            cooldown_value = redis_client.get(cooldown_key)
+            cooldown_active = bool(cooldown_value)
+        except Exception:
+            logger.warning(
+                "Failed to read burn-rate cooldown for agent %s; proceeding as if inactive.",
+                persistent_agent_id,
+                exc_info=True,
+            )
+            cooldown_active = False
+        if cooldown_active:
+            if has_recent_user_message(
+                persistent_agent_id,
+                window_minutes=BURN_RATE_USER_INACTIVITY_MINUTES,
+            ):
+                try:
+                    redis_client.delete(cooldown_key)
+                except Exception:
+                    logger.debug(
+                        "Failed to clear burn cooldown for agent %s after user interaction",
+                        persistent_agent_id,
+                        exc_info=True,
+                    )
+            else:
+                logger.info(
+                    "Skipping event processing for agent %s – burn-rate cooldown active.",
+                    persistent_agent_id,
+                )
+                span.add_event("Processing skipped - burn cooldown active")
+                clear_processing_queued_flag(persistent_agent_id)
+                return
 
     # Guard against reviving expired/closed cycles when a follow‑up arrives after TTL expiry
     if budget_id is not None:
@@ -993,7 +1072,6 @@ def process_agent_events(
     lock_key = f"agent-event-processing:{persistent_agent_id}"
     pending_key = f"agent-event-processing:pending:{persistent_agent_id}"
 
-    redis_client = get_redis_client()
     lock = Redlock(key=lock_key, masters={redis_client}, auto_release_time=14400)  # 4 hour timeout to match Celery
 
     lock_acquired = False
@@ -1390,6 +1468,18 @@ def _run_agent_loop(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     logger.info("Starting agent loop for agent %s", agent.id)
+    span.set_attribute("burn.cooldown_seconds", BURN_RATE_COOLDOWN_SECONDS)
+    try:
+        redis_client = get_redis_client()
+    except Exception:
+        logger.warning(
+            "Failed to acquire Redis client for agent %s; burn controls may be impaired.",
+            agent.id,
+            exc_info=True,
+        )
+        redis_client = None
+    burn_follow_up_task = globals().get("process_agent_events_task")
+    span.set_attribute("burn.follow_up_task_present", bool(burn_follow_up_task))
 
     # Heuristic auto-enable: scan recent inbound messages for site keywords
     # and pre-enable relevant tools if there's capacity (no eviction)
@@ -1448,6 +1538,34 @@ def _run_agent_loop(
     for i in range(max_remaining):
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
             iter_span = trace.get_current_span()
+            try:
+                daily_state = get_agent_daily_credit_state(agent)
+            except Exception:
+                logger.warning(
+                    "Failed to refresh daily credit state for agent %s during loop; continuing without update.",
+                    agent.id,
+                    exc_info=True,
+                )
+                daily_state = credit_snapshot["daily_state"] if credit_snapshot else None
+
+            if credit_snapshot is not None:
+                credit_snapshot["daily_state"] = daily_state
+
+            if should_pause_for_burn_rate(
+                agent,
+                budget_ctx=budget_ctx,
+                span=iter_span,
+                daily_state=daily_state,
+                redis_client=redis_client,
+                follow_up_task=burn_follow_up_task,
+            ):
+                logger.info(
+                    "Agent %s paused due to burn rate; exiting loop after %d iteration(s).",
+                    agent.id,
+                    i + 1,
+                )
+                return cumulative_token_usage
+
             # Atomically consume one global step; exit if budget exhausted
             if budget_ctx is not None:
                 consumed, new_used = AgentBudgetManager.try_consume_step(
@@ -1462,13 +1580,14 @@ def _run_agent_loop(
                     except Exception:
                         logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
                     return cumulative_token_usage
+
             history, fitted_token_count, prompt_archive_id = build_prompt_context(
                 agent,
                 current_iteration=i + 1,
                 max_iterations=MAX_AGENT_LOOP_ITERATIONS,
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
-                daily_credit_state=credit_snapshot["daily_state"] if credit_snapshot else None,
+                daily_credit_state=daily_state,
                 routing_profile=get_current_eval_routing_profile(),
             )
             prompt_archive_attached = False
