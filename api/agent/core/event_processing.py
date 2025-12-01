@@ -961,7 +961,8 @@ def process_agent_events(
 
         # Respect active burn-rate cooldown unless a recent user message arrived.
         try:
-            cooldown_active = bool(redis_client.get(cooldown_key))
+            cooldown_value = redis_client.get(cooldown_key)
+            cooldown_active = bool(cooldown_value)
         except Exception:
             cooldown_active = False
         if cooldown_active:

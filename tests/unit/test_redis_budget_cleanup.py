@@ -88,6 +88,7 @@ class RedisBudgetCleanupTests(TestCase):
         mock_lock = MagicMock()
         mock_lock.acquire.return_value = True
         mock_lock_class.return_value = mock_lock
+        mock_redis_client.return_value.get.return_value = None
         
         # Mock budget manager
         mock_budget_mgr.find_or_start_cycle.return_value = (budget_id, 10, 2)

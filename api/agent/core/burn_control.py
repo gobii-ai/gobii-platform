@@ -10,6 +10,7 @@ from django.utils import timezone as dj_timezone
 
 from config import settings
 from config.redis_client import get_redis_client
+from .schedule_parser import ScheduleParser
 from .budget import AgentBudgetManager, BudgetContext
 from .prompt_context import get_agent_daily_credit_state
 from api.models import (
@@ -22,6 +23,9 @@ from api.models import (
 logger = logging.getLogger(__name__)
 
 BURN_RATE_COOLDOWN_SECONDS = int(getattr(settings, "BURN_RATE_COOLDOWN_SECONDS", 3600))
+BURN_FOLLOW_UP_SKIP_WINDOW_SECONDS = int(
+    getattr(settings, "BURN_FOLLOW_UP_SKIP_WINDOW_SECONDS", 2 * 60 * 60)
+)
 BURN_FOLLOW_UP_TTL_BUFFER_SECONDS = int(
     getattr(settings, "BURN_FOLLOW_UP_TTL_BUFFER_SECONDS", 60)
 )
@@ -40,6 +44,42 @@ def burn_follow_up_key(agent_id: Union[str, UUID]) -> str:
     """Return the Redis key used to dedupe scheduled burn-rate follow-ups."""
 
     return f"agent-burn-followup:{agent_id}"
+
+
+def _next_scheduled_run(agent: PersistentAgent, *, now=None):
+    """Return the datetime of the next scheduled run for the agent, if known."""
+
+    now = now or dj_timezone.now()
+    schedule_str = getattr(agent, "schedule", None) or getattr(agent, "schedule_snapshot", None)
+    if not schedule_str:
+        return None
+
+    try:
+        schedule_obj = ScheduleParser.parse(schedule_str)
+    except Exception:
+        logger.debug("Failed to parse schedule for agent %s", agent.id, exc_info=True)
+        return None
+
+    if schedule_obj is None:
+        return None
+
+    try:
+        eta = schedule_obj.remaining_estimate(now)
+    except Exception:
+        logger.debug("Failed to compute next scheduled run for agent %s", agent.id, exc_info=True)
+        return None
+
+    if eta is None:
+        return None
+
+    if isinstance(eta, (int, float)):
+        eta = timedelta(seconds=eta)
+
+    try:
+        return now + eta
+    except Exception:
+        logger.debug("Failed to compute next scheduled datetime for agent %s", agent.id, exc_info=True)
+        return None
 
 
 def has_recent_user_message(agent_id: Union[str, UUID], *, window_minutes: int) -> bool:
@@ -68,8 +108,28 @@ def schedule_burn_follow_up(
 ) -> Optional[str]:
     """Schedule a delayed follow-up run to resume after a burn-rate pause."""
 
+    now = dj_timezone.now()
+    next_run = _next_scheduled_run(agent, now=now)
+    if next_run is not None:
+        horizon = now + timedelta(seconds=BURN_FOLLOW_UP_SKIP_WINDOW_SECONDS)
+        if next_run <= horizon:
+            logger.info(
+                "Skipping burn-rate follow-up for agent %s: cron/interval run at %s within %s seconds.",
+                agent.id,
+                next_run,
+                BURN_FOLLOW_UP_SKIP_WINDOW_SECONDS,
+            )
+            return None
+
     try:
-        from ..tasks.process_events import process_agent_events_task  # noqa: WPS433
+        from api.agent.core import event_processing as _event_processing  # type: ignore
+
+        process_agent_events_task = (
+            follow_up_task
+            or getattr(_event_processing, "process_agent_events_task", None)
+        )
+        if process_agent_events_task is None:
+            from ..tasks.process_events import process_agent_events_task  # noqa: WPS433
     except Exception:
         logger.exception("Failed to import process_agent_events_task for agent %s", agent.id)
         return None

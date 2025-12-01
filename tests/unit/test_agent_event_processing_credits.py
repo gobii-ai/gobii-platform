@@ -718,3 +718,48 @@ class PersistentAgentToolCreditTests(TestCase):
                 notes="burn_rate_cooldown",
             ).exists()
         )
+
+    def test_burn_rate_pause_skips_follow_up_when_cron_is_soon(self):
+        fake_store: dict[str, str] = {}
+
+        class FakeRedis:
+            def get(self, key):
+                return fake_store.get(key)
+
+            def set(self, key, value, ex=None):
+                fake_store[key] = value
+                return True
+
+            def delete(self, key):
+                return 1 if fake_store.pop(key, None) is not None else 0
+
+        fake_redis = FakeRedis()
+        burn_state = {
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_threshold_per_hour": Decimal("3"),
+            "burn_rate_window_minutes": 60,
+        }
+
+        self.agent.schedule = "@hourly"
+        self.agent.save(update_fields=["schedule"])
+
+        with patch("api.agent.core.event_processing.get_redis_client", return_value=fake_redis), \
+             patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=burn_state), \
+             patch("api.agent.core.event_processing.build_prompt_context") as build_prompt_mock, \
+             patch(
+                 "api.agent.core.event_processing.process_agent_events_task",
+                 create=True,
+             ) as follow_up_task:
+            follow_up_task.apply_async = MagicMock()
+
+            usage = ep._run_agent_loop(
+                self.agent,
+                is_first_run=True,
+                credit_snapshot=None,
+                run_sequence_number=1,
+            )
+
+        self.assertEqual(usage["total_tokens"], 0)
+        build_prompt_mock.assert_not_called()
+        follow_up_task.apply_async.assert_not_called()
+        self.assertIsNone(fake_store.get(bc.burn_follow_up_key(self.agent.id)))

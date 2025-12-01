@@ -87,7 +87,8 @@ class RedisBudgetLeakTests(TestCase):
         
         # Mock the context
         with patch('api.agent.core.event_processing.set_budget_context'):
-            with patch('api.agent.core.event_processing.get_redis_client'):
+            with patch('api.agent.core.event_processing.get_redis_client') as mock_redis:
+                mock_redis.return_value.get.return_value = None
                 with patch('api.agent.core.event_processing.Redlock') as mock_lock:
                     mock_lock.return_value.acquire.return_value = True
                     
