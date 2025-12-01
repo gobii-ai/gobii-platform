@@ -1,7 +1,5 @@
 """Burn-rate control helpers for persistent agents."""
 
-from __future__ import annotations
-
 import logging
 from datetime import timedelta
 from decimal import Decimal
@@ -24,6 +22,9 @@ from api.models import (
 logger = logging.getLogger(__name__)
 
 BURN_RATE_COOLDOWN_SECONDS = int(getattr(settings, "BURN_RATE_COOLDOWN_SECONDS", 3600))
+BURN_FOLLOW_UP_TTL_BUFFER_SECONDS = int(
+    getattr(settings, "BURN_FOLLOW_UP_TTL_BUFFER_SECONDS", 60)
+)
 BURN_RATE_USER_INACTIVITY_MINUTES = int(
     getattr(settings, "BURN_RATE_USER_INACTIVITY_MINUTES", 60)
 )
@@ -59,7 +60,12 @@ def has_recent_user_message(agent_id: Union[str, UUID], *, window_minutes: int) 
         return False
 
 
-def schedule_burn_follow_up(agent: PersistentAgent, cooldown_seconds: int) -> Optional[str]:
+def schedule_burn_follow_up(
+    agent: PersistentAgent,
+    cooldown_seconds: int,
+    redis_client=None,
+    follow_up_task=None,
+) -> Optional[str]:
     """Schedule a delayed follow-up run to resume after a burn-rate pause."""
 
     try:
@@ -69,12 +75,18 @@ def schedule_burn_follow_up(agent: PersistentAgent, cooldown_seconds: int) -> Op
         return None
 
     token = uuid4().hex
-    redis_client = get_redis_client()
+    ttl_seconds = max(1, cooldown_seconds + BURN_FOLLOW_UP_TTL_BUFFER_SECONDS)
+    client = redis_client if redis_client is not None else get_redis_client()
     try:
-        set_result = redis_client.set(
+        set_result = client.set(
             burn_follow_up_key(agent.id),
             token,
-            ex=cooldown_seconds,
+            ex=ttl_seconds,
+        )
+        logger.debug(
+            "Burn follow-up token set result for agent %s: %s",
+            agent.id,
+            set_result,
         )
     except Exception:
         logger.debug(
@@ -90,6 +102,13 @@ def schedule_burn_follow_up(agent: PersistentAgent, cooldown_seconds: int) -> Op
         return None
 
     try:
+        logger.info(
+            "Scheduling burn-rate follow-up for agent %s via %s (countdown=%s, ttl=%s)",
+            agent.id,
+            getattr(process_agent_events_task, "__name__", type(process_agent_events_task)),
+            cooldown_seconds,
+            ttl_seconds,
+        )
         process_agent_events_task.apply_async(
             args=[str(agent.id)],
             kwargs={"burn_follow_up_token": token},
@@ -112,11 +131,13 @@ def pause_for_burn_rate(
     burn_window: Optional[int],
     budget_ctx: Optional[BudgetContext],
     span=None,
+    redis_client=None,
+    follow_up_task=None,
 ) -> None:
     """Record a burn-rate pause, set cooldown markers, and schedule a follow-up."""
 
     cooldown_seconds = max(1, int(BURN_RATE_COOLDOWN_SECONDS))
-    redis_client = get_redis_client()
+    redis_client = redis_client if redis_client is not None else get_redis_client()
 
     try:
         redis_client.set(
@@ -129,7 +150,12 @@ def pause_for_burn_rate(
             "Failed to set burn-rate cooldown key for agent %s", agent.id, exc_info=True
         )
 
-    follow_up_token = schedule_burn_follow_up(agent, cooldown_seconds)
+    follow_up_token = schedule_burn_follow_up(
+        agent,
+        cooldown_seconds,
+        redis_client=redis_client,
+        follow_up_task=follow_up_task,
+    )
 
     window_text = f"{burn_window} minutes" if burn_window else "the recent window"
     cooldown_minutes = round(cooldown_seconds / 60, 2)
@@ -178,11 +204,18 @@ def pause_for_burn_rate(
 
 
 def should_pause_for_burn_rate(
-    agent: PersistentAgent, *, budget_ctx: Optional[BudgetContext], span=None
+    agent: PersistentAgent,
+    *,
+    budget_ctx: Optional[BudgetContext],
+    span=None,
+    daily_state: Optional[dict] = None,
+    redis_client=None,
+    follow_up_task=None,
 ) -> bool:
     """Return True and trigger pause if burn rate exceeds threshold without user input."""
 
-    daily_state = get_agent_daily_credit_state(agent)
+    if daily_state is None:
+        daily_state = get_agent_daily_credit_state(agent)
     burn_rate = daily_state.get("burn_rate_per_hour")
     burn_threshold = daily_state.get("burn_rate_threshold_per_hour")
     burn_window = daily_state.get("burn_rate_window_minutes")
@@ -206,7 +239,8 @@ def should_pause_for_burn_rate(
 
     # If a cooldown is already in place, do not schedule another.
     try:
-        if get_redis_client().get(burn_cooldown_key(agent.id)):
+        client = redis_client if redis_client is not None else get_redis_client()
+        if client.get(burn_cooldown_key(agent.id)):
             return False
     except Exception:
         logger.debug(
@@ -215,6 +249,9 @@ def should_pause_for_burn_rate(
             exc_info=True,
         )
 
+    if follow_up_task is not None:
+        logger.debug("Burn-rate pause will schedule follow-up via override task for agent %s", agent.id)
+
     pause_for_burn_rate(
         agent,
         burn_rate=burn_rate,
@@ -222,5 +259,7 @@ def should_pause_for_burn_rate(
         burn_window=burn_window,
         budget_ctx=budget_ctx,
         span=span,
+        redis_client=redis_client,
+        follow_up_task=follow_up_task,
     )
     return True

@@ -37,6 +37,7 @@ from .budget import (
     set_current_context as set_budget_context,
 )
 from .burn_control import (
+    BURN_RATE_COOLDOWN_SECONDS,
     BURN_RATE_USER_INACTIVITY_MINUTES,
     burn_cooldown_key,
     burn_follow_up_key,
@@ -1461,6 +1462,13 @@ def _run_agent_loop(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     logger.info("Starting agent loop for agent %s", agent.id)
+    span.set_attribute("burn.cooldown_seconds", BURN_RATE_COOLDOWN_SECONDS)
+    try:
+        redis_client = get_redis_client()
+    except Exception:
+        redis_client = None
+    burn_follow_up_task = globals().get("process_agent_events_task")
+    span.set_attribute("burn.follow_up_task_present", bool(burn_follow_up_task))
 
     # Heuristic auto-enable: scan recent inbound messages for site keywords
     # and pre-enable relevant tools if there's capacity (no eviction)
@@ -1519,6 +1527,28 @@ def _run_agent_loop(
     for i in range(max_remaining):
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
             iter_span = trace.get_current_span()
+            daily_state = credit_snapshot["daily_state"] if credit_snapshot else None
+            if daily_state is None:
+                try:
+                    daily_state = get_agent_daily_credit_state(agent)
+                except Exception:
+                    daily_state = None
+
+            if should_pause_for_burn_rate(
+                agent,
+                budget_ctx=budget_ctx,
+                span=iter_span,
+                daily_state=daily_state,
+                redis_client=redis_client,
+                follow_up_task=burn_follow_up_task,
+            ):
+                logger.info(
+                    "Agent %s paused due to burn rate; exiting loop after %d iteration(s).",
+                    agent.id,
+                    i + 1,
+                )
+                return cumulative_token_usage
+
             # Atomically consume one global step; exit if budget exhausted
             if budget_ctx is not None:
                 consumed, new_used = AgentBudgetManager.try_consume_step(
@@ -1533,14 +1563,6 @@ def _run_agent_loop(
                     except Exception:
                         logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
                     return cumulative_token_usage
-
-            if should_pause_for_burn_rate(agent, budget_ctx=budget_ctx, span=iter_span):
-                logger.info(
-                    "Agent %s paused due to burn rate; exiting loop after %d iteration(s).",
-                    agent.id,
-                    i + 1,
-                )
-                return cumulative_token_usage
 
             history, fitted_token_count, prompt_archive_id = build_prompt_context(
                 agent,
