@@ -275,7 +275,21 @@ def should_pause_for_burn_rate(
     """Return True and trigger pause if burn rate exceeds threshold without user input."""
 
     if daily_state is None:
-        daily_state = get_agent_daily_credit_state(agent)
+        try:
+            daily_state = get_agent_daily_credit_state(agent)
+        except Exception:
+            logger.warning(
+                "Failed to get daily credit state for agent %s; cannot check burn rate.",
+                agent.id,
+                exc_info=True,
+            )
+            return False
+    if daily_state is None:
+        logger.warning(
+            "Daily credit state unavailable for agent %s; skipping burn-rate pause check.",
+            agent.id,
+        )
+        return False
     burn_rate = daily_state.get("burn_rate_per_hour")
     burn_threshold = daily_state.get("burn_rate_threshold_per_hour")
     burn_window = daily_state.get("burn_rate_window_minutes")
@@ -288,7 +302,13 @@ def should_pause_for_burn_rate(
             or burn_rate <= burn_threshold
         ):
             return False
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Error during burn rate check for agent %s: %s. Skipping pause.",
+            getattr(agent, "id", "unknown"),
+            exc,
+            exc_info=True,
+        )
         return False
 
     # Do not pause if the agent recently engaged with the user.
@@ -303,8 +323,8 @@ def should_pause_for_burn_rate(
         if client.get(burn_cooldown_key(agent.id)):
             return False
     except Exception:
-        logger.debug(
-            "Failed cooldown check for agent %s; proceeding cautiously.",
+        logger.warning(
+            "Failed cooldown check for agent %s; proceeding as if no cooldown is active.",
             agent.id,
             exc_info=True,
         )

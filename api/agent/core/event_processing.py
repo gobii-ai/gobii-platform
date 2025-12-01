@@ -964,6 +964,11 @@ def process_agent_events(
             cooldown_value = redis_client.get(cooldown_key)
             cooldown_active = bool(cooldown_value)
         except Exception:
+            logger.warning(
+                "Failed to read burn-rate cooldown for agent %s; proceeding as if inactive.",
+                persistent_agent_id,
+                exc_info=True,
+            )
             cooldown_active = False
         if cooldown_active:
             if has_recent_user_message(
@@ -1467,6 +1472,11 @@ def _run_agent_loop(
     try:
         redis_client = get_redis_client()
     except Exception:
+        logger.warning(
+            "Failed to acquire Redis client for agent %s; burn controls may be impaired.",
+            agent.id,
+            exc_info=True,
+        )
         redis_client = None
     burn_follow_up_task = globals().get("process_agent_events_task")
     span.set_attribute("burn.follow_up_task_present", bool(burn_follow_up_task))
@@ -1533,6 +1543,11 @@ def _run_agent_loop(
                 try:
                     daily_state = get_agent_daily_credit_state(agent)
                 except Exception:
+                    logger.warning(
+                        "Failed to refresh daily credit state for agent %s during loop; continuing without update.",
+                        agent.id,
+                        exc_info=True,
+                    )
                     daily_state = None
 
             if should_pause_for_burn_rate(
