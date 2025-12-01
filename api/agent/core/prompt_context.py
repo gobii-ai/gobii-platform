@@ -20,7 +20,6 @@ from django.db.models import Q, Prefetch, Sum
 from django.utils import timezone as dj_timezone
 
 from config import settings
-from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview
 from api.services import mcp_servers as mcp_server_service
 from api.services.daily_credit_settings import get_daily_credit_settings
@@ -93,7 +92,6 @@ __all__ = [
     "message_history_limit",
     "get_prompt_token_budget",
     "get_agent_daily_credit_state",
-    "compute_burn_rate",
     "build_prompt_context",
     "add_budget_awareness_sections",
     "get_agent_tools",
@@ -1250,48 +1248,6 @@ def add_budget_awareness_sections(
                 ))
 
 
-            if (
-                burn_rate is not None
-                and burn_threshold is not None
-                and Decimal("0") < burn_threshold < burn_rate
-            ):
-                window_text = (
-                    f"the last {burn_window} minutes"
-                    if burn_window
-                    else "the recent window"
-                )
-                burn_warning = (
-                    f"WARNING: Current burn rate is {burn_rate} credits/hour over {window_text}, above the pacing target of {burn_threshold}. "
-                    "Slow your cadence or pause non-essential tasks to stay within the soft target."
-                )
-                sections.append((
-                    "burn_rate_warning",
-                    burn_warning,
-                    2,
-                    True,
-                ))
-                try:
-                    analytics_props: dict[str, Any] = {
-                        "agent_id": str(agent.id),
-                        "agent_name": agent.name,
-                        "burn_rate_per_hour": str(burn_rate),
-                        "burn_rate_threshold_per_hour": str(burn_threshold),
-                    }
-                    props_with_org = Analytics.with_org_properties(
-                        analytics_props,
-                        organization=getattr(agent, "organization", None),
-                    )
-                    Analytics.track_event(
-                        user_id=agent.user.id,
-                        event=AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_WARNING,
-                        source=AnalyticsSource.AGENT,
-                        properties=props_with_org,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to emit analytics for agent %s burn rate warning",
-                        getattr(agent, "id", None),
-                    )
         except Exception as e:
             logger.warning("Failed to generate daily credit summary for prompt: %s", e, exc_info=True)
             # Do not block prompt creation if credit summary fails

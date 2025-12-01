@@ -563,7 +563,7 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertTrue(result)
         names = [call.args[0] for call in budget_group.section_text.call_args_list]
         self.assertIn("soft_target_progress", names)
-        self.assertIn("burn_rate_warning", names)
+        self.assertNotIn("burn_rate_warning", names)
         self.assertIn("tool_cost_awareness", names)
         soft_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "soft_target_progress")
         self.assertIn("Soft target progress", soft_call.args[1])
@@ -574,7 +574,7 @@ class PersistentAgentToolCreditTests(TestCase):
         "api.agent.core.prompt_context.get_tool_cost_overview",
         return_value=(Decimal("1"), {}),
     )
-    def test_budget_sections_emit_burn_rate_analytics_event(self, _mock_costs):
+    def test_budget_sections_do_not_emit_burn_rate_analytics_event(self, _mock_costs):
         critical_group = MagicMock()
         budget_group = MagicMock()
         critical_group.group.return_value = budget_group
@@ -597,15 +597,7 @@ class PersistentAgentToolCreditTests(TestCase):
                 daily_credit_state=state,
                 agent=self.agent,
             )
-        track_mock.assert_called_once()
-        kwargs = track_mock.call_args.kwargs
-        self.assertEqual(kwargs["user_id"], self.user.id)
-        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_WARNING)
-        self.assertEqual(kwargs["source"], AnalyticsSource.AGENT)
-        props = kwargs["properties"]
-        self.assertEqual(props["agent_id"], str(self.agent.id))
-        self.assertEqual(props["burn_rate_per_hour"], str(state["burn_rate_per_hour"]))
-        self.assertEqual(props["burn_rate_threshold_per_hour"], str(state["burn_rate_threshold_per_hour"]))
+        track_mock.assert_not_called()
 
     def test_budget_sections_handle_unlimited_soft_target(self):
         critical_group = MagicMock()
@@ -692,7 +684,8 @@ class PersistentAgentToolCreditTests(TestCase):
              patch(
                  "api.agent.core.event_processing.process_agent_events_task",
                  create=True,
-             ) as follow_up_task:
+             ) as follow_up_task, \
+             patch("api.agent.core.burn_control.Analytics.track_event") as track_event_mock:
             follow_up_task.apply_async = MagicMock()
 
             usage = ep._run_agent_loop(
@@ -718,6 +711,10 @@ class PersistentAgentToolCreditTests(TestCase):
                 code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,
             ).exists()
         )
+        track_event_mock.assert_called_once()
+        track_kwargs = track_event_mock.call_args.kwargs
+        self.assertEqual(track_kwargs["user_id"], self.user.id)
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_LIMIT_REACHED)
 
     def test_burn_rate_pause_skips_follow_up_when_cron_is_soon(self):
         fake_store: dict[str, str] = {}

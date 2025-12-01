@@ -13,6 +13,7 @@ from config.redis_client import get_redis_client
 from .schedule_parser import ScheduleParser
 from .budget import AgentBudgetManager, BudgetContext
 from .prompt_context import get_agent_daily_credit_state
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.models import (
     PersistentAgent,
     PersistentAgentMessage,
@@ -233,6 +234,30 @@ def pause_for_burn_rate(
         step=step,
         code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,
     )
+
+    try:
+        analytics_props: dict[str, str] = {
+            "agent_id": str(agent.id),
+            "agent_name": agent.name,
+            "burn_rate_per_hour": str(burn_rate),
+            "burn_rate_threshold_per_hour": str(burn_threshold),
+        }
+        if burn_window is not None:
+            analytics_props["burn_rate_window_minutes"] = str(burn_window)
+        props_with_org = Analytics.with_org_properties(
+            analytics_props,
+            organization=getattr(agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=getattr(getattr(agent, "user", None), "id", None),
+            event=AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_LIMIT_REACHED,
+            source=AnalyticsSource.AGENT,
+            properties=props_with_org,
+        )
+    except Exception:
+        logger.debug(
+            "Failed to emit burn-rate limit analytics for agent %s", agent.id, exc_info=True
+        )
 
     if span is not None:
         try:
