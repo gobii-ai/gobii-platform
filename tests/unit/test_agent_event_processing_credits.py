@@ -715,7 +715,7 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,
-                notes="burn_rate_cooldown",
+                code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,
             ).exists()
         )
 
@@ -836,6 +836,6 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,
-                notes="burn_rate_cooldown",
+                code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,
             ).exists()
         )
