@@ -6041,26 +6041,6 @@ class PersistentAgentMessage(models.Model):
         super().save(*args, **kwargs)
 
 
-class PersistentAgentEmailFooter(models.Model):
-    """Reusable snippets appended to outbound emails for eligible agents."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=128, help_text="Label to identify this footer in admin.")
-    html_content = models.TextField(help_text="HTML snippet appended to the email template.")
-    text_content = models.TextField(help_text="Plaintext snippet appended to the email body.")
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["name"]
-        verbose_name = "Persistent Agent Email Footer"
-        verbose_name_plural = "Persistent Agent Email Footers"
-
-    def __str__(self) -> str:
-        return self.name
-
-
 class PersistentAgentMessageAttachment(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     message = models.ForeignKey(

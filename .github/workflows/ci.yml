@@ -52,8 +52,6 @@ jobs:
             tag: batch_email_body
           - batch: email_allowlist
             tag: batch_email_allowlist
-          - batch: email_footer
-            tag: batch_email_footer
           - batch: pages
             tag: batch_pages
           - batch: marketing_events
