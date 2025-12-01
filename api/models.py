@@ -6487,6 +6487,7 @@ class PersistentAgentSystemStep(models.Model):
         LLM_CONFIGURATION_REQUIRED = "LLM_CONFIGURATION_REQUIRED", "LLM Configuration Required"
         PROACTIVE_TRIGGER = "PROACTIVE_TRIGGER", "Proactive Trigger"
         SYSTEM_DIRECTIVE = "SYSTEM_DIRECTIVE", "System Directive"
+        BURN_RATE_COOLDOWN = "BURN_RATE_COOLDOWN", "Burn Rate Cooldown"
         # Add more system-generated step codes here as needed.
 
     step = models.OneToOneField(

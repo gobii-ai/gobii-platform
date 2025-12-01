@@ -231,8 +231,7 @@ def pause_for_burn_rate(
     )
     PersistentAgentSystemStep.objects.create(
         step=step,
-        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-        notes="burn_rate_cooldown",
+        code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN
     )
 
     if span is not None:
