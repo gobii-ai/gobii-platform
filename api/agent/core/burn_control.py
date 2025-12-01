@@ -58,7 +58,7 @@ def _next_scheduled_run(agent: PersistentAgent, *, now=None):
     try:
         schedule_obj = ScheduleParser.parse(schedule_str)
     except Exception:
-        logger.debug("Failed to parse schedule for agent %s", agent.id, exc_info=True)
+        logger.warning("Failed to parse schedule for agent %s", agent.id, exc_info=True)
         return None
 
     if schedule_obj is None:
@@ -67,7 +67,7 @@ def _next_scheduled_run(agent: PersistentAgent, *, now=None):
     try:
         eta = schedule_obj.remaining_estimate(now)
     except Exception:
-        logger.debug("Failed to compute next scheduled run for agent %s", agent.id, exc_info=True)
+        logger.warning("Failed to compute next scheduled run for agent %s", agent.id, exc_info=True)
         return None
 
     if eta is None:
@@ -79,7 +79,7 @@ def _next_scheduled_run(agent: PersistentAgent, *, now=None):
     try:
         return now + eta
     except Exception:
-        logger.debug("Failed to compute next scheduled datetime for agent %s", agent.id, exc_info=True)
+        logger.warning("Failed to compute next scheduled datetime for agent %s", agent.id, exc_info=True)
         return None
 
 
