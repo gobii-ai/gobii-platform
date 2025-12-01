@@ -26,7 +26,7 @@ from .admin_forms import (
 from .models import (
     ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
-    PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentConversation,
+    PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
@@ -3052,6 +3052,15 @@ class PersistentAgentMessageAdmin(admin.ModelAdmin):
             return format_html('<a href="{}">View</a>', url)
         return "-"
     conversation_link.short_description = "Thread"
+
+
+@admin.register(PersistentAgentEmailFooter)
+class PersistentAgentEmailFooterAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name", "html_content", "text_content")
+    ordering = ("name",)
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(AgentPeerLink)
