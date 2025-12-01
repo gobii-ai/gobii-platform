@@ -763,3 +763,79 @@ class PersistentAgentToolCreditTests(TestCase):
         build_prompt_mock.assert_not_called()
         follow_up_task.apply_async.assert_not_called()
         self.assertIsNone(fake_store.get(bc.burn_follow_up_key(self.agent.id)))
+
+    def test_burn_rate_rechecks_fresh_daily_state_each_iteration(self):
+        fake_store: dict[str, str] = {}
+
+        class FakeRedis:
+            def get(self, key):
+                return fake_store.get(key)
+
+            def set(self, key, value, ex=None):
+                fake_store[key] = value
+                return True
+
+            def delete(self, key):
+                return 1 if fake_store.pop(key, None) is not None else 0
+
+        fake_redis = FakeRedis()
+        burn_states = [
+            {
+                "burn_rate_per_hour": Decimal("1"),
+                "burn_rate_threshold_per_hour": Decimal("3"),
+                "burn_rate_window_minutes": 60,
+            },
+            {
+                "burn_rate_per_hour": Decimal("5"),
+                "burn_rate_threshold_per_hour": Decimal("3"),
+                "burn_rate_window_minutes": 60,
+            },
+        ]
+
+        def next_burn_state(*_args, **_kwargs):
+            if burn_states:
+                return burn_states.pop(0)
+            return {
+                "burn_rate_per_hour": Decimal("5"),
+                "burn_rate_threshold_per_hour": Decimal("3"),
+                "burn_rate_window_minutes": 60,
+            }
+
+        response = MagicMock()
+        response.choices = [MagicMock(message=MagicMock(content="thinking", tool_calls=[]))]
+        token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cached_tokens": 0,
+        }
+
+        with patch("api.agent.core.event_processing.get_redis_client", return_value=fake_redis), \
+             patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2), \
+             patch("api.agent.core.event_processing.get_agent_daily_credit_state", side_effect=next_burn_state) as burn_state_fn, \
+             patch("api.agent.core.event_processing.build_prompt_context", return_value=([], 0, None)), \
+             patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[{}]), \
+             patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)), \
+             patch(
+                 "api.agent.core.event_processing.process_agent_events_task",
+                 create=True,
+             ) as follow_up_task:
+            follow_up_task.apply_async = MagicMock()
+
+            usage = ep._run_agent_loop(
+                self.agent,
+                is_first_run=True,
+                credit_snapshot=None,
+                run_sequence_number=1,
+            )
+
+        self.assertEqual(usage["total_tokens"], 0)
+        self.assertEqual(burn_state_fn.call_count, 2)
+        follow_up_task.apply_async.assert_called_once()
+        self.assertTrue(fake_store.get(bc.burn_cooldown_key(self.agent.id)))
+        self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                notes="burn_rate_cooldown",
+            ).exists()
+        )

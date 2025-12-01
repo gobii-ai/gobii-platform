@@ -1538,17 +1538,18 @@ def _run_agent_loop(
     for i in range(max_remaining):
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
             iter_span = trace.get_current_span()
-            daily_state = credit_snapshot["daily_state"] if credit_snapshot else None
-            if daily_state is None:
-                try:
-                    daily_state = get_agent_daily_credit_state(agent)
-                except Exception:
-                    logger.warning(
-                        "Failed to refresh daily credit state for agent %s during loop; continuing without update.",
-                        agent.id,
-                        exc_info=True,
-                    )
-                    daily_state = None
+            try:
+                daily_state = get_agent_daily_credit_state(agent)
+            except Exception:
+                logger.warning(
+                    "Failed to refresh daily credit state for agent %s during loop; continuing without update.",
+                    agent.id,
+                    exc_info=True,
+                )
+                daily_state = credit_snapshot["daily_state"] if credit_snapshot else None
+
+            if credit_snapshot is not None:
+                credit_snapshot["daily_state"] = daily_state
 
             if should_pause_for_burn_rate(
                 agent,
@@ -1586,7 +1587,7 @@ def _run_agent_loop(
                 max_iterations=MAX_AGENT_LOOP_ITERATIONS,
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
-                daily_credit_state=credit_snapshot["daily_state"] if credit_snapshot else None,
+                daily_credit_state=daily_state,
                 routing_profile=get_current_eval_routing_profile(),
             )
             prompt_archive_attached = False
