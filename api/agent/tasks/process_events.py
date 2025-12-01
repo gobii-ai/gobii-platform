@@ -86,6 +86,7 @@ def process_agent_events_task(
     depth: int | None = None,
     eval_run_id: str | None = None,
     mock_config: Optional[Dict[str, Any]] = None,
+    burn_follow_up_token: str | None = None,
 ) -> None:  # noqa: D401, ANN001
     """Celery task that triggers event processing for one persistent agent."""
     from api.evals.execution import set_current_eval_routing_profile
@@ -121,6 +122,7 @@ def process_agent_events_task(
             depth=depth,
             eval_run_id=eval_run_id,
             mock_config=mock_config,
+            burn_follow_up_token=burn_follow_up_token,
         )
     finally:
         set_current_eval_routing_profile(None)

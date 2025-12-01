@@ -25,6 +25,8 @@ from api.agent.core.prompt_context import (
     compute_burn_rate,
 )
 from constants.plans import PlanNames
+from api.agent.core import event_processing as ep
+from api.agent.core import burn_control as bc
 
 
 class _DummySpan:
@@ -662,3 +664,57 @@ class PersistentAgentToolCreditTests(TestCase):
         usage_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "browser_task_usage")
         self.assertIn("2/2", usage_call.args[1])
         self.assertIn("browser_task_usage_warning", names)
+
+    def test_burn_rate_pause_schedules_follow_up_and_exits_loop(self):
+        fake_store: dict[str, str] = {}
+
+        class FakeRedis:
+            def get(self, key):
+                return fake_store.get(key)
+
+            def set(self, key, value, ex=None):
+                fake_store[key] = value
+                return True
+
+            def delete(self, key):
+                return 1 if fake_store.pop(key, None) is not None else 0
+
+        fake_redis = FakeRedis()
+        burn_state = {
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_threshold_per_hour": Decimal("3"),
+            "burn_rate_window_minutes": 60,
+        }
+
+        with patch("api.agent.core.event_processing.get_redis_client", return_value=fake_redis), \
+             patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=burn_state), \
+             patch("api.agent.core.event_processing.build_prompt_context") as build_prompt_mock, \
+             patch(
+                 "api.agent.core.event_processing.process_agent_events_task",
+                 create=True,
+             ) as follow_up_task:
+            follow_up_task.apply_async = MagicMock()
+
+            usage = ep._run_agent_loop(
+                self.agent,
+                is_first_run=True,
+                credit_snapshot=None,
+                run_sequence_number=1,
+            )
+
+        self.assertEqual(usage["total_tokens"], 0)
+        build_prompt_mock.assert_not_called()
+
+        follow_up_task.apply_async.assert_called_once()
+        _, kwargs = follow_up_task.apply_async.call_args
+        self.assertEqual(kwargs["countdown"], ep.BURN_RATE_COOLDOWN_SECONDS)
+        token = kwargs["kwargs"]["burn_follow_up_token"]
+        self.assertEqual(fake_store.get(bc.burn_follow_up_key(self.agent.id)), token)
+        self.assertTrue(fake_store.get(bc.burn_cooldown_key(self.agent.id)))
+
+        self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                notes="burn_rate_cooldown",
+            ).exists()
+        )
