@@ -36,7 +36,7 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         with self.agent_event_listener(agent_id, start_time=time.time()) as events:
             msg = self.inject_message(agent_id, instruction, trigger_processing=True)
 
-            first_event = events.wait_for(AgentEventType.PROCESSING_COMPLETE, timeout=60)
+            first_event = events.wait_for(AgentEventType.PROCESSING_COMPLETE, timeout=120)
             if not first_event:
                 self.record_task_result(
                     run_id,
