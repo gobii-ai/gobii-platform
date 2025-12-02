@@ -17,6 +17,7 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.integrations import postmark_status
 
 from .email_content import convert_body_to_html_and_plaintext
+from .email_footer_service import append_footer_if_needed
 from .smtp_transport import SmtpTransport
 
 
@@ -229,6 +230,14 @@ def _get_postmark_connection():
     _postmark_connection = get_connection("anymail.backends.postmark.EmailBackend")
     return _postmark_connection
 
+
+def _prepare_email_content(message: PersistentAgentMessage, body_raw: str) -> tuple[str, str]:
+    """Convert the raw body into HTML/plaintext and append footers when required."""
+    html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
+    agent = getattr(message, "owner_agent", None)
+    return append_footer_if_needed(agent, html_snippet, plaintext_body)
+
+
 @tracer.start_as_current_span("AGENT - Deliver Agent Email")
 def deliver_agent_email(message: PersistentAgentMessage):
     """
@@ -286,7 +295,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             body_raw = message.body
 
             # content conversion
-            html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
+            html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
             html_body = render_to_string(
                 "emails/persistent_agent_email.html",
                 {"body": html_snippet},
@@ -398,7 +407,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             )
         subject = message.raw_payload.get("subject", "")
         body_raw = message.body
-        html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
+        html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
 
         # Log simulated content details for parity with non-prod simulation branch
         logger.info(
@@ -456,7 +465,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         
         # For simulation, also show content conversion results
         logger.info("SIMULATION - Processing content conversion for message %s", message.id)
-        html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
+        html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
         
         logger.info(
             "SIMULATION - Content conversion results for message %s: "
@@ -543,7 +552,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         # Detect content type and convert appropriately
         logger.info("Starting content type detection and conversion for message %s", message.id)
-        html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
+        html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
         
         # Log the conversion results
         logger.info(
