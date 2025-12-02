@@ -6353,6 +6353,65 @@ class PersistentAgentToolCall(models.Model):
         return f"ToolCall<{self.tool_name}> {preview}..."
 
 
+class PersistentAgentVariable(models.Model):
+    """Per-agent stored variable that can be referenced by name."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="variables",
+        help_text="Agent that owns this variable.",
+    )
+    name = models.CharField(
+        max_length=128,
+        help_text="Unique variable name within an agent.",
+    )
+    value = models.TextField(
+        help_text="Raw value as text (JSON-encoded when structured).",
+    )
+    is_json = models.BooleanField(
+        default=False,
+        help_text="True when value is JSON-encoded structured data.",
+    )
+    size_bytes = models.PositiveIntegerField(
+        default=0,
+        help_text="Size of value in bytes for budgeting.",
+    )
+    tool_call = models.ForeignKey(
+        "PersistentAgentToolCall",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="variables",
+        help_text="Originating tool call, when applicable.",
+    )
+    summary = models.CharField(
+        max_length=256,
+        blank=True,
+        help_text="Optional short description of the variable contents.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "name"], name="pa_variable_agent_name_unique"
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "-created_at"], name="pa_variable_recent_idx"),
+            models.Index(fields=["agent", "name"], name="pa_variable_lookup_idx"),
+        ]
+
+    def __str__(self):
+        return f"Variable ${self.name}"
+
+
 class PersistentAgentCronTrigger(models.Model):
     """Denotes that a step was created due to a scheduled cron execution."""
 

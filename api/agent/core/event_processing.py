@@ -53,6 +53,12 @@ from .token_usage import (
     set_usage_span_attributes,
     usage_attribute as _usage_attribute,
 )
+from .variables import (
+    extract_variableize_config,
+    resolve_variables_in_params,
+    variableize_from_config,
+    VariableResolutionError, variableize_full_result,
+)
 from ..short_description import (
     maybe_schedule_mini_description,
     maybe_schedule_short_description,
@@ -89,6 +95,7 @@ from ..tools.sqlite_state import agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.search_tools import execute_search_tools
+from ..tools.variable_tools import execute_var_lookup
 from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools
 from ..tools.web_chat_sender import execute_send_chat_message
 from ..tools.peer_dm import execute_send_agent_message
@@ -1861,6 +1868,33 @@ def _run_agent_loop(
                     try:
                         raw_args = getattr(call.function, "arguments", "") or ""
                         tool_params = json.loads(raw_args)
+                        try:
+                            tool_params, used_vars = resolve_variables_in_params(agent, tool_params)
+                            if used_vars:
+                                tool_span.set_attribute("vars.resolved", ",".join(sorted(used_vars)))
+                        except VariableResolutionError as exc:
+                            logger.warning(
+                                "Agent %s: variable resolution failed for %s: %s",
+                                agent.id,
+                                tool_name,
+                                exc,
+                            )
+                            try:
+                                step_kwargs = {
+                                    "agent": agent,
+                                    "description": (
+                                        "Variable lookup failed. Re-send the SAME tool call with a valid "
+                                        "variable name (use $var_name). "
+                                        f"Error: {exc}"
+                                    ),
+                                }
+                                _attach_completion(step_kwargs)
+                                step = PersistentAgentStep.objects.create(**step_kwargs)
+                                _attach_prompt_archive(step)
+                            except Exception:
+                                logger.debug("Failed to persist correction step for variable resolution error", exc_info=True)
+                            followup_required = True
+                            break
                     except Exception:
                         # Simple recovery: record a correction instruction and retry next iteration.
                         preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
@@ -1954,14 +1988,17 @@ def _run_agent_loop(
                             before_count,
                             after_count,
                         )
+                    elif tool_name == "var_lookup":
+                        result = execute_var_lookup(agent, tool_params)
                     else:
                         # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
                         result = execute_enabled_tool(agent, tool_name, tool_params)
 
-                    result_content = json.dumps(result)
+                    result_obj, variableize_config = extract_variableize_config(result)
+                    result_content = json.dumps(result_obj)
                     # Log result summary
                     try:
-                        status = result.get("status") if isinstance(result, dict) else None
+                        status = result_obj.get("status") if isinstance(result_obj, dict) else None
                     except Exception:
                         status = None
                     result_preview = result_content[:RESULT_LOG_MAX_CHARS]
@@ -1976,6 +2013,7 @@ def _run_agent_loop(
 
                     # Guard ORM writes against stale connections; retry once on OperationalError
                     close_old_connections()
+                    tool_call = None
                     try:
                         # Create tool step with the execution result preview
                         step_kwargs = {
@@ -1986,7 +2024,7 @@ def _run_agent_loop(
                         _attach_completion(step_kwargs)
                         step = PersistentAgentStep.objects.create(**step_kwargs)
                         _attach_prompt_archive(step)
-                        PersistentAgentToolCall.objects.create(
+                        tool_call = PersistentAgentToolCall.objects.create(
                             step=step,
                             tool_name=tool_name,
                             tool_params=tool_params,
@@ -2015,7 +2053,7 @@ def _run_agent_loop(
                         _attach_completion(step_kwargs)
                         step = PersistentAgentStep.objects.create(**step_kwargs)
                         _attach_prompt_archive(step)
-                        PersistentAgentToolCall.objects.create(
+                        tool_call = PersistentAgentToolCall.objects.create(
                             step=step,
                             tool_name=tool_name,
                             tool_params=tool_params,
@@ -2033,6 +2071,31 @@ def _run_agent_loop(
                                 exc_info=True,
                             )
                         logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
+
+                    if tool_call:
+                        if variableize_config:
+                            try:
+                                created_vars = variableize_from_config(agent, tool_call, result_obj, variableize_config)
+                                if created_vars:
+                                    logger.info(
+                                        "Agent %s: stored variable(s) %s for %s",
+                                        agent.id,
+                                        ", ".join(f"${v.name}" for v in created_vars),
+                                        tool_name,
+                                    )
+                            except Exception:
+                                logger.debug("Variableization from config failed for tool %s", tool_name, exc_info=True)
+                        try:
+                            created_vars = variableize_full_result(agent, tool_call, result_obj)
+                            if created_vars:
+                                logger.info(
+                                    "Agent %s: stored variable(s) %s for %s (size threshold)",
+                                    agent.id,
+                                    ", ".join(f"${v.name}" for v in created_vars),
+                                    tool_name,
+                                )
+                        except Exception:
+                            logger.debug("Variableization by size failed for tool %s", tool_name, exc_info=True)
                     allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
                     tool_requires_followup = not allow_auto_sleep
 

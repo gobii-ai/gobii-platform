@@ -16,7 +16,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Q, Prefetch, Sum
+from django.db.models import Q, Sum
 from django.utils import timezone as dj_timezone
 
 from config import settings
@@ -49,6 +49,7 @@ from ..tools.tool_manager import (
 )
 from ..tools.web_chat_sender import get_send_chat_tool
 from ..tools.webhook_sender import get_send_webhook_tool
+from ..tools.variable_tools import get_var_lookup_tool
 
 from ...models import (
     AgentCommPeerState,
@@ -67,6 +68,8 @@ from ...models import (
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
     PersistentAgentEnabledTool,
+    PersistentAgentToolCall,
+    PersistentAgentVariable,
 )
 
 from .budget import AgentBudgetManager, get_current_context as get_budget_context
@@ -596,6 +599,27 @@ def build_prompt_context(
 
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
+
+    variable_group.section_text(
+        "variable_usage",
+        (
+            "Large tool outputs may be stored as variables. Use $var_name directly in tool arguments, and call var_lookup to read a variable instead of asking the user to resend data."
+        ),
+        weight=2,
+        non_shrinkable=True,
+    )
+
+    recent_variables = list(
+        PersistentAgentVariable.objects.filter(agent=agent).order_by("-created_at")[:5]
+    )
+    if recent_variables:
+        names = ", ".join(f"${v.name}" for v in recent_variables)
+        variable_group.section_text(
+            "variable_catalog",
+            f"Available variables: {names}",
+            weight=1,
+            shrinker="hmt",
+        )
     
     # Browser tasks - each task gets its own section for better token management
     _build_browser_tasks_sections(agent, variable_group)
@@ -1862,6 +1886,7 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         # MCP management tools
         get_search_tools_tool(),
         get_request_contact_permission_tool(),
+        get_var_lookup_tool(),
     ]
 
     include_enable_db_tool = True
