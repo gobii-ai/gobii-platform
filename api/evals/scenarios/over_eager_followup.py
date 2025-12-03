@@ -18,7 +18,7 @@ class OverEagerFollowupScenario(EvalScenario, ScenarioExecutionTools):
         # Task 1: Inject prompt that should not require any follow-up
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
 
-        prompt = "Thanks! I’ll reach out later if needed. Please don’t follow up unless I ask."
+        prompt = "Thanks! I'll reach out later if needed. Please don't follow up unless I ask."
         with self.wait_for_agent_idle(agent_id, timeout=120):
             msg = self.inject_message(
                 agent_id,
@@ -49,28 +49,27 @@ class OverEagerFollowupScenario(EvalScenario, ScenarioExecutionTools):
         outbound_count = len(outbound)
 
         if outbound_count <= 1:
+            status = EvalRunTask.Status.PASSED
             summary = (
                 "No outbound replies after prompt."
                 if outbound_count == 0
                 else "Single outbound reply after prompt."
             )
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.PASSED,
-                task_name="verify_outbound_count",
-                observed_summary=summary,
-                artifacts={"message": outbound[0]} if outbound else {},
-            )
         else:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.FAILED,
-                task_name="verify_outbound_count",
-                observed_summary=f"Agent sent {outbound_count} outbound messages; expected 0 or 1.",
-                artifacts={"message": outbound[0]},
-            )
+            status = EvalRunTask.Status.FAILED
+            summary = f"Agent sent {outbound_count} outbound messages; expected 0 or 1."
+
+        artifacts = {"message": outbound[0]} if outbound else {}
+        self.record_task_result(
+            run_id,
+            None,
+            status,
+            task_name="verify_outbound_count",
+            observed_summary=summary,
+            artifacts=artifacts,
+        )
+
+        if status == EvalRunTask.Status.FAILED:
             return
 
         # Task 3: Judge whether the (optional) reply is over-eager/pushy
@@ -99,20 +98,17 @@ class OverEagerFollowupScenario(EvalScenario, ScenarioExecutionTools):
         )
 
         if choice == "Appropriate":
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.PASSED,
-                task_name="verify_reply_neediness",
-                observed_summary=f"Reply acceptable. Reasoning: {reasoning}",
-                artifacts={"message": outbound[0]},
-            )
+            status = EvalRunTask.Status.PASSED
+            summary = f"Reply acceptable. Reasoning: {reasoning}"
         else:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.FAILED,
-                task_name="verify_reply_neediness",
-                observed_summary=f"Reply considered over-eager. Reasoning: {reasoning}",
-                artifacts={"message": outbound[0]},
-            )
+            status = EvalRunTask.Status.FAILED
+            summary = f"Reply considered over-eager. Reasoning: {reasoning}"
+
+        self.record_task_result(
+            run_id,
+            None,
+            status,
+            task_name="verify_reply_neediness",
+            observed_summary=summary,
+            artifacts={"message": outbound[0]},
+        )
