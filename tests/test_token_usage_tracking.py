@@ -326,7 +326,8 @@ class TokenUsageTrackingTest(TestCase):
     @patch("api.agent.core.compaction.get_summarization_llm_config")
     def test_compaction_llm_completion_logged(self, mock_config, mock_run_completion):
         mock_config.return_value = ("provider-key", "model-name", {})
-        mock_run_completion.return_value = make_completion_response()
+        mock_run_completion.return_value = make_completion_response(reasoning_content="Chain of thought")
+        mock_run_completion.return_value.provider = "provider-key"
 
         summary = llm_summarise_comms("", [], agent=self.agent)
 
@@ -337,6 +338,7 @@ class TokenUsageTrackingTest(TestCase):
         ).latest("created_at")
         self.assertEqual(completion.llm_provider, "provider-key")
         self.assertEqual(completion.prompt_tokens, 10)
+        self.assertEqual(completion.thinking_content, "Chain of thought")
 
     @patch("api.agent.tasks.agent_tags.run_completion")
     @patch("api.agent.tasks.agent_tags.get_summarization_llm_config")
@@ -347,6 +349,8 @@ class TokenUsageTrackingTest(TestCase):
             prompt_tokens=8,
             completion_tokens=2,
             cached_tokens=1,
+            provider="provider-key",
+            model="tag-model",
         )
 
         tags = generate_tags_via_llm(self.agent, self.agent.charter)
@@ -368,6 +372,8 @@ class TokenUsageTrackingTest(TestCase):
             prompt_tokens=6,
             completion_tokens=3,
             cached_tokens=1,
+            provider="provider-key",
+            model="short-model",
         )
 
         result = generate_short_desc_via_llm(self.agent, self.agent.charter)
@@ -389,6 +395,8 @@ class TokenUsageTrackingTest(TestCase):
             prompt_tokens=4,
             completion_tokens=2,
             cached_tokens=0,
+            provider="provider-key",
+            model="mini-model",
         )
 
         result = generate_mini_desc_via_llm(self.agent, self.agent.charter)
@@ -426,6 +434,34 @@ class TokenUsageTrackingTest(TestCase):
         ).latest("created_at")
         self.assertEqual(str(completion.eval_run_id), str(self.eval_run.id))
         self.assertEqual(completion.prompt_tokens, 3)
+        self.assertIsNone(completion.thinking_content)
+
+    def test_log_agent_completion_extracts_usage_and_thinking_from_response(self):
+        response = make_completion_response(
+            prompt_tokens=7,
+            completion_tokens=4,
+            cached_tokens=1,
+            reasoning_content="Reasoned path",
+            model="provider/model",
+            provider="provider",
+        )
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+            response=response,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+        ).latest("created_at")
+        self.assertEqual(completion.prompt_tokens, 7)
+        self.assertEqual(completion.completion_tokens, 4)
+        self.assertEqual(completion.cached_tokens, 1)
+        self.assertEqual(completion.llm_model, "provider/model")
+        self.assertEqual(completion.llm_provider, "provider")
+        self.assertEqual(completion.thinking_content, "Reasoned path")
 
     @patch("api.models.PersistentAgentCompletion.objects.create", side_effect=RuntimeError("db down"))
     def test_log_agent_completion_warns_on_failure(self, mock_create):
@@ -448,6 +484,8 @@ class TokenUsageTrackingTest(TestCase):
             completion_tokens=6,
             cached_tokens=3,
             tool_names=["http_request"],
+            model="search-model",
+            provider="provider-key",
         )
 
         def _enable(agent, names):

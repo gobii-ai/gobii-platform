@@ -17,7 +17,7 @@ from ...models import PersistentAgent, PersistentAgentCompletion
 from ...evals.execution import get_current_eval_routing_profile
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
-from ..core.token_usage import extract_token_usage, log_agent_completion, set_usage_span_attributes
+from ..core.token_usage import log_agent_completion, set_usage_span_attributes
 from .mcp_manager import get_mcp_manager
 from .tool_manager import (
     enable_tools,
@@ -218,17 +218,12 @@ def _search_with_llm(
                     **run_kwargs,
                 )
 
-                token_usage, usage = extract_token_usage(
-                    response,
-                    model=model,
-                    provider=provider,
+                token_usage, usage = log_agent_completion(
+                    agent,
+                    completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
+                    response=response,
                 )
                 set_usage_span_attributes(trace.get_current_span(), usage)
-                log_agent_completion(
-                    agent,
-                    token_usage,
-                    completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
-                )
 
                 message = response.choices[0].message
                 content_text = getattr(message, "content", None) or ""

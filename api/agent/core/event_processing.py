@@ -49,6 +49,7 @@ from .llm_utils import run_completion
 from .token_usage import (
     coerce_int as _coerce_int,
     completion_kwargs_from_usage,
+    extract_reasoning_content,
     extract_token_usage,
     set_usage_span_attributes,
     usage_attribute as _usage_attribute,
@@ -1679,6 +1680,7 @@ def _run_agent_loop(
                 logger.exception("LLM call failed for agent %s with all providers", agent.id)
                 break
 
+            thinking_content = extract_reasoning_content(response)
             msg = response.choices[0].message
             token_usage_fields = _token_usage_fields(token_usage)
             completion: Optional[PersistentAgentCompletion] = None
@@ -1689,6 +1691,7 @@ def _run_agent_loop(
                     completion = PersistentAgentCompletion.objects.create(
                         agent=agent,
                         eval_run_id=eval_run_id,
+                        thinking_content=thinking_content,
                         **token_usage_fields,
                     )
                 return completion

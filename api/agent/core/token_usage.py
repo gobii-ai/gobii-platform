@@ -1,5 +1,6 @@
 """Helpers for extracting token usage and cost data from LiteLLM responses."""
 
+import json
 import logging
 from decimal import Decimal
 from numbers import Number
@@ -161,7 +162,7 @@ def compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any]
 def extract_token_usage(
     response: Any,
     *,
-    model: str,
+    model: Optional[str] = None,
     provider: Optional[str] = None,
 ) -> Tuple[Optional[dict], Optional[Any]]:
     if response is None:
@@ -177,7 +178,15 @@ def extract_token_usage(
     if usage is None:
         usage = usage_attribute(response, "usage")
 
-    token_usage: dict[str, Any] = {"model": model, "provider": provider}
+    resolved_model = model or usage_attribute(response, "model") or getattr(response, "model", None)
+    if usage and resolved_model is None:
+        resolved_model = usage_attribute(usage, "model")
+
+    resolved_provider = provider or usage_attribute(response, "provider")
+    if resolved_provider is None and usage is not None:
+        resolved_provider = usage_attribute(usage, "provider")
+
+    token_usage: dict[str, Any] = {"model": resolved_model, "provider": resolved_provider}
     if not usage:
         return token_usage, None
 
@@ -226,6 +235,73 @@ def completion_kwargs_from_usage(token_usage: Optional[dict], *, completion_type
     }
 
 
+def _normalise_reasoning_content(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+
+    if isinstance(raw, str):
+        return raw
+
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for part in raw:
+            normalised = _normalise_reasoning_content(part)
+            if normalised:
+                parts.append(normalised)
+        if parts:
+            return "\n".join(parts)
+        return None
+
+    if isinstance(raw, dict):
+        for key in ("text", "content", "output_text"):
+            value = raw.get(key)
+            if isinstance(value, str):
+                return value
+        try:
+            return json.dumps(raw)
+        except Exception:
+            return str(raw)
+
+    try:
+        return str(raw)
+    except Exception:
+        return None
+
+
+def extract_reasoning_content(response: Any) -> Optional[str]:
+    """Return any reasoning/thinking content from a LiteLLM response."""
+    try:
+        choices = getattr(response, "choices", None)
+        if not choices:
+            return None
+
+        first_choice = choices[0]
+        message = first_choice.get("message") if isinstance(first_choice, dict) else getattr(first_choice, "message", None)
+        if message is None:
+            return None
+
+        reasoning_raw: Any
+        if isinstance(message, dict):
+            reasoning_raw = message.get("reasoning_content")
+        else:
+            reasoning_raw = getattr(message, "reasoning_content", None)
+            if reasoning_raw is None and isinstance(getattr(message, "__dict__", None), dict):
+                reasoning_raw = message.__dict__.get("reasoning_content")
+
+        if reasoning_raw is None and hasattr(message, "model_dump"):
+            try:
+                dumped = message.model_dump()
+                if isinstance(dumped, dict):
+                    reasoning_raw = dumped.get("reasoning_content")
+            except Exception:
+                logger.debug("Failed to pull reasoning_content from model_dump", exc_info=True)
+
+        return _normalise_reasoning_content(reasoning_raw)
+    except Exception:
+        logger.debug("Failed to extract reasoning content from response", exc_info=True)
+        return None
+
+
 def set_usage_span_attributes(span, usage: Any) -> None:
     if not span or not usage:
         return
@@ -242,15 +318,44 @@ def set_usage_span_attributes(span, usage: Any) -> None:
 
 def log_agent_completion(
     agent: Any,
-    token_usage: Optional[dict],
+    token_usage: Optional[dict] = None,
     *,
     completion_type: str,
     eval_run_id: Optional[str] = None,
-) -> None:
+    thinking_content: Optional[str] = None,
+    response: Any = None,
+    model: Optional[str] = None,
+    provider: Optional[str] = None,
+) -> Tuple[Optional[dict], Optional[Any]]:
+    """
+    Persist an agent completion, optionally deriving token usage and thinking content from a LiteLLM response.
+
+    Returns the token_usage dict and raw usage object (if extracted) so callers
+    can re-use them (e.g., for span attributes) without re-parsing the response.
+    """
     if agent is None:
-        return
-    if not token_usage:
-        token_usage = {"model": None, "provider": None}
+        return None, None
+
+    extracted_usage = None
+    derived_token_usage = token_usage
+
+    if response is not None:
+        try:
+            extracted_token_usage, extracted_usage = extract_token_usage(
+                response,
+                model=model,
+                provider=provider,
+            )
+            if derived_token_usage is None:
+                derived_token_usage = extracted_token_usage
+        except Exception:
+            logger.debug("Failed to extract token usage from response", exc_info=True)
+
+        if thinking_content is None:
+            thinking_content = extract_reasoning_content(response)
+
+    if derived_token_usage is None:
+        derived_token_usage = {"model": model, "provider": provider}
 
     resolved_eval_run_id = eval_run_id or _get_budget_eval_run_id()
     try:
@@ -259,7 +364,8 @@ def log_agent_completion(
         PersistentAgentCompletion.objects.create(
             agent=agent,
             eval_run_id=resolved_eval_run_id,
-            **completion_kwargs_from_usage(token_usage, completion_type=completion_type),
+            thinking_content=thinking_content,
+            **completion_kwargs_from_usage(derived_token_usage, completion_type=completion_type),
         )
     except Exception as exc:
         logger.warning(
@@ -270,11 +376,14 @@ def log_agent_completion(
             exc_info=True,
         )
 
+    return derived_token_usage, extracted_usage
+
 
 __all__ = [
     "coerce_int",
     "compute_cost_breakdown",
     "completion_kwargs_from_usage",
+    "extract_reasoning_content",
     "extract_token_usage",
     "usage_attribute",
 ]
