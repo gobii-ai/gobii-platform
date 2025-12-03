@@ -847,19 +847,36 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
                       </div>
                     </div>
                     {isEditing && (
-                      <EndpointEditor
-                        endpoint={endpoint}
-                        saving={endpointSaving}
-                        onCancel={() => setEditingEndpointId(null)}
-                        onSave={async (values) => {
-                          try {
-                            await handlers.onSaveEndpoint(endpoint, values)
-                            setEditingEndpointId(null)
-                          } catch {
-                            // feedback already shown
-                          }
-                        }}
-                      />
+                      <ModalPortal>
+                        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
+                          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-lg font-semibold">
+                                {endpoint.type === 'persistent' ? 'Edit persistent endpoint' : endpoint.type === 'browser' ? 'Edit browser endpoint' : 'Edit embedding endpoint'}
+                              </h3>
+                              <button onClick={() => setEditingEndpointId(null)} className={button.icon}>
+                                <X className="size-5" />
+                              </button>
+                            </div>
+                            <p className="text-sm text-slate-500 mt-1">{provider.name}</p>
+                            <div className="mt-4">
+                              <EndpointEditor
+                                endpoint={endpoint}
+                                saving={endpointSaving}
+                                onCancel={() => setEditingEndpointId(null)}
+                                onSave={async (values) => {
+                                  try {
+                                    await handlers.onSaveEndpoint(endpoint, values)
+                                    setEditingEndpointId(null)
+                                  } catch {
+                                    // feedback already shown
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </ModalPortal>
                     )}
                     {status && (
                       <div className={`mt-3 text-xs ${tone}`}>
@@ -994,7 +1011,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const isEmbedding = endpoint.type === 'embedding'
 
   return (
-    <div className="mt-3 space-y-3">
+    <div className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="text-xs text-slate-500">Model identifier</label>
@@ -1066,7 +1083,6 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
               <option key={option.value || 'default'} value={option.value}>{option.label}</option>
             ))}
           </select>
-          <span className="text-slate-400">Applied when reasoning params are supported.</span>
         </div>
       )}
       <div className="flex justify-end gap-2">
@@ -1206,17 +1222,17 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
           </div>
           {type === 'persistent' && (
             <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
-              <span className="font-semibold text-slate-700">Default reasoning effort</span>
-              <select
-                value={reasoningEffort}
-                onChange={(event) => setReasoningEffort(event.target.value)}
-                disabled={!supportsReasoning}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
-              >
-                {reasoningEffortOptions.map((option) => (
-                  <option key={option.value || 'default'} value={option.value}>{option.label}</option>
-                ))}
-              </select>
+          <span className="font-semibold text-slate-700">Default reasoning effort</span>
+          <select
+            value={reasoningEffort}
+            onChange={(event) => setReasoningEffort(event.target.value)}
+            disabled={!supportsReasoning}
+            className="rounded-lg border border-slate-300 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            {reasoningEffortOptions.map((option) => (
+              <option key={option.value || 'default'} value={option.value}>{option.label}</option>
+            ))}
+          </select>
               <span className="text-slate-400">Optional override when reasoning is enabled.</span>
             </div>
           )}
