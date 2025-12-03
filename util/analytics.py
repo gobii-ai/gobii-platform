@@ -285,7 +285,7 @@ class Analytics:
     def track_event(user_id, event: AnalyticsEvent, source: AnalyticsSource, properties: dict = {}, ip: str = None):
         if Analytics._is_analytics_enabled():
             with traced("ANALYTICS Track Event"):
-                properties['medium'] = str(source)
+                properties['medium'] = str(source) or ""
                 context = {
                     'ip': '0',
                 }
@@ -308,7 +308,7 @@ class Analytics:
         """
         if Analytics._is_analytics_enabled():
             with traced("ANALYTICS Track Event Anonymous"):
-                properties['medium'] = str(source)
+                properties['medium'] = str(source) or ""
                 context = {
                     'ip': '0',
                 }
