@@ -1289,10 +1289,18 @@ class PersistentTierEndpointListCreateAPIView(SystemAdminAPIView):
         if weight <= 0:
             return HttpResponseBadRequest("weight must be greater than zero")
 
+        try:
+            reasoning_override = _coerce_reasoning_effort(payload.get("reasoning_effort_override"))
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        if reasoning_override and not endpoint.supports_reasoning:
+            return HttpResponseBadRequest("Endpoint does not support reasoning; cannot set reasoning_effort_override")
+
         te = PersistentTierEndpoint.objects.create(
             tier=tier,
             endpoint=endpoint,
             weight=weight,
+            reasoning_effort_override=reasoning_override,
         )
         invalidate_llm_bootstrap_cache()
         return _json_ok(tier_endpoint_id=str(te.id))
@@ -1316,6 +1324,14 @@ class PersistentTierEndpointDetailAPIView(SystemAdminAPIView):
             if weight <= 0:
                 return HttpResponseBadRequest("weight must be greater than zero")
             tier_endpoint.weight = weight
+        if "reasoning_effort_override" in payload:
+            try:
+                reasoning_override = _coerce_reasoning_effort(payload.get("reasoning_effort_override"))
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
+            if reasoning_override and not tier_endpoint.endpoint.supports_reasoning:
+                return HttpResponseBadRequest("Endpoint does not support reasoning; cannot set reasoning_effort_override")
+            tier_endpoint.reasoning_effort_override = reasoning_override
         tier_endpoint.save()
         invalidate_llm_bootstrap_cache()
         return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
@@ -1876,6 +1892,7 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
                             tier=new_tier,
                             endpoint=src_te.endpoint,
                             weight=src_te.weight,
+                            reasoning_effort_override=getattr(src_te, "reasoning_effort_override", None),
                         )
 
             # Clone browser config: tiers -> endpoints
@@ -2082,6 +2099,9 @@ class ProfilePersistentTierEndpointListCreateAPIView(SystemAdminAPIView):
             "endpoint_id": str(te.endpoint_id),
             "label": f"{te.endpoint.provider.display_name} · {te.endpoint.litellm_model}",
             "weight": float(te.weight),
+            "reasoning_effort_override": te.reasoning_effort_override,
+            "supports_reasoning": te.endpoint.supports_reasoning,
+            "endpoint_reasoning_effort": te.endpoint.reasoning_effort,
         } for te in endpoints]
         return JsonResponse({"endpoints": payload})
 
@@ -2105,7 +2125,19 @@ class ProfilePersistentTierEndpointListCreateAPIView(SystemAdminAPIView):
         if weight <= 0:
             return HttpResponseBadRequest("weight must be greater than zero")
 
-        te = ProfilePersistentTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        try:
+            reasoning_override = _coerce_reasoning_effort(payload.get("reasoning_effort_override"))
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        if reasoning_override and not endpoint.supports_reasoning:
+            return HttpResponseBadRequest("Endpoint does not support reasoning; cannot set reasoning_effort_override")
+
+        te = ProfilePersistentTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            weight=weight,
+            reasoning_effort_override=reasoning_override,
+        )
         return _json_ok(tier_endpoint_id=str(te.id))
 
 
@@ -2129,6 +2161,14 @@ class ProfilePersistentTierEndpointDetailAPIView(SystemAdminAPIView):
             if weight <= 0:
                 return HttpResponseBadRequest("weight must be greater than zero")
             te.weight = weight
+        if "reasoning_effort_override" in payload:
+            try:
+                reasoning_override = _coerce_reasoning_effort(payload.get("reasoning_effort_override"))
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
+            if reasoning_override and not te.endpoint.supports_reasoning:
+                return HttpResponseBadRequest("Endpoint does not support reasoning; cannot set reasoning_effort_override")
+            te.reasoning_effort_override = reasoning_override
         te.save()
         return _json_ok(tier_endpoint_id=str(te.id))
 

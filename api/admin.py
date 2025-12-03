@@ -3694,6 +3694,7 @@ class PersistentTierEndpointInline(admin.TabularInline):
     model = PersistentTierEndpoint
     extra = 0
     readonly_fields = ("is_premium", "is_max")
+    fields = ("tier", "endpoint", "weight", "reasoning_effort_override", "is_premium", "is_max")
 
 
 PERSISTENT_LLMTIER_CHOICES = tuple((tier.value, tier.value.title()) for tier in AgentLLMTier)
@@ -3826,6 +3827,7 @@ class ProfilePersistentTierEndpointInline(admin.TabularInline):
     extra = 0
     readonly_fields = ("is_premium", "is_max")
     autocomplete_fields = ("endpoint",)
+    fields = ("tier", "endpoint", "weight", "reasoning_effort_override", "is_premium", "is_max")
 
 
 class ProfileBrowserTierEndpointInline(admin.TabularInline):

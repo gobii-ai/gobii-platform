@@ -1879,6 +1879,14 @@ class PersistentTierEndpoint(models.Model):
     tier = models.ForeignKey(PersistentLLMTier, on_delete=models.CASCADE, related_name="tier_endpoints")
     endpoint = models.ForeignKey(PersistentModelEndpoint, on_delete=models.CASCADE, related_name="in_tiers")
     weight = models.FloatField(help_text="Relative weight within the tier; > 0")
+    reasoning_effort_override = models.CharField(
+        max_length=16,
+        choices=PersistentModelEndpoint.ReasoningEffort.choices,
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Optional reasoning effort override applied when the endpoint supports reasoning.",
+    )
     is_premium = models.BooleanField(
         default=False,
         help_text="Matches the premium status of the associated tier.",
@@ -2277,6 +2285,14 @@ class ProfilePersistentTierEndpoint(models.Model):
         related_name="in_profile_tiers",
     )
     weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
+    reasoning_effort_override = models.CharField(
+        max_length=16,
+        choices=PersistentModelEndpoint.ReasoningEffort.choices,
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Optional reasoning effort override applied when the endpoint supports reasoning.",
+    )
     is_premium = models.BooleanField(
         default=False,
         help_text="Matches the premium status of the associated tier.",

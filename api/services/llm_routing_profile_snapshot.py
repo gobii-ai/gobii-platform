@@ -91,6 +91,7 @@ def create_eval_profile_snapshot(source_profile, suite_run_id: str):
                         tier=cloned_tier,
                         endpoint=tier_endpoint.endpoint,
                         weight=tier_endpoint.weight,
+                        reasoning_effort_override=getattr(tier_endpoint, "reasoning_effort_override", None),
                     )
 
         # Clone browser tiers

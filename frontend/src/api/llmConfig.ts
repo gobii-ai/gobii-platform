@@ -20,6 +20,8 @@ export type ProviderEndpoint = {
   supports_vision?: boolean
   browser_base_url?: string
   max_output_tokens?: number | null
+  supports_reasoning?: boolean
+  reasoning_effort?: string | null
   type: 'persistent' | 'browser' | 'embedding'
   enabled: boolean
   provider_id: string
@@ -45,6 +47,9 @@ export type TierEndpoint = {
   label: string
   weight: number
   endpoint_key: string
+  reasoning_effort_override?: string | null
+  supports_reasoning?: boolean
+  endpoint_reasoning_effort?: string | null
 }
 
 export type PersistentTier = {

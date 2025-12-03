@@ -24,6 +24,7 @@ import {
   Settings2,
   Pencil,
   Scale,
+  Sparkles,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -46,11 +47,22 @@ const button = {
   iconDanger: 'p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition',
 }
 
+const reasoningEffortOptions = [
+  { value: '', label: 'Use endpoint default' },
+  { value: 'minimal', label: 'Minimal' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+]
+
 type TierEndpoint = {
   id: string
   endpointId: string
   label: string
   weight: number
+  supportsReasoning?: boolean
+  reasoningEffortOverride?: string | null
+  endpointReasoningEffort?: string | null
 }
 
 type Tier = {
@@ -81,6 +93,8 @@ type ProviderEndpointCard = {
   supports_vision?: boolean
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
+  supports_reasoning?: boolean
+  reasoning_effort?: string | null
   type: llmApi.ProviderEndpoint['type']
 }
 
@@ -121,6 +135,8 @@ type EndpointFormValues = {
   supportsToolChoice?: boolean
   useParallelToolCalls?: boolean
   supportsVision?: boolean
+  supportsReasoning?: boolean
+  reasoningEffort?: string | null
 }
 
 const actionKey = (...parts: Array<string | number | null | undefined>) => parts.filter(Boolean).join(':')
@@ -446,6 +462,8 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       supports_vision: endpoint.supports_vision,
       supports_tool_choice: endpoint.supports_tool_choice,
       use_parallel_tool_calls: endpoint.use_parallel_tool_calls,
+      supports_reasoning: endpoint.supports_reasoning,
+      reasoning_effort: endpoint.reasoning_effort ?? null,
       type: endpoint.type,
     })),
   }))
@@ -497,6 +515,9 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
           endpointId: endpoint.endpoint_id,
           label: endpoint.label,
           weight: normalized[endpoint.id] ?? 0,
+          supportsReasoning: endpoint.supports_reasoning,
+          reasoningEffortOverride: endpoint.reasoning_effort_override ?? null,
+          endpointReasoningEffort: endpoint.endpoint_reasoning_effort ?? null,
         })),
       })
     })
@@ -946,6 +967,8 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const [supportsVision, setSupportsVision] = useState(Boolean(endpoint.supports_vision))
   const [supportsToolChoice, setSupportsToolChoice] = useState(Boolean(endpoint.supports_tool_choice))
   const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
+  const [supportsReasoning, setSupportsReasoning] = useState(Boolean(endpoint.supports_reasoning))
+  const [reasoningEffort, setReasoningEffort] = useState(endpoint.reasoning_effort ?? '')
 
   const handleSave = () => {
     const values: EndpointFormValues = {
@@ -958,6 +981,8 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       supportsToolChoice: supportsToolChoice,
       useParallelToolCalls: parallelTools,
       supportsVision: supportsVision,
+      supportsReasoning,
+      reasoningEffort,
     }
     onSave(values)
   }
@@ -998,6 +1023,20 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
           Vision
         </label>
+        {!isBrowser && !isEmbedding && (
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={supportsReasoning}
+              onChange={(event) => {
+                setSupportsReasoning(event.target.checked)
+                if (!event.target.checked) setReasoningEffort('')
+              }}
+              className="rounded border-slate-300 text-blue-600 shadow-sm"
+            />
+            Reasoning
+          </label>
+        )}
         {!isEmbedding && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsToolChoice} onChange={(event) => setSupportsToolChoice(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
@@ -1011,6 +1050,22 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           </label>
         )}
       </div>
+      {!isBrowser && !isEmbedding && (
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+          <span className="font-semibold text-slate-700">Default reasoning effort</span>
+          <select
+            value={reasoningEffort}
+            onChange={(event) => setReasoningEffort(event.target.value)}
+            disabled={!supportsReasoning}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            {reasoningEffortOptions.map((option) => (
+              <option key={option.value || 'default'} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <span className="text-slate-400">Applied when reasoning params are supported.</span>
+        </div>
+      )}
       <div className="flex justify-end gap-2">
         <button className={button.secondary} onClick={onCancel} disabled={saving}>Cancel</button>
         <button className={button.primary} onClick={handleSave} disabled={saving}>
@@ -1038,6 +1093,8 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [supportsTemperature, setSupportsTemperature] = useState(true)
   const [supportsTools, setSupportsTools] = useState(true)
   const [parallelTools, setParallelTools] = useState(true)
+  const [supportsReasoning, setSupportsReasoning] = useState(false)
+  const [reasoningEffort, setReasoningEffort] = useState('')
   const [temperature, setTemperature] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const isSubmitting = busy || submitting
@@ -1062,6 +1119,8 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         supportsToolChoice: supportsTools,
         useParallelToolCalls: parallelTools,
         temperature,
+        supportsReasoning,
+        reasoningEffort,
       })
     } finally {
       setSubmitting(false)
@@ -1115,6 +1174,20 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
               Vision
             </label>
+            {type === 'persistent' && (
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={supportsReasoning}
+                  onChange={(event) => {
+                    setSupportsReasoning(event.target.checked)
+                    if (!event.target.checked) setReasoningEffort('')
+                  }}
+                  className="rounded border-slate-300 text-blue-600 shadow-sm"
+                />
+                Reasoning
+              </label>
+            )}
             {type !== 'embedding' && (
               <>
                 <label className="inline-flex items-center gap-2">
@@ -1128,6 +1201,22 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               </>
             )}
           </div>
+          {type === 'persistent' && (
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+              <span className="font-semibold text-slate-700">Default reasoning effort</span>
+              <select
+                value={reasoningEffort}
+                onChange={(event) => setReasoningEffort(event.target.value)}
+                disabled={!supportsReasoning}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                {reasoningEffortOptions.map((option) => (
+                  <option key={option.value || 'default'} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <span className="text-slate-400">Optional override when reasoning is enabled.</span>
+            </div>
+          )}
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <button className={button.secondary} onClick={onClose} disabled={isSubmitting}>Cancel</button>
@@ -1207,6 +1296,7 @@ function TierCard({
   onStageEndpointWeight,
   onCommitEndpointWeights,
   onRemoveEndpoint,
+  onUpdateEndpointReasoning,
   isActionBusy,
 }: {
   tier: Tier
@@ -1222,8 +1312,10 @@ function TierCard({
   onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
   onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
   onRemoveEndpoint: (tier: Tier, endpoint: TierEndpoint) => void
+  onUpdateEndpointReasoning?: (tier: Tier, endpoint: TierEndpoint, value: string | null, scope: TierScope) => void
   isActionBusy: (key: string) => boolean
 }) {
+  const [openReasoningFor, setOpenReasoningFor] = useState<string | null>(null)
   const headerIcon = tier.premium ? <ShieldCheck className="size-4 text-emerald-700" /> : <Layers className="size-4 text-slate-500" />
   const canAdjustWeights = tier.endpoints.length > 1
   const disabledHint = canAdjustWeights ? '' : 'At least two endpoints are required to rebalance weights.'
@@ -1285,46 +1377,96 @@ function TierCard({
           {tier.endpoints.map((endpoint) => {
             const unitWeight = pendingWeights[endpoint.id] ?? endpoint.weight
             const displayWeight = roundToDisplayUnit(unitWeight)
+            const reasoningValue = endpoint.reasoningEffortOverride ?? ''
+            const reasoningBusy = isActionBusy(actionKey('tier-endpoint', endpoint.id, 'reasoning')) || isActionBusy(actionKey('profile-tier-endpoint', endpoint.id, 'reasoning'))
+            const handleReasoningChange = (value: string) => {
+              if (!onUpdateEndpointReasoning) return
+              Promise.resolve(onUpdateEndpointReasoning(tier, endpoint, value || null, scope))
+                .finally(() => setOpenReasoningFor(null))
+                .catch(() => {})
+            }
+            const effortOptions = reasoningEffortOptions.map((option, index) =>
+              index === 0
+                ? { ...option, label: `Use default (${endpoint.endpointReasoningEffort || 'none'})` }
+                : option
+            )
+            const isMenuOpen = openReasoningFor === endpoint.id
             return (
-              <div key={endpoint.id} className="grid grid-cols-12 items-center gap-3 text-sm font-medium text-slate-900/90">
-                <span className="col-span-6 flex items-center gap-2 truncate" title={endpoint.label}><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
-                <div className="col-span-6 flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={displayWeight}
-                    onChange={(event) => {
-                      if (!canAdjustWeights) return
-                      const decimal = parseUnitInput(event.target.valueAsNumber)
-                      onStageEndpointWeight(tier, endpoint.id, decimal, scope)
-                    }}
-                    disabled={!canAdjustWeights}
-                    onMouseUp={handleCommit}
-                    onTouchEnd={handleCommit}
-                    onPointerUp={handleCommit}
-                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={displayWeight.toFixed(2)}
-                    onChange={(event) => {
-                      if (!canAdjustWeights) return
-                      const decimal = parseUnitInput(event.target.valueAsNumber)
-                      onStageEndpointWeight(tier, endpoint.id, decimal, scope)
-                    }}
-                    disabled={!canAdjustWeights}
-                    onBlur={handleCommit}
-                    inputMode="decimal"
-                    className="block w-24 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                  />
-                  <button onClick={() => onRemoveEndpoint(tier, endpoint)} className={button.iconDanger} aria-label="Remove endpoint">
-                    <Trash className="size-4" />
-                  </button>
+              <div key={endpoint.id} className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-900/90">
+                  <span className="flex min-w-0 flex-1 items-center gap-2 truncate" title={endpoint.label}><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
+                  <div className="flex items-center gap-2 relative">
+                    {endpoint.supportsReasoning ? (
+                      <div className="relative">
+                        <button
+                          type="button"
+                          className={`${button.icon} ${reasoningValue ? 'text-blue-600' : ''}`}
+                          aria-label="Set reasoning effort"
+                          disabled={!onUpdateEndpointReasoning || reasoningBusy}
+                          onClick={() => setOpenReasoningFor(isMenuOpen ? null : endpoint.id)}
+                        >
+                          {reasoningBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                        </button>
+                        {isMenuOpen && (
+                          <div className="absolute right-0 top-10 z-20 w-48 rounded-xl border border-slate-200 bg-white shadow-xl">
+                            {effortOptions.map((option) => (
+                              <button
+                                key={option.value || 'default'}
+                                className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-slate-50"
+                                onClick={() => handleReasoningChange(option.value)}
+                                disabled={reasoningBusy}
+                              >
+                                <span>{option.label}</span>
+                                {option.value === reasoningValue ? <Check className="size-3 text-blue-600" /> : null}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                    <button onClick={() => onRemoveEndpoint(tier, endpoint)} className={button.iconDanger} aria-label="Remove endpoint">
+                      <Trash className="size-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-12 items-center gap-3">
+                  <div className="col-span-12 md:col-span-7">
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={displayWeight}
+                      onChange={(event) => {
+                        if (!canAdjustWeights) return
+                        const decimal = parseUnitInput(event.target.valueAsNumber)
+                        onStageEndpointWeight(tier, endpoint.id, decimal, scope)
+                      }}
+                      disabled={!canAdjustWeights}
+                      onMouseUp={handleCommit}
+                      onTouchEnd={handleCommit}
+                      onPointerUp={handleCommit}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                  <div className="col-span-12 md:col-span-5 flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={displayWeight.toFixed(2)}
+                      onChange={(event) => {
+                        if (!canAdjustWeights) return
+                        const decimal = parseUnitInput(event.target.valueAsNumber)
+                        onStageEndpointWeight(tier, endpoint.id, decimal, scope)
+                      }}
+                      disabled={!canAdjustWeights}
+                      onBlur={handleCommit}
+                      inputMode="decimal"
+                      className="block w-24 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    />
+                  </div>
                 </div>
               </div>
             )
@@ -1355,6 +1497,7 @@ function RangeSection({
   onStageEndpointWeight,
   onCommitEndpointWeights,
   onRemoveEndpoint,
+  onUpdateEndpointReasoning,
   pendingWeights,
   savingTierIds,
   dirtyTierIds,
@@ -1371,6 +1514,7 @@ function RangeSection({
   onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
   onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
   onRemoveEndpoint: (tier: Tier, endpoint: TierEndpoint) => void
+  onUpdateEndpointReasoning?: (tier: Tier, endpoint: TierEndpoint, value: string | null, scope: TierScope) => void
   pendingWeights: Record<string, number>
   savingTierIds: Set<string>
   dirtyTierIds: Set<string>
@@ -1494,6 +1638,7 @@ function RangeSection({
                 onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
                 onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
                 onRemoveEndpoint={onRemoveEndpoint}
+                onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, 'persistent')}
                 isActionBusy={isActionBusy}
               />
             )
@@ -1525,6 +1670,7 @@ function RangeSection({
                 onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
                 onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
                 onRemoveEndpoint={onRemoveEndpoint}
+                onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, 'persistent')}
                 isActionBusy={isActionBusy}
               />
             )
@@ -1821,6 +1967,8 @@ export function LlmConfigScreen() {
       payload.supports_tool_choice = values.supportsToolChoice ?? true
       payload.use_parallel_tool_calls = values.useParallelToolCalls ?? true
       payload.supports_vision = values.supportsVision ?? false
+      payload.supports_reasoning = values.supportsReasoning ?? false
+      payload.reasoning_effort = values.reasoningEffort ? values.reasoningEffort : null
       payload.enabled = true
     }
     return runMutation(() => llmApi.createEndpoint(kind, payload), {
@@ -1861,6 +2009,10 @@ export function LlmConfigScreen() {
     if (values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
     if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
+    if (kind === 'persistent') {
+      if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
+      if (values.reasoningEffort !== undefined) payload.reasoning_effort = values.reasoningEffort || null
+    }
     return runMutation(() => llmApi.updateEndpoint(kind, endpoint.id, payload), {
       successMessage: 'Endpoint updated',
       label: 'Saving endpoint…',
@@ -2051,6 +2203,31 @@ export function LlmConfigScreen() {
         })
       },
     })
+
+  const handleTierEndpointReasoning = (tier: Tier, endpoint: TierEndpoint, value: string | null, scope: TierScope) => {
+    if (scope !== 'persistent') return
+    const payload: Record<string, unknown> = { reasoning_effort_override: value || null }
+    const busyKey = selectedProfile ? actionKey('profile-tier-endpoint', endpoint.id, 'reasoning') : actionKey('tier-endpoint', endpoint.id, 'reasoning')
+    const context = tier.name
+    if (selectedProfile) {
+      return runWithFeedback(
+        async () => {
+          await llmApi.updateProfilePersistentTierEndpoint(endpoint.id, payload)
+          await invalidateProfileDetail()
+        },
+        {
+          label: 'Saving reasoning…',
+          busyKey,
+          context,
+        },
+      )
+    }
+    return runMutation(() => llmApi.updatePersistentTierEndpoint(endpoint.id, payload), {
+      label: 'Saving reasoning…',
+      busyKey,
+      context,
+    })
+  }
 
   const handleBrowserTierAdd = (isPremium: boolean) =>
     runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), {
@@ -2881,6 +3058,7 @@ export function LlmConfigScreen() {
                 onStageEndpointWeight={stageTierEndpointWeight}
                 onCommitEndpointWeights={(tier) => selectedProfile ? commitProfileTierEndpointWeights(tier, 'persistent') : commitTierEndpointWeights(tier, 'persistent')}
                 onRemoveEndpoint={(tier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(tier, endpoint, 'persistent') : handleTierEndpointRemove(tier, endpoint, 'persistent')}
+                onUpdateEndpointReasoning={handleTierEndpointReasoning}
                 pendingWeights={pendingWeights}
                 savingTierIds={savingTierIds}
                 dirtyTierIds={dirtyTierIds}

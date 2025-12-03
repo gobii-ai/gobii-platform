@@ -183,6 +183,9 @@ def build_llm_overview() -> dict[str, Any]:
                         "label": f"{endpoint.provider.display_name} · {endpoint.litellm_model}",
                         "weight": float(te.weight),
                         "endpoint_key": endpoint.key,
+                        "reasoning_effort_override": te.reasoning_effort_override,
+                        "supports_reasoning": endpoint.supports_reasoning,
+                        "endpoint_reasoning_effort": endpoint.reasoning_effort,
                     }
                 )
             tiers_payload.append(
@@ -343,6 +346,9 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
                     "label": f"{endpoint.provider.display_name} · {endpoint.litellm_model}",
                     "weight": float(te.weight),
                     "endpoint_key": endpoint.key,
+                    "reasoning_effort_override": te.reasoning_effort_override,
+                    "supports_reasoning": endpoint.supports_reasoning,
+                    "endpoint_reasoning_effort": endpoint.reasoning_effort,
                 })
             tiers_payload.append({
                 "id": str(tier.id),

@@ -628,7 +628,10 @@ def _collect_failover_configs(
                 params.pop("temperature", None)
 
             supports_reasoning = bool(getattr(endpoint, "supports_reasoning", False))
-            reasoning_effort = getattr(endpoint, "reasoning_effort", None)
+            tier_reasoning_override = getattr(te, "reasoning_effort_override", None)
+            reasoning_effort = tier_reasoning_override or getattr(endpoint, "reasoning_effort", None)
+            if not supports_reasoning:
+                reasoning_effort = None
 
             params_with_hints = dict(params)
             params_with_hints["supports_temperature"] = supports_temperature
