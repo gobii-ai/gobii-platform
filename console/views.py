@@ -5702,7 +5702,12 @@ class AgentWelcomeView(LoginRequiredMixin, DetailView):
     @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_queryset")
     def get_queryset(self):
         # Ensure users can only access their own agents
-        return super().get_queryset().filter(user=self.request.user)
+        return (
+            super()
+            .get_queryset()
+            .filter(user=self.request.user)
+            .select_related('organization__billing')
+        )
 
     @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_context_data")
     def get_context_data(self, **kwargs):
@@ -5735,6 +5740,30 @@ class AgentWelcomeView(LoginRequiredMixin, DetailView):
             elif primary_email and getattr(primary_email, 'is_primary', False):
                 preferred_channel = 'email'
         context['preferred_channel'] = preferred_channel
+
+        owner_plan = get_user_plan(self.request.user)
+        organization_name = None
+        org_has_paid_seats = False
+
+        if agent.organization_id:
+            organization = agent.organization
+            organization_name = getattr(organization, "name", None)
+            owner_plan = get_organization_plan(organization)
+            billing = getattr(organization, "billing", None)
+            org_has_paid_seats = bool(getattr(billing, "purchased_seats", 0) > 0)
+
+        plan_id = str(owner_plan.get("id", "")).lower() if owner_plan else ""
+
+        context.update({
+            'owner_plan': owner_plan,
+            'owner_plan_id': plan_id,
+            'owner_plan_name': owner_plan.get("name", "") if owner_plan else "",
+            'agent_has_org': bool(agent.organization_id),
+            'agent_org_name': organization_name,
+            'org_has_paid_seats': org_has_paid_seats if agent.organization_id else None,
+            'show_pro_scale_upsell': plan_id == PlanNamesChoices.FREE.value,
+            'show_scale_upsell': plan_id in (PlanNamesChoices.FREE.value, PlanNamesChoices.STARTUP.value),
+        })
 
         return context
 
