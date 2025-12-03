@@ -7,7 +7,7 @@ from celery import shared_task
 
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
-from api.agent.core.token_usage import extract_token_usage, log_agent_completion
+from api.agent.core.token_usage import log_agent_completion
 from api.agent.short_description import (
     compute_charter_hash,
     prepare_mini_description,
@@ -58,15 +58,10 @@ def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any
         logger.exception("LLM mini description generation failed: %s", exc)
         return ""
 
-    token_usage, _ = extract_token_usage(
-        response,
-        model=model,
-        provider=provider,
-    )
     log_agent_completion(
         agent,
-        token_usage,
         completion_type=PersistentAgentCompletion.CompletionType.MINI_DESCRIPTION,
+        response=response,
     )
 
     try:

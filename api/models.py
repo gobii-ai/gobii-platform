@@ -6178,6 +6178,11 @@ class PersistentAgentCompletion(models.Model):
     cached_tokens = models.IntegerField(null=True, blank=True)
     llm_model = models.CharField(max_length=256, null=True, blank=True)
     llm_provider = models.CharField(max_length=128, null=True, blank=True)
+    thinking_content = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Reasoning/thinking content returned by the LLM when available.",
+    )
     input_cost_total = models.DecimalField(
         max_digits=12,
         decimal_places=6,
