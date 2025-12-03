@@ -274,7 +274,8 @@ class Analytics:
 
     @staticmethod
     @tracer.start_as_current_span("ANALYTICS Track")
-    def track(user_id, event, properties, context = {}, ip: str = None, message_id: str = None, timestamp = None):
+    def track(user_id, event, properties, context: dict | None = None, ip: str = None, message_id: str = None, timestamp = None):
+        context = context or {}
         if Analytics._is_analytics_enabled():
             with traced("ANALYTICS Track"):
                 context['ip'] = '0'
@@ -282,7 +283,8 @@ class Analytics:
 
     @staticmethod
     @tracer.start_as_current_span("ANALYTICS Track Event")
-    def track_event(user_id, event: AnalyticsEvent, source: AnalyticsSource, properties: dict = {}, ip: str = None):
+    def track_event(user_id, event: AnalyticsEvent, source: AnalyticsSource, properties: dict | None = None, ip: str = None):
+        properties = properties or {}
         if Analytics._is_analytics_enabled():
             with traced("ANALYTICS Track Event"):
                 properties['medium'] = str(source)
@@ -294,7 +296,7 @@ class Analytics:
 
     @staticmethod
     @tracer.start_as_current_span("ANALYTICS Track Event Anonymous")
-    def track_event_anonymous(anonymous_id: str, event: AnalyticsEvent, source: AnalyticsSource, properties: dict = {}, ip: str = None):
+    def track_event_anonymous(anonymous_id: str, event: AnalyticsEvent, source: AnalyticsSource, properties: dict | None = None, ip: str = None):
         """
         Track an event for an anonymous user. This is useful for tracking events that do not require user identification,
         such as page views or interactions that do not require authentication.
@@ -306,6 +308,7 @@ class Analytics:
             properties (dict): A dictionary of properties to associate with the event.
             ip (str, optional): The IP address of the user. Defaults to None.
         """
+        properties = properties or {}
         if Analytics._is_analytics_enabled():
             with traced("ANALYTICS Track Event Anonymous"):
                 properties['medium'] = str(source)
@@ -542,7 +545,7 @@ class Analytics:
                 email=email
             )
 
-            return user.id
+            return str(user.id)
 
         except User.DoesNotExist:
             # If no user is found, we can return None or handle it as needed
